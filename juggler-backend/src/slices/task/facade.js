@@ -1278,4 +1278,9 @@ module.exports = {
   KnexProjectsRepository: KnexProjectsRepository,
   InMemoryProjectsRepository: require('./adapters/InMemoryProjectsRepository'),
   PlacementMode: PlacementMode,
+
+  // Plan-downgrade enforcement (999.994) — tasks_v + cal_sync_ledger mutation,
+  // the task slice's own home for logic that used to live backwards in
+  // controllers/billing-webhooks.controller.js.
+  enforceDowngradeLimits: require('./adapters/DowngradeLimitsEnforcer').enforceDowngradeLimits,
 };

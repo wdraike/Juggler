@@ -241,10 +241,13 @@ function callAuthServiceImpersonate(adminUserId, targetUserId, reason) {
   });
 }
 
-// billing enforceDowngradeLimits (tasks_v + cal_sync_ledger, outside this slice) —
-// injected from the legacy controller (the golden-master + my-plan also call it).
+// billing enforceDowngradeLimits (tasks_v + cal_sync_ledger) — delegates to the
+// TASK SLICE FACADE (999.994), not the legacy controller. Mirrors the
+// TaskSliceCalSyncAdapter precedent above: task-domain logic reached backwards
+// out of controllers/billing-webhooks.controller; it now lives in
+// slices/task/adapters/DowngradeLimitsEnforcer, owned by the task slice.
 function enforceDowngradeLimits(userId, planFeatures) {
-  return require('../../controllers/billing-webhooks.controller').enforceDowngradeLimits(userId, planFeatures);
+  return require('../task/facade').enforceDowngradeLimits(userId, planFeatures);
 }
 
 // feature-gate I/O primitives — injected from the legacy module so the thin

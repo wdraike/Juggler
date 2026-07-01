@@ -214,7 +214,9 @@ describe('B1 — REGRESSION (real facade): plan-catalog cache split-brain after 
       jest.mock('../../../../src/middleware/feature-gate.js', function () {
         return { requireFeature: jest.fn(), requireFeatureIncludes: jest.fn(), checkUsageLimit: jest.fn() };
       });
-      jest.mock('../../../../src/controllers/billing-webhooks.controller', function () {
+      // 999.994: enforceDowngradeLimits now lives in the task slice facade,
+      // not controllers/billing-webhooks.controller.
+      jest.mock('../../../../src/slices/task/facade', function () {
         return { enforceDowngradeLimits: jest.fn(function () { return Promise.resolve(); }) };
       });
       jest.mock('../../../../src/controllers/feature-catalog.controller', function () {
@@ -335,7 +337,9 @@ describe('B1 — REGRESSION (real facade): plan-catalog cache split-brain after 
       jest.mock('../../../../src/middleware/feature-gate.js', function () {
         return { requireFeature: jest.fn(), requireFeatureIncludes: jest.fn(), checkUsageLimit: jest.fn() };
       });
-      jest.mock('../../../../src/controllers/billing-webhooks.controller', function () {
+      // 999.994: enforceDowngradeLimits now lives in the task slice facade,
+      // not controllers/billing-webhooks.controller.
+      jest.mock('../../../../src/slices/task/facade', function () {
         return { enforceDowngradeLimits: jest.fn(function () { return Promise.resolve(); }) };
       });
       jest.mock('../../../../src/controllers/feature-catalog.controller', function () {
@@ -481,7 +485,9 @@ describe('B2 — REGRESSION (real facade): renameTasks passes updated_at as knex
       jest.mock('../../../../src/middleware/feature-gate.js', function () {
         return { requireFeature: jest.fn(), requireFeatureIncludes: jest.fn(), checkUsageLimit: jest.fn() };
       });
-      jest.mock('../../../../src/controllers/billing-webhooks.controller', function () {
+      // 999.994: enforceDowngradeLimits now lives in the task slice facade,
+      // not controllers/billing-webhooks.controller.
+      jest.mock('../../../../src/slices/task/facade', function () {
         return { enforceDowngradeLimits: jest.fn(function () { return Promise.resolve(); }) };
       });
       jest.mock('../../../../src/controllers/feature-catalog.controller', function () {

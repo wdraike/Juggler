@@ -148,7 +148,8 @@ async function reconcileLimitsIfNeeded(userId, planFeatures) {
   // Run async — don't block the request
   setImmediate(async () => {
     try {
-      const { enforceDowngradeLimits } = require('../controllers/billing-webhooks.controller');
+      // Task-domain logic (999.994) — task slice facade, not the legacy controller.
+      const { enforceDowngradeLimits } = require('../slices/task/facade');
       await enforceDowngradeLimits(userId, planFeatures);
     } catch (err) {
       logger.error('[plan-features] Reconciliation failed for user', { userId, error: err });

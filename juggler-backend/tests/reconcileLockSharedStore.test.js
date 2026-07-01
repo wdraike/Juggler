@@ -13,7 +13,8 @@
  *     false) is skipped — even across two independent module instances (two "processes").
  *   - Lock errors are fail-soft → fall back to the local guard, never crash.
  *
- * lib/redis and the billing-webhooks controller are mocked — no live Redis, no DB.
+ * lib/redis and the task slice facade (999.994: enforceDowngradeLimits moved off
+ * the billing-webhooks controller) are mocked — no live Redis, no DB.
  */
 
 'use strict';
@@ -31,8 +32,8 @@ describe('reconcileLimitsIfNeeded — cross-instance dedupe lock (999.385)', fun
   function loadMiddleware(redisStub) {
     jest.resetModules();
     enforceMock = jest.fn(function () { return Promise.resolve(); });
-    jest.doMock('../src/controllers/billing-webhooks.controller', function () {
-      return { enforceDowngradeLimits: enforceMock, handleWebhook: jest.fn() };
+    jest.doMock('../src/slices/task/facade', function () {
+      return { enforceDowngradeLimits: enforceMock };
     });
     jest.doMock('../src/lib/redis', function () { return redisStub; });
     return require('../src/middleware/plan-features.middleware');
