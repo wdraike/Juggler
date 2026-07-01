@@ -97,8 +97,14 @@ test('does NOT construct EventSource when the /events/token POST resolves AFTER 
   // The guard must have held: no zombie EventSource ever constructed, and
   // window.__jugglerEventSource must NOT have been overwritten with a live
   // post-teardown instance.
+  //
+  // 999.997 note: window.__jugglerEventSource is now a STABLE EventTarget hub
+  // created synchronously in the effect body (before the async token POST
+  // resolves), so it is no longer `undefined` here — it's the hub. What the
+  // guard actually protects is that the hub is never replaced by the
+  // post-teardown raw EventSource, which we assert directly.
   expect(EventSourceSpy).not.toHaveBeenCalled();
-  expect(window.__jugglerEventSource).toBeUndefined();
+  expect(window.__jugglerEventSource).not.toBeInstanceOf(EventSourceSpy);
 });
 
 test('constructs EventSource with the opaque token (not the raw JWT) when the token POST resolves while still MOUNTED', async () => {
@@ -118,7 +124,11 @@ test('constructs EventSource with the opaque token (not the raw JWT) when the to
   const calledUrl = EventSourceSpy.mock.calls[0][0];
   expect(calledUrl).toContain('token=opaque-happy-path');
   expect(calledUrl).not.toContain('raw-jwt-should-never-reach-sse-url');
-  expect(window.__jugglerEventSource).toBeInstanceOf(EventSourceSpy);
+  // 999.997: window.__jugglerEventSource is the stable EventTarget hub, not
+  // the raw per-connect EventSource (see useTaskState.sse-hub-reconnect.test.js
+  // for the reconnect-survival contract this enables).
+  expect(window.__jugglerEventSource).not.toBeInstanceOf(EventSourceSpy);
+  expect(window.__jugglerEventSource.__jugglerHub).toBe(true);
 
   unmount();
 });

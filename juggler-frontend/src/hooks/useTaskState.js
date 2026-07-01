@@ -354,6 +354,30 @@ export default function useTaskState() {
     // the POST is in flight).
     var sseTornDown = false;
 
+    // 999.997: a STABLE EventTarget "hub" exposed as window.__jugglerEventSource.
+    // External consumers (AppLayout / CalSyncPanel / SchedulerStepper) bind their
+    // SSE listeners ONCE on mount to window.__jugglerEventSource. Previously that
+    // was the raw EventSource, which is REPLACED on every reconnect (onerror →
+    // new EventSource) — so after any reconnect those once-bound listeners pointed
+    // at the closed instance and silently stopped firing until a full remount.
+    // Fix: window.__jugglerEventSource is now a hub that is NEVER replaced; each
+    // reconnect's raw EventSource re-forwards its events into this hub, so
+    // once-bound consumer listeners survive reconnects. Reuse an existing hub (a
+    // prior mount / React 18 StrictMode double-invoke) so consumers that already
+    // bound to it are not orphaned.
+    var sseHub = (window.__jugglerEventSource && window.__jugglerEventSource.__jugglerHub)
+      ? window.__jugglerEventSource
+      : Object.assign(new EventTarget(), { __jugglerHub: true });
+    window.__jugglerEventSource = sseHub;
+    // Event types external consumers subscribe to — re-dispatched from the raw
+    // EventSource onto the stable hub on every (re)connect. (useTaskState's own
+    // handlers stay bound to the raw EventSource, which it re-binds each connect,
+    // so they are unaffected by the swap and are not forwarded here.)
+    var SSE_HUB_FORWARD_TYPES = [
+      'tasks:changed', 'schedule:changed', 'schedule:running',
+      'sync:progress', 'sync:error', 'sync:lock_conflict'
+    ];
+
     // Shared refresh logic — reload tasks + placements
     async function refreshFromServer() {
       try {
@@ -445,8 +469,16 @@ export default function useTaskState() {
 
         var url = apiBase + '/events?token=' + encodeURIComponent(opaque);
         eventSource = new EventSource(url);
-        // Expose globally so other components (e.g. CalSyncPanel) can listen for events
-        window.__jugglerEventSource = eventSource;
+        // 999.997: forward consumer event types from this (per-connect) raw
+        // EventSource onto the STABLE hub so once-bound external listeners survive
+        // reconnects. These forwarder listeners die with the EventSource when it is
+        // closed on the next reconnect/unmount, so they do not accumulate. `e.data`
+        // is preserved (consumers JSON.parse it) via MessageEvent.
+        SSE_HUB_FORWARD_TYPES.forEach(function(type) {
+          eventSource.addEventListener(type, function(e) {
+            sseHub.dispatchEvent(new MessageEvent(type, { data: e.data }));
+          });
+        });
 
         eventSource.addEventListener('connected', function() {
           sseActive = true;
