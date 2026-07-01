@@ -26,6 +26,7 @@ var { makeTask, makeTaskId, makeLedgerRow } = require('./helpers/test-fixtures')
 var { getGCalEvent, getMSFTEvent, waitForPropagation } = require('./helpers/api-helpers');
 var { deleteGCalEvent, deleteMSFTEvent, deleteAllGCalTestEvents, deleteAllMSFTTestEvents } = require('./helpers/test-fixtures');
 var { assertGCalEventMatchesTask } = require('./helpers/assertions');
+var gcalApi = require('../../src/lib/gcal-api');
 
 var user;
 var gcalToken;
@@ -513,7 +514,51 @@ describe('Ledger orphan prune (D-09)', () => {
 
   beforeEach(async () => {
     if (!await isDbAvailable()) return;
-    user = await seedTestUser();
+    // 999.1013: this test previously ran with an unconnected user (no adapter
+    // credentials), so sync() returned early at the `validAdapters.length===0`
+    // guard (cal-sync.controller.js:273) — the D-09 prune lives in the write-
+    // phase transaction further down and was never reached, regardless of live
+    // GCal credentials. Fixed at the seed instead of gating this test behind
+    // testWithCreds: seed a non-expired fake access token (short-circuits the
+    // real OAuth refresh, same technique as 13-sync-declined-invite.test.js's
+    // GCAL_ONLY_FAKE) and mock gcalApi.listEvents so sync() reaches the write
+    // phase deterministically without any live network/credentials.
+    user = await seedTestUser({
+      gcal_refresh_token: 'fake-refresh-token-d09',
+      gcal_access_token: 'fake-access-token-d09',
+      gcal_token_expiry: new Date(Date.now() + 60 * 60 * 1000)
+    });
+    // Row B (below) is a PENDING remote deletion (provider_event_id still set) —
+    // listEvents must still report that event as present, otherwise sync()'s
+    // real "remote deletion confirmed" cascade (cal-sync.controller.js:1180-1183)
+    // finalizes it to provider_event_id:null in THIS same run, which the D-09
+    // prune then immediately removes — a legitimate cascade, but it defeats the
+    // "still pending" fixture's premise. An empty listEvents result would report
+    // evt_pending_123 as gone, so keep it in the mocked provider response.
+    jest.spyOn(gcalApi, 'listEvents').mockResolvedValue({
+      items: [{
+        id: 'evt_pending_123',
+        status: 'confirmed',
+        summary: 'Still-pending remote event',
+        start: { dateTime: '2026-07-05T10:00:00-04:00' },
+        end: { dateTime: '2026-07-05T10:30:00-04:00' }
+      }],
+      nextSyncToken: 'tok-d09'
+    });
+    // Row B has task_id:null + a still-present provider event — sync()'s
+    // `!task && event` path (cal-sync.controller.js:1171-1188) calls
+    // pAdapter.deleteEvent to retry the remote delete. A SUCCESSFUL delete
+    // clears provider_event_id (cal-sync.controller.js:1180), which the D-09
+    // prune would then remove in the same run — defeating row B's "still
+    // pending" premise. A non-404/410 failure re-throws to the outer catch
+    // (:1194) and leaves the ledger row untouched, which is what "pending"
+    // means (the row was previously proving this via an UNMOCKED live 401
+    // against googleapis.com from the fake token — deterministic now).
+    jest.spyOn(gcalApi, 'deleteEvent').mockRejectedValue(new Error('simulated: remote deletion not yet confirmed'));
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   test('orphan prune: deleted_local ledger rows with no task and no event are removed after sync', requireDB(async () => {

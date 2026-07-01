@@ -90,13 +90,33 @@ async function listEvents(client, timeMin, timeMax, userId) {
     throw new Error('Apple Calendar: no calendars enabled');
   }
 
+  // 999.1012: parity with GoogleCalendarAdapter/MicrosoftCalendarAdapter —
+  // exclude events the signed-in Apple ID has declined. CalDAV has no
+  // per-user "self" flag; match ATTENDEE email against the account's own
+  // Apple ID (apple_cal_username, apple-cal-api.js:parseVEvents attendees[]).
+  var userRow = await db('users').where('id', userId).select('apple_cal_username').first();
+  // At least one enabled Apple calendar was just confirmed above, so
+  // apple_cal_username missing here is a data-integrity gap (not an expected
+  // "not connected" case) — log it rather than silently disabling the filter.
+  if (!userRow || !userRow.apple_cal_username) {
+    calAdapterAppleLogger.error('apple_cal_username missing for a user with enabled Apple calendars — declined-invite filter cannot run', { userId });
+  }
+  var selfEmail = ((userRow && userRow.apple_cal_username) || '').toLowerCase();
+
   var allEvents = [];
   var hasPartialFailure = false;
   for (var i = 0; i < calendars.length; i++) {
     var cal = calendars[i];
     try {
       var events = await appleCalApi.listEvents(client, cal.calendar_id, timeMin, timeMax);
-      var normalized = events.map(function(e) {
+      var normalized = events
+        .filter(function(e) {
+          // 999.1014: guard against a null/undefined attendee element.
+          if (!selfEmail || !Array.isArray(e.attendees)) return true;
+          var self = e.attendees.find(function(a) { return a && a.email === selfEmail; });
+          return !(self && self.partstat === 'DECLINED');
+        })
+        .map(function(e) {
         var ne = normalizeEvent(e);
         ne._calendarId = cal.calendar_id;
         return ne;

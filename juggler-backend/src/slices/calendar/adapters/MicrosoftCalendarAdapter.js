@@ -127,7 +127,16 @@ async function getValidAccessToken(user) {
 async function listEvents(token, timeMin, timeMax, _userId) {
   var result = await msftCalApi.listEvents(token, timeMin, timeMax);
   var events = (result && result.items) || [];
-  return events.map(normalizeEvent);
+  return events
+    .filter(function(e) {
+      // 999.1012: parity with GoogleCalendarAdapter's declined-self-invite
+      // filter. Microsoft Graph exposes the signed-in user's own RSVP directly
+      // via event.responseStatus.response ('$select' includes responseStatus,
+      // see lib/msft-cal-api.js) — no attendees array scan needed.
+      var rs = e && e.responseStatus;
+      return !(rs && rs.response === 'declined');
+    })
+    .map(normalizeEvent);
 }
 
 /**

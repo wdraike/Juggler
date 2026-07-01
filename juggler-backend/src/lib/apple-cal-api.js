@@ -162,6 +162,18 @@ function parseVEvents(icsData, url, etag) {
     var lastModified = vevent.getFirstPropertyValue('last-modified');
     var lastModStr = lastModified ? formatICALDateTime(lastModified) : null;
 
+    // 999.1012: ATTENDEE + PARTSTAT, so callers can filter declined self-invites
+    // (parity with GoogleCalendarAdapter/MicrosoftCalendarAdapter). CalDAV has no
+    // per-user "self" flag — the caller matches attendee.email against the
+    // account's own Apple ID.
+    var attendeeProps = vevent.getAllProperties('attendee') || [];
+    var attendees = attendeeProps.map(function(prop) {
+      var raw = prop.getFirstValue() || '';
+      var email = String(raw).replace(/^mailto:/i, '').toLowerCase();
+      var partstat = (prop.getParameter('partstat') || '').toUpperCase();
+      return { email: email, partstat: partstat };
+    });
+
     results.push({
       id: eventId,
       title: summary,
@@ -173,6 +185,7 @@ function parseVEvents(icsData, url, etag) {
       durationMinutes: durationMinutes > 0 ? durationMinutes : 30,
       lastModified: lastModStr,
       isTransparent: !!isTransparent,
+      attendees: attendees,
       _url: url || null,
       _etag: etag || null,
       _raw: icsData

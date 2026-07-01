@@ -1160,19 +1160,26 @@ syncing all connected providers in one pass).
 - **Source:** code
 - **Notes/gaps:** The handoff is one-directional through the lock: sync writes FIXED/promoted tasks, releases the lock, then the scheduler reflows floating tasks around them. See `docs/architecture/SYNC-EVENT-TO-TASK-HANDOFF.md`.
 
+### [CAL-20] Declined/deleted invites are removed via the same generic MISS_THRESHOLD ladder (CAL-15): all three provider adapters filter out events the signed-in user has declined from `listEvents`, so a declined invite reads as "missing" and ages out after 3 consecutive misses like any other deleted event
+- **Code:** Google `slices/calendar/adapters/GoogleCalendarAdapter.js:80-86` (`attendees[].self.responseStatus === 'declined'`, null-guarded per element); Microsoft `slices/calendar/adapters/MicrosoftCalendarAdapter.js:130-138` (`event.responseStatus.response === 'declined'` — Graph exposes the signed-in user's own RSVP directly, no attendees array needed); Apple `slices/calendar/adapters/AppleCalendarAdapter.js:93-112` + ATTENDEE/PARTSTAT parsing `lib/apple-cal-api.js:parseVEvents` (matches ATTENDEE email against `apple_cal_username`, filters `partstat === 'DECLINED'`)
+- **Status:** IMPLEMENTED
+- **Tests:** `tests/cal-sync/13-sync-declined-invite.test.js` (Google adapter filter + E2E MISS_THRESHOLD deletion — full coverage), `tests/cal-sync/22-sync-declined-invite-parity.test.js` (Microsoft adapter filter — full coverage, 999.1012; Apple — ICS ATTENDEE/PARTSTAT parsing only, NOT the AppleCalendarAdapter-level filter itself, see the file's own header note + backlog 999.1035; GCal null-attendee-element hardening, 999.1014)
+- **Source:** BUG-999.999 (Google); 999.1010 (declined/deleted invite removal); 999.1012 (MSFT+Apple parity); 999.1014 (null-attendee hardening)
+- **Notes/gaps:** No new deletion mechanism — this is CAL-15's existing `miss_count`/`MISS_THRESHOLD=3` ladder; the only change per provider is that `listEvents` no longer returns a declined event at all, so it counts as a miss. Apple's ATTENDEE parsing (`apple-cal-api.js`) previously extracted no attendee data — 999.1012 added it. **Coverage gap:** the Apple adapter-level filter (AppleCalendarAdapter.js:106-112, matching a parsed ATTENDEE against `apple_cal_username`) has no automated test — a DB-backed integration test was attempted but dropped due to a pre-existing test-bed DB flake (999.1035).
+
 ---
 
 ## SUMMARY
 
-**Total behaviors:** 19 (CAL-1 … CAL-19)
+**Total behaviors:** 20 (CAL-1 … CAL-20)
 
 **By status:**
-- IMPLEMENTED: 15 (CAL-1,2,3,4,5,6,7,8,9,10,11,12,13,14,17,19 — count 16) → **16 IMPLEMENTED**
+- IMPLEMENTED: 15 (CAL-1,2,3,4,5,6,7,8,9,10,11,12,13,14,17,19,20 — count 17) → **17 IMPLEMENTED**
 - PARTIAL: 1 (CAL-18)
 - KNOWN-BUG: 1 (CAL-16 split-part sync)
 - CAL-15 is IMPLEMENTED but carries a KNOWN open bug (#4 multi-provider interference)
 
-Net: **16 IMPLEMENTED, 1 PARTIAL (CAL-18), 1 KNOWN-BUG (CAL-16), 1 IMPLEMENTED-with-open-defect (CAL-15).** 0 PLANNED, 0 CONTRADICTED.
+Net: **17 IMPLEMENTED, 1 PARTIAL (CAL-18), 1 KNOWN-BUG (CAL-16), 1 IMPLEMENTED-with-open-defect (CAL-15).** 0 PLANNED, 0 CONTRADICTED.
 
 **KNOWN open bugs (per CLAUDE.md "Known remaining issues: DB contention on simultaneous syncs, split task part sync"):**
 1. **Split-task-part sync (CAL-16)** — only 1 provider event created per split task; `reconcileSplitsForUser` not wired into the production scheduler path. Confirmed by soak A12 on all three providers. `cal-sync.controller.js:1468-1493`, `lib/reconcile-splits.js:197-222`.

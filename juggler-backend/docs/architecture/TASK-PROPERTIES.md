@@ -149,7 +149,7 @@ This helper is the **sole source** of the XOR decision. Every enforcement path d
 | Source ID | `source_id` | `sourceId` | string | System | For instances: points to master. Used for field inheritance and chunk grouping. |
 | Generated | `generated` | `generated` | bool | System | Instance was scheduler-generated. Treated as user-anchored (date preserved). |
 | Occurrence Ordinal | `occurrence_ordinal` | `occurrenceOrdinal` | int | System | Which occurrence of the recurring task (1..N). |
-| Marker | `marker` | `marker` | bool | User | Non-blocking reminder. Shown on calendar, doesn't consume time. Expressed as `placement_mode = 'reminder'` in the DB. The `marker` computed column in `tasks_v` is `CASE WHEN placement_mode = 'reminder' THEN 1 ELSE 0 END`. |
+| Marker | `marker` | `marker` | bool | User | Non-blocking reminder. Shown on calendar, doesn't consume time. Expressed as `placement_mode = 'reminder'` in the DB. The `marker` computed column in `tasks_v` is `CASE WHEN placement_mode = 'reminder' THEN 1 ELSE 0 END`. Set via the ◇ Reminder toggle in `TaskDetailHeader.jsx` (button, `onMarkerChange`) / `TaskEditForm.jsx` (`handleMarkerChange` maps to `placementMode`). |
 
 #### Recurrence Types (`recur.type`)
 
