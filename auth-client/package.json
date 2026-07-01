@@ -1,0 +1,17 @@
+{
+  "name": "auth-client",
+  "version": "1.0.0",
+  "description": "Shared auth client for Raike applications — JWT verification via JWKS",
+  "main": "auth-client.js",
+  "exports": {
+    ".": "./auth-client.js",
+    "./mcp-auth": "./mcp-auth.js",
+    "./proxy-config": "./proxy-config.js",
+    "./service-auth": "./service-auth.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "jose": "^5.2.0",
+    "uuid": "^11.1.0"
+  }
+}

@@ -88,7 +88,7 @@ function LocationRow({ loc, config, theme }) {
     setLoading(true);
     setGeoError('');
     try {
-      var { default: apiClient } = await import('../../services/apiClient');
+      var { default: apiClient } = await import('../../../services/apiClient');
       var resp = await apiClient.get('/weather/geocode', { params: { q: input } });
       var { lat, lon, displayName: dn } = resp.data;
       updateLocationCoords(lat, lon, dn || input);

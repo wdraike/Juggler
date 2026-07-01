@@ -16,7 +16,9 @@ playwright-report/
 *.db
 scripts/db-backup/
 .playwright-mcp/
-auth-client/
+# auth-client source is vendored + tracked (needed by juggler-backend Dockerfile COPY,
+# which runs in a clean CI checkout); only its installed deps stay ignored.
+auth-client/node_modules/
 .worktrees/
 .claude/
 .muppets/

@@ -13,7 +13,7 @@ function ProjectRow({ p, config, theme, onRename, taskCount, canReorder, isFirst
   async function handleSave() {
     if (!editName || editName === p.name && editColor === p.color) { setEditing(false); return; }
     try {
-      var { default: apiClient } = await import('../../services/apiClient');
+      var { default: apiClient } = await import('../../../services/apiClient');
       var oldName = p.name;
       await apiClient.put('/projects/' + p.id, { name: editName, color: editColor, icon: p.icon, oldName: oldName });
       config.setProjects(config.projects.map(function(x) {
@@ -49,7 +49,7 @@ function ProjectRow({ p, config, theme, onRename, taskCount, canReorder, isFirst
       <span style={{ color: theme.text, flex: 1 }}>{p.name}</span>
       <span style={{ fontSize: 11, color: theme.textMuted, minWidth: 28, textAlign: 'right' }}>{taskCount}</span>
       <button onClick={function() { setEditing(true); }} title="Edit project" style={{ border: 'none', background: 'transparent', color: theme.textMuted, cursor: 'pointer', fontSize: 12 }}>&#x270E;</button>
-      <button onClick={async function() { if (!p.id) return; try { var { default: apiClient } = await import('../../services/apiClient'); await apiClient.delete('/projects/' + p.id); config.setProjects(config.projects.filter(function(x) { return x.id !== p.id; })); } catch (e) { console.error(e); } }} style={{ border: 'none', background: 'transparent', color: theme.redText, cursor: 'pointer', fontSize: 14 }}>&times;</button>
+      <button onClick={async function() { if (!p.id) return; try { var { default: apiClient } = await import('../../../services/apiClient'); await apiClient.delete('/projects/' + p.id); config.setProjects(config.projects.filter(function(x) { return x.id !== p.id; })); } catch (e) { console.error(e); } }} style={{ border: 'none', background: 'transparent', color: theme.redText, cursor: 'pointer', fontSize: 14 }}>&times;</button>
     </div>
   );
 }
@@ -94,7 +94,7 @@ export default function ProjectsTab({ config, theme, allProjectNames, allTasks, 
       reordered.splice(newIdx, 0, moved);
       var withOrder = reordered.map(function(p, i) { return Object.assign({}, p, { sortOrder: i }); });
       config.setProjects(withOrder);
-      try { var { default: apiClient } = await import('../../services/apiClient'); await apiClient.put('/projects/reorder', { ids: withOrder.map(function(p) { return p.id; }) }); } catch (e) { console.error('reorder failed:', e); }
+      try { var { default: apiClient } = await import('../../../services/apiClient'); await apiClient.put('/projects/reorder', { ids: withOrder.map(function(p) { return p.id; }) }); } catch (e) { console.error('reorder failed:', e); }
     }
   }
 
@@ -102,7 +102,7 @@ export default function ProjectsTab({ config, theme, allProjectNames, allTasks, 
 
   function toggleSort(field) { if (sortBy === field) setSortDir(sortDir === 'asc' ? 'desc' : 'asc'); else { setSortBy(field); setSortDir('asc'); } }
 
-  async function promoteTaskProject(name) { try { var { default: apiClient } = await import('../../services/apiClient'); var res = await apiClient.post('/projects', { name: name, color: '#2E4A7A' }); config.setProjects([...config.projects, res.data.project]); } catch (e) { console.error(e); } }
+  async function promoteTaskProject(name) { try { var { default: apiClient } = await import('../../../services/apiClient'); var res = await apiClient.post('/projects', { name: name, color: '#2E4A7A' }); config.setProjects([...config.projects, res.data.project]); } catch (e) { console.error(e); } }
 
   var sortArrow = sortDir === 'asc' ? ' ▲' : ' ▼';
   var btnStyle = function(active) { return { border: 'none', background: active ? theme.accent + '22' : 'transparent', color: active ? theme.accent : theme.textMuted, cursor: 'pointer', fontSize: 11, fontWeight: active ? 600 : 400, borderRadius: 4, padding: '2px 6px' }; };
@@ -129,7 +129,7 @@ export default function ProjectsTab({ config, theme, allProjectNames, allTasks, 
       <div style={{ display: 'flex', gap: 6 }}>
         <input type="color" value={newColor} onChange={e => setNewColor(e.target.value)} style={{ width: 32, height: 28, border: 'none', cursor: 'pointer' }} />
         <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Project name" onKeyDown={function(e) { if (e.key === 'Enter') document.getElementById('add-project-btn').click(); }} style={{ flex: 1, padding: '4px 6px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }} />
-        <button id="add-project-btn" onClick={async () => { if (!newName) return; try { var { default: apiClient } = await import('../../services/apiClient'); var res = await apiClient.post('/projects', { name: newName, color: newColor }); config.setProjects([...config.projects, res.data.project]); setNewName(''); } catch (e) { console.error(e); } }} style={{ border: 'none', borderRadius: 4, padding: '4px 12px', background: theme.accent, color: '#FDFAF5', fontSize: 12, cursor: 'pointer' }}>Add</button>
+        <button id="add-project-btn" onClick={async () => { if (!newName) return; try { var { default: apiClient } = await import('../../../services/apiClient'); var res = await apiClient.post('/projects', { name: newName, color: newColor }); config.setProjects([...config.projects, res.data.project]); setNewName(''); } catch (e) { console.error(e); } }} style={{ border: 'none', borderRadius: 4, padding: '4px 12px', background: theme.accent, color: '#FDFAF5', fontSize: 12, cursor: 'pointer' }}>Add</button>
       </div>
     </div>
   );
