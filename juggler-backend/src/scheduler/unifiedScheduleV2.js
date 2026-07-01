@@ -2543,6 +2543,12 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   }, phaseSnapshots ? { phaseSnapshots: phaseSnapshots } : {});
 }
 
+// W2 (999.941): expose hasWeatherConstraint as a real property on the default
+// export so callers (runSchedule.js) can require the canonical implementation
+// instead of maintaining a duplicate inline copy. Previously this function was
+// only reachable via the `_testOnly` block below (test-only).
+unifiedScheduleV2.hasWeatherConstraint = hasWeatherConstraint;
+
 module.exports = unifiedScheduleV2;
 
 // Test-only exports — allow direct unit testing of dep-gating helpers.

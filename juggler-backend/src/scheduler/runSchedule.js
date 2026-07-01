@@ -1270,7 +1270,13 @@ async function runScheduleAndPersist(userId, _retries, options) {
   if (toDeleteIds.length > 0) {
     // Use db (not trx) so this persists even if the deletion transaction rolls
     // back on lock timeout — the safety-net flag must survive a rollback.
-    await db('task_instances').whereIn('id', toDeleteIds).update({ unscheduled: 1, updated_at: _runScheduleCommand.clockNow() });
+    // Routed through ScheduleRepositoryPort.writeChanged's otherUpdates bucket
+    // (W3a, 999.941) — same call shape as the other _runScheduleCommand.persistDelta
+    // sites in this file, but handed `db` (not `trx`) so the write commits
+    // independently of the surrounding reconcile transaction.
+    await _runScheduleCommand.persistDelta(db, userId, toDeleteIds.map(function(id) {
+      return { id: id, dbUpdate: { unscheduled: 1, updated_at: _runScheduleCommand.clockNow() } };
+    }), { instanceOnly: true });
     await _runScheduleCommand.deleteTasksWhere(trx, userId, function(q) { return q.whereIn('id', toDeleteIds); });
     logger.info('[SCHED] reconcile: deleted ' + toDeleteIds.length + ' stale recurring instances');
     reconcileChanged = true;
@@ -1573,15 +1579,11 @@ async function runScheduleAndPersist(userId, _retries, options) {
   tPerf.reconcileEnd = Date.now() - tPerfStart;
 
   // Load weather data for weather-constrained tasks (fail-open if no coords/cache).
-  // Detection MUST mirror hasWeatherConstraint() in unifiedScheduleV2.js — otherwise
-  // a task whose only constraint is humidity skips the load and fails open silently.
+  // Detection delegates to the canonical hasWeatherConstraint() in
+  // unifiedScheduleV2.js (W2 dedupe, 999.941) — otherwise a task whose only
+  // constraint is humidity skips the load and fails open silently.
   cfg.weatherByDateHour = {};
-  var hasWeatherTasks = allTasks.some(function(t) {
-    return (t.weatherPrecip && t.weatherPrecip !== 'any') ||
-           (t.weatherCloud  && t.weatherCloud  !== 'any') ||
-           t.weatherTempMin != null || t.weatherTempMax != null ||
-           t.weatherHumidityMin != null || t.weatherHumidityMax != null;
-  });
+  var hasWeatherTasks = allTasks.some(unifiedScheduleV2.hasWeatherConstraint);
   if (hasWeatherTasks && cfg.locations && cfg.locations.length > 0) {
     try {
       cfg.weatherByDateHour = await _weatherProvider.loadWeatherForHorizon(cfg.locations, db);
