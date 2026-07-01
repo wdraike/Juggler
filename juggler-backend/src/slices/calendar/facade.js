@@ -188,12 +188,6 @@ async function gcalCallback(code, state, reqUser) {
     return { status: 400, body: 'Missing code or state parameter' };
   }
 
-  if (!(await gcalMarkCodeUsed(code))) {
-    logger.info('[GCAL CALLBACK] Duplicate code detected, redirecting without re-exchange');
-    var frontUrl = require('../../proxy-config').services.juggler.frontend;
-    return { status: 302, redirect: frontUrl + '/?gcal=connected' };
-  }
-
   var decoded;
   try {
     var result = await verifyStateToken(state);
@@ -206,6 +200,13 @@ async function gcalCallback(code, state, reqUser) {
   if (reqUser && reqUser.id !== userId) {
     return { status: 403, body: 'OAuth state does not match authenticated user' };
   }
+
+  if (!(await gcalMarkCodeUsed(code))) {
+    logger.info('[GCAL CALLBACK] Duplicate code detected, redirecting without re-exchange');
+    var frontUrl = require('../../proxy-config').services.juggler.frontend;
+    return { status: 302, redirect: frontUrl + '/?gcal=connected' };
+  }
+
   var oauth2Client = gcalApi.createOAuth2Client();
   var tokens = await gcalApi.getTokensFromCode(oauth2Client, code);
 
@@ -332,12 +333,6 @@ async function msftCallback(code, state, reqUser) {
     return { status: 400, body: 'Missing code or state parameter' };
   }
 
-  if (!(await msftMarkCodeUsed(code))) {
-    logger.info('[MSFT CALLBACK] Duplicate code detected, redirecting without re-exchange');
-    var frontUrl = require('../../proxy-config').services.juggler.frontend;
-    return { status: 302, redirect: frontUrl + '/?msftcal=connected' };
-  }
-
   var decoded;
   try {
     var result = await verifyStateToken(state);
@@ -354,6 +349,13 @@ async function msftCallback(code, state, reqUser) {
   if (!codeVerifier) {
     return { status: 400, body: 'Missing PKCE code_verifier in state' };
   }
+
+  if (!(await msftMarkCodeUsed(code))) {
+    logger.info('[MSFT CALLBACK] Duplicate code detected, redirecting without re-exchange');
+    var frontUrl = require('../../proxy-config').services.juggler.frontend;
+    return { status: 302, redirect: frontUrl + '/?msftcal=connected' };
+  }
+
   var tokens = await msftCalApi.getTokensFromCode(code, codeVerifier);
 
   var update = {
