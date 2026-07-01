@@ -356,10 +356,11 @@ describe('derivePlacements — terminal-status tasks are never unplaced', () => 
     expect(Object.keys(result.dayPlacements)).toHaveLength(0);
   });
 
-  it('missed + unscheduled=1 → NOT in unplaced', () => {
-    const missed = { id: 'm1', text: 'Take Meds', status: 'missed', unscheduled: true, date: null, time: null };
-    expect(derivePlacements([missed]).unplaced).not.toContain(missed);
-  });
+  // NOTE: the former "missed + unscheduled=1 → NOT in unplaced" case was removed
+  // with the 'missed' status itself (commit df8adfa, 2026-06-28 — "overdue is the
+  // display concept"). 'missed' is no longer a status nor a TERMINAL_STATUSES
+  // member, so the case asserted dead behavior (999.998 test-rot). done/skip/
+  // cancel/pause terminal handling stays covered by the cases above + below.
 
   it('a NON-terminal unscheduled task still goes to unplaced (guard not over-broad)', () => {
     const pending = { id: 'p9', text: 'Real unplaced', status: '', unscheduled: true };
