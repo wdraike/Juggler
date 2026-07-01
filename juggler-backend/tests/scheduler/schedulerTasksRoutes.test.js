@@ -107,6 +107,16 @@ describe('scheduler-tasks push-handler', () => {
       expect(mockRunScheduleForPush).not.toHaveBeenCalled();
     });
 
+    // 999.996: Zod validation (scheduler-task.schema.js) — proves the schema
+    // rejects a malformed type, not just an absent key (the pre-existing
+    // `if (!userId)` check happened to also catch missing-key, but not e.g.
+    // a non-string userId, which would have reached runScheduleForPush).
+    test('400 (non-retryable) when userId is not a string', async () => {
+      const res = await request(makeApp()).post('/tasks/q').send({ userId: 12345 });
+      expect(res.status).toBe(400);
+      expect(mockRunScheduleForPush).not.toHaveBeenCalled();
+    });
+
     test('200 when run succeeds', async () => {
       mockRunScheduleForPush.mockResolvedValueOnce({ claimed: true, success: true });
       const res = await request(makeApp()).post('/tasks/q').send({ userId: 'u1' });

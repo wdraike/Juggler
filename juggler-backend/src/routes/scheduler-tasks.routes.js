@@ -33,6 +33,8 @@
 const express = require('express');
 const crypto = require('crypto');
 const { createLogger } = require('@raike/lib-logger');
+const { validate } = require('../middleware/validate');
+const { pushTaskSchema } = require('../schemas/scheduler-task.schema');
 const logger = createLogger('scheduler-tasks.routes');
 
 const router = express.Router();
@@ -104,15 +106,10 @@ async function authenticate(req, res, next) {
  * POST /tasks/:queueName — run a scheduler job pushed by Cloud Tasks.
  * Body: { userId, source, enqueuedAt }.
  */
-router.post('/:queueName', express.json({ limit: '256kb' }), authenticate, async (req, res) => {
+router.post('/:queueName', express.json({ limit: '256kb' }), authenticate, validate(pushTaskSchema), async (req, res) => {
   const { queueName } = req.params;
   const payload = req.body || {};
   const userId = payload.userId;
-
-  if (!userId) {
-    // Malformed task — non-retryable. 400 so Cloud Tasks does NOT retry.
-    return res.status(400).json({ ok: false, error: 'payload.userId is required' });
-  }
 
   const ctx = {
     queueName,
