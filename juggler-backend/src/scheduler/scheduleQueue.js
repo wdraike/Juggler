@@ -2,16 +2,21 @@
  * scheduleQueue.js — DB-backed event queue + debounced scheduler runner
  *
  * Mutation controllers call enqueueScheduleRun(userId) after their DB write.
- * This inserts a row into schedule_queue and marks the user dirty in memory.
+ * This inserts a row into schedule_queue.
  *
  * A poll loop checks the DB for unclaimed rows on a short interval. For each
  * unclaimed user, it atomically claims the row (claimed_by + claimed_at), then
  * runs the scheduler if the quiet period has elapsed.
  *
- * The dirty set is retained as a write-side advisory hint: enqueue() marks the
- * user dirty so the poll loop checks immediately on this instance. It is NOT the
- * authoritative gate for processing — the DB claim is. This prevents the
- * multi-instance double-run described in RESEARCH.md Category 2 / Pitfall 3.
+ * The poll loop is DB-only-authoritative (999.952): under two Cloud Run
+ * instances, an in-memory dirty set on instance A never marked instance B
+ * dirty, so B's poll loop could miss a pending user entirely. The prior
+ * in-memory dirty set was removed; the DB row itself is the sole pending-work
+ * record, queried directly each poll (`SELECT DISTINCT user_id FROM
+ * schedule_queue WHERE claimed_at IS NULL AND created_at < NOW() - INTERVAL
+ * 2 SECOND`). The `_running` map remains as a single-flight in-process guard
+ * (not a queue-membership hint) — see the multi-instance double-run pattern
+ * in RESEARCH.md Category 2 / Pitfall 3.
  *
  * Reference pattern: cal-history-cron.js uses the same DB-based claim approach
  * (sync_locks shard leader election). The claiming here is lighter-weight —

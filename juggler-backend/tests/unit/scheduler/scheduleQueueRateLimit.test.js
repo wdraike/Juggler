@@ -16,17 +16,27 @@
 'use strict';
 
 // Mock the knex handle so the rate-limited path's upsert is a no-op (no live DB).
+// `insert` is a spy (not just a stub) so tests can assert the pending recompute
+// row was actually written — the DB row IS the "dirty" record post-999.952
+// (the in-memory `_dirty` Set was removed; see scheduleQueue.js history). The
+// spy is built and attached to the exported mock function ENTIRELY inside the
+// factory (not via an outer closure) — jest.mock() factories run in a scope
+// where referencing an out-of-scope variable is unreliable.
 jest.mock('../../../src/db', function () {
+  var insertSpy = jest.fn(function () { return chain; });
   var chain = {
-    insert: function () { return chain; },
+    insert: insertSpy,
     onConflict: function () { return chain; },
     merge: function () { return Promise.resolve(); }
   };
-  return function () { return chain; };
+  var mockDb = function () { return chain; };
+  mockDb.__insertSpy = insertSpy;
+  return mockDb;
 });
 
 var scheduleQueue = require('../../../src/scheduler/scheduleQueue');
 var I = scheduleQueue._internal;
+var insertSpy = require('../../../src/db').__insertSpy;
 
 var MAX = I.RATE_LIMIT_MAX;          // 10
 var WINDOW = I.RATE_LIMIT_WINDOW_MS; // 60000
@@ -89,24 +99,27 @@ describe('999.591 scheduler per-user rate limit', function () {
   });
 
   test('over-limit enqueue still records the recompute and returns rateLimited:true (WARN-3) — no throw', async function () {
+    insertSpy.mockClear();
     // Exhaust the window for this user via the public path's checker.
     for (var i = 0; i < MAX; i++) { I.checkRateLimit('rl-user'); }
     // The (MAX+1)th public enqueue is rate-limited: it must NOT drop the pending
-    // recompute — it still marks the user dirty + upserts (mocked) and reports
+    // recompute — it still upserts the schedule_queue row (mocked) and reports
     // rateLimited:true, never throwing.
     var result = await scheduleQueue.enqueueScheduleRun('rl-user', 'test:rate-limit');
     expect(result).toEqual({ enqueued: true, rateLimited: true });
-    // The pending recompute IS recorded (poll loop will pick it up).
-    expect(scheduleQueue._dirty.has('rl-user')).toBe(true);
+    // The pending recompute IS recorded (poll loop will pick it up). Post-999.952
+    // the DB row is the sole "dirty" record (the in-memory _dirty Set was removed).
+    expect(insertSpy).toHaveBeenCalledWith(expect.objectContaining({ user_id: 'rl-user' }));
   });
 
   test('a rate-limited enqueue with options.immediate does NOT throw (immediate suppressed)', async function () {
+    insertSpy.mockClear();
     for (var i = 0; i < MAX; i++) { I.checkRateLimit('rl-imm'); }
     // immediate:true would normally trigger processUser; while rate-limited it is
     // suppressed (shouldRun = immediate && !rateLimited === false). Result is still
     // the rate-limited contract and no throw escapes.
     var result = await scheduleQueue.enqueueScheduleRun('rl-imm', 'test:rate-limit', { immediate: true });
     expect(result).toEqual({ enqueued: true, rateLimited: true });
-    expect(scheduleQueue._dirty.has('rl-imm')).toBe(true);
+    expect(insertSpy).toHaveBeenCalledWith(expect.objectContaining({ user_id: 'rl-imm' }));
   });
 });

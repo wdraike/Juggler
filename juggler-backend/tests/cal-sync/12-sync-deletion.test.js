@@ -412,9 +412,14 @@ describe('Done-task reactivation — done_frozen reset (D-04)', () => {
     });
     await makeLedgerRow({ task_id: task.id, origin: 'juggler', provider: 'gcal', status: 'done_frozen' });
 
+    // 999.1013: must be a genuine terminal→non-terminal transition to trigger
+    // reactivateDoneFrozen (UpdateTaskStatus.js:196-197 gates on
+    // isTerminalStatus(existing.status) && !isTerminalStatus(status)). This was
+    // 'wip' before commit 450b00b's mechanical wip-removal sweep rewrote it to
+    // 'done' — done→done is a terminal→terminal no-op that never reactivates.
     var statusReq = mockReq(user, {
       params: { id: task.id },
-      body: { status: 'done' }
+      body: { status: '' }
     });
     var statusRes = mockRes();
     await updateTaskStatus(statusReq, statusRes);

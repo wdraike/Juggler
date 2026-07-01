@@ -48,12 +48,14 @@ describe('999.869 scheduleQueue._resetForTests — full cross-suite shutdown', f
 
   test('clears the poll loop AND the in-memory state that stopPollLoop leaves behind', function () {
     // Arrange: drive the module into the exact "dirty" shape a real suite leaves —
-    // a running poll loop, pending dirty/running entries, AND a saturated per-user
+    // a running poll loop, a pending running entry, AND a saturated per-user
     // rate-limit window. Every precondition is OBSERVABLY perturbed before reset so
     // the AFTER assertions are non-vacuous (a no-op stub fails them).
+    // (999.1016: the in-memory `_dirty` Set / `dirtyCount` were removed by 999.952 —
+    // the poll loop is now DB-only-authoritative, so there is no in-memory dirty
+    // state left to leak across suites; this test only needs to cover what still
+    // exists: the poll loop, `_running`, and the rate-limit window.)
     scheduleQueue.startPollLoop();
-    scheduleQueue._dirty.add('leaked-user-a');
-    scheduleQueue._dirty.add('leaked-user-b');
     scheduleQueue._running.set('leaked-user-a', Promise.resolve());
     // Saturate the rate-limit window for a user (RATE_LIMIT_MAX hits) so the NEXT
     // checkRateLimit returns false — a real, observable piece of _rateWindows state.
@@ -62,17 +64,15 @@ describe('999.869 scheduleQueue._resetForTests — full cross-suite shutdown', f
 
     var before = scheduleQueue.getPollLoopState();
     expect(before.active).toBe(true);          // poll loop is live
-    expect(before.dirtyCount).toBe(2);         // dirty set populated
     expect(before.runningCount).toBe(1);       // running map populated
 
     // Act
     scheduleQueue._resetForTests();
 
-    // Assert: a no-op stub or a stopPollLoop-only teardown would leave dirtyCount /
-    // runningCount > 0 and the rate window saturated — the fix must zero ALL of it.
+    // Assert: a no-op stub or a stopPollLoop-only teardown would leave runningCount
+    // > 0 and the rate window saturated — the fix must zero ALL of it.
     var after = scheduleQueue.getPollLoopState();
     expect(after.active).toBe(false);          // poll loop stopped
-    expect(after.dirtyCount).toBe(0);          // dirty set cleared
     expect(after.runningCount).toBe(0);        // running map cleared
     // The rate-limit window was cleared: the same user is allowed again. This FAILS
     // if _resetForTests does not clear _rateWindows (the assertion is non-vacuous —
@@ -85,7 +85,6 @@ describe('999.869 scheduleQueue._resetForTests — full cross-suite shutdown', f
     expect(function () { scheduleQueue._resetForTests(); }).not.toThrow();
     var state = scheduleQueue.getPollLoopState();
     expect(state.active).toBe(false);
-    expect(state.dirtyCount).toBe(0);
   });
 
   test('after reset, the next enqueue still works — the dropped backend cache re-resolves (no isCloudTasks crash)', async function () {
