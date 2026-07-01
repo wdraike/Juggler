@@ -409,10 +409,44 @@ UpdateTask.prototype._fastPath = async function _fastPath(input) {
 
 // ── LOCK PATH (handler L1142-1179) ──
 UpdateTask.prototype._lockPath = async function _lockPath(ctx) {
+  var self = this;
   var id = ctx.id;
   var userId = ctx.userId;
   var row = ctx.row;
   var existing = ctx.existing;
+
+  // 999.967 (RC3): recurring=false must run the SAME recurCleanup transaction
+  // the unlocked complex path runs (ledger cleanup, done-instance handling,
+  // resetRecurringInstances) — not the generic split-into-scheduling/non-
+  // scheduling-fields write below, which never invokes it. Without this, a
+  // toggle-off that lands while the scheduler/cal-sync lock is held (routine —
+  // the lock cycles every ~2min) silently skipped all recurrence cleanup,
+  // leaving orphaned cal_sync_ledger rows and stale future instances.
+  if (row.recurring === 0) {
+    var taskType = existing.task_type || 'task';
+    var TEMPLATE_FIELDS = this.mappers.TEMPLATE_FIELDS;
+    await this.repo.runInTransaction(async function (trxRepo) {
+      await self.recurCleanup({
+        trxRepo: trxRepo,
+        taskType: taskType,
+        existing: existing,
+        row: row,
+        anchorDateVal: undefined,
+        tz: null,
+        userId: userId,
+        id: id,
+        TEMPLATE_FIELDS: TEMPLATE_FIELDS
+      });
+    });
+    await this.cache.invalidateTasks(userId);
+    var toggleBroadcastIds = [id];
+    try { toggleBroadcastIds = await this.repo.expandToAllInstanceIds(userId, [id]); } catch { /* fall back */ }
+    this.enqueueScheduleRun(userId, 'api:updateTask', toggleBroadcastIds, { skipEmit: false, skipScheduler: false });
+    var toggledRow = await this.repo.fetchTaskWithEventIds(id, userId);
+    var toggleTemplateRows = await this.repo.getRecurringTemplateRows(userId);
+    var toggleSrcMap = this.mappers.buildSourceMap(toggleTemplateRows);
+    return { status: 200, body: { task: this.mappers.rowToTask(toggledRow, null, toggleSrcMap), queued: true } };
+  }
 
   var split = this.splitFields(row);
   var schedulingFields = split.schedulingFields;

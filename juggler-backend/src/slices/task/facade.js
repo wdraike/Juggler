@@ -272,7 +272,12 @@ async function recurCleanup(ctx) {
       await twrite.updateTaskById(trx, existing.source_id, templateUpdate, userId);
     }
 
-    if (templateUpdate.recur !== undefined) {
+    // 999.967 (RC3): the sibling batchUpdateTxn parity block (below,
+    // "[BATCH] cycle reset") already guards on `|| templateUpdate.recurring
+    // === 0` — this single-task path was missing it, so editing via a
+    // recurring_instance row (rather than the template directly) with
+    // {recurring:false} skipped resetRecurringInstances entirely.
+    if (templateUpdate.recur !== undefined || templateUpdate.recurring === 0) {
       await twrite.resetRecurringInstances(trx, userId, existing.source_id, '[RECUR] cycle reset via instance edit');
     }
 
