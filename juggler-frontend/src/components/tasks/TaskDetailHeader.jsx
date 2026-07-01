@@ -188,12 +188,13 @@ export default function TaskDetailHeader({
             title={marker ? 'Reminder event — does not block time' : 'Make this a non-blocking reminder event'}
             onClick={() => onMarkerChange && onMarkerChange(!marker)}
             style={{
-              fontSize: 10, background: marker ? BRAND.indigo + '22' : TH.badgeBg,
-              color: marker ? BRAND.indigo : TH.textMuted,
+              fontSize: 10, height: 24, boxSizing: 'border-box',
+              background: marker ? BRAND.indigo + '22' : TH.badgeBg,
+              color: marker ? BRAND.indigo : TH.badgeText,
               border: '1px solid ' + (marker ? BRAND.indigo : TH.inputBorder),
               borderRadius: 3, padding: '1px 6px', cursor: 'pointer', fontFamily: 'inherit'
             }}>
-            {marker ? '◇ Reminder' : '◇'}
+            ◇ Reminder
           </button>
         </div>
 

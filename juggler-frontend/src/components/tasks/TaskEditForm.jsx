@@ -140,7 +140,6 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   var [taskTools, setTaskTools] = useState(isCreate ? [] : (task.tools || []));
   var [travelBefore, setTravelBefore] = useState(isCreate ? 0 : (task.travelBefore || 0));
   var [travelAfter, setTravelAfter] = useState(isCreate ? 0 : (task.travelAfter || 0));
-  var [marker, setMarker] = useState(isCreate ? false : !!task.marker);
   var [flexWhen, setFlexWhen] = useState(isCreate ? false : !!task.flexWhen);
   var [weatherPrecip, setWeatherPrecip] = useState(isCreate ? 'any' : (task.weatherPrecip || 'any'));
   var [weatherCloud, setWeatherCloud]   = useState(isCreate ? 'any' : (task.weatherCloud  || 'any'));
@@ -207,6 +206,15 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     setRecurringHasPreferredTime(mode === 'time_window');
   }
 
+  // `marker` (BUG 999.1000) is derived from placementMode, not separate state:
+  // placement_mode='reminder' is the single source of truth server-side (the
+  // `marker` DB column was dropped; tasks_v derives it). The ◇ toggle drives
+  // placementMode directly so the save payload carries the authoritative field.
+  var marker = placementMode === 'reminder';
+  function handleMarkerChange(next) {
+    setPlacementMode(next ? 'reminder' : 'anytime');
+  }
+
   // Sync form state from task prop when it changes externally
   useEffect(function() {
     if (isCreate || !task) return;
@@ -236,7 +244,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     setSplit(newSnap.split); setSplitMin(newSnap.splitMin);
     setTaskLoc(newSnap.location); setTaskTools(newSnap.tools);
     setTravelBefore(newSnap.travelBefore); setTravelAfter(newSnap.travelAfter);
-    setMarker(newSnap.marker);
+    setPlacementMode(newSnap.placementMode);
     setFlexWhen(newSnap.flexWhen);
     setRecurType(newSnap.recurType); setRecurDays(newSnap.recurDays); setRecurTimesPerCycle(newSnap.recurTimesPerCycle || 0);
     setRecurFillPolicy(newSnap.recurFillPolicy || 'keep');
@@ -298,7 +306,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
         project={project} onProjectChange={setProject} allProjectNames={allProjectNames}
         pri={pri} onPriChange={setPri} dur={dur}
         notes={notes} onNotesChange={setNotes} url={url} onUrlChange={setUrl}
-        marker={marker} onMarkerChange={setMarker}
+        marker={marker} onMarkerChange={handleMarkerChange}
         scheduledBadge={whenBadge}
         unplacedDetail={!isCreate && task && task._unplacedDetail ? task._unplacedDetail : null}
         whenBlocked={!isCreate && task && task._whenBlocked && !flexWhen}
@@ -340,7 +348,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             split={split} onSplitChange={setSplit} splitMin={splitMin} onSplitMinChange={setSplitMin}
             travelBefore={travelBefore} onTravelBeforeChange={setTravelBefore}
             travelAfter={travelAfter} onTravelAfterChange={setTravelAfter}
-            marker={marker} onMarkerChange={setMarker}
+            marker={marker} onMarkerChange={handleMarkerChange}
             flexWhen={flexWhen} onFlexWhenChange={setFlexWhen}
             dayReq={dayReq} onDayReqChange={setDayReq}
             when={when} onWhenChange={setWhen}
