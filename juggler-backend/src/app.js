@@ -323,23 +323,12 @@ app.post('/api/events/token', authenticateJWT, function(req, res) {
   res.json({ token: token });
 });
 
-app.get('/api/events', (req, res, next) => {
-  // Accept token from query param (EventSource limitation) or Authorization header.
-  // If the token is an opaque SSE token (not a JWT), resolve it to a userId and
-  // set req.user so the connection proceeds without JWT verification.
-  if (req.query.token && !req.headers.authorization) {
-    var sseToken = sseTokens.get(req.query.token);
-    if (sseToken && sseToken.expiresAt > Date.now()) {
-      // Opaque token hit — consume it (one-time use) and set req.user
-      sseTokens.delete(req.query.token);
-      req.user = { id: sseToken.userId };
-      return next();
-    }
-    // Not an opaque token — treat as JWT (existing behavior)
-    req.headers.authorization = 'Bearer ' + req.query.token;
-  }
-  next();
-}, authenticateJWT, (req, res) => {
+// Extracted SSE stream handler (999.946 W1) — same body as before, no
+// behavior change. Invoked directly from the opaque-token HIT branch below
+// (bypassing authenticateJWT, since req.user is already resolved from the
+// opaque token) and from the header-JWT branch (after authenticateJWT
+// succeeds).
+function sseStreamHandler(req, res) {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
@@ -357,6 +346,32 @@ app.get('/api/events', (req, res, next) => {
   }, 30000);
 
   req.on('close', () => clearInterval(heartbeat));
+}
+
+app.get('/api/events', (req, res) => {
+  // Accept token from query param (EventSource limitation) or Authorization
+  // header. A query-param token MUST resolve to an opaque SSE token
+  // (999.946) — raw JWTs in the URL are never accepted (they leak into
+  // proxy/access logs, browser history, and Referer headers).
+  if (req.query.token) {
+    var sseToken = sseTokens.get(req.query.token);
+    if (sseToken && sseToken.expiresAt > Date.now()) {
+      // Opaque token hit — consume it (one-time use), set req.user, and
+      // stream directly. Do NOT fall through to authenticateJWT: no Bearer
+      // header exists on this branch, so authenticateJWT would 401 it.
+      sseTokens.delete(req.query.token);
+      req.user = { id: sseToken.userId };
+      return sseStreamHandler(req, res);
+    }
+    // Opaque miss/expired — reject. NEVER promote the query value to a JWT
+    // Bearer (that was the 999.946 vuln: any validly-signed JWT authenticated
+    // via the URL).
+    return res.status(401).json({ error: 'Invalid or expired SSE token' });
+  }
+  // No query token — fall back to header-based JWT auth.
+  authenticateJWT(req, res, function () {
+    sseStreamHandler(req, res);
+  });
 });
 
 // Routes

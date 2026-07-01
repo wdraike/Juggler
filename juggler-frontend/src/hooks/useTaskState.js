@@ -346,6 +346,13 @@ export default function useTaskState() {
     var fallbackIntervalId = null;
     var eventSource = null;
     var reconnectTimer = null;
+    // Set true by the effect cleanup below so an in-flight /events/token
+    // POST (or its .catch) that resolves AFTER unmount/effect-rerun is a
+    // no-op instead of opening a zombie EventSource nothing will ever close
+    // (999.946 bird BLOCK-1: async gap between POST and EventSource creation
+    // races the cleanup, which only checks `eventSource` — still null while
+    // the POST is in flight).
+    var sseTornDown = false;
 
     // Shared refresh logic — reload tasks + placements
     async function refreshFromServer() {
@@ -416,145 +423,168 @@ export default function useTaskState() {
       }, delay);
     }
 
-    // Start SSE connection
+    // Start SSE connection. Exchanges the JWT (sent in the Authorization
+    // HEADER via apiClient) for a one-time, 60s opaque SSE token, then
+    // connects with that opaque token in the URL — never the raw JWT
+    // (999.946). connectSSE is the single entry point for both the initial
+    // connect and every reconnect (see onerror below), so each (re)connect
+    // naturally fetches a fresh one-time token.
     function connectSSE() {
       var token = getAccessToken();
       if (!token) { startPolling(); return; }
 
-      var url = apiBase + '/events?token=' + encodeURIComponent(token);
-      eventSource = new EventSource(url);
-      // Expose globally so other components (e.g. CalSyncPanel) can listen for events
-      window.__jugglerEventSource = eventSource;
-
-      eventSource.addEventListener('connected', function() {
-        sseActive = true;
-        // Stop polling fallback if active
-        if (fallbackIntervalId) { clearInterval(fallbackIntervalId); fallbackIntervalId = null; }
-      });
-
-      eventSource.addEventListener('tasks:changed', function(e) {
-        // Surgical path: if the server told us which ids changed, fetch just
-        // those and upsert. Ids that 404 (the underlying mutation was a
-        // delete) are removed from state. Otherwise fall back to the full
-        // version-check + reload path (covers old servers, sources like
-        // cal-sync and config that don't carry an ids payload).
-        var data = null;
-        try { data = JSON.parse(e.data); } catch(err) {}
-        var ids = data && Array.isArray(data.ids) ? data.ids : null;
-        var hadIds = !!(ids && ids.length > 0);
-        if (hadIds) ids = filterOutSelfWrites(ids);
-        if (hadIds && (!ids || ids.length === 0)) {
-          // Every id was our own just-acked write — nothing to fetch.
+      apiClient.post('/events/token').then(function(tokenRes) {
+        if (sseTornDown) return;
+        var opaque = tokenRes.data && tokenRes.data.token;
+        if (!opaque) {
+          // No token in response — fall back to polling, retry later.
+          startPolling();
+          reconnectTimer = setTimeout(connectSSE, 5000);
           return;
         }
-        if (ids && ids.length > 0) {
-          Promise.all(ids.map(function(id) {
-            return apiClient.get('/tasks/' + id)
-              .then(function(res) { return { id: id, task: res.data.task }; })
-              .catch(function(err) {
-                // 404 = deleted; any other error = leave state alone
-                if (err && err.response && err.response.status === 404) return { id: id, task: null };
-                return null;
-              });
-          })).then(function(results) {
-            var upserts = [];
-            var removals = [];
-            results.forEach(function(r) {
-              if (!r) return;
-              if (r.task) upserts.push(r.task);
-              else removals.push(r.id);
-            });
-            if (removals.length > 0) {
-              dispatch({ type: 'REMOVE_TASKS', ids: removals });
-            }
-            if (upserts.length > 0) {
-              hydrateTaskTimezones(upserts, getHydrationTimezone());
-              dispatch({ type: 'UPSERT_TASKS', tasks: upserts });
-            }
-          });
-        } else {
-          refreshFromServer();
-        }
-      });
 
-      eventSource.addEventListener('schedule:changed', function(e) {
-        var data = null;
-        try { data = JSON.parse(e.data); } catch(err) {}
-        var cs = data && data.changeset;
+        var url = apiBase + '/events?token=' + encodeURIComponent(opaque);
+        eventSource = new EventSource(url);
+        // Expose globally so other components (e.g. CalSyncPanel) can listen for events
+        window.__jugglerEventSource = eventSource;
 
-        if (cs) {
-          var addedArr = cs.added || [];
-          var changedArr = cs.changed || [];
-          var removedArr = cs.removed || [];
-          // Nothing changed in the changeset — skip task upserts but still
-          // reload placements. The schedule cache includes newly-created
-          // tasks that the scheduler didn't move (already had scheduled_at).
-          if (addedArr.length + changedArr.length + removedArr.length === 0) {
-            loadPlacements();
-            armNudgeTimer(computeNextTaskEnd(taskStateRef.current.tasks));
+        eventSource.addEventListener('connected', function() {
+          sseActive = true;
+          // Stop polling fallback if active
+          if (fallbackIntervalId) { clearInterval(fallbackIntervalId); fallbackIntervalId = null; }
+        });
+
+        eventSource.addEventListener('tasks:changed', function(e) {
+          // Surgical path: if the server told us which ids changed, fetch just
+          // those and upsert. Ids that 404 (the underlying mutation was a
+          // delete) are removed from state. Otherwise fall back to the full
+          // version-check + reload path (covers old servers, sources like
+          // cal-sync and config that don't carry an ids payload).
+          var data = null;
+          try { data = JSON.parse(e.data); } catch(err) {}
+          var ids = data && Array.isArray(data.ids) ? data.ids : null;
+          var hadIds = !!(ids && ids.length > 0);
+          if (hadIds) ids = filterOutSelfWrites(ids);
+          if (hadIds && (!ids || ids.length === 0)) {
+            // Every id was our own just-acked write — nothing to fetch.
             return;
           }
-          // Remove deleted tasks from state immediately
-          if (removedArr.length > 0) {
-            dispatch({ type: 'REMOVE_TASKS', ids: removedArr });
-          }
-          // Patch path: changed entries may be either ids (legacy) or {id, patch}.
-          // New format ships with patches so we skip the per-task fetch entirely.
-          var changedPatches = [];
-          var changedFetchIds = [];
-          changedArr.forEach(function(c) {
-            if (c && typeof c === 'object' && c.id && c.patch) changedPatches.push(c);
-            else if (typeof c === 'string') changedFetchIds.push(c);
-          });
-          if (changedPatches.length > 0) {
-            dispatch({ type: 'PATCH_TASKS', patches: changedPatches });
-          }
-          // Added: backend now ships full task objects in the changeset so the
-          // frontend can upsert directly. Older payloads (or any added entry
-          // that's still a bare id string) fall back to the fetch path.
-          var addedFullRows = [];
-          var addedFetchIds = [];
-          addedArr.forEach(function(a) {
-            if (a && typeof a === 'object' && a.id) addedFullRows.push(a);
-            else if (typeof a === 'string') addedFetchIds.push(a);
-          });
-          if (addedFullRows.length > 0) {
-            hydrateTaskTimezones(addedFullRows, getHydrationTimezone());
-            dispatch({ type: 'UPSERT_TASKS', tasks: addedFullRows });
-          }
-          var fetchIds = addedFetchIds.concat(changedFetchIds);
-          if (fetchIds.length > 0) {
-            Promise.all(fetchIds.map(function(id) {
-              return apiClient.get('/tasks/' + id).then(function(res) {
-                return res.data.task;
-              }).catch(function() { return null; });
-            })).then(function(tasks) {
-              var valid = tasks.filter(Boolean);
-              if (valid.length > 0) {
-                hydrateTaskTimezones(valid, getHydrationTimezone());
-                dispatch({ type: 'UPSERT_TASKS', tasks: valid });
+          if (ids && ids.length > 0) {
+            Promise.all(ids.map(function(id) {
+              return apiClient.get('/tasks/' + id)
+                .then(function(res) { return { id: id, task: res.data.task }; })
+                .catch(function(err) {
+                  // 404 = deleted; any other error = leave state alone
+                  if (err && err.response && err.response.status === 404) return { id: id, task: null };
+                  return null;
+                });
+            })).then(function(results) {
+              var upserts = [];
+              var removals = [];
+              results.forEach(function(r) {
+                if (!r) return;
+                if (r.task) upserts.push(r.task);
+                else removals.push(r.id);
+              });
+              if (removals.length > 0) {
+                dispatch({ type: 'REMOVE_TASKS', ids: removals });
+              }
+              if (upserts.length > 0) {
+                hydrateTaskTimezones(upserts, getHydrationTimezone());
+                dispatch({ type: 'UPSERT_TASKS', tasks: upserts });
               }
             });
+          } else {
+            refreshFromServer();
           }
-        } else {
-          // Fallback: no changeset — full reload
-          if (loadTasksRef.current) loadTasksRef.current();
-        }
+        });
 
-        // Reload placements (time-slot positions) — only when something
-        // actually moved on the schedule grid.
-        loadPlacements();
-        // Recompute nudge timer on every schedule change (D-05)
-        armNudgeTimer(computeNextTaskEnd(taskStateRef.current.tasks));
-      });
+        eventSource.addEventListener('schedule:changed', function(e) {
+          var data = null;
+          try { data = JSON.parse(e.data); } catch(err) {}
+          var cs = data && data.changeset;
 
-      eventSource.onerror = function() {
-        sseActive = false;
-        if (eventSource) { eventSource.close(); eventSource = null; }
-        // Reconnect after 5s, fall back to polling in the meantime
+          if (cs) {
+            var addedArr = cs.added || [];
+            var changedArr = cs.changed || [];
+            var removedArr = cs.removed || [];
+            // Nothing changed in the changeset — skip task upserts but still
+            // reload placements. The schedule cache includes newly-created
+            // tasks that the scheduler didn't move (already had scheduled_at).
+            if (addedArr.length + changedArr.length + removedArr.length === 0) {
+              loadPlacements();
+              armNudgeTimer(computeNextTaskEnd(taskStateRef.current.tasks));
+              return;
+            }
+            // Remove deleted tasks from state immediately
+            if (removedArr.length > 0) {
+              dispatch({ type: 'REMOVE_TASKS', ids: removedArr });
+            }
+            // Patch path: changed entries may be either ids (legacy) or {id, patch}.
+            // New format ships with patches so we skip the per-task fetch entirely.
+            var changedPatches = [];
+            var changedFetchIds = [];
+            changedArr.forEach(function(c) {
+              if (c && typeof c === 'object' && c.id && c.patch) changedPatches.push(c);
+              else if (typeof c === 'string') changedFetchIds.push(c);
+            });
+            if (changedPatches.length > 0) {
+              dispatch({ type: 'PATCH_TASKS', patches: changedPatches });
+            }
+            // Added: backend now ships full task objects in the changeset so the
+            // frontend can upsert directly. Older payloads (or any added entry
+            // that's still a bare id string) fall back to the fetch path.
+            var addedFullRows = [];
+            var addedFetchIds = [];
+            addedArr.forEach(function(a) {
+              if (a && typeof a === 'object' && a.id) addedFullRows.push(a);
+              else if (typeof a === 'string') addedFetchIds.push(a);
+            });
+            if (addedFullRows.length > 0) {
+              hydrateTaskTimezones(addedFullRows, getHydrationTimezone());
+              dispatch({ type: 'UPSERT_TASKS', tasks: addedFullRows });
+            }
+            var fetchIds = addedFetchIds.concat(changedFetchIds);
+            if (fetchIds.length > 0) {
+              Promise.all(fetchIds.map(function(id) {
+                return apiClient.get('/tasks/' + id).then(function(res) {
+                  return res.data.task;
+                }).catch(function() { return null; });
+              })).then(function(tasks) {
+                var valid = tasks.filter(Boolean);
+                if (valid.length > 0) {
+                  hydrateTaskTimezones(valid, getHydrationTimezone());
+                  dispatch({ type: 'UPSERT_TASKS', tasks: valid });
+                }
+              });
+            }
+          } else {
+            // Fallback: no changeset — full reload
+            if (loadTasksRef.current) loadTasksRef.current();
+          }
+
+          // Reload placements (time-slot positions) — only when something
+          // actually moved on the schedule grid.
+          loadPlacements();
+          // Recompute nudge timer on every schedule change (D-05)
+          armNudgeTimer(computeNextTaskEnd(taskStateRef.current.tasks));
+        });
+
+        eventSource.onerror = function() {
+          sseActive = false;
+          if (eventSource) { eventSource.close(); eventSource = null; }
+          // Reconnect after 5s, fall back to polling in the meantime
+          startPolling();
+          reconnectTimer = setTimeout(connectSSE, 5000);
+        };
+      }).catch(function() {
+        if (sseTornDown) return;
+        // Opaque-token fetch failed (network/auth error) — fall back to
+        // polling and retry the whole connect (incl. a fresh token fetch)
+        // after 5s, mirroring the existing eventSource.onerror fallback.
         startPolling();
         reconnectTimer = setTimeout(connectSSE, 5000);
-      };
+      });
     }
 
     // Polling fallback (used when SSE is unavailable)
@@ -577,6 +607,7 @@ export default function useTaskState() {
     }, 5 * 60 * 1000); // every 5 minutes
 
     return function() {
+      sseTornDown = true;
       if (eventSource) eventSource.close();
       if (fallbackIntervalId) clearInterval(fallbackIntervalId);
       if (reconnectTimer) clearTimeout(reconnectTimer);
