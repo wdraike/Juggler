@@ -78,6 +78,10 @@ async function listEvents(token, timeMin, timeMax, userId) {
 
   return events
     .filter(function(e) { return e.status !== 'cancelled'; })
+    .filter(function(e) {
+      var self = Array.isArray(e.attendees) && e.attendees.find(function(a) { return a.self === true; });
+      return !(self && self.responseStatus === 'declined');
+    })
     .map(normalizeEvent);
 }
 
