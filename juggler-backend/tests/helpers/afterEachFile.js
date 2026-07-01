@@ -72,6 +72,13 @@ function stopLoop() {
 // green suite.
 // ---------------------------------------------------------------------------
 
+// Upper bound for the per-file truncate/schema-restore afterAll hook (999.995).
+// The default jest hook deadline is 5000ms, which the 24-table TRUNCATE + view
+// DDL restore + migration re-apply can exceed against a shared/contended 3407,
+// producing a false "Test Suite failed to run" on a suite whose assertions all
+// passed. 30s is a generous ceiling that resolves as soon as teardown finishes.
+var TEARDOWN_TIMEOUT_MS = 30000;
+
 // Volatile data tables truncated between files. NEVER includes
 // knex_migrations / knex_migrations_lock (schema/migration ledger).
 var TRUNCATE_TABLES = [
@@ -221,7 +228,17 @@ if (typeof afterAll === 'function') {
   // same-scope afterAll hooks in registration order... actually LIFO — but
   // order between these two is immaterial: stopLoop touches timers, this
   // touches the DB).
+  //
+  // Explicit teardown timeout (999.995): this hook opens a fresh knex conn and
+  // does 24 TRUNCATEs + a canonical-view DDL restore + a migration re-apply.
+  // Against a shared/contended test-bed MySQL (3407) that legitimately exceeds
+  // jest's default 5000ms afterAll deadline → "Test Suite failed to run" even
+  // though the file's own assertions all passed (a false-red seen on untouched
+  // baseline files when run standalone). A generous teardown deadline removes
+  // the false-red without slowing the happy path — the hook resolves as soon as
+  // the truncate completes; the timeout is only an upper bound, not a wait. It
+  // does NOT change test isolation (same tables truncated, same schema restore).
   afterAll(async function () {
     await truncateVolatileTables();
-  });
+  }, TEARDOWN_TIMEOUT_MS);
 }
