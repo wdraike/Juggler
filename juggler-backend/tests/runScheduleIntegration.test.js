@@ -710,6 +710,21 @@ describe('BUG-671 regression: floating tasks must never be flagged overdue', () 
       updated_at: db.fn.now(),
     });
 
+    // zoe (999.1037/1038/1035 audit, 2026-07-01): captured via real mutation
+    // testing — deleting runSchedule.js's `if (!rawRowPast.overdue) {...}`
+    // guard entirely still passed the ORIGINAL version of this assertion set,
+    // because the guard's own update payload ({overdue:1, unscheduled:null,
+    // updated_at:now()}) is idempotent on status/scheduled_at/overdue when the
+    // row is already overdue:1 — those fields don't change value whether the
+    // guard runs or not. The one field the (removed) guard's write WOULD still
+    // touch is `updated_at` (a fresh timestamp on every unconditional write,
+    // vs. untouched when the guard correctly no-ops). Capture the seeded
+    // updated_at now and assert it is BYTE-IDENTICAL after run 2 — this is
+    // guard-specific: it only stays unchanged when the no-op path is actually
+    // taken, catching the exact mutation zoe demonstrated.
+    var seededRow = await db('task_instances').where('id', todayInst.id).first();
+    var seededUpdatedAt = seededRow.updated_at;
+
     // Second scheduler run
     await runScheduleAndPersist(USER_ID);
 
@@ -728,6 +743,12 @@ describe('BUG-671 regression: floating tasks must never be flagged overdue', () 
     // is a no-op once overdue is already set; a regression that re-clears it or
     // rolls the instance forward would flip this.
     expect(row.overdue).toBeTruthy();
+
+    // GUARD-SPECIFIC assertion (zoe mutation-test fix): updated_at must be
+    // UNCHANGED — a redundant write (the guard removed/broken) stamps a fresh
+    // updated_at even when overdue/status/scheduled_at happen to end up at the
+    // same values, so this catches exactly the false-pass zoe demonstrated.
+    expect(String(row.updated_at)).toBe(String(seededUpdatedAt));
   });
 });
 
