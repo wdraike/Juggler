@@ -92,7 +92,7 @@ describe('BF-7: task deleted during API phase is skipped in write phase', () => 
     //    the task no longer exists in freshById.
     //
     //    Must be a future task with date + time so it isn't filtered out of pushQueue.
-    var futureDate = new Date('2026-07-01T14:00:00Z'); // ~47 days out, within 60-day window
+    var futureDate = new Date(Date.now() + 30 * 86400000); // ~30 days out, within 60-day window
     var task = await makeTask({
       user_id: user.id,
       text: 'BF-7 Test Task',
