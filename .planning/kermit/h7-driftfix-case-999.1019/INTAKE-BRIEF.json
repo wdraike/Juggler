@@ -1,0 +1,27 @@
+{
+  "leg_id": "h7-driftfix-case-999.1019",
+  "backlog_id": "999.1019",
+  "mode": "bugfix",
+  "repro": {
+    "description": "KnexScheduleRepository.writeChanged batched-CASE path has CASE branches for scheduled_at, dur, date, day, time, but NO branch for split_ordinal/split_total. When a drift-fix delta (runSchedule.js:1295-1303) carrying dur + split_ordinal + split_total is routed through writeChanged via the dur trigger, dur is persisted but split_ordinal and split_total are silently dropped — desyncing split-chunk metadata for every user.",
+    "steps": [
+      "Seed a task_instance with split_ordinal=1, split_total=2, dur=30",
+      "Create a delta with dbUpdate={dur:45, split_ordinal:2, split_total:3, updated_at}",
+      "Call repo.writeChanged(delta, {userId, instanceOnly:true})",
+      "Read back the instance — split_ordinal and split_total will still be 1 and 2 (dropped), only dur updated to 45"
+    ],
+    "evidence": "runSchedule.js:1298 drift-fix CASE update writes split_ordinal/split_total/dur alongside flag fields. KnexScheduleRepository.writeChanged batched path (line ~112-170) handles dur CASE but has no split_ordinal/split_total CASE."
+  },
+  "root_cause": {
+    "region": "juggler-backend/src/slices/scheduler/adapters/KnexScheduleRepository.js writeChanged batched-CASE path (lines ~112-170)",
+    "hypothesis": "The batched-CASE path in writeChanged was implemented with CASE branches for scheduled_at, dur, date, day, time but missed split_ordinal and split_total. When a drift-fix delta includes these fields alongside dur, the batched path writes dur via CASE but silently drops split_ordinal/split_total because they have no CASE branch and are not in the generic otherUpdates path (they're in INSTANCE_UPDATE_FIELDS but the batched path only processes known CASE columns).",
+    "fix": "Add a forEach loop for ['split_ordinal', 'split_total'] mirroring the dur CASE pattern, plus add both fields to INSTANCE_UPDATE_FIELDS in tasks-write.js."
+  },
+  "risk_flags": {
+    "data_corruption": true,
+    "security": false,
+    "frontend": false,
+    "interface_change": false,
+    "user_facing": false
+  }
+}

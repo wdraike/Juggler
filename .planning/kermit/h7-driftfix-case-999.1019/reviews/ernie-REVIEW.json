@@ -1,0 +1,63 @@
+{
+  "reviewer": "ernie",
+  "leg_id": "h7-driftfix-case-999.1019",
+  "status": "PASS",
+  "findings": [
+    {
+      "id": "E1",
+      "severity": "INFO",
+      "file": "juggler-backend/src/slices/scheduler/adapters/KnexScheduleRepository.js",
+      "line": 160,
+      "description": "The new forEach over ['split_ordinal','split_total'] is a near-verbatim port of the legacy drift-fix CASE emission at runSchedule.js:1295-1303. Same hardcoded array, same `!= null` filter (correctly skips undefined AND null, and correctly INCLUDES 0 — split_total could legitimately be falsy), same `CASE id ... WHEN ? THEN ? ... ELSE `col` END` shape, same trx.raw(splitCaseExpr, splitBindings) parameterization. Faithful to the legacy pattern."
+    },
+    {
+      "id": "E2",
+      "severity": "INFO",
+      "file": "juggler-backend/src/slices/scheduler/adapters/KnexScheduleRepository.js",
+      "line": 169,
+      "description": "Column name is interpolated via `'ELSE `' + col + '` END'` but `col` originates from the hardcoded literal array `['split_ordinal', 'split_total']` on line 160 — never user input. No SQL-injection surface. Backtick-quoting matches the legacy code (line 1301) and the dateChunk pattern (lines 183-185). Safe."
+    },
+    {
+      "id": "E3",
+      "severity": "INFO",
+      "file": "juggler-backend/src/slices/scheduler/adapters/KnexScheduleRepository.js",
+      "line": 161,
+      "description": "Null handling is correct: `pu.dbUpdate[col] != null` filters to only rows that actually carry the split column in the chunk. Rows in the chunk WITHOUT the column fall through to the `ELSE `col`` clause, preserving their existing value — no accidental nulling. The `splitChunk.length === 0` early return (line 162) correctly skips emitting a no-op CASE when no row in the chunk carries the column."
+    },
+    {
+      "id": "E4",
+      "severity": "INFO",
+      "file": "juggler-backend/src/slices/scheduler/adapters/KnexScheduleRepository.js",
+      "line": 160,
+      "description": "Routing consistency: a delta enters the batched path when `(pu.dbUpdate.scheduled_at || pu.dbUpdate.dur) && !pu.dbUpdate.status` (line 112). Drift-fix deltas carry `dur`, so they correctly route here and now also persist split_ordinal/split_total. Deltas carrying split columns WITHOUT dur/scheduled_at route to the per-row otherUpdates path (line 203-206), which handles all dbUpdate fields generically via updateTaskById — confirmed by IT-SPLIT-b. No path drops the split columns."
+    },
+    {
+      "id": "E5",
+      "severity": "INFO",
+      "file": "juggler-backend/src/lib/tasks-write.js",
+      "line": 77,
+      "description": "INSTANCE_UPDATE_FIELDS gains 'split_ordinal','split_total' ahead of 'split_group'. This is the field allowlist that updateTaskById / updateTasksWhere consult when instanceOnly=true; without these entries the per-row path (otherUpdates) would ALSO silently strip the split columns from the dbUpdate payload. The fix correctly addresses both paths. Ordering before split_group is cosmetically consistent (ordinal/total describe the chunk, group identifies the set)."
+    },
+    {
+      "id": "E6",
+      "severity": "INFO",
+      "file": "juggler-backend/tests/w1-split-ordinal-case.integration.test.js",
+      "line": 1,
+      "description": "Test quality is strong. IT-SPLIT-a seeds split_ordinal=1/split_total=2/dur=30, applies a drift-fix-shaped delta (dur=45, split_ordinal=2, split_total=3) that routes to the batched path via `dur`, and asserts all three columns changed — directly proving the CASE branches fire. IT-SPLIT-b applies a split-only delta (no dur/scheduled_at) routing to otherUpdates and asserts the per-row path persists split columns too. Mutation proof is documented in the header (remove the forEach → split_ordinal stays 1 → RED). before/after state asserted. Cleanup in beforeAll/afterAll/beforeEach is thorough. Uses assertDbAvailable reachability guard per TEST-FR-001."
+    },
+    {
+      "id": "E7",
+      "severity": "INFO",
+      "file": "juggler-backend/src/slices/scheduler/adapters/KnexScheduleRepository.js",
+      "line": 144,
+      "description": "Pre-existing (out of scope, not a finding against this fix): the dur CASE branch at line 144 uses `!!pu.dbUpdate.dur` which would skip a legitimate `dur: 0` value. The new split branches correctly use `!= null` instead, matching the legacy drift-fix code. No action required for this leg — noting only for future cleanup of the dur branch."
+    }
+  ],
+  "proof_checklist": {
+    "code_reviewed": true,
+    "logic_correct": true,
+    "pattern_consistent": true,
+    "test_quality_verified": true
+  },
+  "summary": "PASS. The bugfix correctly adds split_ordinal/split_total CASE branches to KnexScheduleRepository.writeChanged's batched path, faithfully mirroring the legacy drift-fix CASE emission at runSchedule.js:1295-1303. Parameterization uses bound `?` placeholders; the interpolated column name comes from a hardcoded literal array (no injection surface). Null handling via `!= null` is correct and consistent with the legacy code — it includes falsy-but-present values (e.g. split_total: 0) and the `ELSE `col`` clause preserves existing values for chunk rows that don't carry the column. The empty-chunk early return prevents no-op CASEs. INSTANCE_UPDATE_FIELDS is updated in tandem so the per-row otherUpdates path also persists the split columns. The integration test (IT-SPLIT-a / IT-SPLIT-b) proves both the batched and per-row paths, with a documented mutation proof and proper DB reachability guarding. No logic, injection, or consistency issues found. One out-of-scope note: the pre-existing dur branch uses a truthy filter (`!!`) rather than `!= null` — not a defect in this fix."
+}

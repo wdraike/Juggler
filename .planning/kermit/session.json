@@ -1,16 +1,20 @@
 {
-  "leg_id": "999.884-ui-map-e2e-foundation",
-  "intent": "Foundation of 999.884: UI map + E2E coverage tooling for juggler-frontend (UI map artifact, TDD coverage-% calculator, Playwright scaffold + representative coverage-tagged specs, decomposition). No live browser run.",
-  "mode": "new",
+  "leg_id": "h7-driftfix-case-999.1019",
+  "intent": "Fix 999.1019: split_ordinal/split_total CASE branches missing from KnexScheduleRepository.writeChanged batched path",
+  "mode": "bugfix",
   "lanes": [],
   "depth": "standard",
-  "scope": ["juggler-frontend"],
-  "branch": "sweep/juggler-2026-06-26",
-  "status": "in_progress",
-  "wbs": ".planning/kermit/WBS-999.884-ui-map-e2e-foundation.md",
-  "spec": ".planning/kermit/999.884-ui-map-e2e-foundation/SPEC.md",
-  "traceability": ".planning/kermit/999.884-ui-map-e2e-foundation/TRACEABILITY.md",
+  "scope": ["juggler-backend"],
+  "branch": "leg/h7-driftfix-case-999.1019",
+  "status": "in_review",
+  "wbs": ".planning/kermit/h7-driftfix-case-999.1019/WBS.md",
+  "traceability": ".planning/kermit/h7-driftfix-case-999.1019/TRACEABILITY.md",
   "verdict": null,
-  "owner": { "sse_port": 13674, "host": "Williams-MacBook-Pro.local", "started": "2026-06-27T03:16:22Z" },
-  "opened": "2026-06-27T03:16:22Z", "last_update": "2026-06-27T03:16:22Z"
+  "owner": {
+    "sse_port": 0,
+    "host": "Williams-MacBook-Pro.local",
+    "started": "2026-07-02T22:30:00Z"
+  },
+  "opened": "2026-07-02T22:30:00Z",
+  "last_update": "2026-07-02T22:30:00Z"
 }
