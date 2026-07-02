@@ -49,7 +49,14 @@
 // Point knex at the isolated test DB before requiring anything that uses it.
 // This must happen before requiring '../src/db' or knexfile.
 process.env.NODE_ENV = 'test';
-if (!process.env.DB_NAME) process.env.DB_NAME = 'juggler_recurdel_test';
+// 999.1037 fix-follow-up: unconditional (not `if (!process.env.DB_NAME)`).
+// jest.config.js's setupFiles now loads .env.test (DB_NAME=juggler_test) BEFORE
+// this file's own top-level code runs, so a conditional guard here is a
+// permanent no-op (ernie BLOCK, 2026-07-01) and this file would silently run
+// against the SHARED juggler_test schema instead of its isolated one — exactly
+// the testbed-juggler-test-pollution class already hit once (2026-06-21).
+// Reassert unconditionally so this file's isolation always wins.
+process.env.DB_NAME = 'juggler_recurdel_test';
 
 var db = require('../../src/db');
 var { runScheduleAndPersist } = require('../../src/scheduler/runSchedule');

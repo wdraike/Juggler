@@ -646,17 +646,32 @@ describe('BUG-671 regression: floating tasks must never be flagged overdue', () 
   });
 
   // BUG-671-AC4 — GUARD TEST (must remain GREEN before and after fix).
-  // A recurring instance that has already been marked missed MUST NOT be
-  // rolled forward or have its status changed by a subsequent scheduler run.
-  // Per SCHEDULER.md §8 Rule 2, missed recurring instances keep their status
-  // and are not perpetually rescheduled.
+  // A past-incomplete recurring instance that the scheduler has already
+  // flagged overdue MUST NOT be rolled forward or have its overdue/status
+  // touched by a subsequent scheduler run.
+  //
+  // 999.1038: rewritten. status='missed' was retired by migration
+  // 20260628100000_remove_missed_from_status_constraints.js (David,
+  // 2026-06-24: "there should not be any auto-miss feature") — the DB CHECK
+  // constraint on task_instances.status no longer accepts 'missed' at all, so
+  // this test's original fixture-seed step (`update({status:'missed', ...})`)
+  // now THROWS on a fresh test-bed (confirmed via SHOW CREATE TABLE
+  // task_instances: chk_task_instances_status only allows '', done, cancel,
+  // skip, pause, disabled, archived, restored, cancelled). Per
+  // runSchedule.js:2258-2278 ("Leg D — AUTO-MISS REMOVED"), the equivalent
+  // terminal-ish state for "past, incomplete, already flagged" is now
+  // status='' + overdue=1 (scheduled_at stays set, pinned on its day) — the
+  // `if (!rawRowPast.overdue) { ...update... }` guard there is a no-op once
+  // overdue is already 1, which is exactly the "not altered" behavior this
+  // test asserts. Same intent as the original (a settled past-due instance is
+  // not perpetually re-touched), expressed in the current status vocabulary.
   //
   // Implementation note: the reconciler deletes "stale" pending recurring
   // instances that don't match the template's expected ID scheme. We therefore
-  // test an instance that is ALREADY in status='missed' (a terminal state the
-  // reconciler respects and leaves intact) and verify a second scheduler run
-  // does not alter it.
-  test('AC4 (guard): already-missed recurring instance is NOT altered by a subsequent scheduler run', async () => {
+  // test an instance that is ALREADY overdue=1 (a state the reconciler
+  // respects and leaves intact) and verify a second scheduler run does not
+  // alter it.
+  test('AC4 (guard): already-overdue past recurring instance is NOT altered by a subsequent scheduler run', async () => {
     if (!available) return;
 
     await seedTemplate({ id: 'tmpl-ac4', text: 'AC4 recurring', dur: 30 });
@@ -679,38 +694,40 @@ describe('BUG-671 regression: floating tasks must never be flagged overdue', () 
     // First run: verify the scheduler doesn't touch or roll the already-past instance.
     var result1 = await runScheduleAndPersist(USER_ID); // eslint-disable-line no-unused-vars
 
-    // The seeded instance is our concrete missed instance — mark it missed to
-    // simulate a day passing without completion.
+    // The seeded instance is our concrete past-due instance — flag it overdue
+    // to simulate a prior scheduler run having already pinned it (runSchedule.js
+    // Phase 9's `overdue:1, unscheduled:null` write for a placed past-incomplete
+    // recurring instance). status stays '' — 'missed' is no longer a valid value.
     var todayInst = await db('task_instances').where('id', 'ac4-inst-seeded').first();
     expect(todayInst).toBeTruthy(); // seeded instance MUST exist — not vacuous
 
-    var MISSED_SCHED = STALE_DATE_UTC; // force scheduled_at into past
+    var OVERDUE_SCHED = STALE_DATE_UTC; // scheduled_at stays pinned in the past
     await db('task_instances').where('id', todayInst.id).update({
-      status: 'missed',
-      scheduled_at: MISSED_SCHED,
-      completed_at: MISSED_SCHED,
-      // A clean terminal missed row has overdue cleared. (Leg D: run1 may flag a placed
-      // past instance overdue=1; this manual missed-creation supersedes that with a proper
-      // terminal row, mirroring how a real terminal transition clears the overdue flag.)
-      overdue: 0,
+      status: '',
+      scheduled_at: OVERDUE_SCHED,
+      completed_at: null, // incomplete — not done, never was
+      overdue: 1,          // the current terminal-ish "past, flagged, pinned" marker
       updated_at: db.fn.now(),
     });
 
     // Second scheduler run
     await runScheduleAndPersist(USER_ID);
 
-    // The missed instance must NOT have been altered — still missed, still at past date
+    // The overdue instance must NOT have been altered — still '', still overdue,
+    // still at its past date.
     var row = await db('task_instances').where('id', todayInst.id).first();
     expect(row).toBeTruthy();
-    expect(row.status).toBe('missed');
+    expect(row.status).toBe('');
 
     // scheduled_at must not have been rolled to today or later
     var scheduledDate = (row.scheduled_at || '').slice(0, 10);
     var today = todayKey();
     expect(scheduledDate < today).toBe(true); // not rolled forward
 
-    // Must NOT have overdue=1 (missed instances use status='missed', not the overdue DB flag)
-    expect(row.overdue).toBeFalsy();
+    // Must still have overdue=1 — runSchedule.js's `if (!rawRowPast.overdue)` guard
+    // is a no-op once overdue is already set; a regression that re-clears it or
+    // rolls the instance forward would flip this.
+    expect(row.overdue).toBeTruthy();
   });
 });
 

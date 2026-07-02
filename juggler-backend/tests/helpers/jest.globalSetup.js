@@ -6,6 +6,17 @@
 
 process.env.NODE_ENV = 'test';
 
+// 999.1037: globalSetup runs in jest's separate main process — it is NOT
+// covered by jest.config.js's setupFiles (that only runs per test-worker
+// file), so it needs its own explicit .env.test load. Without this, a
+// manual `npx jest` run (no DB_PORT/.env.test already exported in the shell)
+// falls through to knexfile.js's defaults (port 3306, no password) and the
+// safety guard below correctly refuses — but the refusal itself was
+// confusing without this fix, since .env.test (which sets the right target)
+// exists on disk but was never read.
+var path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '../../.env.test') });
+
 var knex = require('knex');
 var knexConfig = require('../../knexfile');
 

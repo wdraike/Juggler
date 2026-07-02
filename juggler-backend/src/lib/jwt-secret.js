@@ -1,6 +1,8 @@
 /**
  * Shared JWT secret for OAuth state tokens.
  * Used by calendar controllers (gcal, msft).
+ *
+ * Implements JwtSecretPort (lib/ports/JwtSecretPort.js).
  */
 var { jwtVerify } = require('jose');
 

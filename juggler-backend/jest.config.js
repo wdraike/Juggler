@@ -25,6 +25,9 @@ module.exports = {
     '^uuid$': '<rootDir>/tests/helpers/uuid-mock.js'
   },
   globalSetup: '<rootDir>/tests/helpers/jest.globalSetup.js',
+  // 999.1037: load .env.test before ANY test file's own top-level requires run
+  // (see tests/helpers/jest.setupEnv.js for the full root-cause writeup).
+  setupFiles: ['<rootDir>/tests/helpers/jest.setupEnv.js'],
   // Per-test-file teardown: stop the scheduleQueue poll loop after each test/file
   // so a stray timer tick can't fire post-teardown and call getQueueBackend() on a
   // torn-down/mocked registry. Also prevents a background timer from firing during

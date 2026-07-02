@@ -1,6 +1,8 @@
 /**
  * credential-encrypt.js — AES-256-GCM encryption for stored credentials.
  *
+ * Implements CredentialEncryptPort (lib/ports/CredentialEncryptPort.js).
+ *
  * Used to encrypt app-specific passwords (e.g., Apple CalDAV) at rest.
  * Key is read from CREDENTIAL_ENCRYPTION_KEY env var (64-char hex = 32 bytes).
  *

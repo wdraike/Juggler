@@ -14,11 +14,34 @@
 
 process.env.NODE_ENV = 'test';
 
+// 999.1037: load .env.test EXPLICITLY (by path), the same way
+// tests/cal-sync/helpers/test-setup.js does, instead of relying on
+// knexfile.js's bare `require('dotenv').config()` (which loads the default
+// `.env` — a file that does not exist in this repo — and is a no-op here).
+// Without this, DB_HOST/DB_PORT/DB_USER/DB_PASSWORD depend on whatever order
+// OTHER test files happened to require/mutate process.env in the same jest
+// worker — exactly the "intermittently hangs or misconnects" (Access denied
+// ...@192.168.65.1, no password) failure mode reported in 999.1037,
+// reproduced on an unrelated pre-existing file (confirming a require-order
+// race, not a test-specific bug). dotenv.config() never overrides an
+// already-set process.env var, so an explicit shell export (e.g.
+// `DB_PORT=3407 jest`) still takes precedence over .env.test.
+var path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '../../.env.test') });
+
 var knex = require('knex');
 var knexConfig = require('../../knexfile');
 
+// 999.1037: bound the connect/acquire attempt so a genuinely-unreachable DB
+// (test-bed not started, wrong host) fails FAST with a clear error instead of
+// hanging on the OS-level TCP timeout for a half-open port. Applied only to
+// this test-helper's own knex instance — dev/production knexfile configs
+// are unaffected.
+var testConnConfig = Object.assign({}, knexConfig.test.connection, { connectTimeout: 5000 });
+var testPoolConfig = Object.assign({}, knexConfig.test.pool, { acquireTimeoutMillis: 5000 });
+
 // Single shared connection used by all test helpers and seed scripts
-var db = knex(knexConfig.test);
+var db = knex(Object.assign({}, knexConfig.test, { connection: testConnConfig, pool: testPoolConfig }));
 
 // Tables that hold user-scoped data, in deletion order (FK-safe)
 var USER_TABLES = [
