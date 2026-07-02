@@ -2,7 +2,7 @@
 type: design
 service: juggler
 status: active
-last_updated: 2026-05-24
+last_updated: 2026-07-02
 tags:
   - type/design
   - service/juggler
@@ -14,7 +14,12 @@ tags:
 
 # Task Configuration Matrix
 
-**Last Updated:** 2026-05-24
+**Last Updated:** 2026-07-02
+
+> **Correction (leg juggy4, 2026-07-02 — sched-audit L1, REG-02).** The `time_window` row below
+> previously claimed a missed flex window resulted in "unplaced + dual-placed with `_overdue`". That
+> dual-write is superseded — see `SCHEDULER-RULES.md` §3.1 Phase 4/5 and
+> `SCHEDULER-OVERDUE-LADDER.md` § Supersession note for the current unscheduled-overdue contract.
 
 Catalog of every valid task configuration combination and its scheduler behavior.
 Derived from `placementModes.js`, `unifiedScheduleV2.js`, `WhenSection.jsx`,
@@ -53,7 +58,7 @@ Derived from `placementModes.js`, `unifiedScheduleV2.js`, `WhenSection.jsx`,
 | `reminder` | Optional | Optional | If date+time provided, immovable at anchor (Phase 0). If no time, falls through to slack queue with `dur=0`. | N/A (no occupancy) | `tryPlaceAtTime` if anchored; else `findEarliestSlot` with `dur=0` |
 | `all_day` | Yes | No | Day-locked if `datePinned=true`; otherwise floats across eligible days. | N/A | **Filtered out** of time-grid placement entirely (`buildItems` early return). Rendered as full-day banner in calendar UI only. |
 | `fixed` | Yes | Yes | Immovable at exact `anchorDate` + `anchorMin` (Phase 0). `findEarliestSlot` clamped to single day. | N/A — `fixed` IS the rigid state | `tryPlaceAtTime` (Phase 0). Non-recurring fixed = `isFixedWhen=true` (cannot be displaced). Recurring fixed = `isRigid=true` (can be displaced on conflict, then force-placed). |
-| `time_window` | Yes | Yes (as `preferredTimeMins`) | Day-locked to `anchorDate`; `datePinned` clamps `earliestIdx=latestIdx`. | `rigid=true` when `timeFlex=0` (exact) → behaves like `fixed` | `isWindowMode=true`. Searches `[windowLo, windowHi]`. If window entirely past today → `isMissedWindow=true` → unplaced + dual-placed with `_overdue`. |
+| `time_window` | Yes | Yes (as `preferredTimeMins`) | Day-locked to `anchorDate`; `datePinned` clamps `earliestIdx=latestIdx`. | `rigid=true` when `timeFlex=0` (exact) → behaves like `fixed` | `isWindowMode=true`. Searches `[windowLo, windowHi]`. If window entirely past today → `isMissedWindow=true` → routed to `unplaced` only (juggy4, 2026-07-02; never dual-placed on the grid). Persistence then applies the two-way split: prior `scheduled_at` set → `overdue=1` pinned on the grid; `scheduled_at` still NULL → `unscheduled=1` (unscheduled-overdue lane). See `unifiedScheduleV2.js:2347-2379`, `runSchedule.js:1907-1987`. |
 | `time_blocks` | Optional | No | If `datePinned=true`, clamps to `anchorDate`. If no date, floats across horizon. | N/A | `whenParts` drive `eligibleWindows()` via `getWhenWindows()`. `flexWhen=true` enables retry with `relaxWhen=true`. |
 | `anytime` | Optional | No | If `datePinned=true`, clamps to `anchorDate`. If no date, floats across horizon (infinite slack). | N/A | No window constraints. `preferLatestSlot=true` for recurring past-anchorMin today. |
 

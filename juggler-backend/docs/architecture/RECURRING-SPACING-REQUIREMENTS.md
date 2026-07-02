@@ -2,8 +2,19 @@
 
 **Service:** juggler
 **Status:** draft (needs implementation)
-**Last Updated:** 2026-06-27
+**Last Updated:** 2026-07-02
 **Backlog:** 999.874 (sub-item 2)
+
+> **⚠️ Requirement-ID namespace disclaimer (sched-audit L1, REG-10, added 2026-07-02).** The `R1`–`R8`
+> IDs used in this document (§Requirements below) are **local to this draft doc only** — they are
+> NOT canonical `docs/REQUIREMENTS.md` IDs. In particular, this doc's `R1` ("Instance Day Assignment")
+> collides with canonical `REQUIREMENTS.md` R1 ("Task Creation"); the two are unrelated requirements
+> that happen to share a number. This doc is a pre-implementation draft (`status: draft (needs
+> implementation)`) — its spacing algorithm is not yet built (`unifiedScheduleV2.js`'s existing spacing
+> guard is a simpler "block or allow" check per the Design Notes below, not this doc's R1–R8
+> algorithm). **Do not renumber** these IDs as part of this leg (per explicit scope instruction) — if
+> and when this design ships, fold its requirements into `docs/REQUIREMENTS.md` under a fresh family
+> (e.g. R57+, per the sched-audit register's suggested resolution) rather than reusing R1–R8 verbatim.
 
 ---
 

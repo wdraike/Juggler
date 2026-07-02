@@ -14,6 +14,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Docs
+
+- **Scheduler doc supersession sweep** (sched-audit L1, 2026-07-02): reconciled 8 scheduler docs that
+  still described pre-juggy4 or otherwise-superseded behavior as current. Corrected stale "dual-placed
+  on grid" / "force-placed at original date" claims in `SCHEDULER-RULES.md` and
+  `TASK-CONFIGURATION-MATRIX.md` to match the unscheduled-overdue contract; banner-marked
+  `SCHEDULER-VISUAL.md` as a v1 design-reference and flagged its "bump lower-priority task"
+  mechanism REJECTED-in-v2; fixed `SCHEDULER-SPEC.md`'s stale "no R32.7" note (R32.7/R32.8 are now
+  real, per `docs/REQUIREMENTS.md`), its stale weather fail-open contradiction note (code + tests are
+  already fail-closed), and its stale auto-miss description (removed 2026-06-24 per David's ruling —
+  scheduler no longer auto-applies terminal `status:'missed'`; past-incomplete recurring instances now
+  stay non-terminal via `overdue`/`unscheduled` flags); added a requirement-ID namespace disclaimer to
+  `RECURRING-SPACING-REQUIREMENTS.md` (its local R1–R8 collide with canonical `REQUIREMENTS.md` R1–R8;
+  not renumbered per scope); added a STALE banner to `SCHEDULER-TRACEABILITY-REPORT.md` (cites 5
+  deleted test files, 6 wrongly-"MISSING" requirements now covered — full regeneration deferred to
+  after the L4 test-repair leg); fixed `TASK-STATE-MATRIX.md`'s stale "pause deletes future instances"
+  claim (pause cascades `status='pause'`, keeps instances); retired `SCHEDULER-AUDIT-REQUIREMENTS.md`
+  (orphaned pre-v2 requirements register, superseded by `SCHEDULER-SPEC.md`/`REQUIREMENTS.md`). No
+  code changes. Full per-file detail: `.planning/kermit/sched-audit/reviews/L1-DOCS-CHANGELOG.md`.
+
 ### Fixed
 
 - **Overdue recurring/split tasks no longer bunch/overlap on the grid** (leg juggy4, ROADMAP, 2026-07-02): the scheduler's Phase 4 (`missedWindowItems`) and Phase 5 (`pastAnchoredRecurrings`) rescue passes previously force-placed overdue recurring tasks straight onto the calendar with zero occupancy check, so two unrelated overdue tasks could land at the identical date+time and render as overlapping/bunched entries. Per David's product ruling, once a recurring or split task's flex window/anchor date has passed (it cannot move forward anymore), it now shows as **unscheduled-overdue, pinned to its deadline date** instead of being force-placed on the grid — never rolled forward. Overdue split-task chunks each persist as their own DB row (no merge/delete, per the existing separate-rows ruling); the calendar UI already merges same-master chunks into one visible entry. Fixed/ingested calendar events and rigid/fixed recurring tasks are unaffected — this only changes flexible/TIME_WINDOW recurring and split tasks once they go overdue.

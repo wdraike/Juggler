@@ -28,7 +28,7 @@ where a fragment disagrees with the code, the **code + this doc win** and the fr
 ## Status dashboard (reconciled vs code)
 | Subsystem (section) | Behaviors | Implemented | Partial | Planned/Not-built | Contradicted / Known-bug |
 |---------------------|-----------|-------------|---------|-------------------|--------------------------|
-| A — Placement engine | 23 | 21 | 1 | — | 1 (weather fail-open) + 3 doc-drift gaps |
+| A — Placement engine | 23 | 22 | 1 | — | 3 doc-drift gaps (weather fail-open row RESOLVED 2026-07-02 — was already fail-closed in code, doc was stale; see [PLACE-WEATHER]) |
 | B — Recurring lifecycle | 24 | ~20 | ~2 | master/instance UPSERT redesign | 2 (dual-missed logic, delete-instance) + doc drift |
 | C — Overdue / forward-roll | 16 | 9 (main) | 2 | 999.801 reconcile | 3 WIP-ungated + 1 BLOCK on `60835fe` |
 | D — Persistence / read model | 21 | 18 | 2 (slack_mins, W4 cache) | W2 partition (NOT built) | 1 (slack_mins dropped) |
@@ -65,8 +65,11 @@ ruling before the scheduler is internally consistent.
 - **D2 — Delete-instance: hard-delete vs soft-skip (§B).** SCHEDULER-RULES.md + the VERIFIED R32.5
   test say delete-of-instance = soft-skip (`status='skip'`); `DeleteTask.js scope=instance` does a
   hard row delete. → **Decision:** which is intended? (affects dedup + history).
-- **D3 — Weather gating fail-open vs fail-closed (§A).** Code fails OPEN (places anyway on weather-API
-  failure); requirement R11.10/R38.1 says fail-CLOSED. → **Decision:** product call.
+- **D3 — Weather gating fail-open vs fail-closed (§A) — RESOLVED, no product call needed.** This
+  entry claimed code fails OPEN vs requirement R11.10/R38.1 fail-CLOSED. **Stale as of 2026-07-02
+  (sched-audit L1, REG-07):** code already fails CLOSED (`unifiedScheduleV2.js` `weatherOk`, per-date
+  and per-hour, citing fix 999.546) and `tests/scheduler/weatherFailOpen.test.js` (TS-318/TS-319) pins
+  the fail-closed contract. See [PLACE-WEATHER] in Section A for the reconciled entry.
 - **D4 — Overdue forward-roll (§C, WIP `60835fe`).** Today's fix is built but ungated: 1 BLOCK
   (period-end cap bleeds into the next cycle — must be `anchor+cycleLen-1`, applied unconditionally) +
   3 WARNs (window-close should use `preferred_time_mins` not placed slot; `time_flex==0` distinct from
@@ -283,18 +286,41 @@ The live placement core is **`src/scheduler/unifiedScheduleV2.js`** (2390 lines)
 - **Overdue split chunks (leg juggy4, 2026-07-02):** once a recurring split task's flex window/anchor has passed, EACH incomplete chunk (pre-split-ordinal DB row) is routed individually through the Phase 4/5 rescue passes into `unplaced` — `unifiedScheduleV2.js:2400-2425` (`overdueRescueItems.forEach(item => stillUnplaced.push(item))`). There is **no scheduler-level grouping/collapse** by `masterId`/`sourceId` for this path (unlike the non-overdue split-overflow reason-tagging pass at `:2125-2294`, which does group by `p.task.sourceId || p.task.master_id`). A collapse-to-one-representative design (summed `dur`, lowest-`splitOrdinal` representative) was implemented and then **reverted** after ernie's re-review (E1 BLOCK): it dropped sibling chunks (`splitOrdinal>=2`) out of `result.unplaced` entirely, so `runSchedule.js` §8 never wrote them a terminal `placed|overdue|unscheduled` state — a NEVER-MISSING violation. Completed chunks are excluded upstream (buildItems status guard) and never reach this path. Per-chunk DB rows are always separate rows, never merged/deleted — **ruling 999.841**. The single-displayed-task UX David asked for is produced entirely by the existing **display-layer** grouping in `DailyView.jsx:282-288` (groups by `splitGroup`/`sourceId`+date, shows a `_unplacedChunkCount` badge — rendered by `DailyViewUnschedEntry.jsx`; moved from :995-1007 by the 999.965 decomposition) — this pre-existed the leg and required no scheduler or persistence change.
 
 ### [PLACE-UNPLACED] Every real placement failure produces an `_unplacedReason` (R11.16)
-- **Code:** `populateFailDiag` (`:1186`) sets `failReason`/`failDetail` on a first-pass-wins basis; `tryPlaceQueued` returns `{slot:null, failReason, failDetail}` (`:1361`); `applyPlacementFailReason` (`:1374`) attributes the reason with precedence (partial_split → weather → FR1 diagnostic → `no_slot` floor). Reason codes: `tool_conflict`, `location_mismatch`, `no_slot`, `partial_split`, `weather`, `missedRecurring`.
+- **Code:** `populateFailDiag` (`:1186`) sets `failReason`/`failDetail` on a first-pass-wins basis; `tryPlaceQueued` returns `{slot:null, failReason, failDetail}` (`:1361`); `applyPlacementFailReason` (`:1374`) attributes the reason with precedence (partial_split → weather → FR1 diagnostic → `no_slot` floor). Reason codes: `tool_conflict`, `location_mismatch`, `no_slot`, `partial_split`, `weather`, `missed`.
 - **Status:** IMPLEMENTED
 - **Tests:** `tests/unit/scheduler/unplacedReasonScenarios.test.js`, `tests/unit/scheduler/placementDiagnostics.test.js`
 - **Source:** code FR1/FR2 comments; AC2.1/AC2.3/AC2.4/AC2.7; R11.16
 - **Notes:** This fixed the "Submit Weekly UI Claim" silent-unplaced symptom (tool_conflict: `personal_pc` not available where/when the day resolves). R11.16 holds for ALL paths (`no_slot` defensive floor).
+- **Correction (sched-audit L1, REG-08, 2026-07-02):** the reason-code list previously ended in
+  `missedRecurring`, a name that doesn't exist in the actual taxonomy. The canonical single source of
+  truth, `shared/scheduler/reasonCodes.js`, defines `REASON_CODES.MISSED = 'missed'` (no
+  `missedRecurring` value anywhere in that module) — corrected above to `missed`.
 
-### [PLACE-WEATHER] Weather gating is fail-OPEN (code) vs fail-CLOSED (requirement)
-- **Code:** `weatherOk(task, dateKey, startMin, weatherByDateHour)` (`:920`) called per candidate slot inside `findEarliestSlot`; `hasWeatherConstraint` (`:912`). Cache miss → fail-open for that slot.
-- **Status:** **CONTRADICTED** — requirement says fail-closed; code is fail-open.
-- **Tests:** PARTIAL (R11.10, R39.5 flagged "Weather fail-open vs fail-closed", P1, gap exists).
-- **Source:** SCHEDULER.md §Weather "Fail-open rule"; SCHEDULER-TRACEABILITY-REPORT.md R11.10/R39.5; SCHEDULER-RULES.md C-row
-- **Notes:** Documented divergence; the doc explicitly notes the requirement wanted fail-closed but the implementation fails open to avoid blocking all placement on a weather-cache miss.
+### [PLACE-WEATHER] Weather gating is fail-CLOSED (code + requirement agree)
+- **RESOLVED (sched-audit L1, REG-07, reconciled 2026-07-02).** This entry previously read "fail-OPEN
+  (code) vs fail-CLOSED (requirement)" / **CONTRADICTED**. That was itself stale: the code was fixed
+  to fail-closed under **999.546** and the doc note was never updated afterward. Verified live this
+  pass — no code change made here.
+- **Code:** `weatherOk(task, dateKey, startMin, weatherByDateHour)` (`unifiedScheduleV2.js:1008-1044`)
+  called per candidate slot inside `findEarliestSlot`; `hasWeatherConstraint` (`:1000-1006`). A missing
+  date entry (`!weatherByDateHour[dateKey]`) OR a missing hour entry (`!w`) both **return false**
+  (ineligible) — fail-CLOSED at both the per-date and per-hour granularity, per the inline comment
+  "FAIL-CLOSED (999.546 / R38 CC6)".
+- **Status:** IMPLEMENTED (fail-closed). No divergence between code and requirement.
+- **Tests:** `tests/scheduler/weatherFailOpen.test.js` (TS-318/TS-319) — despite the filename, these
+  tests now PIN the fail-closed contract at both date- and hour-level granularity; the tests were
+  rewritten from "assert the fail-open vulnerability" to "assert fail-closed" when 999.546 shipped.
+- **Source:** R38.1/R11.10 (fail-closed requirement); `unifiedScheduleV2.js` inline comment citing
+  999.546; `weatherFailOpen.test.js` header comment (documents its own history).
+- **Notes:** `SCHEDULER-RULES.md` §9.3 still describes weather as fail-open for cache-miss/no-coords/
+  API-down. Live-checked this pass: it is likely ALSO stale, not a legitimately separate behavior —
+  `runSchedule.js:1591` sets `cfg.weatherByDateHour = {}` on a fetch failure with the comment
+  "fail-closed: no data → weatherOk rejects every slot → tasks go to Unplaced" (contradicting its own
+  `:1581` comment three lines up, "fail-open if no coords/cache" — an unresolved code-comment drift,
+  not a code bug); an empty map is then consumed by `weatherOk` the same fail-closed way as any other
+  missing-data case (`!weatherByDateHour[dateKey]` → `return false`). §9.3 was not in this leg's
+  directed scope (SCHEDULER-SPEC.md only) — flagged `INFO REFER→abby` for a follow-up §9.3 correction
+  pass, not acted on here.
 
 ### [PLACE-OVERLAP] Overlap prevention, not eviction
 - **Code:** `dayOcc` occupancy grid blocks already-placed minutes; `isFreeWithTravel` skips occupied slots. No post-placement pile-up resolution. Phase 6 "Rigid forced" is the **only** path that deliberately overlaps (with `_conflict=true, locked=true`).
@@ -304,7 +330,10 @@ The live placement core is **`src/scheduler/unifiedScheduleV2.js`** (2390 lines)
 - **Notes:** Original spec described eviction; implementation chose prevention to avoid churn of user-confirmed placements.
 
 ### [PLACE-RECUR-NOROLL] Recurring past-due instances do NOT roll forward
-- **Code:** Phase 3/4/5 mark missed recurrings unplaced (`missedRecurring`) on their assigned day only; no next-day attempt. tpc-flexible templates (count < allowed-days) slide within the cycle window by design (`isFlexibleTpc`, `:572`).
+- **Code:** Phase 3/4/5 mark missed recurrings unplaced (`REASON_CODES.MISSED = 'missed'` — corrected
+  2026-07-02, REG-08; was mis-cited here as `missedRecurring`, a name that doesn't exist in
+  `shared/scheduler/reasonCodes.js`) on their assigned day only; no next-day attempt. tpc-flexible
+  templates (count < allowed-days) slide within the cycle window by design (`isFlexibleTpc`, `:572`).
 - **Status:** IMPLEMENTED
 - **Tests:** `tests/unit/tpc-competition.test.js`, `tests/unit/tpc-spacing-guard.test.js`, `tests/scheduler/recurring-fixed-fallback.test.js`, `tests/scheduler/overdue-unscheduled-pinning.test.js` (new, leg juggy4), `tests/scheduler/roamable-recurring-forward-roll.test.js` (assertions revised, leg juggy4 — AC2a/AC2c/AC6a re-pinned from grid-pin `_overdue:true` to unscheduled-overdue)
 - **Source:** SCHEDULER.md §8 Rule 2; SCHEDULER-RULES.md §4.3
@@ -316,9 +345,10 @@ The live placement core is **`src/scheduler/unifiedScheduleV2.js`** (2390 lines)
 ## SUMMARY
 
 **Total behaviors documented:** 23
-- **IMPLEMENTED:** 21
+- **IMPLEMENTED:** 22 (was 21 — [PLACE-WEATHER] moved here 2026-07-02, REG-07: reconciled to
+  fail-closed, no longer contradicted)
 - **PARTIAL (doc mismatch, behavior present):** 1 — [PLACE-LADDER] (undocumented 5th rung; stale line cite). ([PLACE-SLACK] also has a minor "computed once vs per-iteration" doc mismatch but is behaviorally correct → counted IMPLEMENTED.)
-- **CONTRADICTED:** 1 — [PLACE-WEATHER] (fail-open code vs fail-closed requirement).
+- **CONTRADICTED:** 0 (was 1 — [PLACE-WEATHER]; RESOLVED, see above).
 - **PLANNED:** 0.
 
 **Placement modes (6, confirmed against `placementModes.js:15-22`):** `reminder`, `all_day`, `fixed`, `time_window`, `time_blocks`, `anytime`. The prompt's enum guess ("TIME_WINDOW, TIME_BLOCKS, etc.") is correct; the full set is the 6 above.
@@ -365,11 +395,16 @@ Authoritative doc: `juggler-backend/docs/architecture/SCHEDULER-RULES.md` §5/§
 supporting: `TASK-STATE-MATRIX.md`, `RECURRING-SPACING-DESIGN.md`, `SCHEDULER-OVERDUE-LADDER.md`,
 `SCHEDULER-TRACEABILITY-REPORT.md` (R32.1–R32.6, R33.1–R33.5, R34.1–R34.5).
 
-> **Prompt-vs-reality note on numbering.** The brief references **R32.7** ("day-lock placement, no
-> cross-day roll for non-TPC"). There is **no R32.7** in the requirement set — R32 has exactly six
-> sub-reqs (R32.1–R32.6). Day-lock is real and IMPLEMENTED, but it lives as the `isDayLocked` logic in
-> `unifiedScheduleV2.js` and is documented under `SCHEDULER-RULES.md` §6.2 (Day-Containment) and §5,
-> not as an R32.7 requirement. It is captured below as **[DAY-LOCK]**. The named docs `SCHEDULER.md`,
+> **Prompt-vs-reality note on numbering — STALE, reconciled 2026-07-02 (sched-audit L1, REG-05).**
+> This note originally claimed "there is **no R32.7**" (R32 having only six sub-reqs, R32.1–R32.6) and
+> that day-lock placement was unregistered, captured only as `[DAY-LOCK]` below. **That is no longer
+> true.** `docs/REQUIREMENTS.md` now defines **R32.7** ("day-locked non-TPC recurring instances...")
+> and **R32.8** (single-instance override without touching the template/series) — see
+> `REQUIREMENTS.md:375` (R32.7, status `implemented`) and `:376` (R32.8, status `planned`). Section C
+> below's `[R32.7]` entry (day-lock) already cites `REQUIREMENTS R32.7 (:375)` correctly and needs no
+> change — **this §B note was the stale half of the pair**, written before the requirement register
+> was reconciled. The `[DAY-LOCK]` tag captured below remains valid as an alternate cross-reference
+> label for the same behavior; it is not a second requirement. The named docs `SCHEDULER.md`,
 > `TASK-PROPERTIES.md`, `TASK-STATE-MATRIX.md`, `RECURRING-SPACING-DESIGN.md` live under
 > `juggler-backend/docs/architecture/` (not the `docs/` root). Several only exist in
 > `.claude/worktrees/*` copies — the canonical main-tree copies are the ones cited here.
@@ -431,12 +466,34 @@ supporting: `TASK-STATE-MATRIX.md`, `RECURRING-SPACING-DESIGN.md`, `SCHEDULER-OV
 - **Source:** SCHEDULER-RULES.md §5.2 "Terminal Dedup: Blocks re-expansion on date"
 - **Notes:** This is what prevents a completed/skipped occurrence from being regenerated on the next scheduler run.
 
-### [B-TERM.4] **Auto-miss** (`status:'missed'`) for past recurring instances — applied by `runSchedule.js` Phase 9 ONLY when BOTH the timeFlex placement window AND the recurrence-PERIOD boundary have expired; freeze slot follows a priority ladder
-- **Code:** `runSchedule.js` past-window block (~L1749-1845): skips if `flex >= daysPast*1440` (still in timeFlex window) OR `today < periodEnd` (still in recurrence cycle, via `recurringPeriodEndKey`). Freeze ladder for `scheduled_at`/`completed_at`: `lastRealSlot` (placed slot, parsed UTC with `+'Z'`) → `windowClose` (`computeWindowCloseUtc` = `scheduled_at + timeFlex`) → midnight of occurrence date → `clockNow()`. `recurringPeriodEndKey` (runSchedule.js:226) computes day-locked (cycle=1) vs flexible-TPC (cycle=`recurringCycleDays`) boundary.
-- **Status:** IMPLEMENTED
-- **Tests:** `commands-status-delete-misc.test.js` (R32.4 auto-apply); `unifiedSchedule.test.js` (R11.16 `_unplacedReason:'missed'`)
-- **Source:** SCHEDULER-OVERDUE-LADDER.md L37-48 (explicitly "refines R32.4 — was windowClose regardless of placement"); LOCKED design 999.808 (LC-1/LC-2); SCHEDULER-RULES.md §5.3 "Missed Detection — Three Paths"
-- **Notes/contradictions:** **CONTRADICTED helper.** `shared/scheduler/missedHelpers.js` exposes a *second*, simpler `isTaskMissed`/`shouldAutoMarkMissed` pair using fixed **2-hour** (missed) / **24-hour** (resolution) thresholds off `scheduled_at` — this does NOT honor the recurrence-period boundary and disagrees with the Phase-9 ladder + `computeRecurringDeadline` in the same file. `computeRecurringDeadline` (period-boundary, R50.0) is the canonical one; the 2h/24h functions are legacy/cron-era and a live inconsistency worth flagging. PATH B/C fixes (BUG-142) ensure never-placed past instances still auto-miss even when the reconciler moved `t.date` forward or `unplacedIds` would otherwise block them.
+### [B-TERM.4] **Auto-miss REMOVED (superseded 2026-06-24 — sched-audit L1, REG-09, amended 2026-07-02).** Was: `status:'missed'` auto-applied by `runSchedule.js` Phase 9. Now: NEVER auto-applied.
+- **STALE STATUS BELOW.** This entry's header/status/tests as written describe the **pre-2026-06-24**
+  behavior. Verified live this pass: `runSchedule.js`'s "9. Move remaining past-dated tasks to today"
+  block (`:2187-2289`) no longer sets `status:'missed'` anywhere — the only `'missed'` string literals
+  left in the file are in **comments** (`:1196`, `:2188`, `:2215`, `:2230`) describing the *old* design
+  or explicitly disclaiming it (`:2258-2259`: "A past-incomplete recurring instance is **NEVER**
+  auto-marked terminal 'missed' by the system (David, 2026-06-24: 'there should not be any auto-miss
+  feature')"). Instead, per R50 + the never-missing invariant, a past-incomplete recurring instance:
+  has a placement (`scheduled_at` set) → flagged `overdue=1`, stays pinned on its day, non-terminal;
+  never placed (`scheduled_at` NULL) → surfaced via `unscheduled=1`, also non-terminal. The user may
+  still manually skip/cancel. Comment cites "Leg D (scheduler-recurring-rework §4)" as the origin of
+  the removal — a different/later leg than this doc's `999.808` LOCKED design below, which the removal
+  supersedes.
+- **Code (superseded, kept for history):** `runSchedule.js` past-window block (~L1749-1845 — that line
+  range is now a *different* block, R-FR1 durability persistence, not Phase 9; the real removal is at
+  `:2187-2289`): skips if `flex >= daysPast*1440` (still in timeFlex window) OR `today < periodEnd`
+  (still in recurrence cycle, via `recurringPeriodEndKey`). Freeze ladder for `scheduled_at`/
+  `completed_at`: `lastRealSlot` (placed slot, parsed UTC with `+'Z'`) → `windowClose`
+  (`computeWindowCloseUtc` = `scheduled_at + timeFlex`) → midnight of occurrence date → `clockNow()`.
+  `recurringPeriodEndKey` (runSchedule.js:226) computes day-locked (cycle=1) vs flexible-TPC
+  (cycle=`recurringCycleDays`) boundary. This describes the **removed** freeze-to-`missed` ladder.
+- **Status:** SUPERSEDED (was IMPLEMENTED) — see `runSchedule.js:2257-2268` for the removal + ruling.
+- **Tests:** `commands-status-delete-misc.test.js` (R32.4 auto-apply — verify still green against the
+  new non-`missed` behavior, not re-run in this docs-only leg); `unifiedSchedule.test.js` (R11.16
+  `_unplacedReason:'missed'` — this is the unrelated *reason-code* `missed`, still current, not the
+  terminal status)
+- **Source:** SCHEDULER-OVERDUE-LADDER.md L37-48 (explicitly "refines R32.4 — was windowClose regardless of placement"); LOCKED design 999.808 (LC-1/LC-2, itself now superseded by the 2026-06-24 ruling); SCHEDULER-RULES.md §5.3 "Missed Detection — Three Paths" (also not yet reconciled to this removal — out of this leg's directed scope, flagged `INFO REFER→abby`)
+- **Notes/contradictions:** **CONTRADICTED helper.** `shared/scheduler/missedHelpers.js` exposes a *second*, simpler `isTaskMissed`/`shouldAutoMarkMissed` pair using fixed **2-hour** (missed) / **24-hour** (resolution) thresholds off `scheduled_at` — this does NOT honor the recurrence-period boundary and disagrees with the Phase-9 ladder + `computeRecurringDeadline` in the same file. `computeRecurringDeadline` (period-boundary, R50.0) is the canonical one; the 2h/24h functions are legacy/cron-era and a live inconsistency worth flagging. PATH B/C fixes (BUG-142) ensure never-placed past instances still get their non-terminal overdue/unscheduled flag even when the reconciler moved `t.date` forward or `unplacedIds` would otherwise block them.
 
 ### [B-TERM.5] **Recurrence-period deadline** is end-of-cycle for flexible/TPC, end-of-day for day-locked — single source of truth shared by scheduler Phase 9 and the cal-history cron
 - **Code:** `shared/scheduler/missedHelpers.js` `computeRecurringDeadline({occurrenceDate, recurStart, isDayLocked, cycleDays}, tz)` → 23:59 local of last in-cycle day; cycle anchored to `recurStart + k*cycleDays` (matches expandRecurring bucketing). `recurringCycleDays` (ConstraintSolver.js:62): weekly=7, biweekly=14, monthly=30, daily=1, interval=`every*{1|7|30|365}`, else 0.
@@ -686,12 +743,21 @@ All `file:line` cites are against the **`60835fe` working tree** unless noted.
 - **Source:** REQUIREMENTS R50.8 (:560); ADR Decision 5 (:87).
 - **Notes:** Guards the `dateStrings:true` UTC-misparse trap (MEMORY: never bare `new Date()` on tz-less DB datetimes). Frontend ESM copy kept in sync manually (CRA can't import the CommonJS `shared/` tree) — documented divergence risk.
 
-### [R32.4 / 999.808] Scheduler Phase 9 auto-applies `status:"missed"` to past recurring instances whose timeFlex window AND recurrence-period boundary (R50.0) have BOTH expired. Users cannot set `missed` directly (403). Missed PLACED freezes at the **last real `scheduled_at`**; never-placed falls back to windowClose / midnight.
-- **Code:** `runSchedule.js` Phase 9 (~`:1827-1857`): `lastRealSlot = rawRowPast.scheduled_at != null ? … : null` → `missedAt = lastRealSlot || computeWindowCloseUtc(...) || localToUtc(effectiveDate,'12:00 AM',TZ) || clockNow()`; reconcile spares past pending recurring instances so Phase 9 can freeze them (`:~915`). 403 guard in `UpdateTaskStatus.js`. — MAIN.
-- **Status:** IMPLEMENTED(main). Preserved unchanged by WIP ("R32.4/999.808 missed-freeze … do not disturb").
-- **Tests:** `tests/slices/task/application/commands-status-delete-misc.test.js`.
-- **Source:** REQUIREMENTS R32.4 (:372); doc `architecture/SCHEDULER-OVERDUE-LADDER.md` §Phase-9 (LOCKED 999.808, David 2026-06-19); SPEC.md AC3.
-- **Notes:** This refines R32.4's older "windowClose regardless of placement". Freeze-slot priority ladder: (1) last real `scheduled_at`, (2) `computeWindowCloseUtc`, (3) midnight-of-occurrence, (4) `clockNow()` fallback. Terminal-`scheduled_at` DB CHECK constraint satisfied in both branches.
+### [R32.4 / 999.808] Scheduler Phase 9 auto-applies `status:"missed"` to past recurring instances — SUPERSEDED 2026-06-24 (sched-audit L1, REG-09, amended 2026-07-02)
+- **Amendment:** This entry (header + Code/Status/Notes below) describes the **pre-2026-06-24**
+  auto-miss ladder. Per David's 2026-06-24 ruling ("there should not be any auto-miss feature"), the
+  system **never** auto-applies terminal `status:'missed'` to a past-incomplete recurring instance any
+  longer — see the full amendment + code citation at `[B-TERM.4]` above (Section B), which this entry
+  duplicates. A past-incomplete recurring instance now stays non-terminal: `overdue=1` if it had a
+  placement, `unscheduled=1` if it never did (`runSchedule.js:2257-2268`). The 403-on-direct-user-set
+  guard in `UpdateTaskStatus.js` is unaffected by this change (still relevant — a user still cannot set
+  `missed` directly; the system just no longer sets it either).
+- **Code (superseded, kept for history):** `runSchedule.js` Phase 9 (~`:1827-1857` — stale line range,
+  see `[B-TERM.4]`): `lastRealSlot = rawRowPast.scheduled_at != null ? … : null` → `missedAt = lastRealSlot || computeWindowCloseUtc(...) || localToUtc(effectiveDate,'12:00 AM',TZ) || clockNow()`; reconcile spares past pending recurring instances so Phase 9 can freeze them (`:~915`). 403 guard in `UpdateTaskStatus.js`. — MAIN (historical).
+- **Status:** SUPERSEDED (was IMPLEMENTED(main)). The WIP note "preserved unchanged... do not disturb" no longer holds — it predates the 2026-06-24 removal.
+- **Tests:** `tests/slices/task/application/commands-status-delete-misc.test.js` — verify against current (non-`missed`) behavior in a future test-repair leg, not re-run here (docs-only).
+- **Source:** REQUIREMENTS R32.4 (:372); doc `architecture/SCHEDULER-OVERDUE-LADDER.md` §Phase-9 (LOCKED 999.808, David 2026-06-19 — itself superseded by the later 2026-06-24 ruling); SPEC.md AC3.
+- **Notes:** This refines R32.4's older "windowClose regardless of placement", describing a freeze-slot priority ladder that no longer executes: (1) last real `scheduled_at`, (2) `computeWindowCloseUtc`, (3) midnight-of-occurrence, (4) `clockNow()` fallback. Terminal-`scheduled_at` DB CHECK constraint concern is moot for this path now — the instance never reaches a terminal status here.
 
 ### [R32.7] Day-locked non-TPC recurring instances are locked to their occurrence date (`isDayLocked=true` when `!isFlexibleTpc`): scheduler searches `earliest=latest=anchorDate`; cannot roll to another day. ANYTIME + past anchor-time today → placed at the LATEST available slot today (intra-day). Past-DATE occurrences that can't place are left unplaced — NEVER rolled forward.
 - **Code:** `unifiedScheduleV2.js:572` `isDayLocked = recurring && (FIXED || !isFlexibleTpc) && !(splitTot>1)`; lines 415, 464-469, 834-851, 978-998. Forward-roll gate explicitly guards: `item.isRecurring && item.isFlexibleTpc && !item.isStarted && !item.isFixedWhen` (`:~1670`) — day-locked excluded. — MAIN (lock) + WIP (explicit roll-exclusion).
@@ -981,13 +1047,20 @@ state — so "placed AND unplaced" is impossible.
 - **Source:** WBS W2 row; DESIGN-RULING-overdue-vs-unplaceable.md (referenced by WBS)
 - **Notes:** OVERDUE = had a placement + deadline past + can't re-slot → keep prior `scheduled_at`/time, `overdue=1`, NOT unplaced. UNPLACEABLE = deadline not past + crowded out → `unscheduled=1`, no `scheduled_at`. Replaces the old "window past today → dual-place in unplaced+grid" that produced the "placed AND unplaced" anomaly. This is what makes the DBSS-1 one-row-one-state invariant hold.
 
-### [DBSS-21] Past-due auto-miss writes terminal `status:'missed'` with frozen slot (juggler-cal-history Plan C / R50.0 / 999.808)
+### [DBSS-21] Past-due auto-miss writes terminal `status:'missed'` with frozen slot — SUPERSEDED 2026-06-24 (sched-audit L1, REG-09, amended 2026-07-02)
 
-- **Code:** runSchedule.js auto-miss block (~1750-1845): recurring past + outside both timeFlex window and recurrence-period boundary → `status:'missed'`, `scheduled_at=missedAt`, `completed_at=missedAt`; non-recurring past unplaced → date moved to today (`todayMidnight`)
-- **Status:** IMPLEMENTED
-- **Tests:** `src/scheduler/__tests__/20260509000300_add_missed_status_and_completed_at.test.js`; migration `20260606000000`/`20260609000000` add the `missed` enum value
-- **Source:** runSchedule.js comments (Plan C); brain (recurring overdue lifecycle design; overdue past-due R50)
-- **Notes:** `effectiveDate` uses the raw DB `date` column when `scheduled_at` is null (never-placed instance) so a never-placed past occurrence still becomes missed (BUG-142 PATH B/C). Frozen at the last real slot when placed (parse bare DB string with appended `'Z'` as UTC). `missed` distinguishes a system-applied miss from a user `skip`.
+- **Amendment:** As with `[B-TERM.4]`/`[R32.4 / 999.808]` above, this entry describes the **removed**
+  auto-miss behavior. David's 2026-06-24 ruling removed the terminal `status:'missed'` auto-write
+  entirely — verified live: `runSchedule.js:2187-2289` ("9. Move remaining past-dated tasks to today")
+  no longer sets `status:'missed'` anywhere; the block instead writes non-terminal `overdue=1`
+  (had a placement) or `unscheduled=1` (never placed), per `runSchedule.js:2257-2268`'s explicit
+  comment citing the ruling. The `missed` DB enum value itself is untouched (still a valid, reachable
+  status via other paths) — only this **auto-write** path was removed.
+- **Code (superseded, kept for history):** runSchedule.js auto-miss block (~1750-1845 — stale line range, see `[B-TERM.4]` for the current `:2187-2289` location): recurring past + outside both timeFlex window and recurrence-period boundary → `status:'missed'`, `scheduled_at=missedAt`, `completed_at=missedAt`; non-recurring past unplaced → date moved to today (`todayMidnight`)
+- **Status:** SUPERSEDED (was IMPLEMENTED).
+- **Tests:** `src/scheduler/__tests__/20260509000300_add_missed_status_and_completed_at.test.js`; migration `20260606000000`/`20260609000000` add the `missed` enum value (schema unaffected by the removal — only the auto-write call site changed).
+- **Source:** runSchedule.js comments (Plan C, historical) + `runSchedule.js:2257-2268` (removal + David 2026-06-24 ruling text); brain (recurring overdue lifecycle design; overdue past-due R50; juggler-never-missing-invariant)
+- **Notes:** `effectiveDate` uses the raw DB `date` column when `scheduled_at` is null (never-placed instance) so a never-placed past occurrence still gets its non-terminal overdue/unscheduled flag (BUG-142 PATH B/C) — this part of the mechanism is UNCHANGED by the removal. What changed is only the terminal status write at the end of that path.
 
 ---
 

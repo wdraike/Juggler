@@ -2,7 +2,7 @@
 type: design
 service: juggler
 status: active
-last_updated: 2026-06-26
+last_updated: 2026-07-02
 tags:
   - type/design
   - service/juggler
@@ -13,7 +13,15 @@ tags:
 
 # Task & Habit State Matrix
 
-**Last Updated:** 2026-06-26
+**Last Updated:** 2026-07-02
+
+> **Correction (sched-audit L1, REG-04, 2026-07-02).** The `pause` transition below previously said
+> pause "deletes future instances". Verified live: `facade.js` `handleTemplatePause` (999.590 ruling)
+> sets `status='pause'` on open future instances — it does **not** delete them; `unpause` restores
+> `status=''`. `expandRecurring`'s `sources` filter separately skips templates with `status`
+> `pause`/`disabled`/`cancelled` so no *new* instances generate while paused, which is where the
+> "no future instances appear" impression likely came from. `SCHEDULER-SPEC.md` `[B-TERM.6]` already
+> documents the corrected keep-not-delete behavior; this doc was the one still drifted.
 
 > Complete reference for how every combination of task type, scheduling mode,
 > and user action maps to UI controls and scheduler behavior.
@@ -35,7 +43,7 @@ tags:
             ├──→ wip     (in progress — uses timeRemaining for dur)
             ├──→ skip    (terminal — snaps scheduled_at to now)
             ├──→ cancel  (terminal — snaps scheduled_at to now)
-            └──→ pause   (template only — deletes future instances)
+            └──→ pause   (template only — cascades status='pause' to open future instances, kept not deleted; 999.590)
 
 wip ────────┬──→ done
             ├──→ "" (reopen)
@@ -299,8 +307,8 @@ The guard in the frontend (`AppLayout.jsx`) enforces this using ISO date key com
 [blueprint — not visible on calendar]
     │
     ├── user edits via form ──→ propagates to all open instances
-    ├── user pauses ──→ deletes future open instances
-    ├── user unpauses ──→ scheduler regenerates instances
+    ├── user pauses ──→ cascades status='pause' to open future instances (kept, not deleted; 999.590)
+    ├── user unpauses ──→ restores instances to status=''; scheduler resumes generating new ones
     └── user deletes ──→ cascade: delete open instances, orphan completed ones
 ```
 
