@@ -2,7 +2,7 @@
 type: design
 service: juggler
 status: active
-last_updated: 2026-05-19
+last_updated: 2026-07-02
 tags:
   - type/design
   - service/juggler
@@ -13,11 +13,36 @@ tags:
 
 # Scheduler overdue-placement ladder (#23 review)
 
-**Last Updated:** 2026-05-19
+**Last Updated:** 2026-07-02
 
 ## Context
 
 Issue #23 asked to review how v2 handles tasks that cannot be placed within their ideal constraints. This doc records the ladder v2 actually runs, the options we considered, and the rationale for keeping the current shape.
+
+## Supersession note (leg juggy4, 2026-07-02)
+
+This doc's four-pass `tryPlaceQueued` ladder below is **unchanged** by leg juggy4. What changed sits
+one layer downstream: two **post-loop rescue passes** in `unifiedScheduleV2.js` — Phase 4
+`missedWindowItems` (TIME_WINDOW tasks whose flex window is entirely past) and Phase 5
+`pastAnchoredRecurrings` (recurring tasks whose `anchorDate < today`) — that run *after* an item has
+already exhausted (or, for Phase 5, bypassed via `pastAnchoredPreQueue`) this ladder. These are
+documented in full under `juggler-backend/docs/SCHEDULER-SPEC.md` §[PLACE-PHASES] (Phase 4/5 rows) and
+§[PLACE-SPLIT] (overdue split-chunk routing).
+
+**Prior behavior (commit `9bb62bb`'s when-block-anchor branch, SUPERSEDED):** when a recurring
+TIME_WINDOW task's flex window passed and it had a `when` block, Phase 4 synthesized a **new** grid
+placement directly into `dayPlacements` — with no `dayOcc`/`reserveWithTravel` occupancy check — so two
+unrelated overdue tasks could land at the identical date+start (repro:
+`.planning/kermit/juggy4/INTAKE-BRIEF.json`). Phase 5 had the same defect for past-anchored recurring
+items with no explicit start time (fell back to `start=0` for every such item).
+
+**Current behavior (David's product ruling, 2026-07-02):** Phase 4 and Phase 5 **never** write to
+`dayPlacements`; every item they touch is routed to `unplaced` instead — matching the pre-existing
+Phase 3 `missedPreferredTimeItems` precedent. This makes the "If all four fail…" sentence below
+literally true for these cases too, which it previously was not (the when-block-anchor branch bypassed
+"goes to unplaced" entirely). The persisted end-state is unchanged from what `runSchedule.js` §8 already
+did for every *other* item that reaches `unplaced` — see the two-way split described just below the
+ladder table.
 
 ## The ladder (as implemented)
 
@@ -30,7 +55,13 @@ Issue #23 asked to review how v2 handles tasks that cannot be placed within thei
 | 3 | `item.flexWhen` | Relax `when` to `anytime`. For tasks the user explicitly flagged as "prefer this window but any is fine". Emits `whenRelaxed` flag. |
 | 4 | `slack < 0 && flexWhen` | Both relaxations at once. Last resort. |
 
-If all four fail, the item goes to `unplaced` and then Phase 8 marks it `unscheduled=1` (non-recurring) or leaves recurring instances visible at their last real `scheduled_at`.
+If all four fail, the item goes to `unplaced` and then `runSchedule.js` §8 ("Mark unplaced tasks",
+`:1907-1987`) applies a 2-way split for recurring instances: **(a)** DB row already has a
+`scheduled_at` (was placed on a prior run) → preserve `scheduled_at`/`date`, write `overdue=1` — stays
+visible on the grid at its last real slot, NOT moved to the unscheduled lane (`:1940-1978`); **(b)**
+DB row's `scheduled_at` is still `NULL` (never placed) → write `unscheduled=1` — moved to the
+unscheduled-overdue lane, `date` stays pinned to its own anchor, never rolled forward (`:1980-1984`).
+Non-recurring tasks get an analogous split further down §8 (`:1988+`).
 
 ## Phase-9 — Recurring missed-freeze
 

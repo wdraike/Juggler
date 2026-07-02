@@ -18,6 +18,15 @@ Each notice follows the schema below. Scooter reconciles these into the KG.
 
 ## Notices
 
+## 2026-07-02T15:00:00Z — juggy4 — abby
+- type: requirement
+- artifact: docs/REQUIREMENTS.md:R50.1, R11.5
+- change: R50.1's "MUST NOT be demoted to unscheduled/unplaced" guarantee is now narrowed for recurring instances and recurring split chunks specifically: it holds ONLY once the instance's DB row already has a `scheduled_at` from a prior run (stays pinned overdue on the grid, `runSchedule.js:1907-1987` §8 case B). A recurring/split instance that goes past its due date/time WITHOUT ever having been placed (DB `scheduled_at` still NULL) is now written `unscheduled=1` (unscheduled-overdue lane), date still pinned to its own anchor, never rolled forward — it is no longer force-synthesized a grid time-slot. R11.5's 7-phase model is unchanged in shape; Phase 4 (`missedWindowItems`) and Phase 5 (`pastAnchoredRecurrings`) now route matching items to `unplaced` only, MUST NOT write a grid placement. Fixed/ingested events and rigid/fixed recurring tasks (Phase 6) are unaffected.
+- rationale: David's product ruling (2026-07-02): once a recurring/split task cannot move forward (flex window or anchor date has passed), it must show as unscheduled-overdue pinned to its deadline date rather than being force-placed on the grid with no occupancy check — the old when-block-anchor branch of commit 9bb62bb let two unrelated overdue tasks land at an identical date+start (bunched/overlapping on the calendar). Root cause + fix in leg juggy4 (`unifiedScheduleV2.js:2347-2425`); full doc updates also landed in `juggler-backend/docs/SCHEDULER-SPEC.md` §[PLACE-PHASES]/§[PLACE-SPLIT]/§[PLACE-RECUR-NOROLL] and `juggler-backend/docs/architecture/SCHEDULER-OVERDUE-LADDER.md`.
+- supersedes: the when-block-anchor branch of commit 9bb62bb ("W2 placed-XOR-unplaced" — kept grid-pin-only for missed-window items with a `when` block); the grid-placement aspect of the LOCKED "juggler-recurring-overdue-lifecycle-design" (missed-freeze-at-last-slot) is superseded ONLY for the never-yet-placed case described above — the freeze-at-last-real-slot rule (999.808/R32.4, Phase 9 in runSchedule.js, terminal `status:'missed'`) is UNCHANGED.
+- challenge-id: none
+- resolves: none
+
 ## 2026-06-26T00:00:00Z — 999.892-tz-notnull — abby
 - type: standard
 - artifact: juggler-backend/docs/TIMEZONE-RULES.md:TZ-SCHEMA-1

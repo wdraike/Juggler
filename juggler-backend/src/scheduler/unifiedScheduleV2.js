@@ -410,7 +410,8 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, _cfg) {
         // or after DAY_END) — the clamped window is inverted (Lo > Hi).
         // Fall back to when-tag placement so the task isn't silently unplaced.
         if (windowHi <= windowLo) isWindowMode = false;
-        // Window entirely past on today → mark as missed; dual-placed in unplaced + grid.
+        // Window entirely past on today → mark as missed; routed to unplaced only
+        // (unscheduled-overdue lane) — never placed on the grid.
         else if (anchorDate === todayIsoKey && nowMins != null && windowHi <= nowMins) {
           isMissedWindow = true;
         }
@@ -1798,7 +1799,8 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   var queue = [];
   var todayIsoKey = dates.length > 0 ? dates[0].key : toKey(effectiveTodayKey);
   // Items flagged isMissedPreferredTime are collected here; handled after the
-  // retry pass (below) without entering the placement queue or the dual-place path.
+  // retry pass (below) without entering the placement queue — routed to unplaced
+  // only (unscheduled-overdue lane), never placed on the grid.
   var missedPreferredTimeItems = [];
   // Unplaced accumulator — declared BEFORE this loop because the TPC-budget branch
   // below (item.task._tpcBudgetUnscheduled) pushes to it. Previously `var unplaced`
@@ -1873,8 +1875,9 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
       }
     }
     // Missed preferred-time: recurring task whose preferred-time window has
-    // entirely passed but is not in TIME_WINDOW mode (which has its own
-    // dual-place path). Skip the queue entirely — mark missed below.
+    // entirely passed but is not in TIME_WINDOW mode (which routes its own
+    // missed items to unplaced-only, per the isMissedWindow branch above).
+    // Skip the queue entirely — mark missed below.
     if (item.isMissedPreferredTime) {
       missedPreferredTimeItems.push(item);
       return;
@@ -2342,49 +2345,45 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   });
 
   // Missed-window pass: TIME_WINDOW tasks whose flex window is entirely past.
-  // They appear in unplaced (with 'missed' reason). When the task has a `when`
-  // block (e.g. 'morning'), they are also dual-placed on the grid with _overdue
-  // so the user can mark them done without leaving the day view. Tasks with no
-  // `when` block have no obvious calendar anchor and are unplaced-only.
+  // Product ruling (juggy4, 2026-07-02 — supersedes the when-block-anchor-pins-
+  // grid-only branch of W2 commit 9bb62bb): once a recurring task's flex window
+  // has passed it is NEVER grid-placed (no dayPlacements entry, regardless of
+  // whether it has a `when` block) — it goes unscheduled-overdue only, matching
+  // the existing Phase 3 `missedPreferredTimeItems` precedent above. This
+  // eliminates the no-occupancy-check grid collision the old when-block branch
+  // could produce (two unrelated overdue tasks landing on the identical
+  // date+start). Persisted end-state (E2 fix, juggy4 iteration 1): for items
+  // whose DB scheduled_at is NULL, the existing runSchedule.js:1907-1987
+  // unscheduled-lane path writes unscheduled=1 (moves to the unscheduled
+  // lane). For items that already have a prior scheduled_at, that same path
+  // preserves scheduled_at and writes overdue=1 instead — pinned on the grid
+  // per R50 past-due pinning, NOT moved to the unscheduled lane. Both cases
+  // reuse the path Phase 3's items already go through.
   var missedWindowItems = stillUnplaced.filter(function(u) {
     return u && u.isMissedWindow;
   });
   stillUnplaced = stillUnplaced.filter(function(u) {
     return !(u && u.isMissedWindow);
   });
+  // Collected here and merged with pastAnchoredRecurrings below so overdue
+  // items from EITHER pass are routed into stillUnplaced together (J2 below;
+  // no per-master collapse — see J2 comment).
+  var overdueRescueItems = [];
   missedWindowItems.forEach(function(item) {
     var task = item.task;
     // Mark missed on the task object.
     task._unplacedReason = REASON_CODES.MISSED;
     task._unplacedDetail = 'Flex window has passed';
-    // W2 placed-XOR-unplaced (DESIGN-RULING-overdue-vs-unplaceable, David 2026-06-22):
-    // a missed-window task is OVERDUE — pinned on the grid ONLY when it has a when-block
-    // anchor; otherwise unplaced-only. It is NEVER both (no dual-place). Display reads the
-    // grid entry's _overdue / task.overdue (R50.6/W1), not the unplaced list.
-    if (item.when && item.when.trim() !== '') {
-      var overdueDateKey = item.anchorDate || dates[0].key;
-      if (!dayPlacements[overdueDateKey]) dayPlacements[overdueDateKey] = [];
-      dayPlacements[overdueDateKey].push({
-        task: task,
-        start: item.preferredTimeMins != null ? item.preferredTimeMins : (item.anchorMin || 0),
-        dur: item.dur,
-        locked: false,
-        _overdue: true,
-        travelBefore: 0,
-        travelAfter: 0,
-        _placementReason: 'Recurring window missed — placed for completion',
-      });
-    } else {
-      // No when-block anchor → no calendar slot to pin → unplaced-only.
-      stillUnplaced.push(item);
-    }
+    overdueRescueItems.push(item);
   });
 
   captureSnapshot('missed_window_done');
 
   // Past-anchored recurring pass: recurring items whose anchorDate is before today
-  // couldn't be found in the dates array by findEarliestSlot. Force-place them on
-  // their original anchor date so they appear for the user to mark done/skip.
+  // couldn't be found in the dates array by findEarliestSlot. Product ruling
+  // (juggy4, 2026-07-02): these are NEVER grid-placed either (see missedWindowItems
+  // comment above) — they go unscheduled-overdue, pinned to their own past anchor
+  // date (R50: never rolled forward), matching Phase 3's precedent.
   var pastAnchoredRecurrings = stillUnplaced.filter(function(u) {
     return u && u.isRecurring && u.anchorDate && u.anchorDate < todayIsoKey;
   });
@@ -2393,20 +2392,36 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   });
   pastAnchoredRecurrings.forEach(function(item) {
     var pastTask = item.task;
-    var paDate = item.anchorDate;
-    var paStart = item.preferredTimeMins != null ? item.preferredTimeMins :
-                  (item.anchorMin != null ? item.anchorMin : 0);
-    if (!dayPlacements[paDate]) dayPlacements[paDate] = [];
-    dayPlacements[paDate].push({
-      task: pastTask,
-      start: paStart,
-      dur: item.dur,
-      locked: false,
-      _overdue: true,
-      travelBefore: 0,
-      travelAfter: 0,
-      _placementReason: 'Recurring window missed — placed for completion',
-    });
+    pastTask._unplacedReason = pastTask._unplacedReason || REASON_CODES.MISSED;
+    pastTask._unplacedDetail = pastTask._unplacedDetail || 'Recurring window missed — anchor date has passed';
+    overdueRescueItems.push(item);
+  });
+
+  // J2 (revised — juggy4 iteration 1, Oscar/Kermit design-correction ruling on
+  // ernie E1 BLOCK): every overdue split-task chunk (pre-split ordinal DB row
+  // / inline split chunk) in overdueRescueItems is routed into stillUnplaced
+  // INDIVIDUALLY — no scheduler-level collapse to a single per-master
+  // representative. The prior collapse (collapseOverdueSplitChunksByMaster)
+  // pushed only the lowest-splitOrdinal chunk into stillUnplaced and silently
+  // dropped sibling chunks (splitOrdinal>=2) from result.unplaced entirely.
+  // runSchedule.js §8 (result.unplaced.forEach, :1936-1985) persists only rows
+  // present in result.unplaced, and the past-instance safety-net sweep does
+  // NOT catch the dropped siblings in this exact case — it skips today-
+  // anchored rows (`td >= today` -> return, runSchedule.js:2224) and rows
+  // absent from the start-of-run snapshot (`if (!rawRowById[t.id]) return`,
+  // :2206). Net result for a recurring split master whose today flex-window
+  // had passed with >=2 incomplete chunks: dropped siblings ended
+  // scheduled_at=NULL, unscheduled=NULL(0), status='' — the codebase's own
+  // NEVER-MISSING violation state (runSchedule.js:2266 comment). Routing every
+  // group member into stillUnplaced ensures each one is picked up by
+  // runSchedule §8 individually and persisted unscheduled=1/overdue=1 (E2
+  // above) with its own date pinned — no sibling left in limbo. Per-chunk DB
+  // rows stay separate rows (999.841: no merge/delete here, ever). Duplicate
+  // on-screen entries for the same master are already deduplicated at the
+  // display layer (DailyView.jsx:995-1007 groups by splitGroup/sourceId +
+  // date) — no scheduler-level combining/cloning is needed or added here.
+  overdueRescueItems.forEach(function(item) {
+    stillUnplaced.push(item);
   });
 
   // Force-placement pass: fixed tasks must always appear even when their

@@ -38,6 +38,9 @@ process.env.NODE_ENV = 'test';
 
 var unifiedScheduleV2 = require('../../src/scheduler/unifiedScheduleV2');
 var { DEFAULT_TIME_BLOCKS, DEFAULT_TOOL_MATRIX } = require('../../src/scheduler/constants');
+// revised leg juggy4 2026-07-02: grid-pin superseded by unscheduled-overdue ruling —
+// REASON_CODES.MISSED is the marker unifiedScheduleV2 sets on an unscheduled-overdue task.
+var { REASON_CODES } = require('../../../shared/scheduler/reasonCodes');
 
 // ── Frozen time context ─────────────────────────────────────────────────────
 // TODAY = 2026-06-24 (Wednesday), nowMins = 600 (10:00 AM local)
@@ -130,6 +133,15 @@ function allPlacements(result, taskId) {
 
 function placedOnDates(result, taskId) {
   return allPlacements(result, taskId).map(function(p) { return p.dateKey; });
+}
+
+// revised leg juggy4 2026-07-02: grid-pin superseded by unscheduled-overdue ruling —
+// `result.unplaced` holds bare task objects (unifiedScheduleV2.js:2542-2552); find the
+// one matching taskId, carrying `_unplacedReason`/`_unplacedDetail` and its OWN (never
+// rolled) `date` field.
+function unplacedEntryFor(result, taskId) {
+  if (!result || !result.unplaced) return undefined;
+  return result.unplaced.find(function(t) { return t && t.id === taskId; });
 }
 
 
@@ -273,12 +285,18 @@ describe('AC1 — Forward-roll: roamable recurring re-placed to future slot', fu
 
 describe('AC2 — Effective deadline = min(period-boundary, window-close)', function() {
 
-  test('AC2a: daily windowed (anytime placement) recurring past period → marked _overdue:true (characterization — should pass)', function() {
+  test('AC2a: daily windowed (anytime placement) recurring past period → unscheduled-overdue, NOT grid-placed (revised)', function() {
     // A day-locked daily instance whose day has FULLY PASSED (2026-06-22, 2 days ago).
     // Period end = Jun 22 + 1 = Jun 23. Jun 23 < Jun 24 (today) → past period → overdue.
-    // The scheduler already handles this via pastAnchoredPreQueue + _overdue:true.
-    // This is a GREEN-on-current-code characterization test, kept to prove the existing
-    // overdue-pin behavior is not broken by the fix.
+    //
+    // revised leg juggy4 2026-07-02: grid-pin superseded by unscheduled-overdue ruling.
+    // David's product ruling (2026-07-02, supersedes the freeze-at-last-slot / grid-pin
+    // characterization this test previously asserted): a past-anchored recurring instance
+    // is NEVER grid-placed. It appears exactly once, in `result.unplaced`, with
+    // `_unplacedReason === REASON_CODES.MISSED` and its OWN anchor `date` unchanged
+    // (never rolled forward — matches the Phase 3 `missedPreferredTimeItems` precedent,
+    // unifiedScheduleV2.js:2334-2391). Verified by direct probe against the fixed code
+    // (see TEST-REVIEW.md) before pinning these assertions.
     var instance = makeTask({
       id: 'daily-past',
       taskType: 'recurring_instance',
@@ -297,10 +315,15 @@ describe('AC2 — Effective deadline = min(period-boundary, window-close)', func
 
     var result = runScheduler([instance]);
     var placements = allPlacements(result, 'daily-past');
-    expect(placements.length).toBeGreaterThan(0);
-    var overdueCount = placements.filter(function(p) { return p._overdue; }).length;
-    // day-locked past-period daily SHOULD be placed with _overdue:true
-    expect(overdueCount).toBeGreaterThan(0);
+    // NOT grid-placed at all — the entire grid-pin path is superseded.
+    expect(placements.length).toBe(0);
+
+    // Present exactly once, as unscheduled-overdue, in result.unplaced.
+    var unplacedEntry = unplacedEntryFor(result, 'daily-past');
+    expect(unplacedEntry).toBeTruthy();
+    expect(unplacedEntry._unplacedReason).toBe(REASON_CODES.MISSED);
+    // Pinned to its own anchor date — never rolled forward (R50).
+    expect(unplacedEntry.date).toBe('2026-06-22');
   });
 
   test('AC2b: flexible-TPC weekly past its scheduled day but within period → NOT _overdue (RED: current code marks _overdue on dead day)', function() {
@@ -335,11 +358,15 @@ describe('AC2 — Effective deadline = min(period-boundary, window-close)', func
     expect(deadDayPlacements.some(function(p) { return p._overdue; })).toBe(false);
   });
 
-  test('AC2c: flexible-TPC weekly past its period boundary → _overdue:true on dead slot (should pass post-fix)', function() {
+  test('AC2c: flexible-TPC weekly past its period boundary → unscheduled-overdue, NOT grid-placed (revised)', function() {
     // Period has ENDED: occurrence date = 2026-06-16 (Mon), period = +7 days → ends 2026-06-23.
     // TODAY = 2026-06-24 → past period end. Instance is definitively missed.
-    // EXPECTED: placed at dead date with _overdue:true (pin behavior). This should work on
-    // CURRENT code too (period-end check in Phase 9 falls through to missed).
+    //
+    // revised leg juggy4 2026-07-02: grid-pin superseded by unscheduled-overdue ruling.
+    // Same ruling as AC2a: a past-period-boundary recurring instance is NEVER grid-placed
+    // — it goes to `result.unplaced` with `_unplacedReason === REASON_CODES.MISSED`, date
+    // pinned to its own anchor (never rolled). Verified by direct probe against the fixed
+    // code (see TEST-REVIEW.md) before pinning these assertions.
     var instance = makeTask({
       id: 'weekly-past-period',
       taskType: 'recurring_instance',
@@ -359,11 +386,14 @@ describe('AC2 — Effective deadline = min(period-boundary, window-close)', func
 
     var result = runScheduler([instance]);
     var placements = allPlacements(result, 'weekly-past-period');
-    // Should have a placement (either dead-day or overdue pin)
-    expect(placements.length).toBeGreaterThan(0);
-    var isOverdue = placements.some(function(p) { return p._overdue; });
-    // Past-period flexible-TPC → should be overdue
-    expect(isOverdue).toBe(true);
+    // NOT grid-placed at all.
+    expect(placements.length).toBe(0);
+
+    var unplacedEntry = unplacedEntryFor(result, 'weekly-past-period');
+    expect(unplacedEntry).toBeTruthy();
+    expect(unplacedEntry._unplacedReason).toBe(REASON_CODES.MISSED);
+    // Pinned to its own anchor date — never rolled forward (R50).
+    expect(unplacedEntry.date).toBe('2026-06-16');
   });
 
 });
@@ -582,10 +612,16 @@ describe('AC5 — 999.671 preserved: floating non-recurring task not overdue', f
 
 describe('AC6 — R32.7 preserved: day-locked daily does not roll to another day', function() {
 
-  test('AC6a: daily non-TPC recurring past its occurrence day → stays on dead day, NOT rolled to today (should pass on current code)', function() {
+  test('AC6a: daily non-TPC recurring past its occurrence day → unscheduled-overdue pinned to dead day, NOT rolled to today, NOT grid-placed (revised)', function() {
     // Non-TPC daily (no timesPerCycle) → isFlexibleTpc=false → isDayLocked=true.
-    // Past day = 2026-06-22. Should stay on Jun 22 (with _overdue), NOT move to Jun 24.
-    // This preserves R32.7. Should PASS on current code AND post-fix.
+    // Past day = 2026-06-22.
+    //
+    // revised leg juggy4 2026-07-02: grid-pin superseded by unscheduled-overdue ruling.
+    // R32.7's "does not roll to another day" intent is PRESERVED — it is now proven via
+    // the unscheduled entry's own `date` field (still pinned to 2026-06-22, never today
+    // or later) instead of via a grid placement. The instance is no longer grid-placed at
+    // all (see AC2a/AC2c). Verified by direct probe against the fixed code (see
+    // TEST-REVIEW.md) before pinning these assertions.
     var instance = makeTask({
       id: 'daily-locked',
       taskType: 'recurring_instance',
@@ -605,13 +641,18 @@ describe('AC6 — R32.7 preserved: day-locked daily does not roll to another day
     var result = runScheduler([instance]);
     var placements = allPlacements(result, 'daily-locked');
 
-    // Must NOT appear on today or later dates
+    // Must NOT appear on the grid at all — neither on today/later, nor on the dead day.
     var rolledForward = placements.filter(function(p) { return p.dateKey >= TODAY_KEY; });
     expect(rolledForward.length).toBe(0); // R32.7: no cross-day roll for day-locked
+    expect(placements.length).toBe(0); // NOT grid-placed (superseded grid-pin)
 
-    // Should have a placement on its original day (placed with _overdue)
-    var onDeadDay = placements.filter(function(p) { return p.dateKey === '2026-06-22'; });
-    expect(onDeadDay.length).toBeGreaterThan(0);
+    // R32.7 "stays on its own day, never rolls" is now proven via the unscheduled
+    // entry's pinned date, not a grid placement.
+    var unplacedEntry = unplacedEntryFor(result, 'daily-locked');
+    expect(unplacedEntry).toBeTruthy();
+    expect(unplacedEntry._unplacedReason).toBe(REASON_CODES.MISSED);
+    expect(unplacedEntry.date).toBe('2026-06-22'); // pinned to its dead day, not rolled to today/later
+    expect(unplacedEntry.date >= TODAY_KEY).toBe(false); // explicit no-roll-forward assertion
   });
 
   test('AC6b: WEEKLY non-TPC (every Mon/Wed/Fri — all 3 pick-days, no timesPerCycle) → day-locked → no roll (should pass)', function() {
@@ -765,57 +806,22 @@ describe('PART 2 (AC2 daily half) — windowed daily intra-day roam + window-clo
     expect(anyOverdue).toBe(false);
   });
 
-  test('PART2-B (characterization): daily windowed, preferred 08:00, timeFlex=180, NOW_MINS=720 (noon, window closed at 11:00) → overdue or unscheduled', function() {
-    // Window closed at 11:00 (660 min). now=12:00 (720 min) → past window-close.
-    // No slot left today within the window. The instance should be marked overdue
-    // or left unplaced (the scheduler may not yet implement window-close overdue for same-day).
-    //
-    // This is a characterization / transition test: on CURRENT code the instance may be
-    // placed at a past slot or unplaced. After the fix it should be _overdue (no slot remains
-    // before window-close).
-    //
-    // Not forcing RED — marking as CHARACTERIZATION to establish current behavior.
-    // Post-fix assertion: if placed on today, _overdue===true OR in unplaced list.
-
-    var dailyWindowedClosed = makeTask({
-      id: 'breakfast-window-closed',
-      taskType: 'recurring_instance',
-      text: 'Eat Breakfast',
-      recurring: true,
-      generated: true,
-      placementMode: 'time_window',
-      recur: { type: 'daily', days: 'MTWRFSU' },
-      recurStart: TODAY_KEY,
-      date: TODAY_KEY,
-      day: 'Wed',
-      dur: 30,
-      status: '',
-      overdue: null,
-      timeFlex: 180,
-      preferredTimeMins: 480
-    });
-
-    // Run at noon (720 min): window has been closed for 1 hour
-    var result = runScheduler([dailyWindowedClosed], TODAY_KEY, 720, makeCfg());
-    var placements = allPlacements(result, 'breakfast-window-closed');
-    var unplacedIds = (result.unplaced || []).map(function(t) { return t && t.id; });
-
-    // Characterization: either _overdue on today's placement OR in unplaced
-    var isHandledAsExpired = (
-      placements.some(function(p) { return p._overdue; }) ||
-      unplacedIds.indexOf('breakfast-window-closed') !== -1
-    );
-    // On current code this may pass or fail — document actual behavior in TEST-CATALOG.
-    // This test does NOT assert RED/GREEN at this stage: it merely records the outcome.
-    // The critical test is PART2-A (slot-passed-window-open must not be overdue).
-    // This block kept as a future pin once bert implements window-close for same-day.
-    //
-    // For now: record result without hard assertion (so this test stays GREEN as a baseline).
-    // TODO(bert): once window-close same-day is implemented, change to:
-    //   expect(isHandledAsExpired).toBe(true);
-    void isHandledAsExpired; // acknowledge without asserting — baseline capture only
-    expect(true).toBe(true); // keep suite clean; see comment above
-  });
+  // Window closed at 11:00 (660 min). now=12:00 (720 min) → past window-close.
+  // No slot left today within the window. The instance should be marked overdue
+  // or left unplaced (the scheduler may not yet implement window-close overdue for same-day).
+  //
+  // This is a characterization / transition test: on CURRENT code the instance may be
+  // placed at a past slot or unplaced. After the fix it should be _overdue (no slot remains
+  // before window-close).
+  //
+  // Not forcing RED — marking as CHARACTERIZATION to establish current behavior.
+  // Post-fix assertion: if placed on today, _overdue===true OR in unplaced list.
+  //
+  // The critical test is PART2-A (slot-passed-window-open must not be overdue).
+  // This block kept as a future pin once bert implements window-close for same-day.
+  // TODO(bert): once window-close same-day is implemented, implement with:
+  //   expect(isHandledAsExpired).toBe(true);
+  test.todo('PART2-B (characterization): daily windowed, preferred 08:00, timeFlex=180, NOW_MINS=720 (noon, window closed at 11:00) → overdue or unscheduled');
 
   test('PART2-C (R32.7 guard): daily windowed TODAY instance, window passed → must NOT roll to TOMORROW (day-lock preserved)', function() {
     // Even if the window is closed, a day-locked daily must not appear on tomorrow.
@@ -970,15 +976,24 @@ describe('PART 3 (AC2) — window-less (anytime) daily → overdue only at midni
       return p.dateKey >= TODAY_KEY;
     });
     // Per the unifiedScheduleV2 gate: `_todayParsed < _periodEndDate` is false when equal.
-    // The instance routes to pastAnchoredPreQueue → pinned at dead day with _overdue:true.
+    // The instance routes to pastAnchoredPreQueue → unscheduled-overdue (see below).
     // So no forward placements should exist.
     expect(forwardPlacements.length).toBe(0);
 
-    // Also confirm the instance IS placed somewhere (pinned at dead day, overdue).
+    // revised leg juggy4 2026-07-02: grid-pin superseded by unscheduled-overdue ruling.
+    // "Also confirm the instance IS placed somewhere" previously meant a grid placement
+    // pinned at the dead day with `_overdue:true`. That grid-pin path is superseded: the
+    // instance is now NEVER grid-placed — it is accounted for exactly once as an
+    // unscheduled-overdue entry in `result.unplaced`, pinned to its own anchor date
+    // (never rolled forward). Verified by direct probe against the fixed code (see
+    // TEST-REVIEW.md) before pinning these assertions.
     var allPlaced = allPlacements(result, 'period-boundary-today');
-    expect(allPlaced.length).toBeGreaterThan(0);
-    var isOverdue = allPlaced.some(function(p) { return p._overdue; });
-    expect(isOverdue).toBe(true);
+    expect(allPlaced.length).toBe(0); // NOT grid-placed at all
+
+    var unplacedEntry = unplacedEntryFor(result, 'period-boundary-today');
+    expect(unplacedEntry).toBeTruthy(); // accounted for exactly once, as unscheduled-overdue
+    expect(unplacedEntry._unplacedReason).toBe(REASON_CODES.MISSED);
+    expect(unplacedEntry.date).toBe(anchorKey); // pinned to its own anchor date, never rolled
   });
 
   test('PART3-B: anytime daily YESTERDAY (past period boundary) → not placed on future dates (day-locked; existing scheduler drops it to pendingUpdates/missed path in runScheduleAndPersist)', function() {

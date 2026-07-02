@@ -1,8 +1,8 @@
 ---
 type: changelog
 status: active
-Last-updated: 2026-06-22
-version: leg/fixy-now @ 2026-06-22
+Last-updated: 2026-07-02
+version: leg/juggy4 @ 2026-07-02
 ---
 
 # Changelog
@@ -13,6 +13,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ---
 
 ## [Unreleased]
+
+### Fixed
+
+- **Overdue recurring/split tasks no longer bunch/overlap on the grid** (leg juggy4, ROADMAP, 2026-07-02): the scheduler's Phase 4 (`missedWindowItems`) and Phase 5 (`pastAnchoredRecurrings`) rescue passes previously force-placed overdue recurring tasks straight onto the calendar with zero occupancy check, so two unrelated overdue tasks could land at the identical date+time and render as overlapping/bunched entries. Per David's product ruling, once a recurring or split task's flex window/anchor date has passed (it cannot move forward anymore), it now shows as **unscheduled-overdue, pinned to its deadline date** instead of being force-placed on the grid — never rolled forward. Overdue split-task chunks each persist as their own DB row (no merge/delete, per the existing separate-rows ruling); the calendar UI already merges same-master chunks into one visible entry. Fixed/ingested calendar events and rigid/fixed recurring tasks are unaffected — this only changes flexible/TIME_WINDOW recurring and split tasks once they go overdue.
 
 ### Added
 
