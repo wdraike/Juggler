@@ -4,6 +4,8 @@
  * Uses tsdav for CalDAV protocol operations and ical.js for VEVENT
  * parsing/building. Apple Calendar uses basic auth with an app-specific
  * password over HTTPS to caldav.icloud.com.
+ *
+ * Implements AppleCalApiPort (lib/ports/AppleCalApiPort.js).
  */
 
 var { createDAVClient, _DAVNamespace } = require('tsdav');

@@ -1,6 +1,8 @@
 /**
  * Microsoft Calendar API wrapper using Microsoft Graph REST API
  * Uses direct OAuth2 REST calls with PKCE (no MSAL dependency).
+ *
+ * Implements MsftCalApiPort (lib/ports/MsftCalApiPort.js).
  */
 
 var crypto = require('crypto');
