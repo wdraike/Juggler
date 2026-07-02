@@ -1004,7 +1004,6 @@ export default function AppLayout() {
     var h12 = hr > 12 ? hr - 12 : (hr === 0 ? 12 : hr);
     var newTime = h12 + ':' + (mn < 10 ? '0' : '') + mn + ' ' + ap;
     pushUndo('drag time');
-    updateTask(taskId, { time: newTime });
 
     // Optimistically update placements so the marker stays where it was dropped
     setPlacements(function(prev) {
@@ -1020,7 +1019,19 @@ export default function AppLayout() {
       return Object.assign({}, prev, { dayPlacements: dp });
     });
 
-    showToast('Moved to ' + newTime, 'success');
+    // sched-audit L3 ernie INFO (l3-ernie-5) — same F3 class of defect: must
+    // check the result before toasting. updateTask resolves `true` on success
+    // but a truthy SERVER-MESSAGE STRING (or `false`) on rejection (e.g.
+    // calLocked 403), so only `=== true` counts as success.
+    Promise.resolve(updateTask(taskId, { time: newTime })).then(function (result) {
+      if (result === true) {
+        showToast('Moved to ' + newTime, 'success');
+      } else {
+        showToast(typeof result === 'string' ? result : 'Could not move task', 'error');
+      }
+    }).catch(function () {
+      showToast('Could not move task', 'error');
+    });
   }, [pushUndo, updateTask, showToast, setPlacements]);
 
   // AI ops handler — applies ops from AI command panel

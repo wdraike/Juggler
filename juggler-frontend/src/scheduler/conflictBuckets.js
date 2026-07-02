@@ -54,14 +54,42 @@ export function computeConflictBuckets({ allTasks, statuses, unplaced, backlog, 
   var backlogList = backlog || [];
   var warnings = schedulerWarnings || [];
 
-  var actionCount = overdue.length + unplacedList.length + warnings.length;
+  // sched-audit REG-49/F10 — a row that is BOTH overdue AND unplaced (the common
+  // shape for a missed-recurring-instance row: scheduler reports it unplaced while
+  // rowToTask also flags it overdue) must count ONCE toward actionCount, not twice.
+  // Dedupe overdue/unplaced by task id before summing; `warnings` are structural
+  // scheduler-warning objects (taskId/depId refs, not task rows), so they aren't
+  // part of this id-space and are summed as before.
+  var actionIds = {};
+  overdue.forEach(function(t) { if (t && t.id != null) actionIds[t.id] = true; });
+  unplacedList.forEach(function(t) { if (t && t.id != null) actionIds[t.id] = true; });
+  var actionCount = Object.keys(actionIds).length + warnings.length;
   var infoCount = stale.length + blocked.length + backlogList.length;
+
+  // sched-audit L3 ernie BLOCK (l3-ernie-1) — the id-dedupe above only fixed the
+  // badge's COUNT (actionCount). The Issues PAGE renders `overdue` and `unplaced`
+  // as two separate sections, so a dual-shape row (both overdue and unplaced)
+  // still rendered TWICE even after actionCount was deduped, re-breaking the
+  // 999.862 badge==page invariant this module exists to guarantee. `unplaced`
+  // above is left unchanged (raw scheduler-reported list — some callers may
+  // still want the undeduped shape / it's covered by the F10 unit test contract).
+  // `unplacedForDisplay` is the same list with any id already present in
+  // `overdue` removed, so a page that renders `overdue` + `unplacedForDisplay`
+  // shows the row exactly once. Canonical bucket for a dual-shape row = OVERDUE
+  // (the stronger state — a thing that's overdue AND unplaced is still, first
+  // and foremost, overdue), so the row surfaces under "Overdue", not "Unplaced".
+  var overdueIds = {};
+  overdue.forEach(function(t) { if (t && t.id != null) overdueIds[t.id] = true; });
+  var unplacedForDisplay = unplacedList.filter(function(t) {
+    return !(t && t.id != null && overdueIds[t.id]);
+  });
 
   return {
     overdue: overdue,
     stale: stale,
     blocked: blocked,
     unplaced: unplacedList,
+    unplacedForDisplay: unplacedForDisplay,
     backlog: backlogList,
     warnings: warnings,
     actionCount: actionCount,

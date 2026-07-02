@@ -217,11 +217,12 @@ export default function DailyView({
 
   var unscheduled = useMemo(function () {
     var scheduledIds = {};
-    // Track (sourceId, date) occurrences that already have at least one
-    // placement. If *any* row for that occurrence is scheduled, sibling
-    // rows (split chunks or duplicate task_instance rows for the same
-    // recurring occurrence) should not appear as "unscheduled" — the
-    // user sees them as already on the grid.
+    // Track (sourceId, date) occurrences and HOW MANY chunks of each are
+    // already placed. sched-audit REG-45/F4: a sibling row should only be
+    // hidden as a "duplicate view of an already-covered occurrence" once the
+    // placed chunk count fully covers the occurrence (>= splitTotal, default 1
+    // for non-split duplicate task_instance rows) — an incomplete unplaced
+    // chunk of a PARTIALLY-placed split must still surface in the lane.
     var scheduledByOccurrence = {};
     (placements || []).forEach(function (p) {
       if (!p.task) return;
@@ -229,9 +230,17 @@ export default function DailyView({
       if (p.task.sourceId) {
         scheduledIds[p.task.sourceId] = true;
         var dk = p.task.date || selectedDateKey;
-        scheduledByOccurrence[p.task.sourceId + '|' + dk] = true;
+        var occKey = p.task.sourceId + '|' + dk;
+        scheduledByOccurrence[occKey] = (scheduledByOccurrence[occKey] || 0) + 1;
       }
     });
+    function occurrenceFullyCovered(t, dateKey) {
+      if (!t.sourceId) return false;
+      var placedCount = scheduledByOccurrence[t.sourceId + '|' + (dateKey || '')] || 0;
+      if (placedCount === 0) return false;
+      var total = t.splitTotal || 1;
+      return placedCount >= total;
+    }
     var raw = (allTasks || []).filter(function (t) {
       if (t.date !== selectedDateKey || scheduledIds[t.id]) return false;
       // All-day tasks rendered in the all-day banner above the grid.
@@ -239,10 +248,11 @@ export default function DailyView({
       // Recurring template (blueprint) doesn't belong here. `generated`
       // in-memory chunks also don't — only real DB rows do.
       if (t.taskType === 'recurring_template' || t.generated) return false;
-      // If another row for this occurrence is already scheduled, hide
+      // If another row for this occurrence is already FULLY placed, hide
       // this one — it's a duplicate view of the same occurrence (either
-      // a remaining split chunk or a stray task_instance row).
-      if (t.sourceId && scheduledByOccurrence[t.sourceId + '|' + (t.date || '')]) return false;
+      // a remaining split chunk or a stray task_instance row). A partially
+      // placed split's unplaced sibling is NOT hidden (REG-45/F4).
+      if (occurrenceFullyCovered(t, t.date)) return false;
       // Only hide terminal statuses when filter is not 'all'
       var st = statuses[t.id] || '';
       if (isTerminalStatus(st) && filter !== 'all' && filter !== 'done' && filter !== st) return false;
@@ -267,7 +277,7 @@ export default function DailyView({
         var parsed = parseDate(uDate);
         if (!parsed || formatDateKey(parsed) !== selectedDateKey) return;
       }
-      if (u.sourceId && scheduledByOccurrence[u.sourceId + '|' + (uDate || '')]) return;
+      if (occurrenceFullyCovered(u, uDate)) return;
       var st = statuses[u.id] || '';
       if (isTerminalStatus(st) && filter !== 'all' && filter !== 'done' && filter !== st) return;
       if (!matchesFilter(u.id)) return;
@@ -440,8 +450,25 @@ export default function DailyView({
           var fields = { time: newTime };
           var task = (allTasks || []).find(function (t) { return t.id === taskId; });
           if (task && task.date !== selectedDateKey) fields.date = selectedDateKey;
-          onUpdate(taskId, fields);
-          if (showToast) showToast('Moved to ' + newTime, 'success');
+          // sched-audit REG-44/F3 — must check the result before toasting: onUpdate
+          // (useTaskState's updateTask) resolves `true` on success but a truthy
+          // SERVER-MESSAGE STRING on rejection (e.g. calLocked 403), so only `=== true`
+          // counts as success. A rejection must not show the false "Moved" success
+          // toast; the optimistic state itself is rolled back inside updateTask.
+          Promise.resolve(onUpdate(taskId, fields)).then(function (result) {
+            if (result === true) {
+              if (showToast) showToast('Moved to ' + newTime, 'success');
+            } else if (typeof result === 'string' && showToast) {
+              // sched-audit L3 ernie WARN-1 — onUpdate (AppLayout's handleUpdateTask)
+              // already shows its own generic 'Save failed' error toast when the
+              // update resolves `false`; only show OUR toast for the `string`
+              // (specific server-message) case, which handleUpdateTask does NOT
+              // toast for, to avoid a double error toast for one failed drag.
+              showToast(result, 'error');
+            }
+          }).catch(function () {
+            if (showToast) showToast('Could not move task', 'error');
+          });
         } : undefined}
       >
         <div data-grid-area="1" style={{ position: 'relative', height: gridHeight, margin: isMobile ? '0 4px' : '0 12px' }}>
