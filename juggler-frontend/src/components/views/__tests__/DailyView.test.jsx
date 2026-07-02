@@ -353,9 +353,21 @@ describe('DailyView — 999.882 calendar shows all lifecycle states (grid decoup
       { start: 840, end: 870, task: { id: 'pause1', text: 'Paused task', date: FUTURE_KEY, dur: 30 } },
     ];
   }
+  // NOTE: 'missed1' keeps its placement below (the grid still shows the
+  // block — any placement with a parseable start renders regardless of
+  // status) but is deliberately NOT given a 'missed' status entry here.
+  // 'missed' was removed as a task status in commit df8adfa (2026-06-28 —
+  // "overdue is the display concept"; existing status='missed' rows were
+  // migrated to status=''+overdue=1) and is no longer in TERMINAL_STATUSES or
+  // STATUS_OPTIONS — see constants.test.js and derivePlacements.test.js
+  // (999.998 test-rot precedent, same class of bug: telly found this exact
+  // omission left over from df8adfa's "Updated all tests" sweep). Asserting a
+  // literal 'missed' status value here would pin dead behavior; the "missed"
+  // placement/text is retained purely so the "grid renders every placement's
+  // text regardless of the list filter" assertions stay meaningful.
   var lifecycleStatuses = {
     open1: '', done1: 'done', skip1: 'skip',
-    missed1: 'missed', cancelled1: 'cancelled', pause1: 'pause',
+    cancelled1: 'cancelled', pause1: 'pause',
   };
 
   function renderGrid(filter) {
@@ -402,7 +414,8 @@ describe('DailyView — 999.882 calendar shows all lifecycle states (grid decoup
     renderGrid('open');
     expect(screen.getAllByText('✓').length).toBeGreaterThan(0);   // done ✓
     expect(screen.getAllByText('⏭').length).toBeGreaterThan(0);   // skip ⏭
-    expect(screen.getAllByText('⚠').length).toBeGreaterThan(0);   // missed ⚠
+    // 'missed' status icon assertion removed — 'missed' is no longer a
+    // valid status (df8adfa, 2026-06-28); TaskBlock has no icon branch for it.
     expect(screen.getAllByText('⏸').length).toBeGreaterThan(0);   // pause ⏸
     expect(screen.getAllByText('✗').length).toBeGreaterThan(0);   // cancelled ✗
   });

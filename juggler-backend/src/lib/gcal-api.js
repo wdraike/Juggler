@@ -1,6 +1,8 @@
 /**
  * Google Calendar API wrapper using google-auth-library OAuth2Client
  * Makes REST calls to Calendar API v3 — no googleapis package needed.
+ *
+ * Implements GcalApiPort (lib/ports/GcalApiPort.js).
  */
 
 const { OAuth2Client } = require('google-auth-library');
