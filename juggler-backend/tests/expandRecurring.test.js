@@ -268,6 +268,67 @@ describe('expandRecurring', () => {
     });
   });
 
+  describe('nextOccurrenceAnchor is the anchor for non-rolling types (999.1091 C1)', () => {
+    test('nextOccurrenceAnchor overrides recurStart for a weekly (non-rolling) master', () => {
+      // recurStart = 3/2 (Monday). nextOccurrenceAnchor advances the window to 3/16
+      // (the master's own pattern already fired 3/2 and 3/9; this simulates the
+      // generalized anchor having moved forward past a terminal event) — biweekly
+      // parity should now follow 3/16, not the stale recurStart.
+      const src = makeSource({
+        id: 'noa-bw',
+        taskType: 'recurring_template',
+        date: '2026-03-01',
+        recurStart: '2026-03-02',
+        nextOccurrenceAnchor: '2026-03-16',
+        recur: { type: 'biweekly', days: 'M' }
+      });
+      const result = expandRecurring([src], new Date(2026, 2, 2), new Date(2026, 3, 6));
+      const dates = result.map(t => t.date);
+      expect(dates).toContain('2026-03-16');
+      expect(dates).toContain('2026-03-30');
+      // Old recurStart-based parity (3/2, 3/30 would still match by coincidence of
+      // +28, but 3/9/3/23 must NOT appear either way) — the key assertion is that
+      // 3/2 itself (before the new anchor) is no longer generated.
+      expect(dates).not.toContain('2026-03-02');
+      expect(dates).not.toContain('2026-03-09');
+      expect(dates).not.toContain('2026-03-23');
+    });
+
+    test('rolling type ignores nextOccurrenceAnchor (uses rollingAnchor, unaffected)', () => {
+      const src = makeSource({
+        id: 'noa-roll',
+        taskType: 'recurring_template',
+        date: '2026-03-01',
+        recurStart: '2026-03-01',
+        rollingAnchor: '2026-03-05',
+        nextOccurrenceAnchor: '2026-03-20', // must be ignored for rolling
+        recur: { type: 'rolling', intervalDays: 7 }
+      });
+      const result = expandRecurring([src], new Date(2026, 2, 1), new Date(2026, 3, 1));
+      const dates = result.filter(r => r.sourceId === 'noa-roll').map(r => r.date || r._candidateDate);
+      expect(dates).toContain('2026-03-12'); // 3/5 + 7, via rollingAnchor
+      expect(dates).not.toContain('2026-03-27'); // would be 3/20 + 7 if nextOccurrenceAnchor leaked in
+    });
+
+    test('null nextOccurrenceAnchor falls back to recurStart (pre-existing masters unaffected)', () => {
+      const src = makeSource({
+        id: 'noa-null',
+        taskType: 'recurring_template',
+        date: '2026-03-01',
+        recurStart: '2026-03-02',
+        nextOccurrenceAnchor: null,
+        recur: { type: 'biweekly', days: 'M' }
+      });
+      const result = expandRecurring([src], new Date(2026, 2, 2), new Date(2026, 3, 6));
+      const dates = result.map(t => t.date);
+      expect(dates).toContain('2026-03-02');
+      expect(dates).toContain('2026-03-16');
+      expect(dates).toContain('2026-03-30');
+      expect(dates).not.toContain('2026-03-09');
+      expect(dates).not.toContain('2026-03-23');
+    });
+  });
+
   describe('timesPerCycle with future-only existing instances', () => {
     // Repro: brand-new template, but prior scheduler runs persisted instances
     // only in cycles 2 and 3. Cycle 1 (today) has no existing instance. The

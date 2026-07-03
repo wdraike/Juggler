@@ -37,6 +37,16 @@ function getAnchor(src, startDate) {
     var ra = parseAnchor(src.rollingAnchor);
     if (ra) return ra;
   }
+  // All other recurring types (daily/weekly/biweekly/monthly/interval) use the
+  // generalized next_occurrence_anchor (999.1091 C1) — advanced on each terminal
+  // (done/skip) event to the next occurrence in the master's OWN pattern (see
+  // nextMatchingDate above + juggler-backend/src/lib/next-occurrence-anchor.js).
+  // Null until the master's first terminal event; falls back to recur_start exactly
+  // as before until then, so pre-existing masters are unaffected.
+  if (src.recur && src.recur.type !== 'rolling' && src.nextOccurrenceAnchor) {
+    var na = parseAnchor(src.nextOccurrenceAnchor);
+    if (na) return na;
+  }
   return parseAnchor(src.recurStart) || parseAnchor(src.date) || (function() {
     var d = new Date(startDate); d.setHours(0, 0, 0, 0); return d;
   })();
@@ -50,6 +60,114 @@ function doesDayMatch(dow, daysSpec, dayMap) {
     if (dayMap[daysSpec[i]] === dow) return { match: true, state: 'required' };
   }
   return { match: false };
+}
+
+// Pure predicate: does `r` (a non-rolling recur config) fire on `cursor` (a Date at
+// local midnight), given `anchor` (the phase/parity reference Date — biweekly parity
+// and interval counting are computed relative to it)? EXTRACTED verbatim (999.1091 C1)
+// from the main expansion loop below so the loop and computeNextOccurrenceAnchor's
+// forward-search (juggler-backend/src/lib/next-occurrence-anchor.js, via
+// nextMatchingDate) share ONE implementation of "what counts as a match" — they can
+// never drift apart. Behavior is byte-identical to the inline block this replaced.
+function matchesRecurrenceDay(cursor, r, anchor, dayMap) {
+  if (!r) return false;
+  if (r.type === 'daily') return true;
+  if (r.type === 'weekly' || r.type === 'biweekly') {
+    var days = r.days || 'MTWRF';
+    var dow = cursor.getDay();
+    var dayResult = doesDayMatch(dow, days, dayMap);
+    if (!dayResult.match) return false;
+    if (r.type === 'biweekly') {
+      var daysDiff = Math.round((cursor.getTime() - anchor.getTime()) / 86400000);
+      if (Math.floor(daysDiff / 7) % 2 !== 0) return false;
+    }
+    return true;
+  }
+  if (r.type === 'monthly') {
+    var md = r.monthDays || [1, 15];
+    var dom = cursor.getDate();
+    var lastDom = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
+    for (var mi = 0; mi < md.length; mi++) {
+      var v = md[mi];
+      if (v === 'first' && dom === 1) return true;
+      if (v === 'last' && dom === lastDom) return true;
+      if (Number(v) === dom) return true;
+    }
+    return false;
+  }
+  if (r.type === 'interval') {
+    var every = r.every || 2;
+    var unit = r.unit || 'days';
+    if (unit === 'days') {
+      var between = Math.round((cursor.getTime() - anchor.getTime()) / 86400000);
+      return between >= 0 && between % every === 0;
+    }
+    if (unit === 'weeks') {
+      var betweenD = Math.round((cursor.getTime() - anchor.getTime()) / 86400000);
+      return betweenD >= 0 && betweenD % (every * 7) === 0;
+    }
+    if (unit === 'months') {
+      if (cursor.getDate() !== anchor.getDate()) return false;
+      var monthDiff = (cursor.getFullYear() - anchor.getFullYear()) * 12 + (cursor.getMonth() - anchor.getMonth());
+      return monthDiff >= 0 && monthDiff % every === 0;
+    }
+    if (unit === 'years') {
+      if (cursor.getMonth() !== anchor.getMonth() || cursor.getDate() !== anchor.getDate()) return false;
+      var yearDiff = cursor.getFullYear() - anchor.getFullYear();
+      return yearDiff >= 0 && yearDiff % every === 0;
+    }
+  }
+  return false;
+}
+
+// Pure forward search (999.1091 C1): the first date AFTER `afterDateKey` (a
+// 'YYYY-MM-DD' string) that matches `recur`'s own pattern, using `phaseAnchorKey`
+// ('YYYY-MM-DD', falls back to afterDateKey) as the phase/parity reference. This is
+// "the next occurrence in the master's OWN configured recurrence pattern" — reused by
+// juggler-backend/src/lib/next-occurrence-anchor.js to advance the generalized anchor
+// on a terminal (done/skip) event, per David's ruling (999.1091): daily -> next day;
+// weekly single-day -> same weekday next week; weekly multi-day (e.g. Mon/Wed/Fri) ->
+// the next day in that list, wrapping to next week's first configured day; monthly
+// (e.g. {11,22}) -> next day in the list, wrapping to next month; yearly -> same
+// calendar date one year forward. Pure date math — no I/O, no status/terminal logic
+// (the caller owns that). Bounded iteration; returns null if no match is found within
+// the bound (should not happen for a valid recur config) or the type is unsupported
+// (rolling is NOT handled here — rolling-anchor.js owns that anchor, unchanged).
+function nextMatchingDate(recur, afterDateKey, phaseAnchorKey) {
+  var r = recur;
+  if (typeof r === 'string') { try { r = JSON.parse(r); } catch (_e) { return null; } }
+  if (!r || r.type === 'rolling') return null;
+
+  var after = parseAnchor(afterDateKey);
+  var phaseAnchor = parseAnchor(phaseAnchorKey) || after;
+  if (!after || !phaseAnchor) return null;
+
+  var dayMap = { U: 0, M: 1, T: 2, W: 3, R: 4, F: 5, S: 6 };
+  var cursor = new Date(after.getTime());
+  cursor.setDate(cursor.getDate() + 1);
+
+  // Bound the walk generously — interval years/months need the widest berth.
+  // (ernie WARN, 999.1091: a leap-day anchor (Feb 29, unit='years') only recurs
+  // every ~4 calendar years regardless of `every`, since the match requires BOTH
+  // month+date AND yearDiff % every === 0 — `every*366+40` under-bounds it for
+  // every < 4. Similarly a day-of-month absent from several consecutive
+  // applicable months (e.g. every=3 on the 31st: Jan/Apr/Jul/Oct — only Jan+Jul
+  // have a 31st) can skip multiple `every`-month cycles before matching — bound
+  // generously for several cycles, not just one.)
+  var every = r.every != null ? Math.max(1, parseInt(r.every, 10) || 1) : 1;
+  var maxDays = 400;
+  if (r.type === 'interval' && r.unit === 'years') maxDays = Math.max(every, 4) * 366 + 40;
+  else if (r.type === 'interval' && r.unit === 'months') maxDays = Math.max(every, 1) * 31 * 4 + 60;
+  else if (r.type === 'interval' && r.unit === 'weeks') maxDays = every * 7 + 40;
+  else if (r.type === 'interval' && r.unit === 'days') maxDays = Math.max(400, every + 40);
+
+  for (var i = 0; i < maxDays; i++) {
+    if (matchesRecurrenceDay(cursor, r, phaseAnchor, dayMap)) {
+      return formatDateKey(cursor);
+    }
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return null;
 }
 
 function expandRecurring(allTasks, startDate, endDate, opts) {
@@ -494,50 +612,9 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
         if (he && cursor > he) return;
       }
 
-      var match = false;
-      if (r.type === 'daily') {
-        match = true;
-      } else if (r.type === 'weekly' || r.type === 'biweekly') {
-        var days = r.days || 'MTWRF';
-        var dayResult = doesDayMatch(dow, days, dayMap);
-        if (!dayResult.match) return;
-        var dayState = dayResult.state;
-        if (r.type === 'biweekly') {
-          var daysDiff = Math.round((cursor.getTime() - anchor.getTime()) / 86400000);
-          if (Math.floor(daysDiff / 7) % 2 !== 0) return;
-        }
-        match = true;
-      } else if (r.type === 'monthly') {
-        var md = r.monthDays || [1, 15];
-        var dom = cursor.getDate();
-        var lastDom = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
-        for (var mi = 0; mi < md.length; mi++) {
-          var v = md[mi];
-          if (v === 'first' && dom === 1) { match = true; break; }
-          if (v === 'last' && dom === lastDom) { match = true; break; }
-          if (Number(v) === dom) { match = true; break; }
-        }
-      } else if (r.type === 'interval') {
-        var every = r.every || 2;
-        var unit = r.unit || 'days';
-        if (unit === 'days') {
-          var between = Math.round((cursor.getTime() - anchor.getTime()) / 86400000);
-          if (between >= 0 && between % every === 0) match = true;
-        } else if (unit === 'weeks') {
-          var betweenD = Math.round((cursor.getTime() - anchor.getTime()) / 86400000);
-          if (betweenD >= 0 && betweenD % (every * 7) === 0) match = true;
-        } else if (unit === 'months') {
-          if (cursor.getDate() === anchor.getDate()) {
-            var monthDiff = (cursor.getFullYear() - anchor.getFullYear()) * 12 + (cursor.getMonth() - anchor.getMonth());
-            if (monthDiff >= 0 && monthDiff % every === 0) match = true;
-          }
-        } else if (unit === 'years') {
-          if (cursor.getMonth() === anchor.getMonth() && cursor.getDate() === anchor.getDate()) {
-            var yearDiff = cursor.getFullYear() - anchor.getFullYear();
-            if (yearDiff >= 0 && yearDiff % every === 0) match = true;
-          }
-        }
-      }
+      // Match predicate extracted to matchesRecurrenceDay (999.1091 C1) — byte-identical
+      // behavior, now shared with computeNextOccurrenceAnchor's forward search.
+      var match = matchesRecurrenceDay(cursor, r, anchor, dayMap);
       if (!match) return;
 
       // timesPerCycle: pre-computed optimal dates are in tpcPickedDates.
@@ -662,5 +739,8 @@ function isAnchorDependentRecur(recur) {
 
 module.exports = {
   expandRecurring: expandRecurring,
-  isAnchorDependentRecur: isAnchorDependentRecur
+  isAnchorDependentRecur: isAnchorDependentRecur,
+  matchesRecurrenceDay: matchesRecurrenceDay,
+  nextMatchingDate: nextMatchingDate,
+  getAnchor: getAnchor
 };

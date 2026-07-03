@@ -91,6 +91,7 @@ var tasksWrite = require('../../lib/tasks-write');
 var { PLACEMENT_MODES } = require('../../lib/placementModes');
 var { isTerminalStatus } = require('../../lib/task-status');
 var { isRollingMaster, computeRollingAnchor } = require('../../lib/rolling-anchor');
+var { isPatternRecurMaster, computeNextOccurrenceAnchor } = require('../../lib/next-occurrence-anchor');
 var { getNowInTimezone } = require('../../../../shared/scheduler/getNowInTimezone');
 var { createLogger } = require('@raike/lib-logger');
 var logger = createLogger('task.facade');
@@ -518,6 +519,10 @@ function loadMaster(masterId, userId) {
 }
 
 // updateTaskStatus rolling-anchor projection (verbatim — controller L1790-1808).
+// Also projects the GENERALIZED next_occurrence_anchor (999.1091 C1) for every OTHER
+// recurring type (daily/weekly/biweekly/monthly/interval) — a separate column with
+// separate semantics (see juggler-backend/src/lib/next-occurrence-anchor.js header).
+// Both branches share the same preloaded master row to avoid a second DB read.
 async function applyRollingAnchor(ctx) {
   var masterId = ctx.masterId;
   var userId = ctx.userId;
@@ -538,6 +543,17 @@ async function applyRollingAnchor(ctx) {
       await getDb()('task_masters')
         .where({ id: masterId, user_id: userId })
         .update({ rolling_anchor: _newAnchor, updated_at: getDb().fn.now() });
+    }
+  } else if (_masterForAnchor && isPatternRecurMaster(_masterForAnchor)) {
+    var _pInstanceDate = existing.date ? String(existing.date).slice(0, 10) : null;
+    var _pCurrentAnchor = _masterForAnchor.next_occurrence_anchor
+      ? String(_masterForAnchor.next_occurrence_anchor).slice(0, 10)
+      : null;
+    var _pNewAnchor = computeNextOccurrenceAnchor(status, _pInstanceDate, _pCurrentAnchor, _masterForAnchor.recur);
+    if (_pNewAnchor) {
+      await getDb()('task_masters')
+        .where({ id: masterId, user_id: userId })
+        .update({ next_occurrence_anchor: _pNewAnchor, updated_at: getDb().fn.now() });
     }
   }
 }
