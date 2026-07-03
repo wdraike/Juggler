@@ -30,6 +30,11 @@ var REASON_CODES = Object.freeze({
   // 999.874 sub-item 2: flexible TPC instance could not be placed within
   // its recurrence cycle after exhausting all relaxation attempts.
   SPACING_BLOCKED:           'spacing_blocked',
+  // sched-overdue-reasons leg (David ruling, brain 101837, F7): a task whose
+  // ONLY blocker is an unmet/unplaceable dependency (the dependency floor,
+  // computeDepReadyAbs === Infinity) — distinct from a generic capacity
+  // no_slot so the UI can tell the user WHICH cause blocked placement.
+  DEP_BLOCKED:               'dep_blocked',
 });
 
 var REASON_LABELS = Object.freeze({
@@ -44,6 +49,7 @@ var REASON_LABELS = Object.freeze({
   [REASON_CODES.MISSED]:                   'Preferred time passed',
   [REASON_CODES.TPC_BUDGET]:               'Not enough cycle time',
   [REASON_CODES.SPACING_BLOCKED]:          'No available slot within recurrence cycle',
+  [REASON_CODES.DEP_BLOCKED]:              'Blocked by an incomplete task it depends on',
 });
 
 /**

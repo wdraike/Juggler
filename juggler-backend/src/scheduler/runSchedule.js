@@ -2298,12 +2298,27 @@ async function runScheduleAndPersist(userId, _retries, options) {
             });
           }
         } else if (!rawRowPast.unscheduled) {
+          // F6 (sched-overdue-reasons leg, David ruling brain 101837): every
+          // occurrence reaching this branch has ALREADY failed the
+          // effectiveDeadline check above (today >= effectiveDeadline) AND
+          // was never placed (scheduled_at NULL) — that is, by construction,
+          // a genuinely MISSED past occurrence, not merely "no slot found
+          // this run". Some shapes (e.g. a day-locked non-flexible-TPC
+          // ANYTIME recurring instance whose date is in the past) are
+          // dropped by unifiedScheduleV2's own buildItems filter
+          // (:274-309) BEFORE an item is ever built, so t._unplacedReason
+          // is never set upstream for them and this fallback was firing —
+          // mirror unifiedScheduleV2's own pastAnchoredRecurrings pass
+          // (:2493-2504), which stamps REASON_CODES.MISSED for the past-
+          // anchored shapes IT reaches, instead of the generic NO_SLOT
+          // capacity code (a real reason already set upstream, e.g. by a
+          // dep/weather/tool block THIS run, is preserved via the `||`).
           pendingUpdates.push({
             id: t.id,
             dbUpdate: {
               unscheduled: 1,
-              unplaced_reason: t._unplacedReason || REASON_CODES.NO_SLOT,
-              unplaced_detail: t._unplacedDetail || 'Past occurrence — no slot was available',
+              unplaced_reason: t._unplacedReason || REASON_CODES.MISSED,
+              unplaced_detail: t._unplacedDetail || 'Past occurrence — recurring window missed',
               updated_at: _runScheduleCommand.clockNow()
             }
           });

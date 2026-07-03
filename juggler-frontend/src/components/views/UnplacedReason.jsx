@@ -17,6 +17,10 @@ export default function UnplacedReason({ task, theme, compact }) {
   if (!task._unplacedReason && !task._unplacedDetail && !task.unscheduled) return null;
   var reason = task._unplacedReason || 'no_slot';
   var isWeather = reason === 'weather' || reason === 'weather_unavailable';
+  // F7 (sched-overdue-reasons leg): dep_blocked gets its own icon (chain-link),
+  // mirroring the weather branch, so a dependency-blocked task reads as
+  // visually distinct from a generic no_slot capacity chip.
+  var isDepBlocked = reason === 'dep_blocked';
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 8px 0', flexWrap: 'wrap' }}>
       <span style={{
@@ -24,7 +28,7 @@ export default function UnplacedReason({ task, theme, compact }) {
         background: theme.amberBg, color: theme.amberText,
         border: '1px solid ' + theme.amberBorder, whiteSpace: 'nowrap'
       }}>
-        {isWeather ? '🌤 ' : ''}{labelFor(reason)}
+        {isWeather ? '🌤 ' : ''}{isDepBlocked ? '🔗 ' : ''}{labelFor(reason)}
       </span>
       {!compact && task._unplacedDetail && (
         <span style={{ fontSize: 9, color: theme.textMuted }}>{task._unplacedDetail}</span>

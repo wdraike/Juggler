@@ -135,6 +135,15 @@ function placementFor(result, taskId) {
 }
 function isOnGrid(result, taskId) { return !!placementFor(result, taskId); }
 
+/** ISO date key N days from TODAY (mirrors depsGatingCharacterization.test.js's dateKey helper). */
+function farDateKey(n) {
+  const parts = TODAY.split('-').map(Number);
+  const d = new Date(parts[0], parts[1] - 1, parts[2]);
+  d.setDate(d.getDate() + n);
+  const m = d.getMonth() + 1, day = d.getDate();
+  return d.getFullYear() + '-' + (m < 10 ? '0' + m : m) + '-' + (day < 10 ? '0' + day : day);
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // TEST 1 — RED: the a3-02 occupancy hole lets a scheduler-placed flexible
 // task double-book a force-placed rigid task's slot.
@@ -152,31 +161,43 @@ describe('D-C test 1 — force-placed FIXED slot must be RESERVED against a sche
     id: 'fixed_A', text: 'Fixed A (forced through the a3-02 hole)', date: TODAY,
     when: 'ghost_block', placementMode: PLACEMENT_MODES.FIXED,
   });
-  // dep_ghost: a genuinely never-placeable dependency (same ghost_block
-  // trick) with a live, non-terminal status so computeDepReadyAbs (:983)
-  // treats it as a real blocking dep (returns Infinity, never resolves) —
-  // NOT merely an absent id (an absent id is silently treated as
-  // non-blocking, :989 `if (st===undefined) continue`).
-  const depGhost = baseTask({
-    id: 'dep_ghost', text: 'Dep (never placeable)', date: TODAY, pri: 'P4',
-    when: 'ghost_block', placementMode: PLACEMENT_MODES.ANYTIME,
+  // dep_far: FIXED, explicit time, anchored 20 days out — a GENUINELY
+  // placeable dependency (mirrors depsGatingCharacterization.test.js B7's
+  // `b7_dep` shape exactly: FIXED + explicit time always places regardless of
+  // `when`-tag windows). computeDepReadyAbs therefore returns a FINITE (if
+  // far-future) depReadyAbs for flex_B, never Infinity — flex_B is NOT
+  // permanently dep-blocked, so M-2's isPermanentlyDepBlocked gate does not
+  // apply to it and the pre-existing deadlineRelaxed rescue still fires for
+  // it, exactly like B7.1.
+  const depFar = baseTask({
+    id: 'dep_far', text: 'Dep (placeable, but far in the future)', date: farDateKey(20),
+    time: '9:00 AM', placementMode: PLACEMENT_MODES.FIXED,
   });
   // flex_B: ANYTIME, `when='narrow'` -> its ONLY configured window today is
   // exactly [840,870) (14:00-14:30) — literally "the only remaining slot,
-  // given constraints, is 14:00". `deadline=TODAY` + a live unresolved dep
-  // routes it through the main queue (blocked by the dep gate) -> retry
-  // (still blocked) -> stillUnplaced -> the `deadlineRelaxed` filter
-  // (deadlineDate<=today && dependsOn.length>0) -> `findEarliestSlot` with
-  // relaxDeps:true, ignoreDeadline:true, reading `dayOcc` (which the a3-02
-  // hole left untouched at 840) -> lands on the identical minute.
+  // given constraints, is 14:00". `deadline=TODAY` + a live dep that resolves
+  // LATE (dep_far, day+20 — NOT permanently blocked) routes it through the
+  // main queue (blocked by the dep gate: depReadyAbs is far beyond any
+  // candidate today) -> stillUnplaced -> the `deadlineRelaxed` filter
+  // (deadlineDate<=today && dependsOn.length>0), which M-2's gate does NOT
+  // divert (isPermanentlyDepBlocked is false — the dep WILL eventually
+  // place) -> `findEarliestSlot` with relaxDeps:true, ignoreDeadline:true,
+  // reading `dayOcc`. Repaired 2026-07-03 (bert REFER): the ORIGINAL fixture
+  // gave flex_B a dependency that never places at all (`dep_ghost`), which is
+  // the exact M-2 shape — after M-2 shipped, flex_B routed straight to
+  // `unplaced` via the new dep-blocked gate, vacuously "passing" this test
+  // without ever exercising the occupancy-reservation path (a3-02) it was
+  // built to pin. Swapped for the B7-shaped "resolves late" dependency so the
+  // deadlineRelaxed rescue still fires and the fixture again isolates the
+  // a3-02 occupancy hole on its own.
   const flexB = baseTask({
-    id: 'flex_B', text: 'Flex B (deadline+dep, only slot is 14:00)', date: TODAY, pri: 'P2',
-    when: 'narrow', dependsOn: ['dep_ghost'], deadline: TODAY,
+    id: 'flex_B', text: 'Flex B (deadline+late-resolving dep, only slot is 14:00)', date: TODAY, pri: 'P2',
+    when: 'narrow', dependsOn: ['dep_far'], deadline: TODAY,
     placementMode: PLACEMENT_MODES.ANYTIME,
   });
 
   test('RED: flex_B must NOT land at (TODAY, 840) — the exact minute fixed_A was force-placed at 14:00 — FAILS on current code (a3-02 hole)', () => {
-    const result = run([fixedA, depGhost, flexB], 840);
+    const result = run([fixedA, depFar, flexB], 840);
 
     const aPlacement = placementFor(result, 'fixed_A');
     expect(aPlacement).toBeTruthy();
@@ -192,7 +213,7 @@ describe('D-C test 1 — force-placed FIXED slot must be RESERVED against a sche
   });
 
   test('RED (defensive, same fixture): no two grid entries anywhere may share an identical (dateKey,start) — the exact overlap shape the hole produces — FAILS on current code', () => {
-    const result = run([fixedA, depGhost, flexB], 840);
+    const result = run([fixedA, depFar, flexB], 840);
     const seen = new Set();
     let duplicateFound = false;
     Object.keys(result.dayPlacements || {}).forEach((dk) => {

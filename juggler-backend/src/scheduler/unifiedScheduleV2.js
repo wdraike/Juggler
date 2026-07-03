@@ -998,6 +998,25 @@ function computeDepReadyAbs(item, placedById, statuses, dates) {
   return depReadyAbs;
 }
 
+// F7 (sched-overdue-reasons leg): when computeDepReadyAbs returns Infinity the
+// item can never clear its dep gate this scan — this lists WHICH dep id(s)
+// are the live, unplaced blockers, purely for the _unplacedDetail message
+// (populateFailDiag). Mirrors the live/terminal-status filtering in
+// computeDepReadyAbs exactly so the two functions never disagree about which
+// deps are "blocking".
+function findBlockingDepIds(item, placedById, statuses) {
+  var ids = [];
+  if (!item.dependsOn) return ids;
+  for (var j = 0; j < item.dependsOn.length; j++) {
+    var depId = item.dependsOn[j];
+    var st = statuses[depId];
+    if (st === undefined) continue;
+    if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'disabled' || st === 'pause' || st === 'cancelled') continue;
+    if (!placedById[depId]) ids.push(depId);
+  }
+  return ids;
+}
+
 function hasWeatherConstraint(task) {
   if (!task) return false;
   return (task.weatherPrecip && task.weatherPrecip !== 'any') ||
@@ -1295,7 +1314,11 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
     checkLoc: checkLoc,
     locToolDiag: locToolDiag,
     sawEligibleWindow: sawEligibleWindow,
-    sawCapacityBlock: sawCapacityBlock
+    sawCapacityBlock: sawCapacityBlock,
+    // F7: depReadyAbs===Infinity means at least one live dep never placed —
+    // a categorical (whole-scan) block, computed once above (not per-slot).
+    sawDepBlock: checkDeps && depReadyAbs === Infinity,
+    depBlockIds: (checkDeps && depReadyAbs === Infinity) ? findBlockingDepIds(item, placedById, statuses) : null
   });
   return null;
 }
@@ -1324,6 +1347,33 @@ function populateFailDiag(diag, sig) {
     // structural blocker (capacity may have been incidental), so surface it.
     diag.failReason = sig.locToolDiag.cause;
     diag.failDetail = sig.locToolDiag.detail;
+    return;
+  }
+  // F7 (sched-overdue-reasons leg, David ruling brain 101837): the dependency
+  // floor (computeDepReadyAbs === Infinity — at least one live dep never
+  // placed) is a categorical, whole-scan blocker, not merely "some slot was
+  // full" — surface it distinctly from the generic no_slot capacity bucket so
+  // the UI can tell the user WHICH cause blocked placement.
+  // Mutual exclusion, NOT precedence (corrected per zoe-sor-01, bert fix-loop
+  // iter2 — the original wording here claimed "Loc/tool still outranks it",
+  // implying the branches above are checked first and win a genuine competing
+  // case): the per-slot dep gate in the scan loop above (`absoluteMin(i,s) <
+  // depReadyAbs`) short-circuits with `continue` BEFORE checkLoc/recordLocTool
+  // ever run, on every slot, whenever depReadyAbs===Infinity. So sig.locToolDiag
+  // is structurally always null whenever sig.sawDepBlock is true — the
+  // sig.locToolDiag branches above and this dep_blocked branch can never both
+  // be live for the same scan; there is no runtime case where they compete and
+  // loc/tool "wins". A task that is BOTH loc/tool-blocked AND dep-blocked will
+  // always surface as dep_blocked here, never location_mismatch/tool_conflict.
+  // Untested competing-causes case; whether loc/tool should instead be
+  // detected even under a dep-block (i.e. whether the ORIGINAL precedence intent
+  // should actually be implemented) is a design decision this fix does not make —
+  // referred to cookie/scheduler-rules for a ruling.
+  if (sig.sawDepBlock) {
+    diag.failReason = REASON_CODES.DEP_BLOCKED;
+    diag.failDetail = (sig.depBlockIds && sig.depBlockIds.length)
+      ? 'Blocked by dependency: ' + sig.depBlockIds.join(', ')
+      : 'Blocked by an incomplete dependency';
     return;
   }
   if (sig.sawEligibleWindow) {
@@ -1432,7 +1482,10 @@ function findLatestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
     checkLoc: checkLoc,
     locToolDiag: locToolDiag,
     sawEligibleWindow: sawEligibleWindow,
-    sawCapacityBlock: sawCapacityBlock
+    sawCapacityBlock: sawCapacityBlock,
+    // F7: same categorical dep-block signal as findEarliestSlot (see comment there).
+    sawDepBlock: checkDeps && depReadyAbs === Infinity,
+    depBlockIds: (checkDeps && depReadyAbs === Infinity) ? findBlockingDepIds(item, placedById, statuses) : null
   });
   return null;
 }
@@ -2412,6 +2465,38 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   var stillUnplaced = unplaced.filter(function(u) { return !(u && u._deferred); });
   retryQueue.forEach(function(item) {
     delete item._deferred;
+    // ernie WARN ern-sor-f1 (bert fix-loop iter2): the reason applyPlacementFailReason
+    // stamped during the main pass (:2196) reflects ONLY that pass's diagnosis — often
+    // dep_blocked because the dep simply hadn't been placed yet this pass, not because
+    // it will NEVER place. applyPlacementFailReason is first-write-wins (:1604), so
+    // without a reset here a renewed failure below would silently keep that stale
+    // main-pass reason even when the dep has since resolved and the ACTUAL final
+    // blocker this retry is something else (capacity/no_slot/tool/location). Clear
+    // both fields before the retry attempt so a fresh failure re-attributes the
+    // CURRENT/final blocking cause via applyPlacementFailReason's diagnostic pipeline.
+    // The M-2 gate (:~2742, isPermanentlyDepBlocked) reads this same field with
+    // nothing else writing to it between this retry and that gate for these items
+    // (verified: only the rigid/missed-window/past-anchored passes touch
+    // _unplacedReason downstream, and those are filtered out of deadlineRelaxed) —
+    // so this also keeps the gate reading a CURRENT, not stale, dep_blocked flag.
+    //
+    // ernie WARN ern-sor-f4 (bert fix-loop iter3): the reset above was UNCONDITIONAL
+    // over every deferred item, not scoped to the stale-dep_blocked case ern-sor-f1
+    // targeted. retryQueue is filtered from `unplaced` by _deferred (:2464), and the
+    // recurring-split-overflow promotion pass (:2441-2455) runs BEFORE this retry and
+    // promotes a still-_deferred item's no_slot reason to RECURRING_SPLIT_OVERFLOW —
+    // a reason applyPlacementFailReason has NO branch to reconstruct (it only
+    // re-derives WEATHER/hasWeatherConstraint, SPACING_BLOCKED/_targetDate, or falls
+    // to the NO_SLOT floor — nothing checks splitTotal/overflow). An unconditional
+    // delete here therefore erased that unreconstructable reason on renewed failure,
+    // regressing R35.6/999.802 to generic no_slot. Scope the reset to the exact
+    // stale class it exists for: DEP_BLOCKED. (PARTIAL_SPLIT :2178 and TPC_BUDGET
+    // :2040 are pushed to `unplaced` directly without ever setting _deferred, so
+    // they never reach retryQueue and don't need guarding here.)
+    if (item.task && item.task._unplacedReason === REASON_CODES.DEP_BLOCKED) {
+      delete item.task._unplacedReason;
+      delete item.task._unplacedDetail;
+    }
     var placement = tryPlaceQueued(item, dates, dayWindows, dayBlocks, dayOcc, placedById, effectiveStatuses, cfg, env);
     if (!placement.slot) {
       // FR2 / AC2.2 — same diagnostic-derived attribution as the main reject path.
@@ -2643,6 +2728,36 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
              u.dependsOn && u.dependsOn.length > 0);
   });
   deadlineRelaxed.forEach(function(item) {
+    // M-2 (David ruling 2026-07-03, brain 101837): a task carrying a REAL
+    // user-set deadline (item.task.deadline — not merely a recurring-anchor
+    // deadlineDate fallback, see buildItems' `deadlineDate = toKey(t.deadline)
+    // || (recurring ? anchorDate : null)`) whose dependency is PERMANENTLY
+    // blocked (the F7 dep_blocked classification — computeDepReadyAbs
+    // returned Infinity for it upstream, i.e. the live dep will NEVER place,
+    // not merely "resolves later than ideal") is OVERDUE + UNSCHEDULED
+    // "regardless of cause" — it stays unscheduled, never force-placed by
+    // relaxing the dep gate. Route straight to unplaced; the dep-blocked
+    // reason is already attributed upstream (F7 fix, applyPlacementFailReason
+    // ran during the normal fallback ladder before this pass) — overdue
+    // status derives on read from the deadline having passed (R50 past-due
+    // semantics), not from a grid placement here.
+    // Scoped NARROWLY to "_unplacedReason already dep_blocked" (not a bare
+    // "has a deadline + has deps" check) so this does NOT regress the
+    // separate, already-tested B7 characterization (depsGatingCharacterization
+    // .test.js): a dep that WILL eventually place (just later than the
+    // deadline, e.g. a fixed task on a far-future date) is a genuine chain-
+    // ordering/timing conflict, not a permanent block — those members keep
+    // the existing dep-relaxation + ignoreDeadline rescue below (which finds
+    // them the earliest true slot today), exactly as before this leg.
+    // Members whose deadlineDate is ONLY the recurring-anchor fallback (no
+    // real task.deadline) are also unaffected by this gate — they never
+    // carry item.task.deadline, so the M-2 branch never fires for them.
+    var hasHardDeadline = !!(item.task && item.task.deadline);
+    var isPermanentlyDepBlocked = item.task && item.task._unplacedReason === REASON_CODES.DEP_BLOCKED;
+    if (hasHardDeadline && isPermanentlyDepBlocked) {
+      stillUnplaced.push(item);
+      return;
+    }
     // Try with dep-relaxation first. If still can't place, also ignore deadline
     // (last resort: place on any future day rather than miss the deadline entirely).
     var relaxedEnv = Object.assign({}, env, { relaxDeps: true });
