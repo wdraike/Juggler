@@ -807,21 +807,47 @@ describe('PART 2 (AC2 daily half) — windowed daily intra-day roam + window-clo
   });
 
   // Window closed at 11:00 (660 min). now=12:00 (720 min) → past window-close.
-  // No slot left today within the window. The instance should be marked overdue
-  // or left unplaced (the scheduler may not yet implement window-close overdue for same-day).
-  //
-  // This is a characterization / transition test: on CURRENT code the instance may be
-  // placed at a past slot or unplaced. After the fix it should be _overdue (no slot remains
-  // before window-close).
-  //
-  // Not forcing RED — marking as CHARACTERIZATION to establish current behavior.
-  // Post-fix assertion: if placed on today, _overdue===true OR in unplaced list.
-  //
-  // The critical test is PART2-A (slot-passed-window-open must not be overdue).
-  // This block kept as a future pin once bert implements window-close for same-day.
-  // TODO(bert): once window-close same-day is implemented, implement with:
-  //   expect(isHandledAsExpired).toBe(true);
-  test.todo('PART2-B (characterization): daily windowed, preferred 08:00, timeFlex=180, NOW_MINS=720 (noon, window closed at 11:00) → overdue or unscheduled');
+  // No slot left today within the window. The instance must be routed to the
+  // unplaced list with _unplacedReason=missed (isMissedWindow path,
+  // unifiedScheduleV2.js:415-416 + 2468-2483). It must NOT be placed on the grid
+  // and must NOT roll to tomorrow (R32.7: day-locked daily stays on its own day).
+  test('PART2-B: daily windowed, preferred 08:00, timeFlex=180, NOW_MINS=720 (noon, window closed at 11:00) → unplaced with missed reason', function() {
+    var dailyWindowed = makeTask({
+      id: 'breakfast-closed',
+      taskType: 'recurring_instance',
+      text: 'Eat Breakfast',
+      recurring: true,
+      generated: true,
+      placementMode: 'time_window',
+      recur: { type: 'daily', days: 'MTWRFSU' },
+      recurStart: TODAY_KEY,
+      date: TODAY_KEY,
+      day: 'Wed',
+      dur: 30,
+      status: '',
+      overdue: null,
+      timeFlex: 180,            // 3-hour window → 8am + 3h = 11am close (660 min)
+      preferredTimeMins: 480    // 8:00 AM
+    });
+
+    var result = runScheduler([dailyWindowed], TODAY_KEY, 720, makeCfg()); // noon, window closed
+
+    // MUST NOT be placed on the grid (window has closed, no valid slot remains)
+    var placements = allPlacements(result, 'breakfast-closed');
+    expect(placements.length).toBe(0);
+
+    // MUST be in the unplaced list with _unplacedReason=missed
+    var unplacedEntry = unplacedEntryFor(result, 'breakfast-closed');
+    expect(unplacedEntry).toBeDefined();
+    expect(unplacedEntry._unplacedReason).toBe(REASON_CODES.MISSED);
+
+    // R32.7: day-locked daily must NOT roll to tomorrow
+    var TOMORROW_KEY = '2026-06-25';
+    var tomorrowPlacements = allPlacements(result, 'breakfast-closed').filter(function(p) {
+      return p.dateKey === TOMORROW_KEY;
+    });
+    expect(tomorrowPlacements.length).toBe(0);
+  });
 
   test('PART2-C (R32.7 guard): daily windowed TODAY instance, window passed → must NOT roll to TOMORROW (day-lock preserved)', function() {
     // Even if the window is closed, a day-locked daily must not appear on tomorrow.
