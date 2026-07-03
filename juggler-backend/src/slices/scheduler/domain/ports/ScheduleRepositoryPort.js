@@ -116,6 +116,27 @@ ScheduleRepositoryPort.prototype.now = function now() {
 };
 
 /**
+ * Read the schedule_cache blob from user_config (legacy placement cache for
+ * cal-sync split expansion + duration correction). Returns the raw row or null.
+ * @param {string} userId tenant scope.
+ * @returns {Promise<Object|null>} the user_config row (config_value is JSON string) or null.
+ */
+ScheduleRepositoryPort.prototype.getScheduleCache = function getScheduleCache(_userId) {
+  throw new Error('ScheduleRepositoryPort.getScheduleCache not implemented');
+};
+
+/**
+ * Upsert the schedule_cache blob into user_config (update if exists, insert if not).
+ * Mirrors the legacy runSchedule.js:2428-2433 upsert pattern exactly.
+ * @param {string} userId tenant scope.
+ * @param {string} cacheJson JSON.stringify'd placement cache.
+ * @returns {Promise<void>}
+ */
+ScheduleRepositoryPort.prototype.upsertScheduleCache = function upsertScheduleCache(_userId, _cacheJson) {
+  throw new Error('ScheduleRepositoryPort.upsertScheduleCache not implemented');
+};
+
+/**
  * The exact set of methods an adapter MUST expose to satisfy ScheduleRepositoryPort.
  * @type {ReadonlyArray<string>}
  */
@@ -123,7 +144,9 @@ var SCHEDULE_REPOSITORY_PORT_METHODS = Object.freeze([
   'writeChanged',
   'deleteTasksWhere',
   'backfillRollingAnchorIfNull',
-  'now'
+  'now',
+  'getScheduleCache',
+  'upsertScheduleCache'
 ]);
 
 module.exports = ScheduleRepositoryPort;

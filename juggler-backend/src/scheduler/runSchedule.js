@@ -2446,12 +2446,9 @@ async function runScheduleAndPersist(userId, _retries, options) {
   placementCache.unplaced = result.unplaced.map(function(t) { return t.id; });
   placementCache.unplacedMeta = unplacedMeta;
   var cacheJson = JSON.stringify(placementCache);
-  var existingCache = await trx('user_config').where({ user_id: userId, config_key: 'schedule_cache' }).first();
-  if (existingCache) {
-    await trx('user_config').where({ user_id: userId, config_key: 'schedule_cache' }).update({ config_value: cacheJson });
-  } else {
-    await trx('user_config').insert({ user_id: userId, config_key: 'schedule_cache', config_value: cacheJson });
-  }
+  // H7 (999.1020): route the schedule_cache upsert through ScheduleRepositoryPort
+  // instead of inline knex — same upsert semantics (update if exists, insert if not).
+  await _runScheduleCommand.upsertScheduleCache(trx, userId, cacheJson);
 
   // Invalidate Redis caches — scheduler modified tasks
   cache.invalidateTasks(userId).catch(function(err) { logger.error("[silent-catch]", { error: err }); });
