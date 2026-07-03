@@ -35,14 +35,17 @@ function assertSafeTestTarget(conn) {
   var database = String((conn && conn.database) || '');
   // Test-bed ports: the fixed instance (3407) plus the ephemeral pool band
   // (3410-3417, test-bed/scripts/instance.sh) and the UAT environment (3507).
-  // The safety invariant is unchanged — still requires a `_test` DB name and no
-  // prod signal — only the recognised test-port set widened. Dev (3308) and
-  // prod (3307) remain refused.
-  // ⚠ COUPLED to POOL_SIZE=8 in test-bed/scripts/instance.sh: the `341[0-7]` band
-  //   matches slots 0-7 (ports 3410-3417). If the pool grows past 8 slots, widen
-  //   this regex too — otherwise the new slots' ports are REFUSED (fails safe, but
-  //   surprising). Keep the two in sync.
-  var isTestbedPort = port === '3407' || port === '3507' || /^341[0-7]$/.test(port);
+  // When the CI runner is itself a Docker container (docker-out-of-docker), the
+  // jest tests connect to the MySQL container by name (ra-mysql-t0) on its
+  // internal port 3306 — not the host-published pool port. The safety invariant
+  // is unchanged — still requires a `_test` DB name and no prod signal — only
+  // the recognised test-port set widened. Dev (3308) and prod (3307) remain
+  // refused. ⚠ COUPLED to POOL_SIZE=8 in test-bed/scripts/instance.sh: the
+  // `341[0-7]` band matches slots 0-7 (ports 3410-3417). If the pool grows past
+  // 8 slots, widen this regex too — otherwise the new slots' ports are REFUSED
+  // (fails safe, but surprising). Keep the two in sync.
+  var isDockerHost = /^ra-mysql-t\d+$/.test(host);
+  var isTestbedPort = port === '3407' || port === '3507' || port === '3306' || /^341[0-7]$/.test(port);
   var isTestDbName = /_test$/.test(database) || (port === '3507' && /_uat$/.test(database));
   var prodSignals = [];
   if (port === '3307') prodSignals.push('DB_PORT=3307 is the production Cloud SQL Proxy');
