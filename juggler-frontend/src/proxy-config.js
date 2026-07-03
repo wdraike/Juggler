@@ -71,6 +71,28 @@ function detect() {
     return { name: 'production', ...ENVIRONMENTS.production };
   }
 
+  // CI test/uat env — Caddy reverse proxy on .raike.local domains.
+  // Caddy routes by subdomain on the same port (e.g. :8443), so each
+  // service URL is the current origin with the subdomain swapped.
+  if (hostname.indexOf('.raike.local') >= 0) {
+    var protocol = w.location.protocol + '//';
+    var host = w.location.host; // includes port
+    var baseUrl = protocol + host;
+    return {
+      name: 'ci-test',
+      suffix: '.raike.local',
+      services: {
+        auth:    { url: baseUrl.replace(/\/\/[^.]+\./, '//auth.') },
+        juggler: { url: baseUrl.replace(/\/\/[^.]+\./, '//juggler.') },
+        resume:  { url: baseUrl.replace(/\/\/[^.]+\./, '//ro.') },
+        billing: { url: baseUrl.replace(/\/\/[^.]+\./, '//payment.') },
+        bugs:    { url: baseUrl.replace(/\/\/[^.]+\./, '//bugs.') },
+      },
+      cookieDomain: '.raike.local',
+      homeUrl: baseUrl.replace(/\/\/[^.]+\./, '//auth.'),
+    };
+  }
+
   return { name: 'localhost', ...ENVIRONMENTS.localhost };
 }
 
