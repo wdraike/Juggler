@@ -2,7 +2,7 @@
  * MCP Server Factory — creates a configured McpServer for a given user
  */
 
-const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
+const { McpServer } = require('@modelcontextprotocol/sdk/server');
 const { registerTaskTools } = require('./tools/tasks');
 const { registerScheduleTools } = require('./tools/schedule');
 const { registerConfigTools } = require('./tools/config');

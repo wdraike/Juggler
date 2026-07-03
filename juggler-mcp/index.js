@@ -6,8 +6,8 @@
  * Set JUGGLER_API_URL and JUGGLER_TOKEN env vars (or store token in ~/.juggler-mcp-token).
  */
 
-const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
-const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
+const { McpServer } = require('@modelcontextprotocol/sdk/server');
+const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server');
 const { z } = require('zod');
 const fs = require('fs');
 const path = require('path');
