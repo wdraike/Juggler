@@ -85,7 +85,7 @@ export default function UnschedEntry({ task, status, onExpand, onStatusChange, o
             </span>
           )}
         </span>
-        {task.dur > 0 && <span style={{ fontSize: 9, color: theme.textMuted, flexShrink: 0 }}>{durLabel(task.dur)}</span>}
+        {(task._unplacedTotalDur || task.dur) > 0 && <span style={{ fontSize: 9, color: theme.textMuted, flexShrink: 0 }}>{durLabel(task._unplacedTotalDur || task.dur)}</span>}
         {task.pri && <span style={{ fontSize: 8, fontWeight: 700, color: priColor, flexShrink: 0 }}>{task.pri}</span>}
         {task.calLocked && <span role="img" aria-label="Calendar-locked — cannot be dragged" title="Calendar-locked — cannot be dragged" style={{ fontSize: 10, flexShrink: 0 }}>{'🔒'}</span>}
         {isOverdue && (

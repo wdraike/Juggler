@@ -290,12 +290,13 @@ export default function DailyView({
     var order = [];
     raw.forEach(function (t) {
       var key = t.splitGroup || (t.sourceId ? t.sourceId + '|' + (t.date || '') : t.id);
-      if (!groups[key]) { groups[key] = { task: t, count: 0 }; order.push(key); }
+      if (!groups[key]) { groups[key] = { task: t, count: 0, totalDur: 0 }; order.push(key); }
       groups[key].count += 1;
+      groups[key].totalDur += (t.dur || 0);
     });
     return order.map(function (k) {
       var g = groups[k];
-      return g.count > 1 ? Object.assign({}, g.task, { _unplacedChunkCount: g.count }) : g.task;
+      return g.count > 1 ? Object.assign({}, g.task, { _unplacedChunkCount: g.count, _unplacedTotalDur: g.totalDur }) : g.task;
     });
   }, [allTasks, unplaced, selectedDateKey, placements, statuses, matchesFilter, filter]);
 

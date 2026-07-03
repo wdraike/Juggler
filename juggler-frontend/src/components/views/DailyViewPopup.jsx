@@ -81,8 +81,8 @@ export default function FixedPopup({ mousePos, item, status, theme, darkMode, ca
             {t.project}
           </span>
         )}
-        {t.dur > 0 && (
-          <span style={{ fontSize: 9, color: theme.textMuted }}>{durLabel(t.dur)}</span>
+        {(t._unplacedTotalDur || t.dur) > 0 && (
+          <span style={{ fontSize: 9, color: theme.textMuted }}>{durLabel(t._unplacedTotalDur || t.dur)}</span>
         )}
       </div>
       {item.start != null && (function() {
