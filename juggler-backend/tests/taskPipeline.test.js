@@ -27,7 +27,7 @@ jest.mock('../src/db', () => {
 });
 
 const { rowToTask, taskToRow, buildSourceMap } = require('../src/controllers/task.controller');
-const unifiedSchedule = require('../src/scheduler/unifiedSchedule');
+const unifiedSchedule = require('../src/scheduler/unifiedScheduleV2');
 const { DEFAULT_TIME_BLOCKS, DEFAULT_TOOL_MATRIX } = require('../src/scheduler/constants');
 
 const TZ = 'America/New_York';

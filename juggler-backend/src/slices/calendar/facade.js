@@ -811,6 +811,140 @@ async function getSyncHistory(userId, opts) {
   return { recentRuns: recentRuns, rows: rows };
 }
 
+// ── 999.1026: cal-sync controller audit-path facade method ──
+// audit (cal-sync.controller.js:audit) previously ran the task-fetch +
+// template-text resolution + per-adapter event comparison INLINE in the
+// controller. This re-exposes the SAME exact logic behind the facade boundary
+// — no behavior change (REFACTOR mode). The controller's audit() becomes a
+// thin HTTP handler that delegates here.
+//
+// The cross-require on task.controller.js:fetchTasksWithEventIds is resolved
+// HERE (inside the facade), not in the controller — the facade already owns
+// the calendar domain's read-path; the task read is a collaborator dependency
+// the facade manages, matching how 999.942 handled the DB reads.
+
+/**
+ * Compare Strive tasks to calendar events and report mismatches.
+ *
+ * @param {string} userId - user ID
+ * @param {Object} userRow - row from users table (used for adapter connectivity)
+ * @param {number} days - window in days (capped at 60 by caller)
+ * @returns {Promise<Object>} report — { window: {startUTC,endUTC,days}, providers: {pid: provReport} }
+ */
+async function auditCalendarSync(userId, userRow, days) {
+  var now = new Date();
+  var end = new Date(now); end.setDate(end.getDate() + days);
+
+  var adapters = getConnectedAdapters(userRow);
+  var report = {
+    window: { startUTC: now.toISOString(), endUTC: end.toISOString(), days: days },
+    providers: {}
+  };
+
+  // Load Strive tasks in window
+  var { fetchTasksWithEventIds } = require('../../controllers/task.controller');
+  // 999.488/489: signature is (userId, queryBuilder) — see note at the other
+  // call site; the legacy 3-arg shape caused ER_NO_TABLES_USED.
+  var taskRows = await fetchTasksWithEventIds(userId, function(q) {
+    q.whereNotNull('scheduled_at')
+      .where('scheduled_at', '>=', now).where('scheduled_at', '<=', end)
+      .whereNot('status', 'done').whereNot('status', 'cancel').whereNot('status', 'skip')
+      .whereNot('status', 'pause').whereNot('status', 'disabled')
+      .whereNot('task_type', 'recurring_template')
+      .where(function() { this.whereNull('unscheduled').orWhere('unscheduled', 0); })
+      .orderBy('scheduled_at');
+  });
+
+  // Resolve recurring instance text from templates
+  var srcIds = taskRows.filter(function(r){ return !r.text && r.source_id; }).map(function(r){ return r.source_id; });
+  var tpl = {};
+  if (srcIds.length > 0) {
+    (await srcDb('tasks_v').whereIn('id', srcIds).select('id', 'text'))
+      .forEach(function(r) { tpl[r.id] = r.text; });
+  }
+  taskRows.forEach(function(r) { if (!r.text && r.source_id) r.text = tpl[r.source_id] || ''; });
+
+  for (var pi = 0; pi < adapters.length; pi++) {
+    var adapter = adapters[pi];
+    var pid = adapter.providerId;
+    var eventIdCol = adapter.getEventIdColumn();
+    var provReport = {
+      striveTasks: taskRows.length,
+      matched: 0,
+      missingFromCalendar: [],
+      timeMismatches: [],
+      durMismatches: [],
+      orphansOnCalendar: []
+    };
+
+    try {
+      var token = await adapter.getValidAccessToken(userRow);
+      var events = await adapter.listEvents(token, now.toISOString(), end.toISOString(), userId);
+
+      var eventsById = {};
+      events.forEach(function(e) {
+        eventsById[e.id] = e;
+        if (e._url) eventsById[e._url] = e;
+      });
+      provReport.calendarEvents = events.length;
+
+      taskRows.forEach(function(r) {
+        var evId = r[eventIdCol];
+        var striveStart = new Date(String(r.scheduled_at).replace(' ', 'T') + 'Z');
+        var striveDur = r.dur || 30;
+
+        if (!evId) {
+          provReport.missingFromCalendar.push({
+            taskId: r.id, text: r.text, striveTime: striveStart.toISOString(), striveDur: striveDur, reason: 'no event ID'
+          });
+          return;
+        }
+        var ev = eventsById[evId];
+        if (!ev) {
+          provReport.missingFromCalendar.push({
+            taskId: r.id, text: r.text, striveTime: striveStart.toISOString(), striveDur: striveDur, reason: 'event ID not on calendar'
+          });
+          return;
+        }
+        var evStart = new Date(ev.startDateTime);
+        var timeDiffMin = Math.abs(striveStart.getTime() - evStart.getTime()) / 60000;
+        var evDur = ev.durationMinutes || 30;
+        var durDiff = Math.abs(striveDur - evDur);
+
+        if (timeDiffMin > 1) {
+          provReport.timeMismatches.push({
+            taskId: r.id, text: r.text,
+            striveTime: striveStart.toISOString(), calTime: evStart.toISOString(), diffMinutes: Math.round(timeDiffMin)
+          });
+        } else if (durDiff > 1 && striveDur > 0 && evDur > 0) {
+          provReport.durMismatches.push({
+            taskId: r.id, text: r.text, striveDur: striveDur, calDur: evDur
+          });
+        } else {
+          provReport.matched++;
+        }
+      });
+
+      var taskEventIds = new Set(taskRows.map(function(r) { return r[eventIdCol]; }).filter(Boolean));
+      events.forEach(function(e) {
+        if (!taskEventIds.has(e.id)) {
+          provReport.orphansOnCalendar.push({
+            eventId: e.id, title: e.title, calTime: e.startDateTime
+          });
+        }
+      });
+
+      provReport.mismatchCount = provReport.missingFromCalendar.length + provReport.timeMismatches.length + provReport.durMismatches.length + provReport.orphansOnCalendar.length;
+    } catch (err) {
+      provReport.error = err.message;
+    }
+
+    report.providers[pid] = provReport;
+  }
+
+  return report;
+}
+
 module.exports = {
   // initializer (thin, side-effect-free)
   initialize: initialize,
@@ -877,4 +1011,7 @@ module.exports = {
   // 999.942: cal-sync controller read-path facade methods
   countLocalChangesSince: countLocalChangesSince,
   getSyncHistory: getSyncHistory,
+
+  // 999.1026: cal-sync controller audit-path facade method
+  auditCalendarSync: auditCalendarSync,
 };

@@ -5,7 +5,7 @@
  * overflow/relaxation, scoring correctness, and complex multi-day scenarios.
  */
 
-var unifiedSchedule = require('../src/scheduler/unifiedSchedule');
+var unifiedSchedule = require('../src/scheduler/unifiedScheduleV2');
 var { timeControl } = require('./helpers/time-control');
 var {
   makeRealConfig, makeTask, makeRigidRecurring, makeFlexRecurring,

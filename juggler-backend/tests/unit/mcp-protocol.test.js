@@ -196,8 +196,8 @@ jest.mock('../../src/db', function () {
 // jest.mock('@modelcontextprotocol/sdk/...') resolves from juggler-backend — a
 // DIFFERENT absolute path — and would never intercept.
 var MCP_DIR = path.resolve(__dirname, '../../../juggler-mcp');
-var SDK_MCP_PATH = require.resolve('@modelcontextprotocol/sdk/server/mcp.js', { paths: [MCP_DIR] });
-var SDK_STDIO_PATH = require.resolve('@modelcontextprotocol/sdk/server/stdio.js', { paths: [MCP_DIR] });
+var SDK_MCP_PATH = require.resolve('@modelcontextprotocol/sdk/server', { paths: [MCP_DIR] });
+var SDK_STDIO_PATH = require.resolve('@modelcontextprotocol/sdk/server', { paths: [MCP_DIR] });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. juggler-mcp/index.js — stdio client protocol tests
