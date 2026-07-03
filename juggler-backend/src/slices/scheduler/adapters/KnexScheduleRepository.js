@@ -153,6 +153,23 @@ KnexScheduleRepository.prototype.writeChanged = async function writeChanged(delt
       updateFields.dur = trx.raw(durCaseExpr, durBindings);
     }
 
+    // split_ordinal / split_total — drift-fix CASE branches (999.1019).
+    // The legacy drift-fix path (runSchedule.js:1295-1303) emits CASEs for these
+    // alongside dur; without these branches the batched path would silently drop
+    // split-chunk metadata when a drift-fix delta is routed through writeChanged.
+    ['split_ordinal', 'split_total'].forEach(function (col) {
+      var splitChunk = chunk.filter(function (pu) { return pu.dbUpdate[col] != null; });
+      if (splitChunk.length === 0) return;
+      var splitCaseExpr = 'CASE id';
+      var splitBindings = [];
+      splitChunk.forEach(function (pu) {
+        splitCaseExpr += ' WHEN ? THEN ?';
+        splitBindings.push(pu.id, pu.dbUpdate[col]);
+      });
+      splitCaseExpr += ' ELSE `' + col + '` END';
+      updateFields[col] = trx.raw(splitCaseExpr, splitBindings);
+    });
+
     var dateChunk = chunk.filter(function (pu) { return pu.dbUpdate.date != null; });
     if (dateChunk.length > 0) {
       var dateCaseExpr = 'CASE id'; var dateBindings = [];

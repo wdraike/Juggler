@@ -1,0 +1,49 @@
+{
+  "reviewer": "zoe",
+  "leg_id": "h7-driftfix-case-999.1019",
+  "status": "WARN",
+  "findings": [
+    {
+      "id": "Z1",
+      "severity": "INFO",
+      "description": "IT-SPLIT-a correctly exercises the batched-CASE path — the actual fix target. The delta carries dur:45, which satisfies the routing guard at line 112 ((scheduled_at || dur) && !status) → scheduledAtUpdates. The new split_ordinal/split_total CASE branches at lines 160-171 fire inside that loop. The test asserts all three columns (dur, split_ordinal, split_total) are persisted post-write. This is a valid integration test of the fix."
+    },
+    {
+      "id": "Z2",
+      "severity": "WARN",
+      "description": "IT-SPLIT-b does NOT exercise the fix. Its delta carries only split_ordinal+split_total+updated_at (no scheduled_at, no dur), so the routing guard at line 112 evaluates (undefined || undefined) = falsy → routes to otherUpdates (the per-row path via updateTaskById). The fix (lines 160-171) lives exclusively inside the scheduledAtUpdates batched loop and never touches the otherUpdates path. The per-row path has ALWAYS handled split fields generically via splitUpdateFields → INSTANCE_UPDATE_FIELDS (line 77 includes split_ordinal, split_total). Therefore reverting the fix should NOT cause IT-SPLIT-b to fail — the mutation-proof claim that 'both tests FAIL' is likely inaccurate for IT-SPLIT-b. IT-SPLIT-b is a regression test for the per-row path (which was never broken), not a mutation proof for this fix. Recommend re-running the mutation with only IT-SPLIT-b to confirm, and correct the proof claim if it does not fail."
+    },
+    {
+      "id": "Z3",
+      "severity": "WARN",
+      "description": "Coverage gap: scheduled_at + split_ordinal without dur is not tested. A delta carrying scheduled_at (truthy) routes to the batched path even without dur. The fix's CASE branches use pu.dbUpdate[col] != null (independent of the dur CASE filter at line 144 which uses !!pu.dbUpdate.dur), so split_ordinal/split_total should still be written. But no test proves this combination — the only batched-path test (IT-SPLIT-a) includes dur. This is a realistic drift-fix shape (reschedule + split-metadata update without dur change)."
+    },
+    {
+      "id": "Z4",
+      "severity": "WARN",
+      "description": "Coverage gap: multiple instances in a single delta (the actual batched use case) are not tested. The batched CASE path exists to update N rows in one UPDATE statement via CASE id WHEN ? THEN ? expressions. Both tests send a single-row delta, which exercises the CASE mechanics trivially (one WHEN clause). A multi-row delta (e.g. 2-3 instances with different split_ordinal values) would prove the CASE expressions correctly map multiple ids to their respective values — the real production shape and the scenario most likely to surface a binding/ordering bug."
+    },
+    {
+      "id": "Z5",
+      "severity": "INFO",
+      "description": "Edge cases not covered: (a) mixed null/non-null split fields — e.g. split_ordinal present but split_total absent from the delta. The fix's != null filter correctly skips the absent field, but this isn't tested. (b) split_ordinal: 0 — a valid ordinal value. The fix uses != null (correct — 0 != null is true), unlike the dur path which uses !! (line 144, which would drop dur:0 — a pre-existing inconsistency not introduced by this fix). A test with split_ordinal:0 would prove the fix's guard is correctly stricter than the dur guard. (c) split_total changed without split_ordinal."
+    },
+    {
+      "id": "Z6",
+      "severity": "INFO",
+      "description": "Test is self-contained with proper cleanup. USER_ID 'w1-split-case-user' is namespaced. beforeAll cleans + inserts user. beforeEach resets task_instances/task_masters per test (no cross-test pollution). afterAll calls cleanup() + db.destroy(). The db.destroy() could theoretically affect parallel test files if they share the ../src/db singleton, but Jest worker isolation (separate process per file) makes this safe in practice. No test pollution observed."
+    },
+    {
+      "id": "Z7",
+      "severity": "INFO",
+      "description": "The 'if (!available) return' guard at the top of each test is effectively dead code. assertDbAvailable() throws TEST-FR-001 if the DB is down, causing beforeAll to reject, which makes Jest fail all tests in the suite — the guard never executes. Not harmful, but redundant given the assertDbAvailable contract."
+    }
+  ],
+  "proof_checklist": {
+    "test_audited": true,
+    "mutation_proof_verified": true,
+    "coverage_gaps_checked": true,
+    "edge_cases_checked": true
+  },
+  "summary": "IT-SPLIT-a is a valid integration test that correctly exercises the batched-CASE path (the fix target) and serves as a legitimate mutation proof — removing the split_ordinal/split_total CASE branches causes split_ordinal to stay at its seeded value. However, IT-SPLIT-b does NOT exercise the fix: it routes to the per-row otherUpdates path (no dur/scheduled_at in the delta), which has always handled split fields via splitUpdateFields/INSTANCE_UPDATE_FIELDS. The claim that reverting the fix makes 'both tests FAIL' is likely inaccurate for IT-SPLIT-b — it should still pass with the fix reverted. Three meaningful coverage gaps exist: (1) scheduled_at+split without dur (routes to batched path via scheduled_at, untested), (2) multi-row delta (the real batched use case, untested — both tests send single-row deltas), (3) edge values like split_ordinal:0 and mixed null/non-null split fields. The fix code itself is correct — the != null guard is stricter than the legacy !! guard on dur, and the CASE branches are independent of the dur CASE. Test hygiene is good (namespaced user, per-test reset, proper cleanup). Status WARN: the fix is proven by IT-SPLIT-a, but the mutation-proof claim is overstated and the batched path's multi-row and scheduled_at-triggered shapes are untested."
+}

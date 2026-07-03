@@ -1,0 +1,124 @@
+{
+  "$contract": "size-classify/v1",
+  "mode": "bugfix",
+  "recommended": {
+    "lane": "full",
+    "depth": "deep",
+    "test_depth": "cross-service"
+  },
+  "mode_hint": {
+    "suggested": null,
+    "matched": [
+      "bugfix",
+      "new"
+    ],
+    "agrees_with_input": null
+  },
+  "size": {
+    "total": 184,
+    "method": "added-lines",
+    "confidence": "high"
+  },
+  "risky": true,
+  "surfaces": [
+    "cross-service"
+  ],
+  "triggers": {
+    "security_surface": false,
+    "infra_surface": false,
+    "frontend": false,
+    "data_migration": false,
+    "code_surface": true,
+    "docs_only": false,
+    "interface_change": false
+  },
+  "prior_art": [
+    {
+      "keyword": "split_ordinal",
+      "git_log_hits": 6,
+      "git_log_sample": [
+        "596a008 fix(scheduler): add split_ordinal/split_total CASE branches to writeChanged + INSTANCE_UPDATE_FIELDS (999.1019)",
+        "baa7ead fix(task): toggle-off recurring at (1,1) no longer 500s — correct ordinal conflict target (leg fixy-l3followup-ordinal)",
+        "3fff701 test: add SC-36 + SC-37 to schedulerPersistIntegration — deps + split chunks"
+      ],
+      "grep_hits": 126,
+      "grep_sample": [
+        ".planning/juggler-code-review-C-AUDIT.md",
+        ".planning/phases/11-migrate-rigid-to-placementMode/11-02-SUMMARY.md",
+        ".planning/phases/juggler-code-review/baseline/eslint-unused-backend.json",
+        "docs/TASK-SETTINGS-TREE.md",
+        "docs/TEST-SPECS-ADVERSARIAL-GAPS-3.md"
+      ],
+      "backlog_closed_hit": false
+    },
+    {
+      "keyword": "split_total",
+      "git_log_hits": 4,
+      "git_log_sample": [
+        "596a008 fix(scheduler): add split_ordinal/split_total CASE branches to writeChanged + INSTANCE_UPDATE_FIELDS (999.1019)",
+        "50a9410 fix(scheduler): persist split chunks as separate rows, no merge-delete (999.841 increment 1)",
+        "3fff701 test: add SC-36 + SC-37 to schedulerPersistIntegration — deps + split chunks"
+      ],
+      "grep_hits": 122,
+      "grep_sample": [
+        ".planning/juggler-code-review-C-AUDIT.md",
+        ".planning/phases/11-migrate-rigid-to-placementMode/11-02-SUMMARY.md",
+        ".planning/phases/juggler-code-review/baseline/eslint-unused-backend.json",
+        "docs/TASK-SETTINGS-TREE.md",
+        "docs/TEST-SPECS-ADVERSARIAL-GAPS-3.md"
+      ],
+      "backlog_closed_hit": false
+    },
+    {
+      "keyword": "writeChanged",
+      "git_log_hits": 4,
+      "git_log_sample": [
+        "596a008 fix(scheduler): add split_ordinal/split_total CASE branches to writeChanged + INSTANCE_UPDATE_FIELDS (999.1019)",
+        "390c1b4 refactor(juggler): scheduler H7 carry — dedupe hasWeatherConstraint + route unscheduled-flag write through port (leg 999.941)",
+        "36edf79 refactor(juggler): H6 W3 — RunScheduleCommand orchestration + P1 migration (JUG-HEX-H6)"
+      ],
+      "grep_hits": 34,
+      "grep_sample": [
+        ".planning/kermit/archive/juggler-hex-h6-scheduler/ARCH-REVIEW.md",
+        ".planning/kermit/archive/juggler-hex-h6-scheduler/SECURITY-REVIEW.md",
+        ".planning/kermit/archive/juggler-hex-h6-scheduler/WBS-juggler-hex-h6-scheduler.md",
+        ".planning/kermit/archive/juggler-hex-h6-scheduler/WBS-source.md",
+        ".planning/kermit/archive/juggler-hex-h6-scheduler/leg-dir/INTAKE-BRIEF.json"
+      ],
+      "backlog_closed_hit": false
+    },
+    {
+      "keyword": "KnexScheduleRepository",
+      "git_log_hits": 3,
+      "git_log_sample": [
+        "596a008 fix(scheduler): add split_ordinal/split_total CASE branches to writeChanged + INSTANCE_UPDATE_FIELDS (999.1019)",
+        "36edf79 refactor(juggler): H6 W3 — RunScheduleCommand orchestration + P1 migration (JUG-HEX-H6)",
+        "4c6c9c5 refactor(juggler): H6 W2 — scheduler ports+adapters + delta-write (JUG-HEX-H6)"
+      ],
+      "grep_hits": 39,
+      "grep_sample": [
+        ".planning/docs-sync/DOCS-SYNC-REPORT.md",
+        ".planning/kermit/archive/juggler-hex-h6-scheduler/ARCH-REVIEW.md",
+        ".planning/kermit/archive/juggler-hex-h6-scheduler/SECURITY-REVIEW.md",
+        ".planning/kermit/archive/juggler-hex-h6-scheduler/TEST-REVIEW.md",
+        ".planning/kermit/archive/juggler-hex-h6-scheduler/WBS-juggler-hex-h6-scheduler.md"
+      ],
+      "backlog_closed_hit": false
+    },
+    {
+      "keyword": "CASE branch",
+      "git_log_hits": 1,
+      "git_log_sample": [
+        "596a008 fix(scheduler): add split_ordinal/split_total CASE branches to writeChanged + INSTANCE_UPDATE_FIELDS (999.1019)"
+      ],
+      "grep_hits": 2,
+      "grep_sample": [
+        "juggler-backend/src/slices/scheduler/adapters/KnexScheduleRepository.js",
+        "juggler-backend/tests/w1-split-ordinal-case.integration.test.js"
+      ],
+      "backlog_closed_hit": false
+    }
+  ],
+  "rationale": "risky surface present — full lane, depth floored >= standard (never trivial/quick)",
+  "ts": "2026-07-02T22:30:09Z"
+}

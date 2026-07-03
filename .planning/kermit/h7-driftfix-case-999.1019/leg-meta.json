@@ -1,0 +1,33 @@
+{
+  "leg_id": "h7-driftfix-case-999.1019",
+  "backlog_id": "999.1019",
+  "mode": "bugfix",
+  "lane": "full",
+  "depth": "standard",
+  "test_depth": "service",
+  "branch": "leg/h7-driftfix-case-999.1019",
+  "project_root": ".",
+  "scope": ["juggler-backend"],
+  "wbs_files": [
+    "juggler-backend/src/lib/tasks-write.js",
+    "juggler-backend/src/slices/scheduler/adapters/KnexScheduleRepository.js",
+    "juggler-backend/tests/w1-split-ordinal-case.integration.test.js"
+  ],
+  "triggers": {
+    "security_surface": false,
+    "infra_surface": false,
+    "frontend": false,
+    "data_migration": false,
+    "code_surface": true,
+    "docs_only": false,
+    "interface_change": false
+  },
+  "risky": true,
+  "surfaces": ["cross-service"],
+  "size_total": 184,
+  "size_method": "added-lines",
+  "size_confidence": "high",
+  "intent": "Fix 999.1019: split_ordinal/split_total CASE branches missing from KnexScheduleRepository.writeChanged batched path — drift-fix deltas would silently drop split-chunk metadata",
+  "verdict": null,
+  "opened": "2026-07-02T22:30:00Z"
+}

@@ -74,7 +74,7 @@ var INSTANCE_UPDATE_FIELDS = [
   'scheduled_at', 'dur',
   'date', 'day', 'time',
   'status', 'time_remaining', 'unscheduled', 'overdue', 'generated',
-  'split_group',
+  'split_ordinal', 'split_total', 'split_group',
   // juggler-cal-history Plan A/C: completed_at column on task_instances.
   'completed_at',
   // DB-single-source (W1): scheduler persists the per-instance unplaced reason

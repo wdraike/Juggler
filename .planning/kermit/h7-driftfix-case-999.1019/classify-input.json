@@ -1,0 +1,15 @@
+{
+  "mode": "bugfix",
+  "project_root": ".",
+  "base_ref": "09b2b4e",
+  "files": [
+    "juggler-backend/src/lib/tasks-write.js",
+    "juggler-backend/src/slices/scheduler/adapters/KnexScheduleRepository.js",
+    "juggler-backend/tests/w1-split-ordinal-case.integration.test.js"
+  ],
+  "added_lines": 184,
+  "acceptance_criteria": null,
+  "new_files": 1,
+  "wbs_text": "Fix 999.1019: split_ordinal/split_total CASE branches missing from KnexScheduleRepository.writeChanged batched path. Add split_ordinal/split_total to INSTANCE_UPDATE_FIELDS. Add CASE branches mirroring dur pattern. Integration test proves drift-fix delta persists all three columns.",
+  "intent_keywords": ["split_ordinal", "split_total", "writeChanged", "KnexScheduleRepository", "CASE branch"]
+}

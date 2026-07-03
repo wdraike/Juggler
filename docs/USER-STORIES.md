@@ -255,7 +255,7 @@ service: juggler
 - The scheduler inserts travel time between consecutive tasks at different locations
 - I can see current weather conditions and forecasts for my locations
 - I can set a task to "dry weather only" and the scheduler skips rainy time slots
-- When weather data is unavailable, weather-constrained tasks are flagged rather than placed blindly
+- When weather data is unavailable, weather-constrained tasks are NOT placed (fail-closed per R38.1) and flagged with `_unplacedReason: "weather_unavailable"`
 
 **Mapped requirements:** R20.1–R20.4, R25.1–R25.5, R27.1–R27.3, R38.1–R38.4
 
