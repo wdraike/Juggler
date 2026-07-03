@@ -136,8 +136,10 @@ shape). Three binding invariants:
 | `deleteTasksWhere(userId, applyWhere)` | Bulk delete via where-builder (merged-out chunk cleanup). Returns rows removed. |
 | `backfillRollingAnchorIfNull(masterId, userId, anchor)` | Set `task_masters.rolling_anchor` ONLY when currently NULL (rolling-anchor backfill). Returns rows updated (0 or 1). |
 | `now()` | DB clock (`SELECT NOW(3)`) for placement-cache `generatedAt`. Returns a JS Date. |
+| `getScheduleCache(userId)` | Read the `user_config.schedule_cache` placement blob (legacy cal-sync read). Returns the raw row or `null`. |
+| `upsertScheduleCache(userId, cacheJson)` | Upsert the `user_config.schedule_cache` placement blob (update if exists, insert if not — legacy runSchedule upsert). Returns void. |
 
-Contract method list: `['writeChanged', 'deleteTasksWhere', 'backfillRollingAnchorIfNull', 'now']`
+Contract method list: `['writeChanged', 'deleteTasksWhere', 'backfillRollingAnchorIfNull', 'now', 'getScheduleCache', 'upsertScheduleCache']`
 
 ### WeatherProviderPort
 

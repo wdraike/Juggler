@@ -238,6 +238,27 @@ KnexScheduleRepository.prototype.now = async function now() {
   return new Date(String(_dbNow).replace(' ', 'T') + 'Z');
 };
 
+/**
+ * Read the schedule_cache blob from user_config (legacy placement cache read,
+ * cal-sync.controller.js ~524). Returns the raw row or null.
+ */
+KnexScheduleRepository.prototype.getScheduleCache = async function getScheduleCache(userId) {
+  return this.db('user_config').where({ user_id: userId, config_key: 'schedule_cache' }).first();
+};
+
+/**
+ * Upsert the schedule_cache blob into user_config (legacy runSchedule.js:2428-2433).
+ * Update if the row exists, insert if it does not. Identical semantics.
+ */
+KnexScheduleRepository.prototype.upsertScheduleCache = async function upsertScheduleCache(userId, cacheJson) {
+  var existing = await this.db('user_config').where({ user_id: userId, config_key: 'schedule_cache' }).first();
+  if (existing) {
+    await this.db('user_config').where({ user_id: userId, config_key: 'schedule_cache' }).update({ config_value: cacheJson });
+  } else {
+    await this.db('user_config').insert({ user_id: userId, config_key: 'schedule_cache', config_value: cacheJson });
+  }
+};
+
 module.exports = KnexScheduleRepository;
 module.exports.KnexScheduleRepository = KnexScheduleRepository;
 module.exports.SCHEDULE_REPOSITORY_PORT_METHODS = SCHEDULE_REPOSITORY_PORT_METHODS;

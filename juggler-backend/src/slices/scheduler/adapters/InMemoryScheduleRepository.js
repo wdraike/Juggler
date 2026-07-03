@@ -103,6 +103,15 @@ InMemoryScheduleRepository.prototype.now = async function now() {
   return this.clock.now();
 };
 
+InMemoryScheduleRepository.prototype.getScheduleCache = async function getScheduleCache(userId) {
+  return this._scheduleCache && this._scheduleCache[userId] ? this._scheduleCache[userId] : null;
+};
+
+InMemoryScheduleRepository.prototype.upsertScheduleCache = async function upsertScheduleCache(userId, cacheJson) {
+  if (!this._scheduleCache) this._scheduleCache = {};
+  this._scheduleCache[userId] = { user_id: userId, config_key: 'schedule_cache', config_value: cacheJson };
+};
+
 module.exports = InMemoryScheduleRepository;
 module.exports.InMemoryScheduleRepository = InMemoryScheduleRepository;
 module.exports.SCHEDULE_REPOSITORY_PORT_METHODS = SCHEDULE_REPOSITORY_PORT_METHODS;

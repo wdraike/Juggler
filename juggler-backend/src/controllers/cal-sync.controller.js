@@ -23,6 +23,8 @@ var { acquireLock, releaseLock, refreshLock } = require('../lib/sync-lock');
 var { flushQueueInLock } = require('../lib/task-write-queue');
 var { PLACEMENT_MODES } = require('../lib/placementModes');
 var { isTerminalStatus } = require('../lib/task-status');
+// H7 (999.1020): route schedule_cache read through ScheduleRepositoryPort
+var KnexScheduleRepository = require('../slices/scheduler/adapters/KnexScheduleRepository');
 var { isAllDayTaskBackend } = require('../lib/isAllDayTaskBackend');
 var { handleTerminalTaskSync } = require('../lib/cal-sync-helpers');
 const { createLogger } = require('@raike/lib-logger');
@@ -521,7 +523,9 @@ async function sync(req, res) {
     // Index each individual placement by taskId+scheduledAtUtc so we can match
     // a task to its SPECIFIC placement (not the sum of all placements).
     var placementsByTaskId = {}; // { taskId: [{ start, dur, dateKey, scheduledAtUtc }] }
-    var cacheRow = await getDb()('user_config').where({ user_id: userId, config_key: 'schedule_cache' }).first();
+    // H7 (999.1020): route through ScheduleRepositoryPort.getScheduleCache
+    var _schedRepo = new KnexScheduleRepository({ db: getDb() });
+    var cacheRow = await _schedRepo.getScheduleCache(userId);
     if (cacheRow) {
       try {
         var cache = typeof cacheRow.config_value === 'string' ? JSON.parse(cacheRow.config_value) : cacheRow.config_value;

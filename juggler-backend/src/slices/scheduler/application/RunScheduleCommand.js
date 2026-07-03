@@ -156,5 +156,26 @@ RunScheduleCommand.prototype.clockNow = function clockNow() {
   return this.clock.now();
 };
 
+/**
+ * Read the schedule_cache blob (delegates to the repository's getScheduleCache).
+ * @param {Function} trx caller's transaction handle.
+ * @param {string} userId tenant scope.
+ * @returns {Promise<Object|null>} the user_config row or null.
+ */
+RunScheduleCommand.prototype.getScheduleCache = function getScheduleCache(trx, userId) {
+  return this._repo(trx).getScheduleCache(userId);
+};
+
+/**
+ * Upsert the schedule_cache blob (delegates to the repository's upsertScheduleCache).
+ * @param {Function} trx caller's transaction handle.
+ * @param {string} userId tenant scope.
+ * @param {string} cacheJson JSON.stringify'd placement cache.
+ * @returns {Promise<void>}
+ */
+RunScheduleCommand.prototype.upsertScheduleCache = function upsertScheduleCache(trx, userId, cacheJson) {
+  return this._repo(trx).upsertScheduleCache(userId, cacheJson);
+};
+
 module.exports = RunScheduleCommand;
 module.exports.RunScheduleCommand = RunScheduleCommand;
