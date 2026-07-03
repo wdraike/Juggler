@@ -399,6 +399,69 @@ describe('F4 — partially-placed split keeps the unplaced remainder visible', (
 });
 
 // ===========================================================================
+// F4-DUR (999.1060) — merged unplaced split chunks show combined remaining
+// duration, not just the first chunk's dur. DailyView.jsx:289-298 groups
+// N unplaced chunks of one split into a single entry; the entry must carry
+// _unplacedTotalDur = sum of all chunks' dur so DailyViewUnschedEntry.jsx:88
+// shows the total (e.g. "1.3h" for 30+45=75min, not "30m").
+// ===========================================================================
+describe('F4-DUR (999.1060) — merged unplaced split entry shows combined duration', () => {
+  var FUTURE_KEY = '2031-04-02';
+  var FUTURE_DATE = new Date('2031-04-02T12:00:00');
+
+  test('2 unplaced chunks of same split: merged entry shows summed duration (75m → 1.3h), not first chunk dur (30m)', () => {
+    var chunkA = {
+      id: 'chunkA', sourceId: 'SPLIT-DUR', date: FUTURE_KEY, text: 'Write thesis',
+      dur: 30, splitTotal: 2, _unplacedReason: 'no_slot', unscheduled: true
+    };
+    var chunkB = {
+      id: 'chunkB', sourceId: 'SPLIT-DUR', date: FUTURE_KEY, text: 'Write thesis',
+      dur: 45, splitTotal: 2, _unplacedReason: 'no_slot', unscheduled: true
+    };
+
+    render(
+      <DailyView
+        {...baseDailyViewProps({
+          selectedDate: FUTURE_DATE,
+          selectedDateKey: FUTURE_KEY,
+          placements: [],
+          allTasks: [chunkA, chunkB],
+          statuses: {},
+          unplacedIds: new Set(['chunkA', 'chunkB'])
+        })}
+      />
+    );
+
+    // The merged entry must show 1.3h (75min total = 30+45),
+    // NOT 30m (first chunk's dur only). The 1.3h label proves _unplacedTotalDur
+    // was summed and displayed; the old code would have shown 30m here.
+    expect(screen.getByText('1.3h')).toBeTruthy();
+  });
+
+  test('single unplaced chunk (no grouping): shows its own dur, no _unplacedTotalDur', () => {
+    var solo = {
+      id: 'solo1', date: FUTURE_KEY, text: 'Solo task',
+      dur: 20, unscheduled: true
+    };
+
+    render(
+      <DailyView
+        {...baseDailyViewProps({
+          selectedDate: FUTURE_DATE,
+          selectedDateKey: FUTURE_KEY,
+          placements: [],
+          allTasks: [solo],
+          statuses: {},
+          unplacedIds: new Set(['solo1'])
+        })}
+      />
+    );
+
+    expect(screen.getByText('20m')).toBeTruthy();
+  });
+});
+
+// ===========================================================================
 // F10 (REG-49) — Issues badge must not double-count a row that is BOTH
 // overdue AND unplaced. conflictBuckets.js sums bucket lengths, so a row
 // present in both `overdue` and the `unplaced` list is counted twice.
