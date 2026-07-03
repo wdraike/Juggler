@@ -14,7 +14,7 @@ export function useTaskEditFormSave({
   recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd,
   placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax,
   weatherHumidityMin, weatherHumidityMax, activeTimezone, onUpdate, onRecurDayConflict,
-  onClose, onCreate, endTimeError, setEndTimeError
+  onClose, onCreate, endTimeError, _setEndTimeError
 }) {
   var [saveStatus, setSaveStatus] = useState(null);
   var [saveError, setSaveError] = useState(null);
