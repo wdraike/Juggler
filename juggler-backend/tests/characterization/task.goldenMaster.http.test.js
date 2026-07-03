@@ -710,24 +710,52 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
       expect(res.body.task.status).toBe('done');
     });
 
-    test('B4 + Surface 4: terminal status requires scheduled_at', async () => {
+    // revised leg sched-audit 2026-07-02: reject-400 superseded by D-B resolve-in-place
+    // ruling (snap-then-write) — see bert REFER db-guard-8 (DB-GUARD-bert-REVIEW.json)
+    // + UpdateTaskStatus.js:154-171. This is a characterization ("golden master")
+    // test — the pinned value itself changed by design per D-B, so this is a
+    // deliberate re-baseline, not a silent drift. A terminal write on an unscheduled
+    // row now SUCCEEDS (200) with scheduled_at snapped to ~now.
+    //
+    // Queue accounting for the FULL success path (vs. the old early-400-return,
+    // which only consumed the first 3 slots): the guard's own loadMaster() fires
+    // (because !existing.scheduled_at), AND applyRollingAnchor's own getMasterById()
+    // fires separately afterward (because the guard's null result is falsy, so it
+    // does not reuse `preloadedMaster` — facade.js:526-527) — two master-table
+    // reads, not one. recordAction (999.681 undo log) then runs before the write.
+    test('B4 + Surface 4: terminal status without scheduled_at → 200, scheduled_at snapped to ~now', async () => {
       const existing = makeTaskRow({
         id: 'task-st-003',
         scheduled_at: null,
         status: ''
       });
-      resolveQueue.push(existing);
-      resolveQueue.push([]);
-      // rolling-master check
-      resolveQueue.push(null);
+      resolveQueue.push(existing);   // 1. existing fetchTaskWithEventIds tasks_v first()
+      resolveQueue.push([]);         // 2. existing fetchTaskWithEventIds ledger select()
+      resolveQueue.push(null);       // 3. guard's own loadMaster() task_masters first() — non-rolling
+      resolveQueue.push(1);          // 4. action_log delete (recordAction, prior entry)
+      resolveQueue.push([1]);        // 5. action_log insert (recordAction)
+      resolveQueue.push(null);       // 6. applyRollingAnchor's own getMasterById() — non-rolling
+      resolveQueue.push({ ...existing, status: 'done' }); // 7. post-update fetchTaskWithEventIds tasks_v first()
+      resolveQueue.push([]);         // 8. post-update fetchTaskWithEventIds ledger select()
+      resolveQueue.push([]);         // 9. srcMap tasks_v select() (getRecurringTemplateRows)
 
+      const before = Date.now();
       const res = await request(app)
         .put('/api/tasks/task-st-003/status')
         .set('Authorization', `Bearer ${VALID_TOKEN}`)
         .send({ status: 'done' });
+      const after = Date.now();
 
-      expect(res.status).toBe(400);
-      expect(res.body).toHaveProperty('code', 'SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS');
+      expect(res.status).toBe(200);
+      expect(res.body.task.status).toBe('done');
+
+      const tasksWrite = require('../../src/lib/tasks-write');
+      const updateCall = tasksWrite.updateTaskById.mock.calls[0];
+      expect(updateCall).toBeDefined();
+      const fields = updateCall[2];
+      expect(fields.scheduled_at).toBeTruthy();
+      expect(fields.scheduled_at.getTime()).toBeGreaterThanOrEqual(before - 5000);
+      expect(fields.scheduled_at.getTime()).toBeLessThanOrEqual(after + 5000);
     });
 
     test('B4 + Surface 4: status=missed is rejected (invalid status)', async () => {

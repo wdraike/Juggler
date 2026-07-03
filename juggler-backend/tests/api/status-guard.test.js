@@ -2,9 +2,9 @@
  * juggler-cal-history Plan C — scheduled_at-required guard for terminal transitions.
  *
  * Asserts:
- *   - PUT /api/tasks/:id/status with status='done' on unscheduled task returns 400 + code
- *     SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS
- *   - Same for 'skip' and 'cancel'
+ *   - PUT /api/tasks/:id/status with status='done'/'skip'/'cancel' on an unscheduled
+ *     task SUCCEEDS (200) with scheduled_at snapped to ~now (revised leg sched-audit
+ *     2026-07-02: reject-400 superseded by D-B resolve-in-place ruling (snap-then-write))
  *   - 'wip' (non-terminal) on unscheduled task is allowed (no guard)
  *   - User-supplied 'missed' rejected with 400 (invalid status — 'missed' is no longer a valid status)
  *   - Recurring template + 'pause' is allowed regardless of scheduled_at
@@ -114,35 +114,67 @@ function seedExisting(task) {
   // additional select() for srcMap returns []
 }
 
+// revised leg sched-audit 2026-07-02: the D-B snap-then-write contract means the
+// unscheduled-terminal-status write no longer short-circuits at the guard — it
+// runs the FULL success path, which calls fetchTaskWithEventIds TWICE (initial
+// `existing` read, then the post-write `updated` re-read at UpdateTaskStatus.js:268).
+// Each fetchTaskWithEventIds call itself pops TWO queue entries (tasks_v .first()
+// + cal_sync_ledger .select()) — so a full round-trip needs 4 queued entries, not 2.
+function seedExistingFullRoundtrip(task) {
+  resolveQueue.push(task); // 1st fetchTaskWithEventIds → tasks_v.first() → existing
+  resolveQueue.push(task); // 1st fetchTaskWithEventIds → cal_sync_ledger.select()
+  resolveQueue.push(task); // 2nd fetchTaskWithEventIds (post-write re-read) → tasks_v.first()
+  resolveQueue.push(task); // 2nd fetchTaskWithEventIds (post-write re-read) → cal_sync_ledger.select()
+}
+
 describe('PUT /api/tasks/:id/status — juggler-cal-history Plan C scheduled_at guard', () => {
-  test('rejects done with 400 when scheduled_at is null', async () => {
-    seedExisting({ id: 'task-1', user_id: TEST_USER.id, task_type: 'task', status: '', scheduled_at: null });
+  // revised leg sched-audit 2026-07-02: reject-400 superseded by D-B resolve-in-place
+  // ruling (snap-then-write) — an unscheduled one-off/non-rolling terminal write now
+  // SUCCEEDS with scheduled_at snapped to ~now, instead of being rejected with 400.
+  // See bert REFER db-guard-4 (DB-GUARD-bert-REVIEW.json) + UpdateTaskStatus.js:154-171.
+  test('snaps scheduled_at + succeeds (200) for done when scheduled_at is null (was: rejects with 400)', async () => {
+    seedExistingFullRoundtrip({ id: 'task-1', user_id: TEST_USER.id, task_type: 'task', status: '', scheduled_at: null });
+    const before = Date.now();
     const res = await request(app)
       .put('/api/tasks/task-1/status')
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
       .send({ status: 'done' });
-    expect(res.status).toBe(400);
-    expect(res.body.code).toBe('SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS');
+    const after = Date.now();
+    expect(res.status).toBe(200);
+    const snapWrite = updateCalls.find(u => u && u.scheduled_at !== undefined);
+    expect(snapWrite).toBeTruthy();
+    expect(snapWrite.scheduled_at.getTime()).toBeGreaterThanOrEqual(before - 5000);
+    expect(snapWrite.scheduled_at.getTime()).toBeLessThanOrEqual(after + 5000);
   });
 
-  test('rejects skip with 400 when scheduled_at is null', async () => {
-    seedExisting({ id: 'task-2', user_id: TEST_USER.id, task_type: 'task', status: '', scheduled_at: null });
+  test('snaps scheduled_at + succeeds (200) for skip when scheduled_at is null (was: rejects with 400)', async () => {
+    seedExistingFullRoundtrip({ id: 'task-2', user_id: TEST_USER.id, task_type: 'task', status: '', scheduled_at: null });
+    const before = Date.now();
     const res = await request(app)
       .put('/api/tasks/task-2/status')
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
       .send({ status: 'skip' });
-    expect(res.status).toBe(400);
-    expect(res.body.code).toBe('SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS');
+    const after = Date.now();
+    expect(res.status).toBe(200);
+    const snapWrite = updateCalls.find(u => u && u.scheduled_at !== undefined);
+    expect(snapWrite).toBeTruthy();
+    expect(snapWrite.scheduled_at.getTime()).toBeGreaterThanOrEqual(before - 5000);
+    expect(snapWrite.scheduled_at.getTime()).toBeLessThanOrEqual(after + 5000);
   });
 
-  test('rejects cancel with 400 when scheduled_at is null', async () => {
-    seedExisting({ id: 'task-3', user_id: TEST_USER.id, task_type: 'task', status: '', scheduled_at: null });
+  test('snaps scheduled_at + succeeds (200) for cancel when scheduled_at is null (was: rejects with 400)', async () => {
+    seedExistingFullRoundtrip({ id: 'task-3', user_id: TEST_USER.id, task_type: 'task', status: '', scheduled_at: null });
+    const before = Date.now();
     const res = await request(app)
       .put('/api/tasks/task-3/status')
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
       .send({ status: 'cancel' });
-    expect(res.status).toBe(400);
-    expect(res.body.code).toBe('SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS');
+    const after = Date.now();
+    expect(res.status).toBe(200);
+    const snapWrite = updateCalls.find(u => u && u.scheduled_at !== undefined);
+    expect(snapWrite).toBeTruthy();
+    expect(snapWrite.scheduled_at.getTime()).toBeGreaterThanOrEqual(before - 5000);
+    expect(snapWrite.scheduled_at.getTime()).toBeLessThanOrEqual(after + 5000);
   });
 
   test('allows wip on unscheduled task (non-terminal not gated)', async () => {

@@ -97,14 +97,28 @@ describe('UpdateTaskStatus (updateTaskStatus)', function () {
     });
   });
 
-  test('terminal status without scheduled_at → 400 SCHEDULE_REQUIRED', function () {
+  // revised leg sched-audit 2026-07-02: reject-400 superseded by D-B resolve-in-place
+  // ruling (snap-then-write) — a terminal write on an unscheduled row now SUCCEEDS
+  // with scheduled_at snapped to ~now, instead of being rejected. See bert REFER
+  // db-guard-5 (DB-GUARD-bert-REVIEW.json) + UpdateTaskStatus.js:154-171.
+  test('terminal status without scheduled_at → 200, scheduled_at snapped to ~now (was: 400 SCHEDULE_REQUIRED)', function () {
     var repo = new InMemoryTaskRepository({ rows: [
       { id: 'ns1', user_id: USER, task_type: 'task', status: '', scheduled_at: null, updated_at: new Date() }
     ] });
     var uc = new UpdateTaskStatus(statusDeps(repo, H.makeTriggerSpy(), H.makeEventsSpy()));
+    var before = Date.now();
     return uc.execute({ id: 'ns1', userId: USER, body: { status: 'done' } }).then(function (out) {
-      expect(out.status).toBe(400);
-      expect(out.body.code).toBe('SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS');
+      var after = Date.now();
+      expect(out.status).toBe(200);
+      expect(out.body.task.status).toBe('done');
+      return repo.fetchTaskWithEventIds('ns1', USER).then(function (r) {
+        expect(r.status).toBe('done');
+        expect(r.scheduled_at).toBeTruthy();
+        var snappedAt = new Date(r.scheduled_at).getTime();
+        expect(snappedAt).toBeGreaterThanOrEqual(before - 5000);
+        expect(snappedAt).toBeLessThanOrEqual(after + 5000);
+        expect(r.completed_at instanceof Date).toBe(true);
+      });
     });
   });
 
@@ -157,8 +171,9 @@ describe('UpdateTaskStatus (updateTaskStatus)', function () {
       expect(out.body.instancesUnpaused).toBe(2);
     });
   });
+});
 
-  // ── W5-2: triggerCalSync.sync spy (BLOCK gap closed) ─────────────────────────
+// ── W5-2: triggerCalSync.sync spy (BLOCK gap closed) ─────────────────────────
 describe('UpdateTaskStatus — triggerCalSync.sync called on skip/cancel of a cal-linked task (W5-2)', function () {
   test('skip on a task with gcal_event_id calls triggerCalSync.sync once', function () {
     // A future-scheduled task with a gcal link. skip/cancel + hasCalLink →

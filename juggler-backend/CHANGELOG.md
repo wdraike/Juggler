@@ -34,6 +34,37 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   (orphaned pre-v2 requirements register, superseded by `SCHEDULER-SPEC.md`/`REQUIREMENTS.md`). No
   code changes. Full per-file detail: `.planning/kermit/sched-audit/reviews/L1-DOCS-CHANGELOG.md`.
 
+- **Final sched-audit docs alignment — David's D-A/D-B/D-C rulings + REG-26 registered** (leg
+  sched-audit, L5, 2026-07-02): `docs/REQUIREMENTS.md` R50.1 gets a second amendment closing REG-12/Q1
+  (David's D-A ruling: a never-placed one-off with a real deadline now follows the SAME
+  pin-to-deadline/never-roll-forward rule juggy4 already gave recurring/split, `unifiedScheduleV2.js:
+  1479-1483,2670-2695` + `runSchedule.js:2118-2130`, `tests/scheduler/sched-audit-da-oneoff.test.js`
+  8/8 GREEN); 3 new sub-requirements registered — **R50.9** (D-B: Unscheduled-lane rows are resolvable
+  in place, done/skip/cancel enabled directly; frontend confirmed shipped, **a backend gap was found
+  during this verification pass and is NOT fixed here** — `UpdateTaskStatus.js`'s
+  `TERMINAL_REQUIRES_SCHEDULE` guard still 400s for any non-`rolling`-cadence unscheduled row, referred
+  to ernie/backlog), **R50.10** (D-C: force-placed rigid/FIXED slots now reserved against scheduler
+  intrusion, reminders coexist, rigid-vs-rigid explicit double-book still allowed, overdue rigid stays
+  pinned + listed — `unifiedScheduleV2.js:2590-2627`, closes REG-24/a3-02, `tests/scheduler/
+  sched-audit-dc-rigid.test.js` 8/8 GREEN), and **R50.11** (the previously-unregistered OVD-1..4
+  forward-roll subsystem, REG-17 — fully shipped, live product behavior; REG-26's roam-retry fix
+  folded in: `unifiedScheduleV2.js:1934-1978` scopes the Phase-3 dead-end to `!isFlexibleTpc` so
+  flexible-TPC items roam forward within their cycle instead of dead-ending, and
+  `computeEffectiveDeadline` (`runSchedule.js:235-241`) was flipped from `max()` to the locked `min()`,
+  closing the F9 doc↔code contradiction — `tests/scheduler/sched-audit-reg26-roam.test.js` +
+  `tests/unit/scheduler/effective-deadline.test.js` + `tests/scheduler/instance-date-rules.test.js`,
+  all GREEN as of 2026-07-02). Added an "OPEN QUESTIONS" subsection under R50 listing 4 still-unruled
+  empty cells A1 flagged (all_day+overdue, chain-member+overdue, weather-blocked+deadline-passed,
+  cal-sync-lock+overdue) — deliberately NOT authored as requirements pending David's ruling.
+  `docs/architecture/SCHEDULER-SPEC.md` §C (Overdue/Forward-Roll subsystem) reconciled to match: the
+  `min()` effective-deadline text was already correct (code was wrong, now fixed — no more doc↔code
+  contradiction to annotate); the OVD-1–OVD-4 entries and their WIP/OPEN-BLOCK statuses (stale since
+  the `60835fe` research pass) updated to IMPLEMENTED/CLOSED with a RESOLVED note preserving the
+  original research trace; the Phase-3 (missed-preferred-time) and Phase-6 (rigid-forced) sections
+  updated with the REG-26 re-present mechanism and the D-C reservation semantics respectively. No code
+  changes from this leg (docs-only; the code changes it documents were made by prior sched-audit
+  legs/bert runs, cited above). Full detail: `.planning/kermit/sched-audit/reviews/L5-DOCS-CHANGELOG.md`.
+
 ### Fixed
 
 - **Overdue recurring/split tasks no longer bunch/overlap on the grid** (leg juggy4, ROADMAP, 2026-07-02): the scheduler's Phase 4 (`missedWindowItems`) and Phase 5 (`pastAnchoredRecurrings`) rescue passes previously force-placed overdue recurring tasks straight onto the calendar with zero occupancy check, so two unrelated overdue tasks could land at the identical date+time and render as overlapping/bunched entries. Per David's product ruling, once a recurring or split task's flex window/anchor date has passed (it cannot move forward anymore), it now shows as **unscheduled-overdue, pinned to its deadline date** instead of being force-placed on the grid — never rolled forward. Overdue split-task chunks each persist as their own DB row (no merge/delete, per the existing separate-rows ruling); the calendar UI already merges same-master chunks into one visible entry. Fixed/ingested calendar events and rigid/fixed recurring tasks are unaffected — this only changes flexible/TIME_WINDOW recurring and split tasks once they go overdue.

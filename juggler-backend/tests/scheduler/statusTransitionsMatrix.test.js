@@ -31,6 +31,11 @@ const { mockClock, mockTimezone } = require('../../test-helpers/time');
 
 // Real controller — exercises the authoritative status-transition guard.
 const controller = require('../../src/controllers/task.controller');
+// telly fix (leg sched-audit 2026-07-03): knexfile `test` uses dateStrings:true —
+// scheduled_at reads back as a tz-less string; use the project's UTC-safe reparse
+// helper rather than a bare `new Date()` (the documented juggler dateStrings/
+// new-Date misparse trap).
+const { scheduledAtToISO } = require('../../src/slices/task/domain/mappers/taskMappers');
 
 // Test-helper rows are seeded under user_id '1' (see test-helpers/db.js).
 const HARNESS_USER_ID = '1';
@@ -399,14 +404,30 @@ describe('TS-329: status transitions verified through the real guard', () => {
     }
   });
 
-  it('Forbidden: terminal status without a scheduled time → 400 SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS', async () => {
-    // Seed an OPEN instance with NO scheduled_at.
+  // revised leg sched-audit 2026-07-02: reject-400 superseded by D-B resolve-in-place
+  // ruling (snap-then-write) — see bert REFER db-guard-7 (DB-GUARD-bert-REVIEW.json)
+  // + UpdateTaskStatus.js:154-171. A terminal write on an unscheduled instance now
+  // SUCCEEDS (200) with scheduled_at snapped to ~now, instead of being rejected.
+  // A FRESH instance is seeded per status (rather than reusing one instance across
+  // all three, as the original 400-path loop did) so each case starts from the
+  // same unscheduled-open precondition — done/skip/cancel are independent checks,
+  // not a sequential transition chain.
+  it('Snap-then-write: terminal status without a scheduled time → 200, scheduled_at snapped to ~now', async () => {
     const master = await createTask({ text: 'no-sched (master)', dur: 30, status: '' });
-    const instance = await createTask({ master_id: master.id, text: 'no-sched', dur: 30, status: '' });
     for (const term of ['done', 'skip', 'cancel']) {
+      const instance = await createTask({ master_id: master.id, text: 'no-sched-' + term, dur: 30, status: '' });
+      const before = Date.now();
       const res = await setStatusViaController(instance.id, term);
-      expect(res.statusCode).toBe(400);
-      expect(res._json.code).toBe('SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS');
+      const after = Date.now();
+      expect(res.statusCode).toBe(200);
+      expect(res._json.task.status).toBe(term);
+
+      const row = await getTasks({ id: instance.id });
+      expect(row.status).toBe(term);
+      expect(row.scheduled_at).toBeTruthy();
+      const snappedAt = new Date(scheduledAtToISO(row.scheduled_at)).getTime();
+      expect(snappedAt).toBeGreaterThanOrEqual(before - 5000);
+      expect(snappedAt).toBeLessThanOrEqual(after + 5000);
     }
   });
 

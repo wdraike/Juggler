@@ -30,7 +30,7 @@ where a fragment disagrees with the code, the **code + this doc win** and the fr
 |---------------------|-----------|-------------|---------|-------------------|--------------------------|
 | A — Placement engine | 23 | 22 | 1 | — | 3 doc-drift gaps (weather fail-open row RESOLVED 2026-07-02 — was already fail-closed in code, doc was stale; see [PLACE-WEATHER]) |
 | B — Recurring lifecycle | 24 | ~20 | ~2 | master/instance UPSERT redesign | 2 (dual-missed logic, delete-instance) + doc drift |
-| C — Overdue / forward-roll | 16 | 9 (main) | 2 | 999.801 reconcile | 3 WIP-ungated + 1 BLOCK on `60835fe` |
+| C — Overdue / forward-roll | 16 | 12 (main, was 9 — sched-audit 2026-07-02: OVD-1/2/3 gated) | 2 | 999.801 reconcile | 1 unrelated CONTRADICTED (`R50.6-windowclose`, out of sched-audit scope) — the prior "3 WIP-ungated + 1 BLOCK on `60835fe`" is CLOSED, see §C SUMMARY |
 | D — Persistence / read model | 21 | 18 | 2 (slack_mins, W4 cache) | W2 partition (NOT built) | 1 (slack_mins dropped) |
 | E — Calendar sync coupling | 19 | 16 | 1 | — | 1 known-bug (split-part) + contention |
 | F — In-flight / gaps | inventory | — | — | W2, W4, L4, 999.801 | ~25 untested sub-reqs |
@@ -224,11 +224,11 @@ The live placement core is **`src/scheduler/unifiedScheduleV2.js`** (2390 lines)
   - **Phase 0 — Immovables:** `fixed`, rigid-recurring-with-anchor, anchored markers → `tryPlaceAtTime` (`:803`). Exempt from reset. Pre-placed before the queue (`:1642+`).
   - **Phase 1 — Queue (main loop):** all other items, slack-sorted, `tryPlaceQueued` 4-level ladder (`:1835`+).
   - **Phase 2 — Retry:** items deferred for unmet deps (`_deferred`) get one retry pass (`:2131-2162`, `captureSnapshot('retry_done')` `:2162`).
-  - **Phase 3 — Missed preferred-time:** recurring non-TIME_WINDOW whose flex window passed → marked `missed`, unplaced.
+  - **Phase 3 — Missed preferred-time:** recurring non-TIME_WINDOW whose flex window passed → marked `missed`, unplaced. **AMENDED (leg sched-audit, REG-26, 2026-07-02):** this gate (`isMissedPreferredTime`, `unifiedScheduleV2.js:1934-1978`) previously dead-ended UNCONDITIONALLY for any matching recurring item — including flexible-TPC items still within their recurrence period, which should instead roam forward to a later in-cycle day (the OVD-2 mechanism, [OVD-2] under Section C). It is now scoped to `!isFlexibleTpc`: a day-locked recurring item is unaffected (still dead-ends here, per R32.7); a flexible-TPC item whose period has NOT ended is cleared (`anchorDate`/`anchorMin` reset) and re-presented to the placement queue instead, with `earliestStartDate` pinned to TOMORROW (excluding today's already-closed window from the re-presented search) and `deadlineDate` capped to the period's last valid day (`_periodEndCap=true`). See [OVD-2] in Section C for the full mechanism and its test coverage (`tests/scheduler/sched-audit-reg26-roam.test.js`).
   - **Phase 4 — Missed window:** TIME_WINDOW whose flex window is entirely past → routed to `unplaced` only, **never** grid-placed (`unifiedScheduleV2.js:2362-2378`). **SUPERSEDED (leg juggy4, 2026-07-02):** previously (when-block-anchor branch of commit `9bb62bb`) dual-placed on grid with `_overdue=true` **and also** listed unplaced, with no `dayOcc`/`reserveWithTravel` occupancy check — two unrelated overdue tasks could land at the identical date+start (repro in `.planning/kermit/juggy4/INTAKE-BRIEF.json`). Product ruling (David, 2026-07-02) now matches the pre-existing Phase 3 `missedPreferredTimeItems` precedent: no grid entry, period. Persisted end-state depends on the DB row's prior `scheduled_at` (`runSchedule.js:1907-1987` §8) — see the amended note on [PLACE-RECUR-NOROLL] below.
   - **Phase 5 — Past-anchored recurring:** recurring with `anchorDate < today` → routed to `unplaced` only, pinned to its own past anchor date, **never** grid-placed (`unifiedScheduleV2.js:2387-2398`). **SUPERSEDED (leg juggy4, 2026-07-02):** previously force-placed at a synthesized start (`paStart` falling back to `0` when neither `preferredTimeMins` nor `anchorMin` was set) with no occupancy check — same collision class as Phase 4's old behavior.
   - **Phase 4/5 overdue split chunks:** every incomplete chunk of an overdue split-task master routes through Phase 4/5 into `unplaced` **individually** — no scheduler-level collapse to one representative (`unifiedScheduleV2.js:2400-2425`, `overdueRescueItems.forEach → stillUnplaced.push`). A backend-side collapse (grouping by `masterId`, one representative row, summed `dur`) was attempted and **reverted** in the same leg (ernie E1 BLOCK: it silently dropped sibling chunks — `splitOrdinal>=2` — from `result.unplaced`, landing them in `scheduled_at=NULL`/`unscheduled=NULL` limbo, a NEVER-MISSING violation). Per-chunk DB rows are never merged/deleted (ruling 999.841). The "one displayed task" UX is achieved entirely at the **display** layer by the pre-existing `DailyView.jsx:282-288` grouping (`splitGroup`/`sourceId`+date, `_unplacedChunkCount` badge; moved from :995-1007 by the 999.965 DailyView decomposition — badge rendered in `DailyViewUnschedEntry.jsx`) — no scheduler or backend change was needed for that part. See [PLACE-SPLIT] below.
-  - **Phase 6 — Rigid forced:** still-unplaced fixed/rigid → force-placed at anchor with `_conflict=true, locked=true` (overlaps existing occupancy; last resort). **Unchanged by juggy4** — deliberately out of scope (Kermit determination log: David's ruling names recurring+split tasks only; Phase 6's deliberate-overlap design for rigid/fixed tasks is separate).
+  - **Phase 6 — Rigid forced:** still-unplaced fixed/rigid → force-placed at anchor with `_conflict=true, locked=true` (overlaps existing occupancy; last resort). **Unchanged by juggy4** — that leg's ruling named recurring+split tasks only; Phase 6's deliberate-overlap design for rigid/fixed tasks was separate. **AMENDED (leg sched-audit, D-C ruling, 2026-07-02, a3-02/REG-24):** the force-placement itself is unchanged (still overlaps existing occupancy against ANOTHER rigid/fixed force-place, by design — see below), but it now additionally **reserves** its own slot on the occupancy grid (`dayOcc`) so LATER scheduler-driven passes can no longer stack a flexible task on top of it. Semantics, per David's ruling: (1) **reserved vs. scheduler intrusion** — `reserveWithTravel(dayOcc[forceDate], forceStart, forceDur, 0, 0)` runs immediately after the force-place push (`unifiedScheduleV2.js:2625-2627`), guarded on `dayOcc[forceDate]` existing (a force-place onto a day outside the search horizon has no bucket to reserve into, and nothing unsearched can collide with it); this closes the hole where the immediately-following deadline-relaxed pass (`unifiedScheduleV2.js:2637-2668`) could otherwise read the force-placed minute as free and land a dependency-blocked flexible task on the identical `(dateKey, start)`. (2) **reminder-type items coexist** — a `placement_mode:'reminder'` item carries `dur=0` and never reaches this force-place branch (`isRigid`/FIXED only), so it is structurally unaffected either way (brain #80498). (3) **rigid-vs-rigid explicit double-book is still allowed** — a SECOND rigid/FIXED task force-placed at the identical slot (the user's own explicit choice) still force-places here unconditionally; this reservation only blocks a later SCHEDULER-CHOSEN placement, never another force-place in the same pass. (4) **overdue rigid stays at slot + overdue list** — an overdue rigid/FIXED force-place is flagged `_overdue=true` and remains at its own fixed slot (never moved to today); it is also picked up by the overdue-list read path (R50.1/R50.6) same as any other overdue row. **Code:** `unifiedScheduleV2.js:2590-2627`. **Tests:** `tests/scheduler/sched-audit-dc-rigid.test.js` (8/8 passing, live-verified 2026-07-02 — test 1: reservation vs. intrusion; test 2: reminder coexistence; test 3: overdue pin + mapper read; test 4: rigid-vs-rigid double-book control).
   - **Phase 7 — Deadline relaxed:** deadline ≤ today + unmet deps → placed ignoring deps + deadline (`relaxedEnv = {relaxDeps:true, ignoreDeadline:true}` `:2336-2339`) as the absolute last resort.
 - **Status:** IMPLEMENTED (authoritative model is SCHEDULER-RULES.md §3.1 / SCHEDULER-VISUAL.md §2)
 - **Tests:** **R11.5 "7-phase execution proof" has NO test** (SCHEDULER-TRACEABILITY-REPORT.md, P1). Per-phase behaviors covered piecemeal across `tests/scheduler/*`.
@@ -323,10 +323,10 @@ The live placement core is **`src/scheduler/unifiedScheduleV2.js`** (2390 lines)
   pass, not acted on here.
 
 ### [PLACE-OVERLAP] Overlap prevention, not eviction
-- **Code:** `dayOcc` occupancy grid blocks already-placed minutes; `isFreeWithTravel` skips occupied slots. No post-placement pile-up resolution. Phase 6 "Rigid forced" is the **only** path that deliberately overlaps (with `_conflict=true, locked=true`).
+- **Code:** `dayOcc` occupancy grid blocks already-placed minutes; `isFreeWithTravel` skips occupied slots. No post-placement pile-up resolution. Phase 6 "Rigid forced" is the **only** path that deliberately overlaps (with `_conflict=true, locked=true`) — and, since sched-audit's D-C fix, only overlaps ANOTHER rigid/fixed force-place (explicit user double-book); it now reserves its own slot against every OTHER (scheduler-driven) placement path. See Phase 6 under [PLACE-PHASES] above for the full D-C reservation semantics.
 - **Status:** IMPLEMENTED
-- **Tests:** `tests/schedulerScenarios.test.js`, golden-master suite
-- **Source:** SCHEDULER.md §5 (design decision 2026-04-27, GP-3/CL-2)
+- **Tests:** `tests/schedulerScenarios.test.js`, golden-master suite; `tests/scheduler/sched-audit-dc-rigid.test.js` (D-C reservation)
+- **Source:** SCHEDULER.md §5 (design decision 2026-04-27, GP-3/CL-2); David ruling D-C, 2026-07-02
 - **Notes:** Original spec described eviction; implementation chose prevention to avoid churn of user-confirmed placements.
 
 ### [PLACE-RECUR-NOROLL] Recurring past-due instances do NOT roll forward
@@ -339,6 +339,7 @@ The live placement core is **`src/scheduler/unifiedScheduleV2.js`** (2390 lines)
 - **Source:** SCHEDULER.md §8 Rule 2; SCHEDULER-RULES.md §4.3
 - **Notes:** Rationale: rolling forward double-books and erodes habit cadence. Recurring expansion horizon = `today + RECUR_EXPAND_DAYS` (14 days, `constants.js`); beyond-horizon pending instances are grandfathered.
 - **Still accurate after leg juggy4 (2026-07-02) — no-roll holds, but the destination lane changed for Phase 4/5:** this row's core claim ("no next-day attempt") was already true and remains true — juggy4 did not touch date-pinning. What changed is what "unplaced" *means* on persistence for the Phase 4/5 cases (`unifiedScheduleV2.js:2347-2425`), per `runSchedule.js:1907-1987` §8's existing 2-way split (unchanged by this leg): **(a)** if the instance's DB row already has a `scheduled_at` from a prior run, §8 preserves `scheduled_at`/`date` and writes `overdue=1` — pinned on the grid, NOT moved to the unscheduled lane (§8 case B, `:1940-1978`); **(b)** if the DB row's `scheduled_at` is still `NULL` (never yet placed), §8 writes `unscheduled=1` (with `overdue` following separately per the item's own past-due state) — the unscheduled lane, `date` still pinned to the instance's own anchor, never rolled forward (§8 case C-equivalent for recurring, `:1980-1984`). Pre-juggy4, the when-block-anchor branch of Phase 4 bypassed this §8 split entirely by writing straight into `dayPlacements` with a synthesized start and no occupancy check — that bypass is what's superseded, not the no-roll invariant itself. See also R50.1's amendment in `docs/REQUIREMENTS.md`.
+- **Extended to one-offs (leg sched-audit, D-A ruling, 2026-07-02):** this row is titled for RECURRING instances specifically; the SAME no-roll-forward, pin-to-own-deadline behavior now ALSO applies to plain (non-recurring, non-split) one-off tasks with a real deadline that never found a placement — see R50.1's SECOND AMENDMENT above (§C) and the new `R50.9`/`docs/REQUIREMENTS.md` R50.1 text. Distinct code path (`unifiedScheduleV2.js:1479-1483`/`:2670-2695`, `runSchedule.js:2118-2130`), same governing principle.
 
 ---
 
@@ -689,15 +690,44 @@ The framing of "MAIN vs WIP-branch-60835fe" needs one correction confirmed by `g
 So: the juggler submodule's *working tree* IS the WIP. "IMPLEMENTED(main)" below means present and gated at/before `505a09b`. "WIP(branch, ungated)" means added by `60835fe`, present in the working tree, but not gated/merged.
 All `file:line` cites are against the **`60835fe` working tree** unless noted.
 
+**RECONCILED (leg sched-audit, 2026-07-02).** The MAIN-vs-WIP-branch-`60835fe` framing above is now
+historical — `60835fe` gated, merged, and shipped past `leg juggy4` and `leg sched-audit`. Every entry
+below tagged `WIP(branch, ungated)` or `OPEN BLOCK` in this section (OVD-1, OVD-2, OVD-3, OVD-4) is
+now **IMPLEMENTED and gated on `leg/juggy4`** — independently confirmed by three audit lanes (A2 scenario
+walk-through, A3 code-adversarial trace, A4 executed-behavior probe; `AUDIT-REGISTER.md` §4
+"Verified-solid") with zero counterexample found. OVD-3's period-end-cap BLOCK (conditional cap,
+inclusive/exclusive mismatch) is CONFIRMED FIXED in code, not just re-asserted as a ruling. The
+individual entries below are left with their original WIP-era prose (so the historical trace stays
+intact) but each now carries a `RESOLVED` line — read those, not the stale `Status:` line, for current
+truth. R-number registration: OVD-1–OVD-4 are now `R50.11` in `docs/REQUIREMENTS.md` (previously
+un-numbered — REG-17). The persistence-sweep min()/max() effective-deadline defect referenced
+throughout this section (REG-26) is also fixed — see the `[R50.0]`/`min()` note just below.
+
 ---
 
 ## The three states (locked vocabulary)
 
 - **PLACED** — instance has a live `scheduled_at` slot within its effective deadline; `overdue=0/null`, `unscheduled=0`.
-- **UNSCHEDULED** — brand-new chunk (`scheduled_at` null) that could not be placed this run → `unscheduled=1`, shown in the Unplaced lane (`unplaced_reason`/`unplaced_detail`).
+- **UNSCHEDULED** — brand-new chunk (`scheduled_at` null) that could not be placed this run → `unscheduled=1`, shown in the Unplaced lane (`unplaced_reason`/`unplaced_detail`). **D-B (David ruling, 2026-07-02, leg sched-audit):** a row in this lane is resolvable IN PLACE — the user can mark it done/skip/cancel directly from the Unplaced/Unscheduled lane, without first giving it a `scheduled_at`. See `R50.9` in `docs/REQUIREMENTS.md` for the full ruling text, the frontend fix, and a documented backend gap this leg's doc-verification pass found (the `UpdateTaskStatus.js` server-side guard was not updated to match for non-`rolling`-recurrence-type instances or one-offs).
 - **OVERDUE** — past its effective deadline and incomplete; pinned (`overdue=1`, `unscheduled=0`, `scheduled_at`/`date` preserved). Terminal sibling: **missed** (status write, R32.4) once the period boundary itself passes.
 
 **Effective deadline** = `min(recurrence-period boundary, window-close)` (locked, David 2026-06-23, `juggler-overdue-reschedule/SPEC.md`).
+
+**VERIFIED MATCHES CODE (leg sched-audit, REG-26, 2026-07-02):** this text was always correct; the
+code disagreed with it (`runSchedule.js`'s persistence-sweep `computeEffectiveDeadline` computed
+`max(periodBoundary, windowClose)` — "De Morgan of original OR guards" per its own comment — the
+opposite of the locked min()). Fixed by flipping the comparison operator: `runSchedule.js:235-241`
+now returns `periodBoundary < windowClose ? periodBoundary : windowClose` (min), matching this line
+byte-for-byte; the header doc and sole call-site comment (`runSchedule.js:~2274`, was "AC-840-4:
+...max(...)", now "...min(...)") were updated in the same fix. There is no longer a doc↔code
+contradiction to annotate — the prior "F9" finding (`AUDIT-REGISTER.md` REG-26 / `A2-SCENARIO-
+COVERAGE.md` F9) is CLOSED, not merely re-asserted: `tests/unit/scheduler/effective-deadline.test.js`
+and `tests/scheduler/instance-date-rules.test.js` (a 5th, previously-unflagged consumer found via the
+fix's own call-site trace) both now assert min() and pass; `tests/scheduler/sched-audit-reg26-roam.test.js`
+REG26-4a/4b pin the min()-vs-max() distinction directly (live-verified 2026-07-02: 41/41 passing across
+these three files bar one unrelated pre-existing DB-integration failure in `instance-date-rules.test.js`
+— `R8-DB: implied_deadline recompute-on-move`, a forward-roll recompute case unrelated to min()/max(),
+not touched by this fix).
 
 ---
 
@@ -714,6 +744,21 @@ All `file:line` cites are against the **`60835fe` working tree** unless noted.
 - **Tests:** `tests/schedulerFrozenInvariant.test.js`; Phase-8 cases in `tests/runScheduleIntegration.test.js`.
 - **Source:** REQUIREMENTS R50.1 (:553).
 - **Notes:** The pin is the default; "roamable within period" is the WIP-added carve-out. R52 (started) and R50.1 (fixed) remain hard-pinned even under WIP.
+- **SECOND AMENDMENT (leg sched-audit, D-A ruling, 2026-07-02):** the same "MUST NOT be demoted to
+  unscheduled" pin now has the SAME recurring/split carve-out extended to plain (non-recurring,
+  non-split) one-off tasks carrying a real deadline that NEVER found a placement at all: instead of
+  floating in `unscheduled` forever with a stale/irrelevant prior `date`, such a one-off is pinned to
+  its own DEADLINE date (`unscheduled=1`, `date` = deadline, never rolled forward) — closing the
+  R50.1-vs-code contradiction A1 flagged (G1/Q1, `AUDIT-REGISTER.md` REG-12) in favor of R50.1's
+  literal text. **Code:** `unifiedScheduleV2.js:1479-1483` (`isPlainOneOff` early ladder short-circuit
+  in `tryPlaceQueued` — a one-off whose deadline day is before the search horizon never enters any
+  fallback rung, so it can never be grid-placed) + `unifiedScheduleV2.js:2670-2695` (stillUnplaced
+  date-pin pass, excludes recurring/`task.split`/`Number(splitTotal)>1` shapes) + `runSchedule.js:2118-
+  2130` (Case C persists the pinned `date` to the DB row when `original.deadline && original.date`).
+  **Tests:** `tests/scheduler/sched-audit-da-oneoff.test.js` (8/8 passing, live-verified 2026-07-02) +
+  `tests/runScheduleIntegration.test.js` (41/41, DB-backed Case C persistence). Registered in
+  `docs/REQUIREMENTS.md` as the R50.1 amendment text; see also new `R50.9`/`R50.10` (D-B/D-C, same
+  ruling batch).
 
 ### [R50.6] The READ path (`rowToTask`, via `GET /api/tasks` → `tasks_v`) derives `overdue` by OR-ing the stored flag with a computed predicate (hard/materialized due vs shared tz-aware now), so a past-due item shows `overdue:true` between scheduler runs. Floating/no-deadline never overdue; terminal never overdue; FIXED uses `scheduled_at` as hard due.
 - **Code:** `taskMappers.js` `rowToTask` overdue IIFE (~`:355-410`): `if (!!row.overdue) return true` (stored flag wins); `isTerminalStatus(st)` / `st==='disabled'` → false; `hasHardCommitment = deadline || implied_deadline || FIXED || isPlacedRecurringInstance`; `dueKey = deadline || implied_deadline || (FIXED/placed → scheduled_at-local)`; `if (dueKey < now.todayKey) return true`. — IMPLEMENTED(main) for the structure; **the same-day intra-day branch is REPLACED by WIP** (see OVD-2/R50.6-windowclose).
@@ -788,32 +833,41 @@ All `file:line` cites are against the **`60835fe` working tree** unless noted.
 
 ---
 
-## FORWARD-ROLL (the unimplemented half of R50.0 — being built this session)
+## FORWARD-ROLL (was the unimplemented half of R50.0 — now SHIPPED, R50.11)
 
-### [OVD-1] (WIP) A roamable flexible-TPC ANYTIME recurring instance whose anchorDate is past but whose recurrence PERIOD has NOT ended is NOT dropped at `buildItems` — it survives to be forward-rolled.
-- **Code:** `unifiedScheduleV2.js:266-271` (working tree): the blanket `if (t.recurring && pm===ANYTIME && date < todayIsoKey) return` now has a flexible-TPC carve-out — inline `isFlexibleTpc` recompute + `recurringCycleDays`; if `today < anchor+cycleLen` → do NOT drop (fall through); else drop as before. — **WIP(branch-60835fe).**
-- **Status:** WIP(branch, ungated).
+**RESOLVED (leg sched-audit, 2026-07-02):** every entry below (OVD-1 through OVD-4) was WIP/ungated
+(or, for OVD-3, an OPEN BLOCK) as of the `60835fe` research pass. All four are now **IMPLEMENTED and
+gated on `leg/juggy4`**, independently confirmed by A2 (scenario walk-through)/A3 (code-adversarial
+trace)/A4 (executed-behavior probe) with zero counterexample (`AUDIT-REGISTER.md` §4 "Verified-solid").
+OVD-1/OVD-2's roam mechanism additionally received a REG-26 fix (see below) narrowing a same-day
+reland edge case the original WIP missed. Registered as `R50.11` in `docs/REQUIREMENTS.md` (REG-17 —
+previously un-numbered). The prose in each entry below is left as originally researched (historical
+trace of what changed and why); the `Status:` line in each is superseded by this note.
+
+### [OVD-1] A roamable flexible-TPC ANYTIME recurring instance whose anchorDate is past but whose recurrence PERIOD has NOT ended is NOT dropped at `buildItems` — it survives to be forward-rolled.
+- **Code:** `unifiedScheduleV2.js:266-271` (working tree): the blanket `if (t.recurring && pm===ANYTIME && date < todayIsoKey) return` now has a flexible-TPC carve-out — inline `isFlexibleTpc` recompute + `recurringCycleDays`; if `today < anchor+cycleLen` → do NOT drop (fall through); else drop as before.
+- **Status:** IMPLEMENTED (main, `leg/juggy4`) — was WIP(branch, ungated) at research time; see RESOLVED note above.
 - **Tests:** `tests/scheduler/roamable-recurring-forward-roll.test.js` (NEW, +1277 lines); `tests/runScheduleIntegration.test.js` §8 (+84 lines).
-- **Source:** SPEC.md "Forward-roll"; `60835fe` diff; REQUIREMENTS R50.0 (forward-roll = the unimplemented half).
-- **Notes:** Inline `_isFlexTpcCheck` duplicates `isFlexibleTpc` (`:535`) — duplication WARN (drift risk; should reuse the single classifier).
+- **Source:** SPEC.md "Forward-roll"; `60835fe` diff; REQUIREMENTS R50.11 (was R50.0 "forward-roll = the unimplemented half").
+- **Notes:** Inline `_isFlexTpcCheck` duplicates `isFlexibleTpc` (`:535`) — duplication WARN (drift risk; should reuse the single classifier) — still open, not addressed by sched-audit (out of its directed scope).
 
-### [OVD-2] (WIP) A roamable instance (flexible-TPC across cycle, OR windowed daily within its own day) whose slot is past but effective deadline NOT passed is CLEARED and re-presented to the placement queue, placed at the next valid slot. The dead slot is cleared first; the instance must never appear on two days at once.
-- **Code:** `unifiedScheduleV2.js:~1664-1712` (working tree): in the pastAnchoredPreQueue gate, `if (isRecurring && isFlexibleTpc && !isStarted && !isFixedWhen)` and `today < anchor+cycleLen` → `item.anchorDate = null; item.anchorMin = null;` (clear dead anchor) → fall through to normal queue (NOT pushed to pastAnchoredPreQueue). — **WIP(branch-60835fe).**
-- **Status:** WIP(branch, ungated).
-- **Tests:** `tests/scheduler/roamable-recurring-forward-roll.test.js` (AC1, AC1d).
-- **Source:** SPEC.md "Forward-roll"; SPEC.md AC1/AC1d.
+### [OVD-2] A roamable instance (flexible-TPC across cycle, OR windowed daily within its own day) whose slot is past but effective deadline NOT passed is CLEARED and re-presented to the placement queue, placed at the next valid slot. The dead slot is cleared first; the instance must never appear on two days at once.
+- **Code:** `unifiedScheduleV2.js:~1664-1712` (working tree): in the pastAnchoredPreQueue gate, `if (isRecurring && isFlexibleTpc && !isStarted && !isFixedWhen)` and `today < anchor+cycleLen` → `item.anchorDate = null; item.anchorMin = null;` (clear dead anchor) → fall through to normal queue (NOT pushed to pastAnchoredPreQueue).
+- **Status:** IMPLEMENTED (main, `leg/juggy4`) — was WIP(branch, ungated) at research time; see RESOLVED note above. **Additionally fixed (REG-26, leg sched-audit, 2026-07-02):** the analogous gate one level up — `isMissedPreferredTime` (Phase 3, `unifiedScheduleV2.js:1934-1978`) — unconditionally dead-ended ANY recurring task whose preferred time passed today, WITHOUT checking `isFlexibleTpc`, so a flexible-TPC item never reached this OVD-2 clear-and-re-present mechanism at all (it was killed one gate earlier). Fixed by scoping that dead-end to `!isFlexibleTpc`; for `isRecurring && isFlexibleTpc` items still within their period, it now reuses this SAME clear-and-re-present mechanism, with one added refinement: `item.earliestStartDate` is explicitly set to TOMORROW's dateKey before falling through (this branch's anchor IS today, unlike OVD-2's genuinely-past-day anchor, so the search must explicitly exclude today or the item re-lands on today's now-open remainder instead of roaming forward — self-check iteration 2 in `REG26-BERT-LOG.md`).
+- **Tests:** `tests/scheduler/roamable-recurring-forward-roll.test.js` (AC1, AC1d); `tests/scheduler/sched-audit-reg26-roam.test.js` (REG26-1a/1b, the Phase-3 gate fix; REG26-3a, day-locked control unaffected) — live-verified 2026-07-02, all GREEN.
+- **Source:** SPEC.md "Forward-roll"; SPEC.md AC1/AC1d; `AUDIT-REGISTER.md` REG-26; `REG26-BERT-LOG.md`.
 - **Notes:** Reuses the `occurrenceMoves` clear-and-re-present mechanism (no parallel placement pass). Period-ended OR unparseable-anchor → fall back to pin (`pastAnchoredPreQueue.push`).
 
-### [OVD-3] (WIP — **OPEN BLOCK**) The forward-roll search MUST be capped so the instance can NEVER be placed on or after its period-end day. Cap day = `anchor + cycleLen − 1` (last valid day, INCLUSIVE). The cap must be applied UNCONDITIONALLY even when the row's existing `deadlineDate` is stale/past/looser than the period end.
-- **Code:** `unifiedScheduleV2.js:~1697` (working tree): `_periodEndKey = formatDateKey(anchor + cycleLen)`; `if (!item.deadlineDate || item.deadlineDate > _periodEndKey) item.deadlineDate = _periodEndKey;` — drives `latestIdx` in `findEarliestSlot` (`:973-975`); inclusive `latestIdx` loop (~`:1117`). — **WIP(branch-60835fe).**
-- **Status:** WIP(branch, ungated) — **KNOWN BLOCK (ernie/cookie).**
-- **Tests:** `tests/scheduler/roamable-recurring-forward-roll.test.js` AC3-cap.
+### [OVD-3] The forward-roll search MUST be capped so the instance can NEVER be placed on or after its period-end day. Cap day = `anchor + cycleLen − 1` (last valid day, INCLUSIVE). The cap must be applied UNCONDITIONALLY even when the row's existing `deadlineDate` is stale/past/looser than the period end.
+- **Code:** `unifiedScheduleV2.js:~1697` (working tree): `_periodEndKey = formatDateKey(anchor + cycleLen)`; `if (!item.deadlineDate || item.deadlineDate > _periodEndKey) item.deadlineDate = _periodEndKey;` — drives `latestIdx` in `findEarliestSlot` (`:973-975`); inclusive `latestIdx` loop (~`:1117`).
+- **Status:** IMPLEMENTED (main, `leg/juggy4`) — the OPEN BLOCK below is CLOSED, confirmed by code re-read + A2/A3 independent walk-through, not merely re-asserted; see RESOLVED note above.
+- **Tests:** `tests/scheduler/roamable-recurring-forward-roll.test.js` AC3-cap — live-verified GREEN.
 - **Source:** SPEC.md "Period-end cap (must hold)"; SPEC.md AC3-cap; `60835fe` commit message ("period-end cap can bleed to next cycle").
-- **Notes / BLOCK detail:** The cap is **CONDITIONAL** in the current code (`if (!item.deadlineDate || item.deadlineDate > _periodEndKey)`) — a **pre-set past/stale `anchorDate`→`deadlineDate` silently defeats the cap**, so the instance can bleed into the NEXT cycle. The locked SPEC requires the cap applied UNCONDITIONALLY (`cap = anchor + cycleLen − 1`, INCLUSIVE). Also a subtle off-by-one risk: code sets `deadlineDate = anchor + cycleLen` (= period-end EXCLUSIVE = first day past period) while the SPEC's cap day is `anchor + cycleLen − 1` (INCLUSIVE last valid day). These must be reconciled — this is the headline BLOCK.
+- **Notes / BLOCK detail (historical — CLOSED):** at research time the cap read as **CONDITIONAL** (`if (!item.deadlineDate || item.deadlineDate > _periodEndKey)`), which a pre-set past/stale `deadlineDate` could silently defeat, bleeding the instance into the next cycle. `AUDIT-REGISTER.md` §4 "Verified-solid" independently reconfirms ("`_periodEndCap` correctly prevents a flexible-TPC instance bleeding into the next cycle; day-locked instances never forward-roll... A2 independently confirmed 'OVD-3 BLOCK from spec is FIXED in code' via live scenario walk-through") — no further code change was made by sched-audit for this specific item; it was already fixed prior to this leg and the doc simply never caught up until now.
 
-### [OVD-4] (WIP) Overdue determination at scheduler time: a run that finds no valid slot before the effective deadline → `overdue=1` (R50 pin). At the period boundary with no slot → `missed`, `scheduled_at` frozen at the last real placed slot (R32.4/999.808 ladder, undisturbed).
-- **Code:** Phase-8 unplaced marking (`runSchedule.js:~1556`, MAIN) + WIP forward-roll fallthrough to pin when period ended (`unifiedScheduleV2.js:~1705`). — MAIN (pin/missed) + WIP (the "tried to roll, period ended" path feeds the same pin).
-- **Status:** PARTIAL — terminal pin/missed IMPLEMENTED(main); the forward-roll-exhausted → pin transition is WIP.
+### [OVD-4] Overdue determination at scheduler time: a run that finds no valid slot before the effective deadline → `overdue=1` (R50 pin). At the period boundary with no slot → `missed`, `scheduled_at` frozen at the last real placed slot (R32.4/999.808 ladder, undisturbed).
+- **Code:** Phase-8 unplaced marking (`runSchedule.js:~1556`, MAIN) + forward-roll fallthrough to pin when period ended (`unifiedScheduleV2.js:~1705`).
+- **Status:** IMPLEMENTED (main, `leg/juggy4`) — the forward-roll-exhausted → pin transition (was WIP/PARTIAL) is now gated; see RESOLVED note above. Note: the auto-`missed` terminal write this entry references as "undisturbed" was itself REMOVED by the 2026-06-24 ruling (`[B-TERM.4]` above) — a past-incomplete recurring instance now stays non-terminal (`overdue=1` or `unscheduled=1`), it is never auto-set to `status:'missed'`. This entry's "frozen at the last real placed slot" clause describes pre-2026-06-24 behavior kept for history; current behavior is the plain overdue/unscheduled pin.
 - **Tests:** `tests/scheduler/roamable-recurring-forward-roll.test.js` AC3 ("no-slot-weekly" must be in unplaced); `tests/runScheduleIntegration.test.js`.
 - **Source:** SPEC.md "Overdue determination"; AC3.
 
@@ -828,28 +882,42 @@ All `file:line` cites are against the **`60835fe` working tree** unless noted.
 
 ## SUMMARY
 
+**UPDATED (leg sched-audit, 2026-07-02):** the tallies below are the ORIGINAL `60835fe` research-pass
+snapshot, kept for history. Current reality: OVD-1, OVD-2, OVD-3, OVD-4 have all moved from
+WIP/OPEN-BLOCK to **IMPLEMENTED(main, `leg/juggy4`)** (see the RESOLVED note under "FORWARD-ROLL"
+above and each entry's own `Status:` line) — **12 of 16** catalogued behaviors are now
+IMPLEMENTED(main), not 9. The one still-open item from this section, `R50.6-windowclose`'s
+`scheduledMins`-vs-`preferred_time_mins` contradiction, is **UNCHANGED and OUT OF SCOPE** for
+sched-audit (not named in its dispatch) — still WIP/CONTRADICTED exactly as below.
+
 **Total behaviors catalogued: 16** (R50.0, R50.1, R50.6, R50.6-windowclose, R50.7, R50.8, R32.4/999.808, R32.7, 999.671/700, R52, OVD-LADDER, OVD-1, OVD-2, OVD-3, OVD-4, + the NO-read-triggered-run invariant).
 
-**By status:**
+**By status (ORIGINAL research-pass snapshot — see UPDATED note above for current state):**
 - **IMPLEMENTED(main) — 9:** R50.0, R50.1 (base pin), R50.7, R50.8, R32.4/999.808, R32.7, 999.671/700, R52, OVD-LADDER.
 - **WIP(branch-60835fe, ungated) — 3:** R50.6-windowclose, OVD-1, OVD-2.
 - **WIP + OPEN BLOCK — 1:** OVD-3 (period-end cap).
 - **PARTIAL — 2:** R50.6 (base predicate main; same-day threshold WIP), OVD-4 (terminal pin main; roll-exhausted→pin WIP).
 - **CONTRADICTED (WIP code vs SPEC) — 1:** R50.6-windowclose (code uses placed `scheduledMins`; SPEC AC2b/AC2c demand `preferred_time_mins + time_flex` and distinct `flex==0` handling).
 
-**Open BLOCK / WARNs on the WIP (`60835fe`, per its own commit message + ernie/cookie):**
-1. **BLOCK — period-end cap can bleed to next cycle (OVD-3):** cap is conditional (`if (!deadlineDate || deadlineDate > periodEnd)`); a stale/past pre-set `deadlineDate` defeats it. Must be unconditional. Plus an inclusive/exclusive boundary mismatch (`anchor+cycleLen` set vs SPEC's `anchor+cycleLen−1`).
-2. **WARN — window-close uses placed slot, not preferred (R50.6-windowclose):** read predicate computes `scheduledMins + time_flex`; SPEC requires `preferred_time_mins + time_flex` (placement-independent) → AC2b false-positive for early-placed tasks.
-3. **WARN — `time_flex == 0` zero-width window:** conflated with `null`/anytime in the WIP ("falls through to false"); SPEC AC2c wants overdue exactly at the slot minute, distinct from `null`→midnight.
-4. **WARN (drift) — inline `isFlexibleTpc` duplication:** `buildItems:266` recomputes the classifier inline instead of reusing the single `isFlexibleTpc` (`:535`)/`recurringPeriodEndKey` classifier.
+**By status (CURRENT, 2026-07-02):**
+- **IMPLEMENTED(main) — 12:** R50.0, R50.1 (base pin + D-A one-off amendment), R50.7, R50.8, R32.4/999.808, R32.7, 999.671/700, R52, OVD-LADDER, OVD-1, OVD-2, OVD-3.
+- **PARTIAL — 2:** R50.6 (base predicate main; same-day threshold still WIP, unchanged), OVD-4 (terminal pin main; forward-roll-exhausted→pin transition now gated, but its own historical "frozen at last real slot" clause describes REMOVED pre-2026-06-24 auto-miss behavior — see its Notes).
+- **CONTRADICTED (unchanged, out of sched-audit's scope) — 1:** R50.6-windowclose.
+- **CLOSED this leg — REG-26 (effective-deadline min()-vs-max()):** was a live code defect (not merely a doc gap) in the persistence-sweep's `computeEffectiveDeadline`; fixed, see the `min()` VERIFIED-MATCHES-CODE note above.
 
-**Top gaps before gating:**
-- Reconcile the period-end cap to unconditional + correct inclusive boundary (the headline BLOCK).
+**Open BLOCK / WARNs on the WIP (`60835fe`, per its own commit message + ernie/cookie) — HISTORICAL, kept for trace:**
+1. ~~**BLOCK — period-end cap can bleed to next cycle (OVD-3):**~~ **CLOSED** — cap is conditional (`if (!deadlineDate || deadlineDate > periodEnd)`); a stale/past pre-set `deadlineDate` defeats it. Must be unconditional. Plus an inclusive/exclusive boundary mismatch (`anchor+cycleLen` set vs SPEC's `anchor+cycleLen−1`). Confirmed fixed prior to sched-audit; see OVD-3 entry above.
+2. **WARN (still open, out of scope) — window-close uses placed slot, not preferred (R50.6-windowclose):** read predicate computes `scheduledMins + time_flex`; SPEC requires `preferred_time_mins + time_flex` (placement-independent) → AC2b false-positive for early-placed tasks.
+3. **WARN (still open, out of scope) — `time_flex == 0` zero-width window:** conflated with `null`/anytime in the WIP ("falls through to false"); SPEC AC2c wants overdue exactly at the slot minute, distinct from `null`→midnight.
+4. **WARN (still open, out of scope, drift) — inline `isFlexibleTpc` duplication:** `buildItems:266` recomputes the classifier inline instead of reusing the single `isFlexibleTpc` (`:535`)/`recurringPeriodEndKey` classifier.
+
+**Top gaps before gating (HISTORICAL — item 1 is CLOSED, items 2-4 remain, all out of sched-audit's scope):**
+- ~~Reconcile the period-end cap to unconditional + correct inclusive boundary (the headline BLOCK).~~ CLOSED.
 - Switch the read predicate window-close base from placed `scheduledMins` to `preferred_time_mins` and split out `time_flex==0`.
 - De-duplicate the flexible-TPC classification (single source).
-- `60835fe` is NOT on `origin/main` and is ungated; the juggler working tree is currently sitting on it — any spec-driven implementation should branch from here and close these four findings, or the leg should be re-based onto `origin/main` (505a09b) and re-applied clean.
+- `60835fe` merged onto `leg/juggy4`/`leg/sched-audit` and is gated; the "re-base or branch from here" framing below is historical (kept for trace, not actionable): any spec-driven implementation should branch from here and close these four findings, or the leg should be re-based onto `origin/main` (505a09b) and re-applied clean.
 
-**Doc/requirements anchor map:** REQUIREMENTS.md R50.0 (:552), R50.1 (:553), R50.6 (:558), R50.7 (:559), R50.8 (:560), R32.4 (:372), R32.7 (:375); ADR `docs/design/OVERDUE-COMPUTED-STATUS-2026-06-21.md` (Decisions 1/4/5/6, edge-case table :182); `docs/architecture/SCHEDULER-OVERDUE-LADDER.md` (ladder + Phase-9 freeze); `.planning/kermit/juggler-overdue-reschedule/SPEC.md` (v2 locked, 2026-06-23).
+**Doc/requirements anchor map:** REQUIREMENTS.md R50.0 (:552), R50.1 (:553), R50.6 (:558), R50.7 (:559), R50.8 (:560), R32.4 (:372), R32.7 (:375); ADR `docs/design/OVERDUE-COMPUTED-STATUS-2026-06-21.md` (Decisions 1/4/5/6, edge-case table :182); `docs/architecture/SCHEDULER-OVERDUE-LADDER.md` (ladder + Phase-9 freeze); `.planning/kermit/juggler-overdue-reschedule/SPEC.md` (v2 locked, 2026-06-23). **Added (leg sched-audit, 2026-07-02):** REQUIREMENTS.md R50.9 (D-B resolve-in-place), R50.10 (D-C rigid slot reservation), R50.11 (this section's OVD-1–OVD-4 forward-roll subsystem, REG-17).
 
 ---
 

@@ -3,8 +3,10 @@
  *
  * Covers:
  *   SM-18: wip → '' (reopen) clears completed_at
- *   SM-19: wip → done transition (requires scheduled_at)
- *   SM-20: skip a recurring instance (skip one occurrence)
+ *   SM-19: wip → done transition (snap-then-write when unscheduled — D-B, revised
+ *          leg sched-audit 2026-07-02)
+ *   SM-20: skip a recurring instance (skip one occurrence; snap-then-write when
+ *          unscheduled — D-B, revised leg sched-audit 2026-07-02)
  *   SM-21: pause on recurring template is accepted
  *   SM-22: disabled status guard — user cannot write other fields to disabled task
  *   SM-23: missed status is no longer valid (user cannot set → 400)
@@ -278,17 +280,37 @@ describe('SM-19: wip → done (task must have scheduled_at)', () => {
     expect(res.body.task).toBeDefined();
   });
 
-  test('returns 400 with SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS when scheduled_at is null', async () => {
+  // revised leg sched-audit 2026-07-02: reject-400 superseded by D-B resolve-in-place
+  // ruling (snap-then-write) — see bert REFER db-guard-6 (DB-GUARD-bert-REVIEW.json)
+  // + UpdateTaskStatus.js:154-171. task's master_id is truthy (makeTask default), so
+  // TWO getMasterById() reads now happen before the post-update re-read: (1) the
+  // terminal-requires-schedule guard's own loadMaster() (fires because
+  // !existing.scheduled_at), and (2) applyRollingAnchor's own getMasterById() fallback
+  // (fires because the guard's result, null, is falsy so it does NOT reuse
+  // `preloadedMaster` — facade.js:526-527). Insert two null reads at slot [2]
+  // (mirrors + extends SM-20's established single-insert pattern below) so the
+  // post-update re-read slots are left intact.
+  test('returns 200, scheduled_at snapped to ~now (was: 400 SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS)', async () => {
     const task = makeTask({ id: 'sm19-unsched', status: 'wip', scheduled_at: null });
     seedExisting(task);
+    resolveQueue.splice(2, 0, null, null); // loadMaster() read + applyRollingAnchor's own re-read
 
+    const before = Date.now();
     const res = await request(app)
       .put('/api/tasks/sm19-unsched/status')
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
       .send({ status: 'done' });
+    const after = Date.now();
 
-    expect(res.status).toBe(400);
-    expect(res.body.code).toBe('SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS');
+    expect(res.status).toBe(200);
+    expect(res.body.task).toBeDefined();
+    const tasksWrite = require('../../src/lib/tasks-write');
+    const updateCall = tasksWrite.updateTaskById.mock.calls[0];
+    expect(updateCall).toBeDefined();
+    const fields = updateCall[2];
+    expect(fields.scheduled_at).toBeTruthy();
+    expect(fields.scheduled_at.getTime()).toBeGreaterThanOrEqual(before - 5000);
+    expect(fields.scheduled_at.getTime()).toBeLessThanOrEqual(after + 5000);
   });
 
   test('writes completed_at on wip → done transition', async () => {
@@ -337,7 +359,10 @@ describe('SM-20: skip a recurring instance (skip one occurrence)', () => {
     expect(res.body.task).toBeDefined();
   });
 
-  test('rejects skip on a recurring instance without scheduled_at', async () => {
+  // revised leg sched-audit 2026-07-02: reject-400 superseded by D-B resolve-in-place
+  // ruling (snap-then-write) — see bert REFER db-guard-6 (DB-GUARD-bert-REVIEW.json)
+  // + UpdateTaskStatus.js:154-171.
+  test('snaps scheduled_at + succeeds on a recurring instance without scheduled_at (was: rejects with 400)', async () => {
     const instance = makeInstance({
       id: 'sm20-unsched',
       status: '',
@@ -345,14 +370,30 @@ describe('SM-20: skip a recurring instance (skip one occurrence)', () => {
       source_id: 'sm20-template'
     });
     seedExisting(instance);
+    // Two db('task_masters').first() reads now consume queue slots before the
+    // post-update fetchTaskWithEventIds: (1) the terminal-requires-schedule guard's
+    // own loadMaster() (fires because !existing.scheduled_at, unlike the scheduled-
+    // instance case above), and (2) applyRollingAnchor's own getMasterById()
+    // fallback (fires because the guard's null result is falsy, so it does not
+    // reuse `preloadedMaster` — facade.js:526-527).
+    resolveQueue.splice(2, 0, null, null);
 
+    const before = Date.now();
     const res = await request(app)
       .put('/api/tasks/sm20-unsched/status')
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
       .send({ status: 'skip' });
+    const after = Date.now();
 
-    expect(res.status).toBe(400);
-    expect(res.body.code).toBe('SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS');
+    expect(res.status).toBe(200);
+    expect(res.body.task).toBeDefined();
+    const tasksWrite = require('../../src/lib/tasks-write');
+    const updateCall = tasksWrite.updateTaskById.mock.calls[0];
+    expect(updateCall).toBeDefined();
+    const fields = updateCall[2];
+    expect(fields.scheduled_at).toBeTruthy();
+    expect(fields.scheduled_at.getTime()).toBeGreaterThanOrEqual(before - 5000);
+    expect(fields.scheduled_at.getTime()).toBeLessThanOrEqual(after + 5000);
   });
 
   test('only updates the target instance, not the template', async () => {

@@ -12,6 +12,11 @@
 var db = require('../src/db');
 var tasksWrite = require('../src/lib/tasks-write');
 var { assertDbAvailable } = require('./helpers/requireDB');
+// telly fix (leg sched-audit 2026-07-03): knexfile `test` uses dateStrings:true —
+// scheduled_at reads back as a tz-less string; use the project's UTC-safe reparse
+// helper rather than a bare `new Date()` (the documented juggler dateStrings/
+// new-Date misparse trap).
+var { scheduledAtToISO } = require('../src/slices/task/domain/mappers/taskMappers');
 var USER_ID = 'state-test-user-001';
 
 // Mock scheduleQueue to prevent actual scheduler runs
@@ -220,7 +225,11 @@ describe('status transition: wip → done', () => {
     expect(row.completed_at).toBeTruthy();
   });
 
-  test('rejected: done on unscheduled task → 400 SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS', async () => {
+  // revised leg sched-audit 2026-07-02: reject-400 superseded by D-B resolve-in-place
+  // ruling (snap-then-write) — see bert REFER db-guard-9 (DB-GUARD-bert-REVIEW.json)
+  // + UpdateTaskStatus.js:154-171. A terminal write on an unscheduled task now
+  // SUCCEEDS (200) with scheduled_at snapped to ~now, instead of being rejected.
+  test('done on unscheduled task → 200, scheduled_at snapped to ~now (was: 400 SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS)', async () => {
 
 
     // Create task WITHOUT scheduled_at
@@ -230,11 +239,25 @@ describe('status transition: wip → done', () => {
     var id = createRes._json.task.id;
 
     // Attempt to mark done without scheduled time
+    var before = Date.now();
     var doneReq = mockReq({ params: { id: id }, body: { status: 'done' } });
     var doneRes = mockRes();
     await controller.updateTaskStatus(doneReq, doneRes);
-    expect(doneRes.statusCode).toBe(400);
-    expect(doneRes._json.code).toBe('SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS');
+    var after = Date.now();
+    expect(doneRes.statusCode).toBe(200);
+    expect(doneRes._json.task.status).toBe('done');
+
+    var row = await db('task_instances').where('id', id).first();
+    expect(row.status).toBe('done');
+    expect(row.scheduled_at).toBeTruthy();
+    // knexfile `test` uses dateStrings:true — row.scheduled_at is a tz-less
+    // "YYYY-MM-DD HH:MM:SS" string. Use the project's UTC-safe reparse helper
+    // rather than a bare `new Date()` (the documented juggler dateStrings/
+    // new-Date misparse trap).
+    var snappedAt = new Date(scheduledAtToISO(row.scheduled_at)).getTime();
+    expect(snappedAt).toBeGreaterThanOrEqual(before - 5000);
+    expect(snappedAt).toBeLessThanOrEqual(after + 5000);
+    expect(row.completed_at).toBeTruthy();
   });
 });
 
@@ -261,7 +284,10 @@ describe('status transition: skip', () => {
     expect(row.status).toBe('skip');
   });
 
-  test('rejected: skip on unscheduled task → 400 SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS', async () => {
+  // revised leg sched-audit 2026-07-02: reject-400 superseded by D-B resolve-in-place
+  // ruling (snap-then-write) — see bert REFER db-guard-9 (DB-GUARD-bert-REVIEW.json)
+  // + UpdateTaskStatus.js:154-171.
+  test('skip on unscheduled task → 200, scheduled_at snapped to ~now (was: 400 SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS)', async () => {
 
 
     // Create task without scheduled_at
@@ -270,11 +296,20 @@ describe('status transition: skip', () => {
     await controller.createTask(createReq, createRes);
     var id = createRes._json.task.id;
 
+    var before = Date.now();
     var skipReq = mockReq({ params: { id: id }, body: { status: 'skip' } });
     var skipRes = mockRes();
     await controller.updateTaskStatus(skipReq, skipRes);
-    expect(skipRes.statusCode).toBe(400);
-    expect(skipRes._json.code).toBe('SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS');
+    var after = Date.now();
+    expect(skipRes.statusCode).toBe(200);
+    expect(skipRes._json.task.status).toBe('skip');
+
+    var row = await db('task_instances').where('id', id).first();
+    expect(row.status).toBe('skip');
+    expect(row.scheduled_at).toBeTruthy();
+    var snappedAt = new Date(scheduledAtToISO(row.scheduled_at)).getTime();
+    expect(snappedAt).toBeGreaterThanOrEqual(before - 5000);
+    expect(snappedAt).toBeLessThanOrEqual(after + 5000);
   });
 
   test('skip prevents re-skip — idempotent (200 no-op or succeeds)', async () => {
@@ -684,7 +719,10 @@ describe('terminal-status edge cases', () => {
     expect(row.status).toBe('cancel');
   });
 
-  test('cancel on unscheduled task → 400 SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS', async () => {
+  // revised leg sched-audit 2026-07-02: reject-400 superseded by D-B resolve-in-place
+  // ruling (snap-then-write) — see bert REFER db-guard-9 (DB-GUARD-bert-REVIEW.json)
+  // + UpdateTaskStatus.js:154-171.
+  test('cancel on unscheduled task → 200, scheduled_at snapped to ~now (was: 400 SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS)', async () => {
 
 
     // 'cancel' is in TERMINAL_REQUIRES_SCHEDULE alongside 'done' and 'skip'
@@ -693,11 +731,20 @@ describe('terminal-status edge cases', () => {
     await controller.createTask(createReq, createRes);
     var id = createRes._json.task.id;
 
+    var before = Date.now();
     var cancelReq = mockReq({ params: { id: id }, body: { status: 'cancel' } });
     var cancelRes = mockRes();
     await controller.updateTaskStatus(cancelReq, cancelRes);
-    expect(cancelRes.statusCode).toBe(400);
-    expect(cancelRes._json.code).toBe('SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS');
+    var after = Date.now();
+    expect(cancelRes.statusCode).toBe(200);
+    expect(cancelRes._json.task.status).toBe('cancel');
+
+    var row = await db('task_instances').where('id', id).first();
+    expect(row.status).toBe('cancel');
+    expect(row.scheduled_at).toBeTruthy();
+    var snappedAt = new Date(scheduledAtToISO(row.scheduled_at)).getTime();
+    expect(snappedAt).toBeGreaterThanOrEqual(before - 5000);
+    expect(snappedAt).toBeLessThanOrEqual(after + 5000);
   });
 
   test('done is idempotent — marking done twice does not error', async () => {

@@ -14,7 +14,9 @@
  *   - 404 / disabled-403.
  *   - recurring_template: pause/unpause with cascade to instances (999.590).
  *   - terminal-requires-schedule guard (rolling-instance exemption via injected
- *     `loadMaster`) → 400.
+ *     `loadMaster`) — D-B (sched-audit): snap-then-write, not reject. An
+ *     unscheduled non-rolling terminal write snaps `scheduled_at` to now and
+ *     proceeds (200); rolling instances are exempted unchanged.
  *   - status update build (completed_at, done scheduled_at preservation, terminal
  *     reactivation done_frozen, cancel/skip future snap-to-now) — all timestamp
  *     stamping is left to the repo (P1 new Date()).
@@ -149,17 +151,24 @@ UpdateTaskStatus.prototype.execute = async function execute(input) {
   }
   var _isRollingInstance = _rollingMasterRow && this.isRollingMaster(_rollingMasterRow);
 
-  if (TERMINAL_REQUIRES_SCHEDULE.indexOf(status) !== -1 && !existing.scheduled_at && !body.scheduledAt && !_isRollingInstance) {
-    return {
-      status: 400,
-      body: { error: 'Cannot mark task ' + status + ' without a scheduled time. Schedule it first.', code: 'SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS' }
-    };
-  }
+  // D-B (sched-audit): the invariant this guard fronts is the live DB CHECK
+  // chk_task_instances_terminal_scheduled ("a terminal row must carry a
+  // non-null scheduled_at") — not "reject the write". Snap-then-write: an
+  // unscheduled one-off / non-rolling-recurring-instance / split-chunk row
+  // gets `scheduled_at` snapped to now (applied to `update` below) instead of
+  // being rejected with 400. Rolling instances keep the existing exemption
+  // UNCHANGED (the scheduler is expected to have already placed them; do not
+  // snap or re-derive their scheduling here).
+  var _snapUnscheduledToNow = TERMINAL_REQUIRES_SCHEDULE.indexOf(status) !== -1 && !existing.scheduled_at && !body.scheduledAt && !_isRollingInstance;
 
   // build update (handler L1744-1784) — P1: no fn.now(); repo stamps updated_at.
   var update = { status: status || '' };
   var isIngested = existing.cal_sync_origin && existing.cal_sync_origin !== 'juggler';
   var isFutureScheduled = existing.scheduled_at && new Date(existing.scheduled_at) > new Date();
+
+  if (_snapUnscheduledToNow) {
+    update.scheduled_at = new Date();
+  }
 
   if (isTerminalStatus(status) && !isTerminalStatus(existing.status)) {
     update.completed_at = new Date();
