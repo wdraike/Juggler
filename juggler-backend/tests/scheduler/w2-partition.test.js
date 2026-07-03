@@ -25,6 +25,7 @@ const { DEFAULT_TIME_BLOCKS, DEFAULT_TOOL_MATRIX } = require('../../src/schedule
 const { PLACEMENT_MODES } = require('../../src/lib/placementModes');
 
 const TODAY = '2026-06-22';
+const TOMORROW = '2026-06-23';
 const TZ = 'America/New_York';
 
 function makeCfg(overrides) {
@@ -88,6 +89,15 @@ function idsUnplaced(result) {
   });
   return ids;
 }
+function gridEntriesForId(result, taskId) {
+  const found = [];
+  Object.keys(result.dayPlacements || {}).forEach((dk) => {
+    (result.dayPlacements[dk] || []).forEach((p) => {
+      if (p && p.task && p.task.id === taskId) found.push(Object.assign({ dateKey: dk }, p));
+    });
+  });
+  return found;
+}
 
 describe('W2 partition — placed XOR unplaced (AC-W2.3) + deadline-based partition (AC-W2.1)', () => {
   // CHARACTERIZATION (not a regression guard): a NON-recurring TIME_WINDOW missed-window task
@@ -102,12 +112,48 @@ describe('W2 partition — placed XOR unplaced (AC-W2.3) + deadline-based partit
     expect(both).toEqual([]);
   });
 
-  test('AC-W2.1 (non-recurring, characterization): missed-window task OVERDUE on grid only', () => {
+  // D-A SCOPE NOTE (leg sched-audit, 2026-07-02, Kermit ruling — recorded here
+  // per bert's REFER→telly, DA-DC-BERT-LOG.md finding #23): David's D-A
+  // one-off ruling (a one-off past its deadline/missed window routes to
+  // unplaced, never rolled forward) is gated in production on
+  // `item.deadlineDate` (unifiedScheduleV2.js findEarliestSlot's
+  // `capAtOwnDeadline` branch + the `stillUnplaced` date-pin pass both
+  // early-return when `!deadlineDate`). `makeMissedWindowTask` above (:42-66)
+  // sets NO `deadline` field at all — a pure when-tag/window task, not a
+  // deadline-bearing one-off — so neither D-A code path engages here, BY
+  // DESIGN, not by accident (confirmed: this test stayed GREEN, unchanged,
+  // across the D-A fix). This test pins the DEADLINE-LESS one-off contract:
+  // with nothing to be overdue AGAINST (no deadline to violate) the task
+  // CANNOT be overdue — it rolls forward to a later, still-open day and lands
+  // there un-marked, exactly like any other legally-rescheduled task. Kermit
+  // ruling: D-A's scope is strictly the deadline-bearing one-off case (see
+  // sched-audit-da-oneoff.test.js D-A1/D-A2 and deadlines.test.js TS-133 for
+  // that contract); it does NOT extend to a task with no deadline at all.
+  //
+  // CORRECTION (zoe DADC-ZOE-REVIEW.md z-2, leg sched-audit): the name and
+  // the paragraph above previously claimed this task "reads OVERDUE on grid" —
+  // that is factually wrong. Direct probe (makeMissedWindowTask, deadline-less,
+  // now=600) shows it lands on 2026-06-23 (TOMORROW, a future day) with
+  // `_overdue` undefined/falsy. A task rolled to a future window is on-time
+  // for that window, not overdue. The two ORIGINAL assertions below (onGrid
+  // true / unplaced false) verified neither the roll-FORWARD direction nor
+  // the NOT-overdue state — a task placed TODAY un-marked would also have
+  // passed them. Renamed + strengthened with the missing shape assertions so
+  // name==assertions.
+  test('AC-W2.1 (non-recurring, DEADLINE-LESS one-off, characterization): missed-window task with no deadline is placed on a LATER day, NOT overdue-marked (nothing to be overdue against)', () => {
     const result = run([makeMissedWindowTask()], 600);
     const onGrid = idsOnGrid(result);
     const unplaced = idsUnplaced(result);
-    expect(onGrid.has('mw_task')).toBe(true);     // pinned on its day
-    expect(unplaced.has('mw_task')).toBe(false);
+    expect(onGrid.has('mw_task')).toBe(true);     // placed somewhere on the grid
+    expect(unplaced.has('mw_task')).toBe(false);  // never in unplaced[] (XOR holds)
+
+    // Shape assertions (z-2): rolled to a FUTURE day (not today, not left in
+    // the past), and NOT overdue-marked — the actual probed behavior.
+    const entries = gridEntriesForId(result, 'mw_task');
+    expect(entries.length).toBe(1);
+    expect(entries[0].dateKey).toBe(TOMORROW);
+    expect(entries[0].dateKey).not.toBe(TODAY);
+    expect(entries[0]._overdue).toBeFalsy();
   });
 
   // AC-W2.3 (recurring) — the :2098 dual-place path is described for a RECURRING missed-window

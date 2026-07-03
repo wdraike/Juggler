@@ -1097,6 +1097,94 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
   });
 
   // ─────────────────────────────────────────────────────────────
+  // z-3 (leg sched-audit, DADC-ZOE-REVIEW.md finding #3) — the Case C
+  // DATE-PERSIST hunk itself (runSchedule.js:2122-2124):
+  //
+  //   if (original.deadline && original.date) {
+  //     unplacedDbUpdate.date = original.date;
+  //   }
+  //
+  // AC4 above (2099 deadline) only proves overdue/unscheduled for Case C — it
+  // never asserts the persisted `date` column, so the D-A ruling's DB half
+  // ("pinned to its own DEADLINE date, never left at the stale prior date")
+  // was executed-but-unasserted (zoe: coverage theater). This test uses a
+  // PAST deadline (not 2099) so the pin's effect on `date` is actually
+  // observable, and seeds a stale prior `date` DIFFERENT from the deadline so
+  // an unwritten/no-op hunk would be caught red-handed.
+  //
+  // Non-tautology proof (RED-genuineness, TEST-AUTHORING §Regression-test
+  // self-verification): /tmp-backed-up runSchedule.js, commented out the
+  // `if (original.deadline && original.date) { unplacedDbUpdate.date = ...; }`
+  // block (lines 2122-2124) -> re-ran this test -> RED (row.date stayed at
+  // the stale prior value, Z3_STALE_DATE_KEY, never became the deadline) ->
+  // restored the file from the /tmp backup -> shasum verified byte-identical
+  // -> re-ran -> GREEN. See DA-TEST-REVIEW.md iteration 3 proof-of-work.
+  // ─────────────────────────────────────────────────────────────
+
+  test('z-3 (DB persist coverage): deadline-bearing anytime one-off, PAST deadline, never placed -- Case C persists row.date == deadline (not the stale prior date), unscheduled=1, scheduled_at NULL, reads overdue via rowToTask', async () => {
+    if (!available) return;
+
+    var Z3_PAST_DEADLINE_KEY = '2026-06-15'; // fixed always-past deadline day
+    var Z3_STALE_DATE_KEY = '2026-06-20';    // stale prior `date`, DIFFERENT from the deadline
+
+    await db('task_masters').insert({
+      id: 'z3-persist-master',
+      user_id: USER_ID,
+      text: 'z-3 Case C date-persist coverage (past deadline)',
+      dur: 30,
+      status: '',
+      placement_mode: 'anytime',
+      when: '_invalid_window_',                      // unplaceable -> result.unplaced (never placed)
+      deadline: Z3_PAST_DEADLINE_KEY + ' 23:59:59',   // PAST deadline (NOT 2099 like AC4 above)
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+    await db('task_instances').insert({
+      id: 'z3-persist-inst',
+      master_id: 'z3-persist-master',
+      user_id: USER_ID,
+      occurrence_ordinal: 1,
+      split_ordinal: 1,
+      split_total: 1,
+      date: Z3_STALE_DATE_KEY,   // stale prior date -- must be overwritten to the deadline
+      // No scheduled_at: never placed -> hasScheduledAt=false -> Case C (not Case B)
+      overdue: 0,
+      dur: 30,
+      status: '',
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+
+    await runScheduleAndPersist(USER_ID);
+
+    // Read via tasks_v (the real unified template+instance read model — same
+    // view rowToTask/the API consume) so `deadline` (stored on task_masters)
+    // is present on the row, not just the task_instances columns.
+    var row = await db('tasks_v').where('id', 'z3-persist-inst').first();
+    expect(row).toBeTruthy();
+
+    // THE CORE ASSERTION (runSchedule.js:2122-2124 Case C date-persist hunk):
+    // persisted row.date is the DEADLINE date, never the stale prior date.
+    expect(String(row.date).slice(0, 10)).toBe(Z3_PAST_DEADLINE_KEY);
+    expect(String(row.date).slice(0, 10)).not.toBe(Z3_STALE_DATE_KEY);
+    expect(row.unscheduled).toBe(1);
+    expect(row.scheduled_at).toBeNull();
+
+    // Production-visible overdue: the REAL read mapper (rowToTask), not a
+    // hand-rolled re-derivation, against a fixed now-context well after the
+    // fixed past deadline. (rowToTask's `date` field is intentionally out of
+    // scope here — its row.date->task.date fallback is gated to
+    // task_type==='recurring_instance' [taskMappers.js:254, "Bug A"], a
+    // separate non-recurring-scoped design decision; z-3 is specifically the
+    // D-A one-off persisted-column + computed-overdue contract, asserted on
+    // the raw persisted row above.)
+    var nowInfo = { todayKey: '2026-07-02', nowMins: 720 };
+    var t = rowToTask(row, TZ, null, null, nowInfo);
+    expect(t.overdue).toBe(true);
+    expect(t.unscheduled).toBe(true);
+  }, 30000);
+
+  // ─────────────────────────────────────────────────────────────
   // AC1-HOLE-CHAIN — GREEN guard (zoe WARN#1 resolution):
   // Floating CHAIN-MEMBER task (depends_on non-empty, no deadline, previously
   // placed, unplaceable this run) MUST NOT get overdue=1 via PATH B Case B.

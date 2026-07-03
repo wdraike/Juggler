@@ -2109,6 +2109,19 @@ async function runScheduleAndPersist(userId, _retries, options) {
       // DB-single-source (W1): persist why it's unplaced so the Unplaced view reads
       // the reason from the row (DB read model), not the deleted placements cache.
       var unplacedDbUpdate = { unscheduled: 1, unplaced_reason: t._unplacedReason || REASON_CODES.NO_SLOT, unplaced_detail: t._unplacedDetail || 'No available slot in the schedule', updated_at: _runScheduleCommand.clockNow() };
+      // D-A (David ruling, 2026-07-02): a one-off/chain-member task that never
+      // found a placement, carrying a real deadline, is pinned to its own
+      // DEADLINE date — never left at whatever stale `date` the row already
+      // had. unifiedScheduleV2.js's stillUnplaced pinning pass already mutates
+      // `t.date` (== original.date, same object reference) to the deadline
+      // in-memory for exactly this case (plain one-off, non-recurring,
+      // non-split, real deadline); persist that pinned value so the DB row
+      // doesn't retain the stale prior date. No-deadline tasks are unaffected
+      // (original.deadline falsy → no `date` write, unchanged pre-existing
+      // behavior).
+      if (original.deadline && original.date) {
+        unplacedDbUpdate.date = original.date;
+      }
       if (result.slackByTaskId && t.id in result.slackByTaskId) {
         unplacedDbUpdate.slack_mins = result.slackByTaskId[t.id];
       }

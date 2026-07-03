@@ -1062,6 +1062,21 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
   if (item.deadlineDate && !(opts && opts.ignoreDeadline)) {
     var di = indexOfDate(dates, item.deadlineDate);
     if (di >= 0) latestIdx = di;
+  } else if (item.deadlineDate && opts && opts.ignoreDeadline && opts.capAtOwnDeadline && !item.isRecurring) {
+    // D-A (David ruling, 2026-07-02): opts.capAtOwnDeadline is set ONLY by
+    // tryPlaceQueued's overdueApplicable ("ignoreDeadline") rung for a plain
+    // ONE-OFF item (see that call site) — it re-imposes the item's own deadline
+    // day as a hard cap even while ignoreDeadline is otherwise true, so a missed
+    // window/deadline is never rolled onto a POST-deadline day (the D-A1 bug).
+    // The rung may still search the deadline day itself (a legitimate same-day
+    // late-slot rescue), just never a day after it. Deliberately NOT applied when
+    // the caller omits the flag (e.g. the deadlineRelaxed pass's direct
+    // findEarliestSlot call, ~line 2545, which intentionally drops the deadline
+    // ceiling as a last-resort rescue for dependency-blocked tasks — D-C test 1
+    // relies on that pass still being able to roll flex_B to the next day once
+    // its dep-chain is relax-able).
+    var diCap = indexOfDate(dates, item.deadlineDate);
+    if (diCap >= 0) latestIdx = diCap;
   }
   // Fixed non-recurring tasks are locked to their anchorDate — they must
   // not be pulled forward to today or pushed to another day.
@@ -1447,6 +1462,27 @@ function tryPlaceQueued(item, dates, dayWindows, dayBlocks, dayOcc, placedById, 
   var flexApplicable = !!item.flexWhen;
   var findSlot = item.preferLatestSlot ? findLatestSlot : findEarliestSlot;
 
+  // D-A / W1 (David ruling 2026-07-02; ernie DADC-CODE-REVIEW.md finding #1):
+  // a plain ONE-OFF (non-recurring, non-split) whose deadline day is entirely
+  // BEFORE the search horizon is a task whose deadline has ALREADY PASSED —
+  // buildDates (:155-179 area) only ever EXTENDS the horizon to cover a
+  // FUTURE deadline, so indexOfDate returning -1 here can only mean "before
+  // today", never "beyond a too-short horizon". Without this guard, rung-1's
+  // own deadline cap (findEarliestSlot, "if (di>=0) latestIdx = di") silently
+  // no-ops for di===-1 and the item is placed on the grid as if unconstrained
+  // (the D-A1 bug) — reached BEFORE overdueApplicable/capAtOwnDeadline even
+  // get a chance to run. Route straight to unplaced instead: it never enters
+  // ANY rung of the fallback ladder, so it can never be grid-placed by any
+  // rung (rung-1 normal, rung-2 ignoreDeadline, rung-4 flex+ignoreDeadline).
+  // Recurring and split flow is untouched — they're excluded from this guard
+  // and continue through the ladder exactly as before.
+  var isPlainOneOff = !item.isRecurring && !(item.task && item.task.split) &&
+    !(Number(item.splitTotal) > 1);
+  if (isPlainOneOff && item.deadlineDate && indexOfDate(dates, item.deadlineDate) < 0) {
+    return { slot: null, failReason: REASON_CODES.MISSED,
+      failDetail: 'Deadline has already passed (before the scheduling horizon start)' };
+  }
+
   var slot = findSlot(item, dates, dayWindows, dayBlocks, dayOcc, base);
   if (slot) return { slot: slot };
 
@@ -1461,7 +1497,7 @@ function tryPlaceQueued(item, dates, dayWindows, dayBlocks, dayOcc, placedById, 
 
   if (overdueApplicable) {
     slot = findSlot(item, dates, dayWindows, dayBlocks, dayOcc,
-      Object.assign({}, base, { ignoreDeadline: true }));
+      Object.assign({}, base, { ignoreDeadline: true, capAtOwnDeadline: true }));
     if (slot) return { slot: slot, overdue: true };
   }
 
@@ -1472,8 +1508,16 @@ function tryPlaceQueued(item, dates, dayWindows, dayBlocks, dayOcc, placedById, 
   }
 
   if (overdueApplicable && flexApplicable) {
+    // W2 (ernie DADC-CODE-REVIEW.md finding #2): this rung must carry the SAME
+    // capAtOwnDeadline as rung-2 (:1498-1501 above) for a one-off — otherwise a
+    // flex_when overdue one-off with today saturated slips past rung-2/rung-3
+    // (both capped to today) and this rung's `ignoreDeadline` alone searches the
+    // FULL horizon, force-placing it on a POST-deadline future day (the exact
+    // D-A1 behavior the fix outlaws, just reached via the flex path). Passing
+    // capAtOwnDeadline here makes it a correct no-op for a one-off whose deadline
+    // is unreachable today — it stays unplaced, same as rung-2's contract.
     slot = findSlot(item, dates, dayWindows, dayBlocks, dayOcc,
-      Object.assign({}, base, { ignoreDeadline: true, relaxWhen: true }));
+      Object.assign({}, base, { ignoreDeadline: true, relaxWhen: true, capAtOwnDeadline: true }));
     if (slot) return { slot: slot, overdue: true, relaxed: true };
   }
 
@@ -2504,6 +2548,30 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     if (isOverlapConflict) forceEntry._conflict = true;
     if (forceIsOverdue) forceEntry._overdue = true;
     dayPlacements[forceDate].push(forceEntry);
+    // D-C (David ruling, 2026-07-02 / a3-02, REG-24): a force-placed rigid/FIXED
+    // task's slot must be RESERVED on the occupancy grid — every OTHER placement
+    // path in this file (tryPlaceAtTime :797, the main queue commit, the retry
+    // pass, the deadlineRelaxed pass) reserves occupancy before/as it commits;
+    // this force-placement path previously did not, so the deadlineRelaxed pass
+    // (which reads dayOcc immediately after this one) could stack a
+    // scheduler-placed flexible task on the identical (dateKey,start). Reserve
+    // with the SAME zero travel buffers the forceEntry itself declares above
+    // (travelBefore/travelAfter: 0) — a rigid force-placement doesn't carry
+    // travel buffers. Guarded on dayOcc[forceDate] existing: a force-placement
+    // onto a genuinely past day outside the search horizon (e.g. an overdue
+    // fixed task pinned to yesterday, D-C test 3) has no dayOcc bucket to
+    // reserve into and nothing in the horizon can collide with a day that's
+    // never searched — a no-op there is correct, not a gap. Reminder-type
+    // items (dur=0) never reach this branch (isRigid/FIXED only) — their
+    // dur=0 coexistence (brain #80498) is unaffected either way. A SECOND
+    // rigid/FIXED task force-placed at the identical slot (D-C test 4,
+    // user-explicit double-book) still force-places here unconditionally —
+    // this reservation only blocks later SCHEDULER-CHOSEN placements
+    // (deadlineRelaxed/findEarliestSlot), never another force-place in this
+    // same forEach.
+    if (dayOcc[forceDate]) {
+      reserveWithTravel(dayOcc[forceDate], forceStart, forceDur, 0, 0);
+    }
     // Emit a recurringConflict warning only for a real overlap (not the overdue case).
     if (isOverlapConflict) warnings.push({ type: 'recurringConflict', taskId: task.id });
   });
@@ -2544,6 +2612,31 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     dayPlaced[slot.dateKey].push(rEntry);
     dayPlacements[slot.dateKey].push(rEntry);
     placedById[item.id] = { dateKey: slot.dateKey, start: slot.start, dur: item.dur };
+  });
+
+  // D-A (David ruling, 2026-07-02): a one-off (non-recurring, non-split) task
+  // that genuinely never found a placement anywhere, and carries a real
+  // deadline, is pinned to its own DEADLINE date — never left at whatever
+  // stale `date` value the row already carried (which reflects a prior
+  // placement attempt, not why it's unplaced now). Mirrors the precedent
+  // already established above for recurring items (missedWindowItems /
+  // pastAnchoredRecurrings pin to their own anchorDate) — recurring and
+  // split tasks are excluded here since their own date/anchor pinning is
+  // handled by those existing passes, not this one (mode=bugfix scope: only
+  // the plain one-off gap, per A1 G1 / A4 Q1 / REG-12 / REG-28).
+  // i5 (ernie DADC-CODE-REVIEW.md finding #7): `task.split` (boolean) alone is
+  // NOT the scheduler's canonical split-chunk test — elsewhere (:2157-2158,
+  // :2316-2317, buildItems' own splitTot derivation) a chunk is identified via
+  // `Number(splitTotal) > 1`, which can be true even when `split` is falsy.
+  // Exclude BOTH shapes so a split-chunk row of either shape never receives
+  // the one-off date-pin.
+  stillUnplaced.forEach(function(u) {
+    var task = u && u.task;
+    if (!task) return;
+    var splitTotal = task.splitTotal != null ? Number(task.splitTotal) : 1;
+    if (u.isRecurring || task.recurring || task.split || splitTotal > 1) return;
+    if (!u.deadlineDate) return;
+    task.date = u.deadlineDate;
   });
 
   // Convert deferred items back to task-object shape for the output contract.

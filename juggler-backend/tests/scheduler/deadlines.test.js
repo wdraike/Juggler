@@ -249,19 +249,58 @@ describe('Deadline Base Tests', () => {
 
 describe('Deadline x Template Tests', () => {
   describe('TS-133: Deadline with schedule templates', () => {
-    test('Task with deadline should respect template constraints', () => {
+    // revised leg sched-audit 2026-07-02: post-deadline roll superseded by D-A
+    // one-off ruling. Original intent (kept): prove a deadline interacts
+    // correctly with the task's `when`-tag template constraint. Fixture is
+    // unchanged: a 'morning' one-off whose ONLY morning block today is
+    // [360,480] (Wed weekday block) has already fully elapsed by nowMins=480
+    // (8:00 AM, the test's own NOW_MINS), while its deadline (720 min / noon
+    // today) has NOT yet passed. Pre-D-A, the scheduler ignored the elapsed
+    // when-tag window and rolled this task to TOMORROW's morning block
+    // (start 360) — landing it PAST its own 720-minute deadline, i.e. the
+    // exact post-deadline forward-roll David's D-A ruling (juggy4,
+    // 2026-07-02) outlaws for a one-off. Under D-A, since no 'morning'
+    // window exists between now (480) and the deadline (720) today, the
+    // task is correctly routed to unplaced instead of grid-placed past its
+    // deadline, with its date pinned to the deadline day (never rolled).
+    test('task whose only morning window today has elapsed before its noon deadline is unplaced (not rolled past its deadline), date pinned to the deadline day', () => {
       const task = makeTask({
         id: 'ts133a',
         text: 'Template deadline task',
         dur: 60,
-        deadline: '2026-06-10 12:00', // 720 minutes
-        when: 'morning' // Morning blocks
+        deadline: '2026-06-10 12:00', // 720 minutes — TODAY at noon
+        when: 'morning' // Morning blocks — today's only morning block [360,480] has already elapsed by NOW_MINS (480)
       });
-      
+
       const result = run([task]);
+
+      // Never grid-placed — neither today nor any later day. Pre-D-A this
+      // rolled to TOMORROW's morning block (start 360), i.e. past the
+      // 720-minute deadline — the exact behavior D-A outlaws.
       const placement = findPlacement(result, 'ts133a');
-      expect(placement).not.toBeNull();
-      expect(placement.start + placement.dur).toBeLessThanOrEqual(720);
+      expect(placement).toBeNull();
+
+      // Routed to unplaced instead, pinned to the deadline's own date
+      // (2026-06-10 — same as TODAY here, since the deadline is today at
+      // noon) — never left rolled forward to a later day.
+      const unplacedEntry = (result.unplaced || []).find(function (u) {
+        return (u.id || (u.task && u.task.id)) === 'ts133a';
+      });
+      expect(unplacedEntry).toBeDefined();
+      const unplacedTask = (unplacedEntry && unplacedEntry.task) || unplacedEntry;
+      expect(unplacedTask.date).toBe('2026-06-10');
+
+      // NEVER-MISSING: exactly one representation total (no dual-place, no drop).
+      let gridCount = 0;
+      Object.keys(result.dayPlacements).forEach(function (dk) {
+        (result.dayPlacements[dk] || []).forEach(function (p) {
+          if (p.task && p.task.id === 'ts133a') gridCount++;
+        });
+      });
+      const unplacedCount = (result.unplaced || []).filter(function (u) {
+        return (u.id || (u.task && u.task.id)) === 'ts133a';
+      }).length;
+      expect(gridCount + unplacedCount).toBe(1);
     });
   });
 
