@@ -1921,10 +1921,63 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     // Missed preferred-time: recurring task whose preferred-time window has
     // entirely passed but is not in TIME_WINDOW mode (which routes its own
     // missed items to unplaced-only, per the isMissedWindow branch above).
-    // Skip the queue entirely — mark missed below.
+    //
+    // REG-26/F9 (LOCKED ruling, David 2026-06-23): a flexible-TPC instance
+    // (isFlexibleTpc — roams within its cycle) must NOT dead-end here the
+    // moment TODAY's window closes when later cycle days are still available.
+    // Give it the SAME forward-roll treatment as the anchorDate<today branch
+    // above (OVD-2/R50.0): clear the anchor and re-present to the queue so it
+    // can be placed on a later day within the cycle. Day-locked recurring
+    // (isFlexibleTpc=false — daily/rigid/non-tpc weekly) has no other valid
+    // day (R32.7) and MUST still dead-end unconditionally — do not widen the
+    // gate for that shape.
     if (item.isMissedPreferredTime) {
-      missedPreferredTimeItems.push(item);
-      return;
+      if (item.isRecurring && item.isFlexibleTpc) {
+        var _mptCycleLen = recurringCycleDays(item.task && item.task.recur != null ? item.task.recur : null) || 1;
+        var _mptAnchorParsed = parseDate(item.anchorDate);
+        var _mptTodayParsed = parseDate(todayIsoKey);
+        if (_mptAnchorParsed && _mptTodayParsed) {
+          var _mptPeriodEndDate = new Date(_mptAnchorParsed.getTime());
+          _mptPeriodEndDate.setDate(_mptPeriodEndDate.getDate() + _mptCycleLen);
+          if (_mptTodayParsed < _mptPeriodEndDate) {
+            // Within period — forward-roll: clear the dead anchor so the instance
+            // enters the placement queue as a fresh unanchored item (mirrors
+            // :1880-1899 above). Unlike the anchorDate<today branch (where "today"
+            // is naturally a later day than the dead anchor), here the anchor IS
+            // today — today's own window has already closed, so today must be
+            // excluded from the search or the item would just re-land on today's
+            // now-open remainder. Force the search to start tomorrow.
+            item.anchorDate = null;
+            item.anchorMin = null;
+            var _mptTomorrow = new Date(_mptTodayParsed.getTime());
+            _mptTomorrow.setDate(_mptTomorrow.getDate() + 1);
+            item.earliestStartDate = formatDateKey(_mptTomorrow);
+            var _mptLastValidDate = new Date(_mptPeriodEndDate.getTime());
+            _mptLastValidDate.setDate(_mptLastValidDate.getDate() - 1);
+            var _mptCapKey = formatDateKey(_mptLastValidDate);
+            // Note: <= todayIsoKey (not < as in the anchorDate<today mirror above) —
+            // this branch's own anchor IS today, so a pre-existing deadlineDate of
+            // exactly today (the day-scoped default for a same-day instance) must
+            // still be widened to the cap; it is not yet a genuine tighter future
+            // deadline the way a < today value would be in the other branch.
+            if (!item.deadlineDate || item.deadlineDate > _mptCapKey || item.deadlineDate <= todayIsoKey) {
+              item.deadlineDate = _mptCapKey;
+            }
+            item._periodEndCap = true;
+            // Fall through to the normal queue path below (do NOT push to
+            // missedPreferredTimeItems).
+          } else {
+            missedPreferredTimeItems.push(item);
+            return;
+          }
+        } else {
+          missedPreferredTimeItems.push(item);
+          return;
+        }
+      } else {
+        missedPreferredTimeItems.push(item);
+        return;
+      }
     }
     // Budget-unscheduled TPC instances: the cycle doesn't have enough time
     // to place all requested instances. These go to unplaced with a reason

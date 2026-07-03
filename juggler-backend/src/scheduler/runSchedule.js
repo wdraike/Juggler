@@ -218,26 +218,32 @@ function computeWindowCloseUtc(task, _today, _tz) {
 }
 
 /**
- * AC-840-4: Combine a recurring period-boundary and a flex window-close into a
- * single explicit effective deadline (the later of the two non-null values).
- * A recurring instance stays live while today < effectiveDeadline.
+ * AC-840-4 (REG-26/F9, flipped to min() per SCHEDULER-SPEC.md:700 LOCKED ruling,
+ * David 2026-06-23): Combine a recurring period-boundary and a flex window-close
+ * into a single explicit effective deadline (the EARLIER of the two non-null
+ * values). A recurring instance stays live while today < effectiveDeadline.
  *
- * Returns the MAXIMUM (later) of the two non-null deadlines — overdue only when
- * past BOTH. This is the De Morgan dual of the original two independent OR guards
- * (instance live if within EITHER window): max not min, preserves R50.0
- * period-boundary extension.
+ * Returns the MINIMUM (earlier) of the two non-null deadlines — overdue as soon
+ * as EITHER has passed. Previously this returned max() (the De Morgan dual of the
+ * original two independent OR guards), which let the persist-sweep believe a
+ * same-day-window-closed, still-mid-cycle instance was "still live" for up to a
+ * full extra cycle while the scheduler (unifiedScheduleV2) had already marked the
+ * same occurrence unplaced/MISSED this run — the F9 dead zone. min() keeps the
+ * sweep's verdict consistent with the scheduler's: once the occurrence's own
+ * window has closed, it is no longer "still live" even if the recurrence period
+ * has not yet ended.
  *
  * @param {Object}  opts
  * @param {Date|null} opts.periodBoundary  — end of the recurrence cycle (from recurringPeriodEndKey)
  * @param {Date|null} opts.windowClose     — timeFlex window close (occurrence date + timeFlex minutes)
- * @returns {Date|null} max(periodBoundary, windowClose), or whichever is non-null, or null if both null.
+ * @returns {Date|null} min(periodBoundary, windowClose), or whichever is non-null, or null if both null.
  */
 function computeEffectiveDeadline(opts) {
   var periodBoundary = opts.periodBoundary;
   var windowClose = opts.windowClose;
   if (periodBoundary == null) return windowClose != null ? windowClose : null;
   if (windowClose == null) return periodBoundary;
-  return periodBoundary > windowClose ? periodBoundary : windowClose;
+  return periodBoundary < windowClose ? periodBoundary : windowClose;
 }
 
 /**
@@ -2255,12 +2261,14 @@ async function runScheduleAndPersist(userId, _retries, options) {
       if (t.marker) return;
 
       if (t.recurring) {
-        // AC-840-4: use the explicit effective deadline = max(period-boundary, window-close).
+        // AC-840-4 (REG-26/F9): use the explicit effective deadline = min(period-boundary, window-close),
+        // per SCHEDULER-SPEC.md:700 LOCKED ruling (David 2026-06-23).
         // A past recurring instance stays live (not overdue) while today < effectiveDeadline.
         //  (1) timeFlex window: occurrence date + timeFlex minutes (scheduler may still place it late).
         //  (2) R50.0 recurrence-PERIOD boundary: a flexible-TPC instance may roam within its cycle
         //      (e.g. a 3×/week task is not missed until the week ends).
-        // effectiveDeadline = max(windowClose, periodEnd) — overdue only when past BOTH (De Morgan of original OR guards).
+        // effectiveDeadline = min(windowClose, periodEnd) — overdue as soon as EITHER has passed, so
+        // the sweep never lags a run where the scheduler already marked this same occurrence MISSED.
         var flex = t.timeFlex != null ? t.timeFlex : 60;
         var windowCloseDate = new Date(td.getTime() + flex * 60 * 1000);
         var periodEndKey = recurringPeriodEndKey(t.recur, effectiveDate);

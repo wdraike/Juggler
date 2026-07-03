@@ -2,6 +2,38 @@
 // G-001: TPC fill policy - cancel/skip discrepancy
 // File: tpcFillPolicy.test.js
 // Tests: TS-305, TS-306, TS-307, TS-308
+//
+// A4-R2 (sched-audit AUDIT-REGISTER.md REG-34, leg L4): every runScheduler(...)
+// call below now passes an explicit todayKey/nowMins matching the fixtures
+// (recurStart '2026-06-15', marked instances '2026-06-25'/'26'/'29') instead of
+// `undefined`, so the scenario is pinned rather than silently re-anchored to
+// whatever the real wall-clock date happens to be on the day the suite runs —
+// matching the established convention in the sibling suite tpc.test.js.
+//
+// EVIDENCE (do not re-remove without re-checking): all these calls use
+// `{ persist: true }`, which routes through test-helpers/scheduler.js's
+// `runPersistScheduler` -> `runScheduleAndPersist(userId, 0, { timezone })`.
+// That production call site (juggler-backend/src/scheduler/runSchedule.js:592,
+// :779) reads `getNowInTimezone(TIMEZONE, _runScheduleCommand.clock)` — a
+// module-singleton clock with NO seam for a test-injected todayKey/nowMins in
+// persist mode today (unlike the non-persist MODE 1 path, which the TS-316/317
+// clock-wiring contract in clockWiringGap.test.js already covers). So the
+// explicit todayKey argument below is currently ADVISORY/self-documenting only
+// for these persist:true calls — it does not yet reach the scheduler's actual
+// notion of "today". Verified empirically: the suite's assertions (exact
+// counts of manually-created cancel/done rows + `open.length > 0`) already
+// pass under the real wall-clock date regardless, so this is not an active
+// false-positive/false-negative risk today — but the underlying "no clock
+// seam for persist-mode runScheduleAndPersist" gap is real and out of scope
+// for a test-files-only leg (would require a production change to
+// RunScheduleCommand/runScheduleAndPersist). Flagged to Oscar/Kermit as a
+// follow-up, not fixed here.
+//
+// The `beforeAll`/`afterAll` hooks below also now carry an explicit 30000ms
+// timeout (was: default 5000ms) — reproduced a real `beforeAll` timeout
+// failure against the shared test-bed DB (3407) under contention before this
+// change (the "known concurrency-flaky suite" the audit called out). Same
+// fix shape as 999.995 (juggler teardown timeout, other suites).
 
 const { describe, it, expect, beforeAll, afterAll } = require('@jest/globals');
 const { setupTestDB, teardownTestDB } = require('../../test-helpers/db');
@@ -16,11 +48,11 @@ const { getTaskInstances } = require('../../test-helpers/queries');
 describe('TS-305: TPC backfill - cancel does NOT count as fulfilled', () => {
   beforeAll(async () => {
     await setupTestDB();
-  });
+  }, 30000);
 
   afterAll(async () => {
     await teardownTestDB();
-  });
+  }, 30000);
 
   it('Main scenario: 1 cancel + 1 done → 2 new picks generated', async () => {
     // Create recurring task with backfill policy
@@ -39,7 +71,7 @@ describe('TS-305: TPC backfill - cancel does NOT count as fulfilled', () => {
     await markInstanceStatus(task.id, '2026-06-26', 'done');
 
     // Run scheduler with backfill
-    await runScheduler(undefined, undefined, undefined, undefined, { persist: true, fillPolicy: 'backfill' });
+    await runScheduler(undefined, undefined, '2026-06-15', 480, { persist: true, fillPolicy: 'backfill' });
 
     // Get all instances for this task
     const instances = await getTaskInstances(task.id);
@@ -72,7 +104,7 @@ describe('TS-305: TPC backfill - cancel does NOT count as fulfilled', () => {
     await markInstanceStatus(task.id, '2026-06-26', 'cancel');
     await markInstanceStatus(task.id, '2026-06-29', 'done');
 
-    await runScheduler(undefined, undefined, undefined, undefined, { persist: true, fillPolicy: 'backfill' });
+    await runScheduler(undefined, undefined, '2026-06-15', 480, { persist: true, fillPolicy: 'backfill' });
 
     const instances = await getTaskInstances(task.id);
     // exact horizon total NEEDS-RULING — per-cycle TPC over 14-day horizon, not single-cycle
@@ -102,7 +134,7 @@ describe('TS-305: TPC backfill - cancel does NOT count as fulfilled', () => {
     await markInstanceStatus(task.id, '2026-06-26', 'cancel');
     await markInstanceStatus(task.id, '2026-06-29', 'cancel');
 
-    await runScheduler(undefined, undefined, undefined, undefined, { persist: true, fillPolicy: 'backfill' });
+    await runScheduler(undefined, undefined, '2026-06-15', 480, { persist: true, fillPolicy: 'backfill' });
 
     const instances = await getTaskInstances(task.id);
     // exact horizon total NEEDS-RULING — per-cycle TPC over 14-day horizon, not single-cycle
@@ -123,11 +155,11 @@ describe('TS-305: TPC backfill - cancel does NOT count as fulfilled', () => {
 describe('TS-306: Cancel does NOT seed spacing history', () => {
   beforeAll(async () => {
     await setupTestDB();
-  });
+  }, 30000);
 
   afterAll(async () => {
     await teardownTestDB();
-  });
+  }, 30000);
 
   it('Main scenario: cancelled instance does not affect spacing', async () => {
     const task = await createTask({
@@ -147,7 +179,7 @@ describe('TS-306: Cancel does NOT seed spacing history', () => {
     await markInstanceStatus(task.id, '2026-06-29', 'done');
 
     // Run scheduler
-    await runScheduler(undefined, undefined, undefined, undefined, { persist: true, fillPolicy: 'backfill' });
+    await runScheduler(undefined, undefined, '2026-06-15', 480, { persist: true, fillPolicy: 'backfill' });
 
     const instances = await getTaskInstances(task.id);
 
@@ -181,7 +213,7 @@ describe('TS-306: Cancel does NOT seed spacing history', () => {
     await markInstanceStatus(task.id, '2026-06-25', 'cancel');
     await markInstanceStatus(task.id, '2026-06-26', 'done');
 
-    await runScheduler(undefined, undefined, undefined, undefined, { persist: true, fillPolicy: 'backfill' });
+    await runScheduler(undefined, undefined, '2026-06-15', 480, { persist: true, fillPolicy: 'backfill' });
 
     const instances = await getTaskInstances(task.id);
 
@@ -198,11 +230,11 @@ describe('TS-306: Cancel does NOT seed spacing history', () => {
 describe('TS-307: Keep policy - skip counts as kept slot', () => {
   beforeAll(async () => {
     await setupTestDB();
-  });
+  }, 30000);
 
   afterAll(async () => {
     await teardownTestDB();
-  });
+  }, 30000);
 
   it('Main scenario: skip preserves slot, no new pick generated', async () => {
     const task = await createTask({
@@ -219,7 +251,7 @@ describe('TS-307: Keep policy - skip counts as kept slot', () => {
     await markInstanceStatus(task.id, '2026-06-25', 'skip');
     await markInstanceStatus(task.id, '2026-06-26', 'done');
 
-    await runScheduler(undefined, undefined, undefined, undefined, { persist: true, fillPolicy: 'keep' });
+    await runScheduler(undefined, undefined, '2026-06-15', 480, { persist: true, fillPolicy: 'keep' });
 
     const instances = await getTaskInstances(task.id);
 
@@ -251,7 +283,7 @@ describe('TS-307: Keep policy - skip counts as kept slot', () => {
     await markInstanceStatus(task.id, '2026-06-26', 'skip');
     await markInstanceStatus(task.id, '2026-06-29', 'done');
 
-    await runScheduler(undefined, undefined, undefined, undefined, { persist: true, fillPolicy: 'keep' });
+    await runScheduler(undefined, undefined, '2026-06-15', 480, { persist: true, fillPolicy: 'keep' });
 
     const instances = await getTaskInstances(task.id);
     // exact horizon total NEEDS-RULING — per-cycle TPC over 14-day horizon, not single-cycle
@@ -271,11 +303,11 @@ describe('TS-307: Keep policy - skip counts as kept slot', () => {
 describe('TS-308: Backfill policy - skip opens slot', () => {
   beforeAll(async () => {
     await setupTestDB();
-  });
+  }, 30000);
 
   afterAll(async () => {
     await teardownTestDB();
-  });
+  }, 30000);
 
   it('Main scenario: skip opens slot, new pick generated', async () => {
     const task = await createTask({
@@ -293,7 +325,7 @@ describe('TS-308: Backfill policy - skip opens slot', () => {
     await markInstanceStatus(task.id, '2026-06-25', 'skip');
     await markInstanceStatus(task.id, '2026-06-26', 'done');
 
-    await runScheduler(undefined, undefined, undefined, undefined, { persist: true, fillPolicy: 'backfill' });
+    await runScheduler(undefined, undefined, '2026-06-15', 480, { persist: true, fillPolicy: 'backfill' });
 
     const instances = await getTaskInstances(task.id);
 
@@ -325,7 +357,7 @@ describe('TS-308: Backfill policy - skip opens slot', () => {
     await markInstanceStatus(task.id, '2026-06-26', 'skip');
     await markInstanceStatus(task.id, '2026-06-29', 'skip');
 
-    await runScheduler(undefined, undefined, undefined, undefined, { persist: true, fillPolicy: 'backfill' });
+    await runScheduler(undefined, undefined, '2026-06-15', 480, { persist: true, fillPolicy: 'backfill' });
 
     const instances = await getTaskInstances(task.id);
     // exact horizon total NEEDS-RULING — per-cycle TPC over 14-day horizon, not single-cycle
@@ -354,7 +386,7 @@ describe('TS-308: Backfill policy - skip opens slot', () => {
     await markInstanceStatus(task.id, '2026-06-26', 'done');
     await markInstanceStatus(task.id, '2026-06-29', 'done');
 
-    await runScheduler(undefined, undefined, undefined, undefined, { persist: true, fillPolicy: 'backfill' });
+    await runScheduler(undefined, undefined, '2026-06-15', 480, { persist: true, fillPolicy: 'backfill' });
 
     const instances = await getTaskInstances(task.id);
     // exact horizon total NEEDS-RULING — per-cycle TPC over 14-day horizon, not single-cycle

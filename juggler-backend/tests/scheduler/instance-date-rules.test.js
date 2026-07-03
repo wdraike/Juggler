@@ -164,12 +164,14 @@ describe('R3/R5/R6-unit: recurringPeriodEndKey per recurrence type', () => {
 
   /**
    * computeEffectiveDeadline sanity (PASS expected):
-   * Already proven by effective-deadline.test.js; included as context for R3/R5.
+   * revised leg sched-audit 2026-07-02: max() superseded by locked min()
+   * effective-deadline ruling (SCHEDULER-SPEC.md:700, David 2026-06-23) —
+   * now proven by effective-deadline.test.js; included as context for R3/R5.
    */
-  it('computeEffectiveDeadline: max(periodBoundary, windowClose)', () => {
+  it('computeEffectiveDeadline: min(periodBoundary, windowClose)', () => {
     const periodBoundary = new Date(addDays(TODAY, 3) + 'T00:00:00Z');
     const windowClose    = new Date(addDays(TODAY, 1) + 'T12:00:00Z');
-    expect(computeEffectiveDeadline({ periodBoundary, windowClose })).toBe(periodBoundary);
+    expect(computeEffectiveDeadline({ periodBoundary, windowClose })).toBe(windowClose);
   });
 });
 
