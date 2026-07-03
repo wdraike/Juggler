@@ -44,7 +44,6 @@ function assertSafeTestTarget(conn) {
   // `341[0-7]` band matches slots 0-7 (ports 3410-3417). If the pool grows past
   // 8 slots, widen this regex too — otherwise the new slots' ports are REFUSED
   // (fails safe, but surprising). Keep the two in sync.
-  var isDockerHost = /^ra-mysql-t\d+$/.test(host);
   var isTestbedPort = port === '3407' || port === '3507' || port === '3306' || /^341[0-7]$/.test(port);
   var isTestDbName = /_test$/.test(database) || (port === '3507' && /_uat$/.test(database));
   var prodSignals = [];
