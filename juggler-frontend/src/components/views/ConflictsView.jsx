@@ -68,7 +68,12 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
       help: 'These tasks are past their due date/time and still open — including calendar events and recurring occurrences whose date has already passed. They stay pinned on the calendar at their original time, flagged overdue. Mark them done, reschedule to a new date, or cancel them.'
     },
     {
-      key: 'unplaced', title: 'Unplaced', tasks: unplaced || [], color: theme.amberText,
+      // sched-audit L3 ernie BLOCK (l3-ernie-1) — use the deduped
+      // issues.unplacedForDisplay (not the raw `unplaced` prop) so a row that is
+      // BOTH overdue and unplaced renders ONCE, under Overdue (the canonical
+      // bucket for a dual-shape row per conflictBuckets.js), keeping this page's
+      // count and rendered rows in agreement with the badge (999.862 invariant).
+      key: 'unplaced', title: 'Unplaced', tasks: issues.unplacedForDisplay, color: theme.amberText,
       tip: 'Tasks the scheduler couldn\'t fit into any available time slot',
       help: 'The scheduler tried to place these tasks but ran out of room. Common causes: the day is too full, time window constraints are too narrow, a non-splittable task is too long for any available gap, or no suitable weather window exists within the 14-day horizon. Try shortening the task, enabling splitting, relaxing the time window, adjusting weather conditions, or moving other tasks to free up space.'
     },

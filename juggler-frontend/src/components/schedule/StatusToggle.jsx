@@ -42,11 +42,25 @@ function canTransitionTo(current, target) {
 // juggler-cal-history Plan C — D-15: terminal transitions require scheduled_at.
 // Disable done/skip/cancel buttons when the task has no scheduled time. Backend 400 guard
 // is the source of truth; this is the UX nicety.
+//
+// sched-audit D-B (2026-07-02, REG-42/F1): superseded for the Unscheduled-lane row —
+// David ruled unscheduled items ARE resolvable in place (the backend now stamps
+// completion on scheduled_at=null rows), so DailyViewUnschedEntry no longer passes
+// disableTerminal. This flag/guard remains available for callers that still need it
+// (e.g. ScheduleCard/TaskCard's own scheduled_at gating is unaffected by this ruling).
 var TERMINAL_REQUIRES_SCHEDULE = TERMINAL_STATUSES;
 
-export default React.memo(function StatusToggle({ value, onChange, onDelete, darkMode, compact, isMobile, taskType, disableTerminal }) {
+export default React.memo(function StatusToggle({ value, onChange, onDelete, darkMode, compact, isMobile, taskType, disableTerminal, hitSlop }) {
   var size = compact ? 16 : (isMobile ? 28 : 22);
   var fontSize = compact ? 8 : (isMobile ? 14 : 12);
+  // sched-audit L3 bird WARN-4 — the compact (16px) button is below WCAG 2.2
+  // SC 2.5.8's 24x24 CSS px minimum target size. `hitSlop` is opt-in per call
+  // site (currently only DailyViewUnschedEntry's lane row, newly made a live
+  // interactive target by F1) — it wraps each button in an invisible ≥24x24
+  // hit-area without changing the button's own visual size, so every OTHER
+  // StatusToggle call site (grid tile, TaskDetailHeader, etc.) renders
+  // pixel-identical to before.
+  var slopSize = 24;
 
   // Filter statuses based on task type
   var statuses = ALL_STATUSES;
@@ -78,9 +92,8 @@ export default React.memo(function StatusToggle({ value, onChange, onDelete, dar
         var noTransition = !canTransitionTo(currentStatus, s.value);
         var needsSchedule = !!disableTerminal && TERMINAL_REQUIRES_SCHEDULE.indexOf(s.value) !== -1;
         var isDisabled = isCurrent || noTransition || needsSchedule;
-        return (
+        var button = (
           <button
-            key={s.value || 'open'}
             onClick={function(e) { e.stopPropagation(); if (!isDisabled) onChange(s.value); }}
             disabled={isDisabled}
             title={isCurrent ? 'Current status' : needsSchedule ? 'Schedule task before resolving' : s.label}
@@ -104,6 +117,15 @@ export default React.memo(function StatusToggle({ value, onChange, onDelete, dar
           >
             {s.icon}
           </button>
+        );
+        if (!hitSlop) return React.cloneElement(button, { key: s.value || 'open' });
+        return (
+          <span
+            key={s.value || 'open'}
+            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: slopSize, height: slopSize, flexShrink: 0 }}
+          >
+            {button}
+          </span>
         );
       })}
     </div>

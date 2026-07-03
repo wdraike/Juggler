@@ -46,6 +46,9 @@ export default function TaskBlock({ item, status, top, height, col, totalCols, o
   var locIcons = (t.location || []).map(function (l) { return locIcon(l); }).filter(Boolean);
   var isFixed = t.fixed || t.rigid || t.placementMode === 'fixed' || t.placement_mode === 'fixed';
   var isMarker = !!t.marker;
+  // sched-audit REG-44/F3 (calLocked, David's Q8) — calendar-born tasks show a lock
+  // glyph and can't be dragged; WhenSection.jsx:251 is the precedent for the flag.
+  var isCalLocked = !!t.calLocked;
   var isWhenRelaxed = !!item._whenRelaxed;
 
   // Start–end time range anchored to the title row. Most-scanned field after
@@ -97,8 +100,8 @@ export default function TaskBlock({ item, status, top, height, col, totalCols, o
 
   return (
     <div
-      draggable={!!canDrag}
-      onDragStart={canDrag ? function (e) { e.dataTransfer.setData('text/plain', t.id); e.dataTransfer.effectAllowed = 'move'; } : undefined}
+      draggable={!!canDrag && !isCalLocked}
+      onDragStart={(canDrag && !isCalLocked) ? function (e) { e.dataTransfer.setData('text/plain', t.id); e.dataTransfer.effectAllowed = 'move'; } : undefined}
       style={{
         position: 'absolute', top: top,
         left: colLeft, width: colWidth || undefined,
@@ -126,7 +129,10 @@ export default function TaskBlock({ item, status, top, height, col, totalCols, o
           borderRadius: 5,
           background: tileBg(t, darkMode, show, theme),
           padding: height >= 42 ? '3px 6px' : '2px 6px',
-          cursor: canDrag ? 'grab' : 'pointer',
+          // sched-audit L3 bird WARN-2 — cursor must reflect actual drag
+          // gating: draggable is `!!canDrag && !isCalLocked` (above), so the
+          // cursor affordance has to check isCalLocked too, not just canDrag.
+          cursor: isCalLocked ? 'not-allowed' : (canDrag ? 'grab' : 'pointer'),
           overflow: 'hidden',
           outline: show ? '2px solid ' + theme.accent : 'none',
           outlineOffset: -1,
@@ -209,6 +215,7 @@ export default function TaskBlock({ item, status, top, height, col, totalCols, o
               }}>{durLabel(t.dur)}</span>
             )}
             {isBlocked && <span title="Blocked" style={{ fontSize: 10, flexShrink: 0 }}>{'\uD83D\uDEAB'}</span>}
+            {isCalLocked && <span role="img" aria-label="Calendar-locked \u2014 cannot be dragged" title="Calendar-locked \u2014 cannot be dragged" style={{ fontSize: 10, flexShrink: 0 }}>{'\uD83D\uDD12'}</span>}
             {typeBadgeText && <span style={{ fontSize: 10, flexShrink: 0, whiteSpace: 'nowrap' }}>{typeBadgeText}</span>}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>

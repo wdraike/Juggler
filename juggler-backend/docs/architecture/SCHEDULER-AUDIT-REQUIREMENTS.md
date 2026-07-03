@@ -1,19 +1,32 @@
 ---
 type: design
 service: juggler
-status: active
-last_updated: 2026-05-19
+status: superseded
+last_updated: 2026-07-02
 tags:
   - type/design
   - service/juggler
-  - status/active
+  - status/superseded
   - scheduler
   - task-management
 ---
 
 # Scheduler Requirements Audit
 
-**Last Updated:** 2026-05-19
+**Last Updated:** 2026-07-02
+
+> ## ⚠️ SUPERSEDED / RETIRED — do not treat as a requirements source (sched-audit L1, REG-11, 2026-07-02)
+> This doc is an **orphaned second requirements register**: it predates and is not referenced by
+> `SCHEDULER-SPEC.md`'s doc reconciliation map, uses an obsolete `GP-*`/`P0-*` ID scheme (not the
+> canonical `R##` family in `docs/REQUIREMENTS.md`), and its vocabulary is pre-v2
+> (`when:'fixed'`, `datePinned` as an active field — both superseded by `placement_mode='fixed'`
+> per `SCHEDULER-RULES.md` §1.1/§13.1 C6). It was carrying `status: active` with no staleness flag,
+> which let it silently surface as a false requirements authority. **`SCHEDULER-SPEC.md` (Sections
+> A–F) is the canonical, currently-reconciled spec; `docs/REQUIREMENTS.md` is the canonical R-number
+> register.** The content below is retained for historical/archival reference only — do not add to it,
+> do not cite it as a live requirement source, and do not resolve its `MISSING`/`FAIL`/`STALE` rows as
+> if they were open work (they were folded into or superseded by the documents above where still
+> relevant).
 
 Every requirement from SCHEDULER.md traced to implementation.
 - **PASS** = code implements the requirement correctly

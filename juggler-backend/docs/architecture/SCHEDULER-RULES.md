@@ -2,7 +2,7 @@
 type: reference
 service: juggler
 status: active
-last_updated: 2026-06-15
+last_updated: 2026-07-02
 tags:
   - type/reference
   - service/juggler
@@ -14,7 +14,17 @@ tags:
 
 # Scheduler Rules — Canonical Reference
 
-**Last Updated:** 2026-06-15
+**Last Updated:** 2026-07-02
+
+> **Supersession note (leg juggy4, 2026-07-02 — sched-audit L1, REG-01).** §3.1 Phase 4/5 and
+> §5.3's "Missed Detection" table below previously described a **dual-write** behavior ("dual-placed
+> on grid" / "force-placed at original date") for missed-window TIME_WINDOW tasks and past-anchored
+> recurring tasks. That behavior was a bug (two unrelated overdue tasks could land on the identical
+> date+start with no occupancy check — see repro in `.planning/kermit/juggy4/INTAKE-BRIEF.json`) and
+> was fixed by David's 2026-07-02 product ruling: Phase 4 and Phase 5 now **never** write to
+> `dayPlacements` — every item they touch routes to `unplaced` only, then persists through the
+> existing two-way split below. The rows have been rewritten to match. Full narrative + code
+> citations: `SCHEDULER-OVERDUE-LADDER.md` § Supersession note.
 
 > Complete, closed-loop rules for the Juggler scheduler. This document is the
 > authority for scheduler behavior. Design docs (SCHEDULER.md, TASK-PROPERTIES.md,
@@ -163,8 +173,8 @@ numbered phases). Items are sorted by `(slack asc, pri asc, dur desc, id)`.
 | 1 | **Queue** (main loop) | All other items, slack-sorted | `tryPlaceQueued` → 4-level fallback ladder | No — reset each run (unless drag-pinned) |
 | 2 | **Retry** | Items deferred due to unmet deps | One retry pass after main loop | No |
 | 3 | **Missed preferred-time** | Recurring non-TIME_WINDOW with passed flex window | Marked `missed`, unplaced | N/A |
-| 4 | **Missed window** | TIME_WINDOW tasks with entirely-past flex window | Dual-placed on grid with `_overdue=true` + unplaced | N/A |
-| 5 | **Past-anchored recurring** | Recurring with `anchorDate < today` | Force-placed at original date with `_overdue=true` | N/A |
+| 4 | **Missed window** | TIME_WINDOW tasks with entirely-past flex window | Routed to `unplaced` only — **never** written to `dayPlacements` (juggy4, 2026-07-02). Persistence then applies the existing two-way split: prior `scheduled_at` set → `overdue=1`, stays pinned on the grid; `scheduled_at` still NULL → `unscheduled=1`, moves to the unscheduled-overdue lane. | N/A |
+| 5 | **Past-anchored recurring** | Recurring with `anchorDate < today` | Routed to `unplaced` only, pinned to its own anchor date — **never** force-placed into `dayPlacements` (juggy4, 2026-07-02). Same two-way persistence split as Phase 4. | N/A |
 | 6 | **Rigid forced** | Still-unplaced fixed/rigid items | Force-placed at anchor with `_conflict=true`, `locked=true` | N/A |
 | 7 | **Deadline relaxed** | Deadline ≤ today + unmet deps | Placed ignoring deps + deadline as last resort | N/A |
 
@@ -288,7 +298,7 @@ TPC is an **overlay** on daily/weekly/biweekly/monthly types. It is active when
 
 | Source | Trigger | What Gets Marked | Resolution Window |
 |--------|---------|-------------------|-------------------|
-| **Scheduler v2 missed-window pass** | TIME_WINDOW task's flex window entirely past | Unplaced + dual-placed with `_overdue=true` | Immediate (at run time) |
+| **Scheduler v2 missed-window pass** | TIME_WINDOW task's flex window entirely past | Unplaced only (juggy4, 2026-07-02 — no grid dual-place); persistence then pins `overdue=1` on the grid if a prior `scheduled_at` exists, else `unscheduled=1` | Immediate (at run time) |
 | **Scheduler v2 missed-preferred-time pass** | Non-TIME_WINDOW recurring with passed preferred time | Unplaced (no dual-place) | Immediate (at run time) |
 | **runSchedule Phase 9** | Past recurring instances whose `timeFlex` window expired | `status='missed'` in DB, `scheduled_at=windowClose` | On next scheduler run |
 | **cal-history-cron** | 24-hour resolution window after `scheduled_at` | `shouldAutoMarkMissed()` → `status='missed'` | Daily cron, 24h window |

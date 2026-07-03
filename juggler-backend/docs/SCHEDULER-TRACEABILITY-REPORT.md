@@ -5,6 +5,32 @@
 **Domain:** Scheduler (103 requirements: R10–R11, R18–R19, R26, R32–R37, R39–R41)  
 **Sources:** `REQUIREMENTS.md`, `SCHEDULER-AUDIT-REQUIREMENTS.md`, 20+ test files read and analyzed
 
+> ## ⚠️ STALE — do not use as a coverage authority (sched-audit L1, REG-06, 2026-07-02)
+> This report is stale as of the current (juggy4, 2026-07-02) test suite. Corrections below are from
+> `.planning/kermit/sched-audit/reviews/A4-TEST-AUDIT.md` (zoe, 2026-07-02 — full 48-suite audit of
+> `juggler-backend/tests/scheduler/`):
+> - **Cites 5 test files that no longer exist** in the current suite directory: `unifiedSchedule.test.js`,
+>   `expandRecurring.test.js`, `rollingAnchor.test.js`, `reconcileSplits.test.js`,
+>   `goldenMaster.a002-location.test.js`. The scheduler test suite was restructured since 2026-06-15;
+>   none of these filenames are present in `juggler-backend/tests/scheduler/` today.
+> - **"MISSING" is wrong for at least 6 requirements**, all now covered with real (non-tautological)
+>   pinning assertions per A4's suite-by-suite read: **R37.1/R37.2** (earliest-start hard bound / `>`
+>   deadline validation) → `earliestStart.test.js`; **R40.1–R40.3** (flexWhen flag / fallback retry /
+>   `_flexWhenRelaxed`) → `flexibleEarliestStartRelax.test.js`; **R19.7** (`partial_split` flag) +
+>   **R35.6** (`recurring_split_overflow` flag) → `split-containment-edges.test.js`; **R10.3** (cyclic
+>   dependency detection) → `dependencies.test.js`; **R11.10/R39.5** (weather fail-closed) →
+>   `weatherFailOpen.test.js` (also independently confirmed fixed in code — see `SCHEDULER-SPEC.md`
+>   `[PLACE-WEATHER]`, reconciled the same date).
+> - A4 additionally found 27 of the current 48 suites SOUND (real assertions) and flagged separate,
+>   narrower gaps (weak/tautological assertions on specific suites, e.g. `w2-partition.test.js`,
+>   `earliestStartWindow.test.js`) — see A4-TEST-AUDIT.md for the full per-suite verdict list; those
+>   are tracked as their own backlog items (L4), not part of this banner.
+> **Full regeneration of this report against the current 48-suite directory is a separate item —
+> intentionally NOT done as part of this docs-only leg** (the register recommends running it **after**
+> the L4 test-repair leg lands, so the regenerated report reflects final state rather than needing a
+> second pass). Until then: treat every "MISSING" row below as unverified, and cross-check anything
+> load-bearing against A4-TEST-AUDIT.md or the live suite directory directly.
+
 ---
 
 ## 1. TRACEABILITY MATRIX

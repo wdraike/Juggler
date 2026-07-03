@@ -57,6 +57,11 @@ export default function useTaskState() {
   const flushPromiseRef = useRef(null);
   const lastVersionRef = useRef(null);
   const loadTasksRef = useRef(null);
+  // sched-audit L3 ernie WARN-2 — per-task write sequence: guards updateTask's
+  // rollback from clobbering a NEWER concurrent update to the same task (e.g. two
+  // rapid drags). Maps taskId -> the sequence number of the most recently
+  // STARTED updateTask call for that id.
+  const writeSeqRef = useRef({});
   // IDs of tasks this client just wrote. The server echoes our writes back
   // over tasks:changed, and without filtering we'd re-fetch them — which
   // races any still-queued writes and flashes the UI back to pre-write
@@ -245,6 +250,22 @@ export default function useTaskState() {
   }, [scheduleSave]);
 
   const updateTask = useCallback(async (id, fields) => {
+    // sched-audit REG-44/F3 — capture the pre-update values for the changed
+    // fields BEFORE the optimistic dispatch, so a server rejection (e.g.
+    // calLocked 403 on a drag-move) can be rolled back rather than left
+    // showing a change the backend never persisted.
+    var prevTask = ((taskStateRef.current && taskStateRef.current.tasks) || []).find(function(t) { return t.id === id; });
+    var prevFields = {};
+    if (prevTask) {
+      Object.keys(fields).forEach(function(k) { prevFields[k] = prevTask[k]; });
+    }
+    // sched-audit L3 ernie WARN-2 — stamp this call with a per-task monotonic
+    // sequence number BEFORE dispatching the optimistic update. On rejection,
+    // only restore `prevFields` if no later updateTask call for this same id
+    // has started since (i.e. this call is still the most recent in-flight
+    // write) — otherwise this rollback would clobber that newer update.
+    var mySeq = (writeSeqRef.current[id] || 0) + 1;
+    writeSeqRef.current[id] = mySeq;
     dispatch({ type: 'UPDATE_TASK', id, fields });
     // Cancel any pending debounced save
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
@@ -263,6 +284,15 @@ export default function useTaskState() {
       // Propagate the server's error message string if present so the caller
       // can surface it in the UI. The backend returns { error: '...' } on 400.
       var serverMsg = error && error.response && error.response.data && error.response.data.error;
+      // Roll back the optimistic UPDATE_TASK dispatch — the server rejected the
+      // change, so the UI must not keep showing it (REG-44/F3). Guarded (WARN-2):
+      // skip the rollback if a newer updateTask call for this id has since
+      // started — that call's own optimistic value (or its own
+      // success/rollback) is authoritative now, not this stale snapshot.
+      if (prevTask && writeSeqRef.current[id] === mySeq) {
+        dispatch({ type: 'UPDATE_TASK', id: id, fields: prevFields });
+      }
+      dispatch({ type: 'CLEAR_DIRTY_TASKS', ids: [id], savedFields: { [id]: fields } });
       return serverMsg || false;
     } finally {
       setSaving(false);

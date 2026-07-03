@@ -118,7 +118,12 @@ function TaskCard({ task, status, onStatusChange, onDelete, onExpand, darkMode, 
       <div data-testid="task-card-row2" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap', minWidth: 0 }}>
         {onStatusChange && (
           <span onClick={function(e) { e.stopPropagation(); }}>
-            <StatusToggle value={status} onChange={function(val) { onStatusChange(task.id, val); }} onDelete={onDelete ? function() { onDelete(task.id); } : null} darkMode={darkMode} isMobile={isMobile} disableTerminal={!task.scheduledAt} />
+            {/* sched-audit D-B (bird-l3-8): David's ruling that unscheduled tasks are
+                resolvable in place is global, not DailyView-lane-only — TaskCard backs
+                ListView/ConflictsView/PriorityView, all of which must let done/skip/cancel
+                resolve an unscheduled row the same way DailyViewUnschedEntry does. No
+                disableTerminal gating here (matches DailyViewUnschedEntry's call site). */}
+            <StatusToggle value={status} onChange={function(val) { onStatusChange(task.id, val); }} onDelete={onDelete ? function() { onDelete(task.id); } : null} darkMode={darkMode} isMobile={isMobile} />
           </span>
         )}
         <div style={{ flex: '1 1 0%', minWidth: 0 }} />

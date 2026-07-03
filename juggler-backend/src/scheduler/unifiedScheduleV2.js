@@ -2100,10 +2100,19 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
       // overlap between the committed slot and that item's eligible windows
       // on that date. Derive new slack from capacity. This replaces a full
       // computeSlack() per affected item — profile showed ~10x faster loop.
+      // REG-23/a3-01 fix: the real reserved footprint is
+      // [slot.start-travelBefore, slot.start+item.dur+travelAfter) —
+      // reserveWithTravel (above) marks exactly that on the occupancy grid,
+      // and computeSlack's initial pass sees it via dayOccPrefix. The overlap
+      // subtracted here must use the SAME travel-inclusive footprint or this
+      // incremental update silently under-debits other items' capacity by
+      // the travel-buffer minutes the commit actually consumed.
+      var itemTb = item.travelBefore || 0;
+      var itemTa = item.travelAfter || 0;
       queue.forEach(function(other) {
         if (other.slack == null || !isFinite(other.slack)) return;
         if (!rangeIncludesDate(other, slotIdx)) return;
-        var ov = overlapWithEligibleWindows(other, slot.dateKey, slot.start, item.dur, dayWindows, dayBlocks);
+        var ov = overlapWithEligibleWindows(other, slot.dateKey, slot.start - itemTb, item.dur + itemTb + itemTa, dayWindows, dayBlocks);
         if (ov > 0) {
           other.capacity -= ov;
           other.slack = other.capacity - other.dur;

@@ -4,6 +4,33 @@
 > **Service:** Juggler
 > **Status:** Active
 
+> ## ⚠️ v1 DESIGN-REFERENCE — NOT current behavior (sched-audit L1, REG-03, 2026-07-02)
+> This document's 8-phase taxonomy (`LOAD → CLASSIFY → PLACE (7 phases) → PERSIST/NOTIFY`, §2 below)
+> is a **pre-v2 design reference**, kept for the visual walkthrough it provides, but it **does not
+> match** the canonical, currently-implemented phase model in `SCHEDULER-RULES.md` §3.1 — the same
+> treatment SCHEDULER-RULES.md's contradiction table already gives `SCHEDULER.md` (C2: "SCHEDULER.md's
+> phase table is a design reference, not current behavior; v2 phases (§3.1) are authoritative").
+> **Where the two disagree, `SCHEDULER-RULES.md` §3.1 wins — always.** Key divergences:
+> - This doc's "Phase 1: Recurring" / "Phase 2: Deadline Work" / "Phase 3: Priority Fill" split by
+>   *item category* (recurring vs. deadline vs. free). The real v2 code (`unifiedScheduleV2.js`) runs
+>   a **single slack-sorted queue** (`tryPlaceQueued`) — there is no separate per-category phase; see
+>   SCHEDULER-RULES.md §3.1 Phase 1 "Queue (main loop)".
+> - This doc's "Phase 5: Recurring Rescue" documents a **"bump lower-priority task off the day"**
+>   mechanism as live, shipping behavior (§2 below, "Step 2"). **This is REJECTED-in-v2** — v2 never
+>   displaces an already-placed task to make room for another. See
+>   `SCHEDULER-OVERDUE-LADDER.md` § "Options considered, and why we're not adding them" →
+>   `"Bump lower-priority tasks to make room"` (rejected: cascading NP-hard, opaque to the user,
+>   slack-first sort already handles the common case, honest overdue lane beats silent shuffling).
+>   Every "bump" reference below (§2 Phase 5, §3 "Post-Ladder Rescue Phases", §6 interaction diagram)
+>   is annotated at its point of use rather than deleted, to preserve this doc's historical value.
+> - The real Phase 4/5 rescue passes (`missedWindowItems` / `pastAnchoredRecurrings`) **never**
+>   write to the grid at all as of the juggy4 2026-07-02 ruling — see `SCHEDULER-RULES.md` §3.1 and
+>   `SCHEDULER-OVERDUE-LADDER.md` § Supersession note. This doc's Phase 5 diagram (drawn 2026-06-17,
+>   pre-dating that ruling) still shows a grid write; treat the diagram as historical illustration of
+>   the *shape* of a rescue pass, not the current persisted outcome.
+> - This doc's "4-level fallback ladder" (§3) IS still accurate and matches `SCHEDULER-RULES.md` §3.2
+>   / `SCHEDULER-OVERDUE-LADDER.md` § "The ladder (as implemented)" — that part is current.
+
 This document provides a visual walkthrough of the Juggler v2 scheduler — the 7 phases, 4-level fallback ladder, 6 placement modes, and the slack-sorted single-pass algorithm. It complements the canonical design doc (`SCHEDULER.md`) and rules reference (`SCHEDULER-RULES.md`).
 
 ---
@@ -186,6 +213,12 @@ The v2 scheduler runs 7 logical phases in sequence. Each phase places items into
 
 ### Phase 5 — Recurring Rescue
 
+> **⚠️ REJECTED-in-v2 (sched-audit L1, REG-03).** Step 2 below ("bump lower-priority task off the
+> day") is **not live code** and never shipped in v2 — see the banner at the top of this document and
+> `SCHEDULER-OVERDUE-LADDER.md` § "Options considered, and why we're not adding them". The real v2
+> Phase 4/5 rescue passes route straight to `unplaced` (no grid write at all, per the juggy4
+> 2026-07-02 ruling — `SCHEDULER-RULES.md` §3.1). Diagram kept for historical reference only.
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │ PHASE 5: RECURRING RESCUE                                       │
@@ -193,7 +226,8 @@ The v2 scheduler runs 7 logical phases in sequence. Each phase places items into
 │ Items: Recurring instances that didn't place in Phase 1         │
 │ Method:                                                         │
 │   1. Try any remaining gap in valid window (ignore when pref)   │
-│   2. Try bumping lower-priority non-recurring task off the day  │
+│   2. [REJECTED-in-v2] Try bumping lower-priority non-recurring   │
+│      task off the day — never implemented, see note above       │
 │   3. If still can't fit → mark unscheduled=1, missedRecurring   │
 │                                                                 │
 │  ┌──────────────────────────────────────────┐                  │
@@ -201,7 +235,8 @@ The v2 scheduler runs 7 logical phases in sequence. Each phase places items into
 │  │  [████████████████████████████████████]   │                  │
 │  │                                           │                  │
 │  │  Step 1: No gap found                     │                  │
-│  │  Step 2: Bump P3 free task → free slot    │                  │
+│  │  Step 2: [REJECTED-in-v2] Bump P3 free    │                  │
+│  │          task → free slot (never shipped) │                  │
 │  │  Step 3: Place recurring in freed slot   │                  │
 │  └──────────────────────────────────────────┘                  │
 │                                                                 │
@@ -356,13 +391,17 @@ Every item in the main queue (Phases 1–2) goes through `tryPlaceQueued()`, whi
 
 If all 4 ladder passes fail, the item enters the rescue phases:
 
+> **⚠️ REJECTED-in-v2:** "Try bumping lower-priority tasks" (Phase 5 box below) never shipped — see
+> the banner at the top of this document. Real v2 routes straight to `unplaced`.
+
 ```
   ┌─────────────────────────────────────────────────────────────┐
   │                    POST-LADDER RESCUE                       │
   │                                                             │
   │  ┌─────────────────────────────────────────────────────┐   │
   │  │ Phase 5: Recurring Rescue (recurring items only)    │   │
-  │  │   → Try bumping lower-priority tasks                │   │
+  │  │   → [REJECTED-in-v2] Try bumping lower-priority     │   │
+  │  │     tasks — never implemented                       │   │
   │  │   → If still fails → unscheduled=1, missedRecurring │   │
   │  └─────────────────────────────────────────────────────┘   │
   │                                                             │
@@ -639,10 +678,11 @@ Chain rollback:
   │ FlexWhen │    │Recurring │    │  + 7     │
   │Relaxation│    │ Rescue   │    │Rescue    │
   │          │    │          │    │          │
-  │ Retries  │    │ Bumps    │    │ Force-   │
-  │ flex     │    │ lower-pri│    │ place /  │
-  │ tasks    │    │ tasks    │    │ relax    │
+  │ Retries  │    │[REJECTED-│    │ Force-   │
+  │ flex     │    │ in-v2]   │    │ place /  │
+  │ tasks    │    │ Bumps*   │    │ relax    │
   └──────────┘    └──────────┘    └──────────┘
+                  * never shipped — see banner
        │               │               │
        ▼               ▼               ▼
   ┌───────────────────────────────────────────┐
