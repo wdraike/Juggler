@@ -5,7 +5,7 @@
 
 ## Purpose
 The single source of truth for what the juggler scheduler is supposed to do — placement, recurring
-lifecycle, overdue/missed, persistence/read-model, and calendar-sync coupling — with **every behavior
+lifecycle, overdue, persistence/read-model, and calendar-sync coupling — with **every behavior
 tagged by its real status in the code** (IMPLEMENTED / PARTIAL / PLANNED / CONTRADICTED / KNOWN-BUG).
 It exists so scheduler intent stops being scattered across a dozen branches + 8 doc fragments + brain
 facts, so in-flight work isn't "lost" between sessions, and so any change is validated against the
@@ -29,7 +29,7 @@ where a fragment disagrees with the code, the **code + this doc win** and the fr
 | Subsystem (section) | Behaviors | Implemented | Partial | Planned/Not-built | Contradicted / Known-bug |
 |---------------------|-----------|-------------|---------|-------------------|--------------------------|
 | A — Placement engine | 23 | 22 | 1 | — | 3 doc-drift gaps (weather fail-open row RESOLVED 2026-07-02 — was already fail-closed in code, doc was stale; see [PLACE-WEATHER]) |
-| B — Recurring lifecycle | 24 | ~20 | ~2 | master/instance UPSERT redesign | 2 (dual-missed logic, delete-instance) + doc drift |
+| B — Recurring lifecycle | 24 | ~20 | ~2 | master/instance UPSERT redesign | 1 (delete-instance) + doc drift (missed-status retired 2026-06-24, docs reconciled) |
 | C — Overdue / forward-roll | 16 | 12 (main, was 9 — sched-audit 2026-07-02: OVD-1/2/3 gated) | 2 | 999.801 reconcile | 1 unrelated CONTRADICTED (`R50.6-windowclose`, out of sched-audit scope) — the prior "3 WIP-ungated + 1 BLOCK on `60835fe`" is CLOSED, see §C SUMMARY |
 | D — Persistence / read model | 21 | 18 | 2 (slack_mins, W4 cache) | W2 partition (NOT built) | 1 (slack_mins dropped) |
 | E — Calendar sync coupling | 19 | 16 | 1 | — | 1 known-bug (split-part) + contention |
@@ -39,7 +39,7 @@ where a fragment disagrees with the code, the **code + this doc win** and the fr
 | # | Topic | Ruling |
 |---|-------|--------|
 | D4+D5 | Foundation sequencing | **Build W2 foundation FIRST** (overdue↔unscheduled partition + FIXED anchor + preserve-prior-placement), THEN forward-roll/effective-deadline overdue on top (fold in WIP `60835fe`). |
-| D1 | "missed" rule | **Period-boundary only.** Delete the legacy 2h/24h `isTaskMissed`/`shouldAutoMarkMissed` (verify no live caller first). |
+| D1 | "missed" rule | **RESOLVED (2026-06-24).** `status='missed'` retired entirely — auto-miss removed, `missed` dropped from status enum + terminal set. Legacy `isTaskMissed`/`shouldAutoMarkMissed` in `missedHelpers.js` are dead code (no live caller). Period-boundary `computeRecurringDeadline` remains as the deadline helper. |
 | D2 | Delete one occurrence | **Soft-skip** (`status='skip'`, keep tombstone). Fix `DeleteTask.js` instance scope to match spec+test. |
 | D3 | Weather lookup fails | **Fail-closed** — hold the task unplaced. Fix code to match R11.10/R38.1. |
 | D7 | `slack_mins` | **Persist it** + dampen rewrite-churn (write only on meaningful change). |
@@ -58,10 +58,14 @@ Each step: spec the behavior precisely → encode in tests → run → fix to gr
 These are where code/docs/designs disagree, or where a load-bearing piece is unbuilt. Each needs a
 ruling before the scheduler is internally consistent.
 
-- **D1 — Dual "missed" logic (§B).** `shared/scheduler/missedHelpers.js` ships BOTH the canonical
-  period-boundary `computeRecurringDeadline` AND legacy fixed 2h/24h `isTaskMissed` /
-  `shouldAutoMarkMissed` that ignore the recurrence cycle and disagree with the Phase-9 ladder.
-  → **Decision:** retire the legacy 2h/24h path (confirm no live caller) so one rule governs "missed".
+- **D1 — Dual "missed" logic (§B) — RESOLVED 2026-06-24.** `status='missed'` was retired entirely
+  (auto-miss removed by David's ruling "there should not be any auto-miss feature"; migration
+  `20260628100000_remove_missed_from_status_constraints.js` dropped it from the CHECK constraints).
+  `shared/scheduler/missedHelpers.js` still ships the canonical period-boundary
+  `computeRecurringDeadline` (kept) AND legacy fixed 2h/24h `isTaskMissed` / `shouldAutoMarkMissed`
+  (dead code — no live caller, `runSchedule.js` no longer sets `status='missed'` anywhere).
+  → **Decision (executed):** the legacy 2h/24h path is dead code; `missed` is no longer a valid
+  status. The period-boundary `computeRecurringDeadline` remains as the deadline helper.
 - **D2 — Delete-instance: hard-delete vs soft-skip (§B).** SCHEDULER-RULES.md + the VERIFIED R32.5
   test say delete-of-instance = soft-skip (`status='skip'`); `DeleteTask.js scope=instance` does a
   hard row delete. → **Decision:** which is intended? (affects dedup + history).
@@ -73,7 +77,8 @@ ruling before the scheduler is internally consistent.
 - **D4 — Overdue forward-roll (§C, WIP `60835fe`).** Today's fix is built but ungated: 1 BLOCK
   (period-end cap bleeds into the next cycle — must be `anchor+cycleLen-1`, applied unconditionally) +
   3 WARNs (window-close should use `preferred_time_mins` not placed slot; `time_flex==0` distinct from
-  null; duplicated `isFlexibleTpc` classifier). It overlaps **999.801** (recurrence-period auto-missed
+  null; duplicated `isFlexibleTpc` classifier). It overlaps **999.801** (recurrence-period
+  overdue reconcile — auto-missed component retired 2026-06-24).
   reconcile) and **DB-single-source W2**. → **Decision:** finish + fold into this spec as one coherent
   requirement (recommended), don't ship the partial.
 - **D5 — W2 partition NOT BUILT (§D/§F) — load-bearing.** The deadline-based OVERDUE↔UNSCHEDULED
@@ -96,7 +101,7 @@ ruling before the scheduler is internally consistent.
 | Recurring forward-roll + effective-deadline overdue | leg `60835fe` (this session) | **WIP, ungated** | finish D4; biggest unmerged payload — don't lose it |
 | DB-single-source **W2** (overdue↔unplaceable partition, FIXED anchor, preserve-prior) | ARCH-DB-SINGLE-SOURCE | **NOT BUILT** | load-bearing (D5) |
 | DB-single-source **W4** (remove `schedule_cache` write) | ARCH-DB-SINGLE-SOURCE | **PARTIAL/blocked** | needs per-split-part persistence (D6) |
-| **999.801** recurrence-period implied-due + R32.4 auto-missed reconcile | overdue-lifecycle design | **partial** | overlaps `60835fe` |
+| **999.801** recurrence-period implied-due + R32.4 overdue reconcile (auto-miss retired 2026-06-24) | overdue-lifecycle design | **partial** | overlaps `60835fe` |
 | Split-part calendar sync (`reconcileSplitsForUser` wiring) | §E CAL-16 | **KNOWN-BUG** | couples to W4 (D6) |
 | Master/instance **UPSERT + drop-refabricate-on-edit** | master-instance redesign | **absent (~40% substrate built)** | re-INSERTs every run today |
 | **L4 adaptive interval** (R54) | master-instance redesign | **deferred** | own milestone |
@@ -382,13 +387,13 @@ The live placement core is **`src/scheduler/unifiedScheduleV2.js`** (2390 lines)
 # Section B — Recurring Task Lifecycle (R32 / R33 / R34 / R50 family)
 
 **Scope:** recurring template vs instance; expansion/materialization; terminal statuses
-(done/skip/cancel/missed/pause/disabled) + dedup-blocking; rolling anchor; day-lock placement;
+(done/skip/cancel/pause/disabled) + dedup-blocking; rolling anchor; day-lock placement;
 fillPolicy + timesPerCycle (TPC) / flexible-TPC roaming; cycle length; cross-cycle spacing history;
 delete semantics.
 
 **Method:** reconciled against the live code. All file paths are absolute-from-repo-root under
 `juggler/`. Primary code: `juggler-backend/src/scheduler/{runSchedule.js,reconcileOccurrences.js,constants.js,unifiedScheduleV2.js}`,
-`shared/scheduler/{expandRecurring.js,missedHelpers.js,dateMatchesRecurrence.js}`,
+`shared/scheduler/{expandRecurring.js,missedHelpers.js (computeRecurringDeadline only — isTaskMissed/shouldAutoMarkMissed are dead code),dateMatchesRecurrence.js}`,
 `juggler-backend/src/lib/rolling-anchor.js`,
 `juggler-backend/src/slices/scheduler/domain/logic/ConstraintSolver.js`,
 `juggler-backend/src/slices/task/{facade.js, application/commands/{UpdateTaskStatus.js,DeleteTask.js}}`.
@@ -446,8 +451,8 @@ supporting: `TASK-STATE-MATRIX.md`, `RECURRING-SPACING-DESIGN.md`, `SCHEDULER-OV
 
 ## Terminal statuses & dedup-blocking
 
-### [B-TERM.1] Status set + valid transitions: `'' (open) → done | wip | skip | cancel | missed`; `missed` is **system-applied only** (user cannot set it directly → 403)
-- **Code:** status enum `juggler-backend/src/slices/task/facade.js:121` `z.enum(['','done','wip','cancel','skip','pause','disabled','missed'])`; terminal set `juggler-backend/src/lib/task-status.js` `TERMINAL_STATUSES = ['done','cancel','skip','pause','missed']`, `isTerminalStatus`; missed-set guard returns 403 (UpdateTaskStatus / commands).
+### [B-TERM.1] Status set + valid transitions: `'' (open) → done | wip | skip | cancel | pause | disabled` (**`missed` RETIRED 2026-06-24** — no longer a valid status)
+- **Code:** status enum `juggler-backend/src/slices/task/facade.js:122` `z.enum(['','wip','done','cancel','skip','pause','disabled'])` (no `missed`); `VALID_STATUSES` in `UpdateTaskStatus.js:52` `['','wip','done','cancel','skip','pause','disabled']`; terminal set `shared/task-status.js` `TERMINAL_STATUSES = ['done','cancel','skip','pause']` (no `missed`); `isTerminalStatus` checks against this set. Direct user attempt to set `missed` → 400 "Invalid status" (the enum rejects it).
 - **Status:** IMPLEMENTED
 - **Tests:** `commands-status-delete-misc.test.js` (R32.4 "403 for direct user set"); `commands-status-delete-misc.test.js` terminal-transition guards
 - **Source:** SCHEDULER-RULES.md §5.1; TASK-STATE-MATRIX.md L34-44
@@ -458,7 +463,7 @@ supporting: `TASK-STATE-MATRIX.md`, `RECURRING-SPACING-DESIGN.md`, `SCHEDULER-OV
 - **Status:** IMPLEMENTED
 - **Tests:** `commands-status-delete-misc.test.js`
 - **Source:** SCHEDULER-RULES.md §5.1/§5.2; TASK-STATE-MATRIX.md L34-37
-- **Notes:** The NOT-NULL `scheduled_at` CHECK constraint is the reason the missed-freeze ladder (B-TERM.4) must always resolve a non-null instant.
+- **Notes:** The NOT-NULL `scheduled_at` CHECK constraint is the reason terminal status writes must always resolve a non-null instant (the retired missed-freeze ladder previously handled this; now done/skip/cancel snap `scheduled_at` to now per B-TERM.2).
 
 ### [B-TERM.3] Terminal rows (done/skip/cancel) **block re-expansion** on their date (terminal-dedup), but their ordinals still advance the new-ordinal counter
 - **Code:** `runSchedule.js` loads `_p_terminalDedupRows` (`task_instances` where status IN terminal), injects synthetic entries `{ id:'_dedup_<source>_<date>', taskType:'recurring_instance', status:'done' }` into `allTasks` so `expandRecurring` dedups via `existingBySourceDate` / `instanceStatusBySourceDate`; terminal ordinals fed into `maxOrdByMaster`/`maxOrdBySource` so new ordinals don't collide. `expandRecurring` dedup keys: `existingBySourceDate[sourceId+'|'+date]` and `existingByDateText[date+'|'+text]`.
@@ -500,7 +505,7 @@ supporting: `TASK-STATE-MATRIX.md`, `RECURRING-SPACING-DESIGN.md`, `SCHEDULER-OV
 - **Code:** `shared/scheduler/missedHelpers.js` `computeRecurringDeadline({occurrenceDate, recurStart, isDayLocked, cycleDays}, tz)` → 23:59 local of last in-cycle day; cycle anchored to `recurStart + k*cycleDays` (matches expandRecurring bucketing). `recurringCycleDays` (ConstraintSolver.js:62): weekly=7, biweekly=14, monthly=30, daily=1, interval=`every*{1|7|30|365}`, else 0.
 - **Status:** IMPLEMENTED
 - **Tests:** `tpc.test.js`, `expandRecurring.test.js` (cycle bucketing)
-- **Source:** missedHelpers.js header ("juggler recurring-overdue-lifecycle, 2026-06-19 — W. David Raike"); R50.0
+- **Source:** missedHelpers.js header ("juggler recurring-overdue-lifecycle, 2026-06-19 — W. David Raike"); R50.0. Note: `missedHelpers.js` also contains dead-code legacy `isTaskMissed`/`shouldAutoMarkMissed` (see D1 above) — only `computeRecurringDeadline` is live.
 - **Notes:** Caller classifies `isDayLocked` + supplies `cycleDays`; function is pure date math, identically usable backend + cron.
 
 ### [B-TERM.6] `pause` is **template-only** and cascades to future open instances (kept, not deleted); `unpause` regenerates / reactivates
@@ -535,15 +540,15 @@ supporting: `TASK-STATE-MATRIX.md`, `RECURRING-SPACING-DESIGN.md`, `SCHEDULER-OV
 - **Source:** SCHEDULER-TRACEABILITY-REPORT.md R32.3 (VERIFIED); SCHEDULER-RULES.md §5.2
 - **Notes:** cancel = "this occurrence didn't count and shouldn't advance my rhythm."
 
-### [R33.3] **missed → soft nudge** `instanceDate + 1 day`
-- **Code:** `rolling-anchor.js` `computeRollingAnchor` → `missed` branch: `new Date(instanceDate+'T00:00:00'); d.setDate(d.getDate()+1)` → next-day key.
-- **Status:** IMPLEMENTED
-- **Tests:** `rollingAnchor.test.js` (`missed → returns instance date + 1 day`)
-- **Source:** SCHEDULER-TRACEABILITY-REPORT.md R33.3 (VERIFIED); SCHEDULER-RULES.md §5.2/§5.4
-- **Notes:** A missed occurrence nudges the cadence forward by one day rather than fully re-anchoring or freezing.
+### [R33.3] **`missed` → soft nudge** `instanceDate + 1 day` — **RETIRED 2026-06-24** (`missed` status no longer exists)
+- **Code (superseded):** `rolling-anchor.js` `computeRollingAnchor` previously had a `missed` branch: `new Date(instanceDate+'T00:00:00'); d.setDate(d.getDate()+1)` → next-day key. The current `computeRollingAnchor` only handles `done`, `skip`, `cancel` — the `missed` branch is gone (any non-terminal/non-done/skip/cancel status returns null via `isTerminalStatus` guard).
+- **Status:** SUPERSEDED — `missed` is no longer a valid status (B-TERM.1). The rolling anchor for past-incomplete recurrings is now handled by the overdue/unscheduled flag mechanism (overdue=1, unscheduled=1) without a terminal status change.
+- **Tests:** `rollingAnchor.test.js` (`missed → returns instance date + 1 day`) — retained as a historical regression guard but the code path is unreachable in production.
+- **Source:** SCHEDULER-TRACEABILITY-REPORT.md R33.3 (VERIFIED — pre-retirement); SCHEDULER-RULES.md §5.2/§5.4
+- **Notes:** With `missed` retired, a past-incomplete recurring occurrence stays non-terminal (overdue=1 if placed, unscheduled=1 if not). The cadence is not nudged; the user manually skip/cancels to advance the anchor.
 
 ### [R33.4] **Stale-event guard:** terminal whose `instanceDate < currentAnchor` returns null (no regression); `>=` allowed
-- **Code:** `rolling-anchor.js` `computeRollingAnchor` → `if (currentAnchor && instanceDate < currentAnchor) return null;`. Also returns null for any non-`done|skip|missed|cancel` status, and when `instanceDate` is falsy.
+- **Code:** `rolling-anchor.js` `computeRollingAnchor` → `if (currentAnchor && instanceDate < currentAnchor) return null;`. Also returns null for any non-`done|skip|cancel` status (via `isTerminalStatus` guard), and when `instanceDate` is falsy.
 - **Status:** IMPLEMENTED
 - **Tests:** `rollingAnchor.test.js` (`guard: terminal date < current anchor returns null`, `>= is allowed`)
 - **Source:** SCHEDULER-TRACEABILITY-REPORT.md R33.4 (VERIFIED)
@@ -578,7 +583,7 @@ supporting: `TASK-STATE-MATRIX.md`, `RECURRING-SPACING-DESIGN.md`, `SCHEDULER-OV
 - **Code:** `unifiedScheduleV2.js` (~L266-318): past-ANYTIME-recurring drop guard with R50.0 exception — inline flexible-TPC check + `recurringCycleDays` period-end test; within period → flow through; period ended OR day-locked → drop.
 - **Status:** IMPLEMENTED
 - **Source:** unifiedScheduleV2.js inline (R50.0); SCHEDULER-RULES.md §5.3
-- **Notes:** This is the placement-phase mirror of the Phase-9 auto-miss period check (B-TERM.4).
+- **Notes:** This is the placement-phase mirror of the recurrence-period deadline check (B-TERM.5, formerly the Phase-9 auto-miss period check — auto-miss retired 2026-06-24).
 
 ---
 
@@ -611,7 +616,7 @@ supporting: `TASK-STATE-MATRIX.md`, `RECURRING-SPACING-DESIGN.md`, `SCHEDULER-OV
 - **Status:** IMPLEMENTED, but **test gap**
 - **Tests:** **NONE explicit** — SCHEDULER-TRACEABILITY-REPORT.md R34.5 ❌ MISSING (minGap + safety valve, backlog 999.416). `tpc.test.js` (TELLY-05) references spacing-guard/safety-valve but the traceability report still flags no explicit minGap assertion.
 - **Source:** RECURRING-SPACING-DESIGN.md (design principles: min-gap primitive, enforce-at-placement, seed-from-DB, skip-don't-fail); SCHEDULER-RULES.md §5.2 Spacing-History column
-- **Notes:** Spacing history (`lastByMaster`) is updated by **done** (and within-run placements) but the design seeds from MAX(date) across ALL statuses. §5.2 lists Spacing-History update as **Yes for done only**; skip/cancel/missed = **No**.
+- **Notes:** Spacing history (`lastByMaster`) is updated by **done** (and within-run placements) but the design seeds from MAX(date) across ALL statuses. §5.2 lists Spacing-History update as **Yes for done only**; skip/cancel = **No**. (`missed` was previously listed here but is retired — no longer a valid status.)
 
 ---
 
@@ -642,9 +647,9 @@ supporting: `TASK-STATE-MATRIX.md`, `RECURRING-SPACING-DESIGN.md`, `SCHEDULER-OV
 - **Intended gaps vs code:** UPSERT-not-reINSERT (absent), drop-refabricate-on-edit (absent), spacing history persistence (partial — `lastByMaster` is run-scoped + DB-seeded but not a first-class persisted spacing log). L4 adaptive-interval split deferred to its own milestone.
 
 ### [IF.2] **Recurring-overdue lifecycle** (PARTIAL → IMPLEMENTED core) — LOCKED 2026-06-19
-- **Code today:** the period-boundary deadline (B-TERM.5 `computeRecurringDeadline`), Phase-9 auto-miss ladder (B-TERM.4, 999.808), and missed soft-nudge anchor (R33.3) are all SHIPPED — this is largely landed, not pending.
+- **Code today:** the period-boundary deadline (B-TERM.5 `computeRecurringDeadline`), the overdue/unscheduled flag mechanism (which replaced the retired Phase-9 auto-miss ladder, B-TERM.4), and the rolling anchor for done/skip/cancel (R33.3 `missed` branch retired) are all SHIPPED — this is largely landed, not pending.
 - **Status:** IMPLEMENTED (the lifecycle/over-materialization design that was "Leg A only" per brain is the residual)
-- **Source:** brain "juggler recurring overdue lifecycle design"; SCHEDULER-OVERDUE-LADDER.md; missedHelpers.js header
+- **Source:** brain "juggler recurring overdue lifecycle design"; SCHEDULER-OVERDUE-LADDER.md; missedHelpers.js header (`computeRecurringDeadline` — live; legacy `isTaskMissed`/`shouldAutoMarkMissed` dead code)
 - **Residual gap:** over-materialization (timesPerCycle=1 emitting 2+ instances/cycle — the "Submit Weekly UI Claim ×N unplaced" symptom) is the Leg-B target; skip/cancel terminal lifecycle (skip/cancel/pause/disabled) is honored in code.
 
 ---
@@ -655,15 +660,16 @@ supporting: `TASK-STATE-MATRIX.md`, `RECURRING-SPACING-DESIGN.md`, `SCHEDULER-OV
 (B-EXP ×4, B-TERM ×6, rolling-anchor R32.1-3 + R33.1-5 ×6 [some merged], DAY-LOCK ×3, R34/fillPolicy/spacing ×5, delete ×2, in-flight ×2.)
 
 **By status:**
-- **IMPLEMENTED (fully, with tests):** 17 — B-EXP.1/2/3/4, B-TERM.1/2/3/5/6, R32.1, R32.2, R32.3, R33.3, R33.4, DAY-LOCK.1(core)/.2/.3, R34.1, R34.2, R34.3
+- **IMPLEMENTED (fully, with tests):** 17 — B-EXP.1/2/3/4, B-TERM.1/2/3/5/6, R32.1, R32.2, R32.3, R33.4, DAY-LOCK.1(core)/.2/.3, R34.1, R34.2, R34.3
 - **IMPLEMENTED but TEST-GAP (❌ MISSING per traceability):** 2 — R33.5 (null-anchor backfill, 999.417), R34.5 (minGap spacing guard + safety valve, 999.416); plus R19.4 rigid-split day-lock has no assertion (999.413)
-- **PARTIAL / ambiguous:** 2 — R32.5 (soft-skip vs scope=instance hard-delete reconciliation), B-TERM.4 (Phase-9 ladder correct, but a contradictory legacy helper coexists)
+- **SUPERSEDED (retired 2026-06-24):** 1 — R33.3 (`missed` status retired, rolling-anchor `missed` branch removed)
+- **PARTIAL / ambiguous:** 2 — R32.5 (soft-skip vs scope=instance hard-delete reconciliation), B-TERM.4 (auto-miss removed 2026-06-24; legacy `missedHelpers.js` 2h/24h functions are dead code)
 - **PLANNED:** 1 — IF.1 master/instance fabricate-once-persist (substrate partially built)
-- **CONTRADICTED:** 1 helper — `missedHelpers.js` 2h/24h `isTaskMissed`/`shouldAutoMarkMissed` vs period-boundary canon
+- **CONTRADICTED (dead code):** `missedHelpers.js` 2h/24h `isTaskMissed`/`shouldAutoMarkMissed` — legacy functions with no live caller; `computeRecurringDeadline` (period-boundary) is the canonical one that remains
 - **DOC-vs-CODE DRIFT:** 1 — TASK-STATE-MATRIX.md says pause "deletes future instances"; code keeps them as `status='pause'`
 
 **Top 5 gaps / contradictions:**
-1. **CONTRADICTION — two missed-detection definitions in one file.** `shared/scheduler/missedHelpers.js` ships both the canonical period-boundary `computeRecurringDeadline` AND legacy fixed-threshold `isTaskMissed` (2h) / `shouldAutoMarkMissed` (24h) that ignore the recurrence cycle. The latter contradict Phase-9 (`runSchedule.js:1749+`) and R50.0. Reconcile/remove the legacy pair.
+1. **DEAD CODE — two missed-detection definitions in one file.** `shared/scheduler/missedHelpers.js` ships both the canonical period-boundary `computeRecurringDeadline` (kept, live) AND legacy fixed-threshold `isTaskMissed` (2h) / `shouldAutoMarkMissed` (24h) that ignore the recurrence cycle. The latter are dead code — `status='missed'` was retired 2026-06-24 and `runSchedule.js` no longer calls them. Safe to delete the legacy pair (confirm no live caller first).
 2. **TEST GAP — R34.5 cross-cycle spacing guard (minGap + safety valve) has no explicit assertion** (`unifiedScheduleV2.js findEarliestSlot`; backlog 999.416, P2). This guards the real "Cut Grass placed Sat then Fri → 6-day-then-1-day drift" bug from RECURRING-SPACING-DESIGN.md.
 3. **TEST GAP — R33.5 null `rolling_anchor` backfill from spacing history** (`runSchedule.js:540-564`; backlog 999.417, P1). Untested path that, if wrong, silently violates the spacing guarantee for pre-2026-05-20 data.
 4. **AMBIGUITY — delete-instance: soft-skip vs hard row delete.** SCHEDULER-RULES.md §5.2 + the VERIFIED R32.5 test say soft-skip (`status='skip'`), but `DeleteTask.js scope=instance` comments "delete just that single row." Confirm which path the UI's default instance-delete invokes (delete-scope 999.680 split).
@@ -709,7 +715,7 @@ throughout this section (REG-26) is also fixed — see the `[R50.0]`/`min()` not
 
 - **PLACED** — instance has a live `scheduled_at` slot within its effective deadline; `overdue=0/null`, `unscheduled=0`.
 - **UNSCHEDULED** — brand-new chunk (`scheduled_at` null) that could not be placed this run → `unscheduled=1`, shown in the Unplaced lane (`unplaced_reason`/`unplaced_detail`). **D-B (David ruling, 2026-07-02, leg sched-audit):** a row in this lane is resolvable IN PLACE — the user can mark it done/skip/cancel directly from the Unplaced/Unscheduled lane, without first giving it a `scheduled_at`. See `R50.9` in `docs/REQUIREMENTS.md` for the full ruling text, the frontend fix, and a documented backend gap this leg's doc-verification pass found (the `UpdateTaskStatus.js` server-side guard was not updated to match for non-`rolling`-recurrence-type instances or one-offs).
-- **OVERDUE** — past its effective deadline and incomplete; pinned (`overdue=1`, `unscheduled=0`, `scheduled_at`/`date` preserved). Terminal sibling: **missed** (status write, R32.4) once the period boundary itself passes.
+- **OVERDUE** — past its effective deadline and incomplete; pinned (`overdue=1`, `unscheduled=0`, `scheduled_at`/`date` preserved). Non-terminal — the user may manually skip/cancel to advance the cadence. (Formerly had a terminal `missed` sibling via R32.4 auto-miss — retired 2026-06-24.)
 
 **Effective deadline** = `min(recurrence-period boundary, window-close)` (locked, David 2026-06-23, `juggler-overdue-reschedule/SPEC.md`).
 
@@ -731,7 +737,7 @@ not touched by this fix).
 
 ---
 
-### [R50.0] Each recurring instance carries an IMPLIED deadline = the recurrence-period boundary (`recurringPeriodEndKey`); day-locked/no-TPC → occurrence+1; flexible-TPC (`timesPerCycle < selectedDays`) → occurrence+cycleLen. First day PAST the period (EXCLUSIVE): live through periodEnd−1, missed ON periodEnd.
+### [R50.0] Each recurring instance carries an IMPLIED deadline = the recurrence-period boundary (`recurringPeriodEndKey`); day-locked/no-TPC → occurrence+1; flexible-TPC (`timesPerCycle < selectedDays`) → occurrence+cycleLen. First day PAST the period (EXCLUSIVE): live through periodEnd−1, overdue ON periodEnd (non-terminal — `missed` status retired 2026-06-24).
 - **Code:** `runSchedule.js:226` `recurringPeriodEndKey(recur, occurrenceDateKey)`; `cycleDays` default 1 (day-locked), `+cycleLen` for flexible-TPC; `formatDateKey(occ + cycleDays)`. `selectedDays` classification (`runSchedule.js:240-258`) is byte-identical to `unifiedScheduleV2.js` `isFlexibleTpc` (`:535`). Cycle length via `ConstraintSolver.recurringCycleDays` (`ConstraintSolver.js:62`). — MAIN.
 - **Status:** IMPLEMENTED(main).
 - **Tests:** `tests/recurringPeriodEnd.test.js` (9 cases); `tests/runScheduleIntegration.test.js` (AC5).
@@ -865,7 +871,7 @@ trace of what changed and why); the `Status:` line in each is superseded by this
 - **Source:** SPEC.md "Period-end cap (must hold)"; SPEC.md AC3-cap; `60835fe` commit message ("period-end cap can bleed to next cycle").
 - **Notes / BLOCK detail (historical — CLOSED):** at research time the cap read as **CONDITIONAL** (`if (!item.deadlineDate || item.deadlineDate > _periodEndKey)`), which a pre-set past/stale `deadlineDate` could silently defeat, bleeding the instance into the next cycle. `AUDIT-REGISTER.md` §4 "Verified-solid" independently reconfirms ("`_periodEndCap` correctly prevents a flexible-TPC instance bleeding into the next cycle; day-locked instances never forward-roll... A2 independently confirmed 'OVD-3 BLOCK from spec is FIXED in code' via live scenario walk-through") — no further code change was made by sched-audit for this specific item; it was already fixed prior to this leg and the doc simply never caught up until now.
 
-### [OVD-4] Overdue determination at scheduler time: a run that finds no valid slot before the effective deadline → `overdue=1` (R50 pin). At the period boundary with no slot → `missed`, `scheduled_at` frozen at the last real placed slot (R32.4/999.808 ladder, undisturbed).
+### [OVD-4] Overdue determination at scheduler time: a run that finds no valid slot before the effective deadline → `overdue=1` (R50 pin). At the period boundary with no slot → stays non-terminal `overdue=1`/`unscheduled=1` (auto-`missed` RETIRED 2026-06-24 — was: `scheduled_at` frozen at the last real placed slot via R32.4/999.808 ladder).
 - **Code:** Phase-8 unplaced marking (`runSchedule.js:~1556`, MAIN) + forward-roll fallthrough to pin when period ended (`unifiedScheduleV2.js:~1705`).
 - **Status:** IMPLEMENTED (main, `leg/juggy4`) — the forward-roll-exhausted → pin transition (was WIP/PARTIAL) is now gated; see RESOLVED note above. Note: the auto-`missed` terminal write this entry references as "undisturbed" was itself REMOVED by the 2026-06-24 ruling (`[B-TERM.4]` above) — a past-incomplete recurring instance now stays non-terminal (`overdue=1` or `unscheduled=1`), it is never auto-set to `status:'missed'`. This entry's "frozen at the last real placed slot" clause describes pre-2026-06-24 behavior kept for history; current behavior is the plain overdue/unscheduled pin.
 - **Tests:** `tests/scheduler/roamable-recurring-forward-roll.test.js` AC3 ("no-slot-weekly" must be in unplaced); `tests/runScheduleIntegration.test.js`.
@@ -1045,11 +1051,11 @@ state — so "placed AND unplaced" is impossible.
 
 ### [DBSS-12] `completed_at` materialized column projected in `tasks_v`; `rowToTask` surfaces it
 
-- **Code:** migration `20260603000000` (failed regex no-op) → `20260614010000_recreate_tasks_v_with_completed_at.js` (fix); `rowToTask` `completedAt: row.completed_at ? scheduledAtToISO(...) : null` (taskMappers.js ~284); scheduler writes `completed_at` on `status:'missed'` auto-miss (runSchedule.js ~missed path)
+- **Code:** migration `20260603000000` (failed regex no-op) → `20260614010000_recreate_tasks_v_with_completed_at.js` (fix); `rowToTask` `completedAt: row.completed_at ? scheduledAtToISO(...) : null` (taskMappers.js ~284); `completed_at` is written on terminal status (done/skip/cancel) — the former `status:'missed'` auto-miss path was retired 2026-06-24 (B-TERM.4)
 - **Status:** IMPLEMENTED
 - **Tests:** `src/scheduler/__tests__/20260509000300_add_missed_status_and_completed_at.test.js`
 - **Source:** migration headers; ROADMAP 999.308a
-- **Notes:** A missed PLACED instance is frozen at its last real slot and `completed_at = missedAt` (LOCKED design 999.808). DB CHECK constraint requires non-null `scheduled_at` for terminal statuses, so auto-miss falls back to window-close/occurrence-midnight when never placed.
+- **Notes:** A terminal PLACED instance (done/skip/cancel) snaps `scheduled_at` to now and `completed_at` is set accordingly (B-TERM.2). The former auto-miss freeze-at-last-slot behavior (LOCKED design 999.808) was retired 2026-06-24 — past-incomplete recurrings now stay non-terminal (`overdue=1`/`unscheduled=1`). DB CHECK constraint requires non-null `scheduled_at` for terminal statuses; the retired auto-miss fallback to window-close/occurrence-midnight is no longer reached.
 
 ### [DBSS-13] `unscheduled` flag column — set on unplaceable, cleared on (re)placement
 
@@ -1122,11 +1128,13 @@ state — so "placed AND unplaced" is impossible.
   entirely — verified live: `runSchedule.js:2187-2289` ("9. Move remaining past-dated tasks to today")
   no longer sets `status:'missed'` anywhere; the block instead writes non-terminal `overdue=1`
   (had a placement) or `unscheduled=1` (never placed), per `runSchedule.js:2257-2268`'s explicit
-  comment citing the ruling. The `missed` DB enum value itself is untouched (still a valid, reachable
-  status via other paths) — only this **auto-write** path was removed.
+  comment citing the ruling. The `missed` DB enum value itself was removed from the CHECK
+  constraints by migration `20260628100000_remove_missed_from_status_constraints.js` (any existing
+  `status='missed'` rows were migrated to `status='' + overdue=1`). It is no longer a valid or
+  reachable status — the Zod schema, `VALID_STATUSES`, and the DB CHECK constraint all reject it.
 - **Code (superseded, kept for history):** runSchedule.js auto-miss block (~1750-1845 — stale line range, see `[B-TERM.4]` for the current `:2187-2289` location): recurring past + outside both timeFlex window and recurrence-period boundary → `status:'missed'`, `scheduled_at=missedAt`, `completed_at=missedAt`; non-recurring past unplaced → date moved to today (`todayMidnight`)
 - **Status:** SUPERSEDED (was IMPLEMENTED).
-- **Tests:** `src/scheduler/__tests__/20260509000300_add_missed_status_and_completed_at.test.js`; migration `20260606000000`/`20260609000000` add the `missed` enum value (schema unaffected by the removal — only the auto-write call site changed).
+- **Tests:** `src/scheduler/__tests__/20260509000300_add_missed_status_and_completed_at.test.js`; migration `20260606000000`/`20260609000000` originally added the `missed` enum value; migration `20260628100000` later removed it from the CHECK constraints (existing `missed` rows migrated to `status='' + overdue=1`).
 - **Source:** runSchedule.js comments (Plan C, historical) + `runSchedule.js:2257-2268` (removal + David 2026-06-24 ruling text); brain (recurring overdue lifecycle design; overdue past-due R50; juggler-never-missing-invariant)
 - **Notes:** `effectiveDate` uses the raw DB `date` column when `scheduled_at` is null (never-placed instance) so a never-placed past occurrence still gets its non-terminal overdue/unscheduled flag (BUG-142 PATH B/C) — this part of the mechanism is UNCHANGED by the removal. What changed is only the terminal status write at the end of that path.
 
