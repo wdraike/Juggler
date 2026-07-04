@@ -30,7 +30,7 @@ where a fragment disagrees with the code, the **code + this doc win** and the fr
 |---------------------|-----------|-------------|---------|-------------------|--------------------------|
 | A — Placement engine | 23 | 22 | 1 | — | 3 doc-drift gaps (weather fail-open row RESOLVED 2026-07-02 — was already fail-closed in code, doc was stale; see [PLACE-WEATHER]) |
 | B — Recurring lifecycle | 24 | ~20 | ~2 | master/instance UPSERT redesign | 1 (delete-instance) + doc drift (missed-status retired 2026-06-24, docs reconciled) |
-| C — Overdue / forward-roll | 16 | 12 (main, was 9 — sched-audit 2026-07-02: OVD-1/2/3 gated) | 2 | 999.801 reconcile | 1 unrelated CONTRADICTED (`R50.6-windowclose`, out of sched-audit scope) — the prior "3 WIP-ungated + 1 BLOCK on `60835fe`" is CLOSED, see §C SUMMARY |
+| C — Overdue / forward-roll | 16 | 14 (main — OVD-1/2/3 gated, R50.6-windowclose resolved 999.1085/999.1062) | 2 | 999.801 reconcile | 0 — the prior CONTRADICTION (`R50.6-windowclose`) is RESOLVED (preferred_time_mins fix on main); the prior "3 WIP-ungated + 1 BLOCK on `60835fe`" is CLOSED, see §C SUMMARY |
 | D — Persistence / read model | 21 | 18 | 2 (slack_mins, W4 cache) | W2 partition (NOT built) | 1 (slack_mins dropped) |
 | E — Calendar sync coupling | 19 | 16 | 1 | — | 1 known-bug (split-part) + contention |
 | F — In-flight / gaps | inventory | — | — | W2, W4, L4, 999.801 | ~25 untested sub-reqs |
@@ -766,26 +766,26 @@ not touched by this fix).
   `docs/REQUIREMENTS.md` as the R50.1 amendment text; see also new `R50.9`/`R50.10` (D-B/D-C, same
   ruling batch).
 
-### [R50.6] The READ path (`rowToTask`, via `GET /api/tasks` → `tasks_v`) derives `overdue` by OR-ing the stored flag with a computed predicate (hard/materialized due vs shared tz-aware now), so a past-due item shows `overdue:true` between scheduler runs. Floating/no-deadline never overdue; terminal never overdue; FIXED uses `scheduled_at` as hard due.
-- **Code:** `taskMappers.js` `rowToTask` overdue IIFE (~`:355-410`): `if (!!row.overdue) return true` (stored flag wins); `isTerminalStatus(st)` / `st==='disabled'` → false; `hasHardCommitment = deadline || implied_deadline || FIXED || isPlacedRecurringInstance`; `dueKey = deadline || implied_deadline || (FIXED/placed → scheduled_at-local)`; `if (dueKey < now.todayKey) return true`. — IMPLEMENTED(main) for the structure; **the same-day intra-day branch is REPLACED by WIP** (see OVD-2/R50.6-windowclose).
-- **Status:** PARTIAL — base predicate IMPLEMENTED(main); the same-day window-close threshold is WIP(branch, ungated).
-- **Tests:** `tests/unit/mappers/overdue-pastdue-recurring.test.js`; frontend `src/utils/__tests__/overdue.test.js`.
-- **Source:** REQUIREMENTS R50.6 (:558); ADR Decision 1 (:61); SPEC.md "Read path (R50.6...)".
-- **Notes:** MAIN (505a09b) same-day check was FIXED-only: `dueKey===todayKey && scheduledMins < nowMins` (505a09b `taskMappers.js:405`). WIP generalises to the window-close threshold below. **This read-path derivation is mapper-owned BY DESIGN** — it fills the gap between discrete scheduler runs; it is NOT a read-triggered scheduler run (Decision 6).
+### [R50.6] The READ path (`rowToTask`, via `GET /api/tasks` → `tasks_v`) derives `overdue` by COMPUTED-ON-READ ONLY (M-5 / 999.1085, leg sched-drop-overdue-column) — no stored flag, no "stored OR computed" hybrid. The single source of truth is `computeOverdueForRow` (hard/materialized due vs shared tz-aware now), so a past-due item shows `overdue:true` between scheduler runs. Floating/no-deadline never overdue; terminal never overdue; FIXED uses `scheduled_at` as hard due.
+- **Code:** `taskMappers.js` `computeOverdueForRow` (~`:182-360`, exported): `isTerminalStatus(st)` / `st==='disabled'` → false; `hasHardCommitment = deadline || (recurring_instance && implied_deadline) || FIXED || isPlacedRecurringInstance`; `dueKey = deadline || implied_deadline || (FIXED/placed → scheduled_at-local)`; `if (dueKey < now.todayKey) return true`. The same-day intra-day branch uses `preferred_time_mins + time_flex` (AC2b compliant, 999.1062). — IMPLEMENTED(main). The stored-flag short-circuit (`if (!!row.overdue) return true`) has been REMOVED; `task_instances.overdue` column was dropped by migration `20260703190000_drop_overdue_column.js`.
+- **Status:** IMPLEMENTED(main) — the stored column is gone (999.1085); the window-close threshold uses `preferred_time_mins` (999.1062, AC2b compliant).
+- **Tests:** `tests/unit/mappers/overdue-pastdue-recurring.test.js`; frontend `src/utils/__tests__/overdue.test.js`; `tests/scheduler/sched-drop-overdue-column-characterization.test.js` (999.1085).
+- **Source:** REQUIREMENTS R50.6 (:558); ADR Decision 1 (:61); SPEC.md "Read path (R50.6...)"; 999.1085 commit `0261b6df`.
+- **Notes:** This read-path derivation is mapper-owned BY DESIGN — it fills the gap between discrete scheduler runs; it is NOT a read-triggered scheduler run (Decision 6). The `computeOverdueForRow` function is exported so `runSchedule.js` (via the task slice facade) calls the identical predicate for its own continuity checks instead of re-deriving or reading a raw column.
 
-### [R50.6-windowclose] (WIP) The same-day overdue threshold is the window-close, not the slot: windowed daily recurring (`time_flex > 0`) is overdue at `scheduledMins + time_flex`; window-less (`time_flex` null/0) falls through to midnight (next-day `dueKey < todayKey`). FIXED stays slot-time (`scheduledMins < nowMins`).
-- **Code:** `taskMappers.js` `rowToTask` "Past-due check" block (~`:404-420`, working tree): comment "Windowed daily recurring (isPlacedRecurringInstance + time_flex > 0): overdue when WINDOW CLOSES = scheduledMins + time_flex (not at the slot)." — **WIP(branch-60835fe), ungated.**
-- **Status:** WIP(branch, ungated) — with a known WARN.
-- **Tests:** `tests/unit/mappers/overdue-pastdue-recurring.test.js` (Round-2 additions, +353 lines per `60835fe` stat).
-- **Source:** SPEC.md AC2/AC2b/AC2c/AC4; `60835fe` commit message.
-- **Notes / KNOWN WARN (from `60835fe` message + SPEC §Touch points):** the WIP uses the **placed `scheduledMins`** as the window base, but the locked design says window-close must use **`preferred_time_mins + time_flex`** (independent of where the task was actually placed) — so a task placed EARLIER than preferred reads overdue too early (AC2b violation). Also `time_flex == 0` (zero-width) handling is conflated with `null` in the current branch ("falls through to false" comment) vs the locked AC2c which wants overdue *exactly at the slot minute* for `flex==0`. CONTRADICTION between WIP code and SPEC AC2b/AC2c — must be reconciled before gating.
+### [R50.6-windowclose] The same-day overdue threshold is the window-close, not the slot: windowed daily recurring (`time_flex > 0`) is overdue at `(preferred_time_mins ?? scheduledMins) + time_flex`; window-less (`time_flex` null/0) falls through to midnight (next-day `dueKey < todayKey`). FIXED stays slot-time (`scheduledMins < nowMins`). `time_flex==0` (zero-width) → overdue at the slot/preferred minute itself (AC2c), distinct from `null`→midnight.
+- **Code:** `taskMappers.js` `computeOverdueForRow` same-day block (~`:343-356`): `preferredTimeMins = row.preferred_time_mins != null ? row.preferred_time_mins : scheduledMins`; `windowCloseMins = preferredTimeMins + row.time_flex`; `if (_now.nowMins >= windowCloseMins) return true`. — IMPLEMENTED(main, 999.1062/999.1085).
+- **Status:** IMPLEMENTED(main) — RESOLVED. The prior WIP CONTRADICTION (placed `scheduledMins` vs `preferred_time_mins`) is fixed: the code now uses `preferred_time_mins ?? scheduledMins` (AC2b compliant). The `time_flex==0` vs `null` distinction is also handled (AC2c).
+- **Tests:** `tests/unit/mappers/overdue-pastdue-recurring.test.js`; `tests/scheduler/sched-drop-overdue-column-characterization.test.js` (999.1085).
+- **Source:** SPEC.md AC2/AC2b/AC2c/AC4; 999.1062 commit `576b8e0c`; 999.1085 commit `0261b6df`.
+- **Notes:** The WIP WARN (placed `scheduledMins` as window base → AC2b false-positive for early-placed tasks) is RESOLVED — the code uses `preferred_time_mins` (placement-independent). The `time_flex==0` conflation with `null` is also RESOLVED — `time_flex != null` gate (line 348) treats `0` as a zero-width window (overdue at the slot minute), while `null` falls through to midnight.
 
 ### [R50.7] The implied deadline is MATERIALIZED to `task_instances.implied_deadline` (DATE column) during the expand/reconcile insert pass (scheduler W3), so the read predicate compares without re-running recurrence logic.
 - **Code:** `runSchedule.js:~1064` `chunkInsertRows` map sets `implied_deadline: recurringPeriodEndKey(srcMap[row.sourceId].recur, occDate)`; migration `20260621000000_add_implied_deadline_to_task_instances.js` (col + `tasks_v` view recreation). — MAIN.
 - **Status:** IMPLEMENTED(main).
 - **Tests:** `tests/db/migrations/20260621000000_implied_deadline.test.js`.
 - **Source:** REQUIREMENTS R50.7 (:559); ADR Decision 4 (:76).
-- **Notes:** Per-OCCURRENCE (per-instance row), NOT inherited from master. Pre-existing rows get NULL (fail-safe — stored `overdue` flag covers them; backfill deferred). NULL is never a data-fallback bug here — it is the documented safe default.
+- **Notes:** Per-OCCURRENCE (per-instance row), NOT inherited from master. Pre-existing rows get NULL (fail-safe — `computeOverdueForRow` returns false for rows with no `implied_deadline` and no `deadline`, so they are simply not overdue via this path; backfill deferred). NULL is never a data-fallback bug here — it is the documented safe default.
 
 ### [R50.8] ONE shared `getNowInTimezone` contract (tz-aware `todayKey`+`nowMins`+`todayDate`, America/New_York default, injectable clock) consumed by BOTH the backend scheduler and the read predicate; frontend reconciled to the same contract. No ad-hoc `new Date()` past-due compare on the display path.
 - **Code:** `shared/scheduler/getNowInTimezone.js` (canonical); `runSchedule.js:264` requires it (local dup removed); `taskMappers.js` uses it for default now (`_getNowInTimezone(timezone || _DEFAULT_TIMEZONE)`); `juggler-frontend/src/utils/timezone.js` reconciled. — MAIN.
@@ -891,10 +891,11 @@ trace of what changed and why); the `Status:` line in each is superseded by this
 **UPDATED (leg sched-audit, 2026-07-02):** the tallies below are the ORIGINAL `60835fe` research-pass
 snapshot, kept for history. Current reality: OVD-1, OVD-2, OVD-3, OVD-4 have all moved from
 WIP/OPEN-BLOCK to **IMPLEMENTED(main, `leg/juggy4`)** (see the RESOLVED note under "FORWARD-ROLL"
-above and each entry's own `Status:` line) — **12 of 16** catalogued behaviors are now
-IMPLEMENTED(main), not 9. The one still-open item from this section, `R50.6-windowclose`'s
-`scheduledMins`-vs-`preferred_time_mins` contradiction, is **UNCHANGED and OUT OF SCOPE** for
-sched-audit (not named in its dispatch) — still WIP/CONTRADICTED exactly as below.
+above and each entry's own `Status:` line) — **14 of 16** catalogued behaviors are now
+IMPLEMENTED(main), not 9. The `R50.6-windowclose` contradiction is **RESOLVED** (999.1085/999.1062):
+the code now uses `preferred_time_mins ?? scheduledMins` (AC2b) and `time_flex != null` gate
+for `flex==0` vs `null` (AC2c). The stored `overdue` column is dropped (999.1085) — overdue
+is computed-on-read only via `computeOverdueForRow`.
 
 **Total behaviors catalogued: 16** (R50.0, R50.1, R50.6, R50.6-windowclose, R50.7, R50.8, R32.4/999.808, R32.7, 999.671/700, R52, OVD-LADDER, OVD-1, OVD-2, OVD-3, OVD-4, + the NO-read-triggered-run invariant).
 
@@ -905,21 +906,21 @@ sched-audit (not named in its dispatch) — still WIP/CONTRADICTED exactly as be
 - **PARTIAL — 2:** R50.6 (base predicate main; same-day threshold WIP), OVD-4 (terminal pin main; roll-exhausted→pin WIP).
 - **CONTRADICTED (WIP code vs SPEC) — 1:** R50.6-windowclose (code uses placed `scheduledMins`; SPEC AC2b/AC2c demand `preferred_time_mins + time_flex` and distinct `flex==0` handling).
 
-**By status (CURRENT, 2026-07-02):**
-- **IMPLEMENTED(main) — 12:** R50.0, R50.1 (base pin + D-A one-off amendment), R50.7, R50.8, R32.4/999.808, R32.7, 999.671/700, R52, OVD-LADDER, OVD-1, OVD-2, OVD-3.
-- **PARTIAL — 2:** R50.6 (base predicate main; same-day threshold still WIP, unchanged), OVD-4 (terminal pin main; forward-roll-exhausted→pin transition now gated, but its own historical "frozen at last real slot" clause describes REMOVED pre-2026-06-24 auto-miss behavior — see its Notes).
-- **CONTRADICTED (unchanged, out of sched-audit's scope) — 1:** R50.6-windowclose.
+**By status (CURRENT, 2026-07-04 — post 999.1085/999.1062):**
+- **IMPLEMENTED(main) — 14:** R50.0, R50.1 (base pin + D-A one-off amendment), R50.6 (computed-on-read, no stored column), R50.6-windowclose (preferred_time_mins fix, AC2b/AC2c compliant), R50.7, R50.8, R32.4/999.808, R32.7, 999.671/700, R52, OVD-LADDER, OVD-1, OVD-2, OVD-3.
+- **PARTIAL — 2:** OVD-4 (terminal pin main; forward-roll-exhausted→pin transition now gated, but its own historical "frozen at last real slot" clause describes REMOVED pre-2026-06-24 auto-miss behavior — see its Notes). ~~R50.6~~ — now IMPLEMENTED (computed-on-read only, 999.1085).
+- **CONTRADICTED — 0:** ~~R50.6-windowclose~~ — RESOLVED (999.1085/999.1062: `preferred_time_mins ?? scheduledMins` fix on main).
 - **CLOSED this leg — REG-26 (effective-deadline min()-vs-max()):** was a live code defect (not merely a doc gap) in the persistence-sweep's `computeEffectiveDeadline`; fixed, see the `min()` VERIFIED-MATCHES-CODE note above.
 
 **Open BLOCK / WARNs on the WIP (`60835fe`, per its own commit message + ernie/cookie) — HISTORICAL, kept for trace:**
 1. ~~**BLOCK — period-end cap can bleed to next cycle (OVD-3):**~~ **CLOSED** — cap is conditional (`if (!deadlineDate || deadlineDate > periodEnd)`); a stale/past pre-set `deadlineDate` defeats it. Must be unconditional. Plus an inclusive/exclusive boundary mismatch (`anchor+cycleLen` set vs SPEC's `anchor+cycleLen−1`). Confirmed fixed prior to sched-audit; see OVD-3 entry above.
-2. **WARN (still open, out of scope) — window-close uses placed slot, not preferred (R50.6-windowclose):** read predicate computes `scheduledMins + time_flex`; SPEC requires `preferred_time_mins + time_flex` (placement-independent) → AC2b false-positive for early-placed tasks.
-3. **WARN (still open, out of scope) — `time_flex == 0` zero-width window:** conflated with `null`/anytime in the WIP ("falls through to false"); SPEC AC2c wants overdue exactly at the slot minute, distinct from `null`→midnight.
+2. ~~**WARN (still open, out of scope) — window-close uses placed slot, not preferred (R50.6-windowclose):**~~ **RESOLVED (999.1085/999.1062)** — read predicate now computes `preferred_time_mins + time_flex` (placement-independent); AC2b compliant.
+3. ~~**WARN (still open, out of scope) — `time_flex == 0` zero-width window:**~~ **RESOLVED (999.1085)** — `time_flex != null` gate treats `0` as a zero-width window (overdue at the slot/preferred minute, AC2c); `null` falls through to midnight.
 4. **WARN (still open, out of scope, drift) — inline `isFlexibleTpc` duplication:** `buildItems:266` recomputes the classifier inline instead of reusing the single `isFlexibleTpc` (`:535`)/`recurringPeriodEndKey` classifier.
 
 **Top gaps before gating (HISTORICAL — item 1 is CLOSED, items 2-4 remain, all out of sched-audit's scope):**
 - ~~Reconcile the period-end cap to unconditional + correct inclusive boundary (the headline BLOCK).~~ CLOSED.
-- Switch the read predicate window-close base from placed `scheduledMins` to `preferred_time_mins` and split out `time_flex==0`.
+- ~~Switch the read predicate window-close base from placed `scheduledMins` to `preferred_time_mins` and split out `time_flex==0`.~~ RESOLVED (999.1085/999.1062).
 - De-duplicate the flexible-TPC classification (single source).
 - `60835fe` merged onto `leg/juggy4`/`leg/sched-audit` and is gated; the "re-base or branch from here" framing below is historical (kept for trace, not actionable): any spec-driven implementation should branch from here and close these four findings, or the leg should be re-based onto `origin/main` (505a09b) and re-applied clean.
 
@@ -1041,13 +1042,12 @@ state — so "placed AND unplaced" is impossible.
 - **Source:** runSchedule.js:1064 comment ("W3 (R50.7): materialize the recurring implied deadline onto the row"); ADR Decision 4 ("A new nullable task_instances.implied_deadline DATE column is written during the existing expand/reconcile insert pass")
 - **Notes:** Materialized (not a generated column) because the recurrence-period end is NOT SQL-expressible — it needs JS recurrence classification. Null when not recurring or no occurrence date. Queryable in SQL for future analytics. Recomputed inline (`recurringPeriodEndKey(t.recur, effectiveDate)`) in the auto-miss path (~1816) as well.
 
-### [DBSS-11] Computed-on-read `overdue` — `rowToTask` ORs the stored flag with a read-time predicate (R50.6 / W4)
-
-- **Code:** `taskMappers.js:rowToTask` overdue IIFE (~334-380); compares now vs (hard `deadline` OR materialized `implied_deadline` OR FIXED `scheduled_at`)
-- **Status:** IMPLEMENTED
-- **Tests:** NONE dedicated to the read-time overdue predicate found (gap)
-- **Source:** taskMappers.js comment "W4 (R50.6): computed-on-read overdue — OR-ed with the stored flag"; ADR Decisions 1 & 3 (compute STATUS on read for display; keep the stored flag)
-- **Notes:** Stored flag short-circuits (`if (!!row.overdue) return true`). Gates: floating/no-deadline/no-implied/non-FIXED → stored flag only; FIXED → `scheduled_at` is the hard due; recurring with no materialized `implied_deadline` → no computed overdue; ANYTIME without hard commitment → no computed overdue (same gate as `computeIsPastDue`). Frozen recurring instances must not compute overdue. Decision 6: NO read-triggered reschedule — read computes display status only.
+### [DBSS-11] Computed-on-read `overdue` — `rowToTask` calls `computeOverdueForRow` (the single source of truth, R50.6 / M-5 / 999.1085) — no stored flag, no "stored OR computed" hybrid
+- **Code:** `taskMappers.js:rowToTask` calls `computeOverdueForRow(row, timezone)` (~`:543`); the function (~`:182-360`, exported) compares now vs (hard `deadline` OR materialized `implied_deadline` OR FIXED `scheduled_at`)
+- **Status:** IMPLEMENTED — the stored `overdue` column was DROPPED by migration `20260703190000_drop_overdue_column.js` (999.1085). No stored flag short-circuit remains.
+- **Tests:** `tests/scheduler/sched-drop-overdue-column-characterization.test.js` (999.1085); `tests/rowToTaskOverdue.test.js`; `tests/unit/mappers/overdue-pastdue-recurring.test.js`
+- **Source:** taskMappers.js comment "M-5 / 999.1085: computed-on-read overdue — single source of truth"; ADR Decisions 1 & 3 (compute STATUS on read for display); 999.1085 commit `0261b6df`
+- **Notes:** The prior "stored flag short-circuits (`if (!!row.overdue) return true`)" behavior is REMOVED. Gates: floating/no-deadline/no-implied/non-FIXED → false; FIXED → `scheduled_at` is the hard due; recurring with no materialized `implied_deadline` → no computed overdue; ANYTIME without hard commitment → no computed overdue (same gate as `computeIsPastDue`). Frozen recurring instances must not compute overdue. Decision 6: NO read-triggered reschedule — read computes display status only. `computeOverdueForRow` is exported so `runSchedule.js` reuses it for cross-run continuity checks (W3).
 
 ### [DBSS-12] `completed_at` materialized column projected in `tasks_v`; `rowToTask` surfaces it
 
@@ -1155,11 +1155,11 @@ state — so "placed AND unplaced" is impossible.
 **Top gaps:**
 1. **W4 not complete (DBSS-19):** `schedule_cache` write persists at `runSchedule.js:1968 / ~2001-2003 / ~2574-2576` with live reads at `~2161 / ~2389 / ~2572`. The ARCH Target "schedule_cache gone with no remaining reader" is unmet; blocked on persisting per-split-part (per-block) placements as instance rows so cal-sync stops reading the cache. The display read path IS off the cache (done).
 2. **`slack_mins` write contradiction (DBSS-9):** the column is materialized in schema and scheduler+mapper handle it, but the batched persist silently drops it; `placementMatchesDbRow` excludes it from skip-comparison to avoid perpetual redundant writes. Read consumers see stale/NULL slack. Needs a decision: persist it or stop computing it.
-3. **Thin test coverage on the read model itself:** no dedicated tests found for `deriveSchedulePlacements.js`, the `tasks_v` projected-column set, `implied_deadline`, `unplaced_reason`/`detail`, or the read-time-overdue predicate in `rowToTask`. Reconcile (`reconcileOccurrences.test.js`, `reconcileSplits.test.js`) and run integration (`runScheduleIntegration.test.js`) are covered; the persistence-to-read mapping layer is under-tested.
+3. **Thin test coverage on the read model itself:** no dedicated tests found for `deriveSchedulePlacements.js`, the `tasks_v` projected-column set, `implied_deadline`, `unplaced_reason`/`detail`. The read-time-overdue predicate (`computeOverdueForRow`) now has dedicated tests (`tests/scheduler/sched-drop-overdue-column-characterization.test.js`, `tests/rowToTaskOverdue.test.js`, `tests/unit/mappers/overdue-pastdue-recurring.test.js` — 999.1085). Reconcile (`reconcileOccurrences.test.js`, `reconcileSplits.test.js`) and run integration (`runScheduleIntegration.test.js`) are covered; the persistence-to-read mapping layer remains under-tested for the other columns.
 
 **Read-model / table contradictions:**
 - Prod = views (`tasks_v`, `tasks_with_sync_v`) over `task_masters` + `task_instances`; the flat `tasks` table is dropped (`20260415010900`). Any code path assuming a `tasks` table is dead on prod.
-- `tasks_v` template branch returns NULL for instance-only columns (overdue/unplaced/slack/scheduled_at) — consumers must treat a `recurring_template` row as a blueprint, never as a schedulable/placeable item (`rowToTask` orphan-guard + status gates enforce this).
+- `tasks_v` template branch returns NULL for instance-only columns (unplaced/slack/scheduled_at) — consumers must treat a `recurring_template` row as a blueprint, never as a schedulable/placeable item (`rowToTask` orphan-guard + status gates enforce this). Note: `overdue` is no longer a `tasks_v` column at all — it was dropped from the view and the underlying table by migration `20260703190000` (999.1085); `overdue` is computed-on-read by `computeOverdueForRow` in `taskMappers.js`.
 - The single remaining read-model contradiction is DBSS-19 (cache still has a reader: cal-sync). Everything else converges on the DB-single-source invariant: one instance row, one state.
 
 ---
