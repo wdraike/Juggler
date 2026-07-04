@@ -228,31 +228,18 @@ describe('Tier 2: Recurrings with Preferred Time', () => {
     expect(p.start).toBeLessThanOrEqual(mins(8)); // before 8am
   });
 
-  test('S8: Breakfast at 7am ±60m, run at 9am → missed + placed overdue at original time', () => {
+  test('S8: Breakfast at 7am ±60m, run at 9am → missed (flex window passed → unplaced-only)', () => {
     // preferredTimeMins is required for the missed-flex path: it represents
     // "user explicitly set a preferred time". Without it, t.time is just a
     // prior scheduler placement and shouldn't anchor a missed-flex window.
     var r = schedule([
       task({ id: 'bf', text: 'Breakfast', recurring: true, placementMode: 'time_window', when: 'morning', time: '7:00 AM', preferredTimeMins: 420, timeFlex: 60, dur: 30, generated: true }),
-    ], 540); // 9am
-    // W2 placed-XOR-unplaced (DESIGN-RULING-overdue-vs-unplaceable, David 2026-06-22): a
-    // missed-window task with a when-block is OVERDUE on the grid ONLY — it is NO LONGER also
-    // pushed to unplaced[] (the old dual-place is superseded). Display reads task.overdue
-    // (R50.6 / ConflictsView routes overdue items to the Overdue list), not unplaced[] membership.
-    expect(isMissed(r, 'bf')).toBe(false);
-    // Kept on the calendar at its original 7 AM slot with an overdue flag.
-    var p = placement(r, 'bf');
-    expect(p).not.toBeNull();
-    expect(p.start).toBe(mins(7));
-    // Locate the raw placement entry to verify the overdue flag
-    var entry = null;
-    for (var dk in r.dayPlacements) {
-      for (var pp of r.dayPlacements[dk]) {
-        if (pp.task && pp.task.id === 'bf') { entry = pp; break; }
-      }
-    }
-    expect(entry).not.toBeNull();
-    expect(entry._overdue).toBe(true);
+    ], 540); // 9am — window [360,480] entirely past
+    // juggy4 ruling (2026-07-02, supersedes W2): missed-window tasks go to
+    // unplaced[] only — NEVER grid-placed by the scheduler. The persistence
+    // layer (runSchedule.js) writes overdue=1 for rows with prior scheduled_at.
+    expect(isMissed(r, 'bf')).toBe(true);
+    expect(isPlaced(r, 'bf')).toBe(false);
   });
 
   test('S9: Recurring instance inherits template time via preferred_time_mins, not stale scheduler time', () => {
@@ -520,7 +507,12 @@ describe('Tier 6: Full Pipeline (DB rows)', () => {
     });
     var srcMap = {}; srcMap['ht_s25'] = template;
     var mapped = rowToTask(instance, TZ, srcMap);
-    expect(mapped.time).toBe('12:00 PM'); // from preferred_time_mins, not 7am
+    // BUG-811 (df8adfa5): preferred_time_mins must NOT overwrite the live time
+    // derived from scheduled_at. The instance has a scheduled_at=7am, so
+    // mapped.time stays '7:00 AM'. The scheduler still uses preferredTimeMins
+    // for placement, so it lands near noon (asserted below).
+    expect(mapped.time).toBe('7:00 AM'); // live scheduled_at, not preferred_time_mins
+    expect(mapped.preferredTimeMins).toBe(720); // preferred_time_mins still set
     var r = schedule([mapped], 600); // 10am
     var p = placement(r, 'rc_s25_47');
     expect(p).not.toBeNull();
@@ -906,7 +898,7 @@ describe('Tier 10: Overdue placement flags', () => {
     expect(!!e.p.task._overdue).toBe(false);
   });
 
-  test('non-rigid recurring from a prior day, outside flex window, still pending → overdue placement on its original day', () => {
+  test('non-rigid recurring from a prior day, outside flex window, still pending → unplaced (missed)', () => {
     // preferredTimeMins required — matches the "user explicitly set a time"
     // contract. Without it, a flexible task anchored on a stale scheduler
     // placement would be wrongly flagged overdue.
@@ -919,11 +911,11 @@ describe('Tier 10: Overdue placement flags', () => {
         date: yesterday, timeFlex: 60, generated: true
       }),
     ], 540);
-    var e = entry(r, 'bf_yesterday');
-    expect(e).not.toBeNull();
-    expect(e.dk).toBe(yesterday);
-    expect(e.p._overdue).toBe(true);
-    expect(e.p.start).toBe(420); // 7:00 AM
+    // juggy4 ruling (2026-07-02): past-anchored recurrings go to unplaced[]
+    // only — NEVER grid-placed by the scheduler. runSchedule.js persists
+    // overdue=1 for rows with prior scheduled_at.
+    expect(isMissed(r, 'bf_yesterday')).toBe(true);
+    expect(isPlaced(r, 'bf_yesterday')).toBe(false);
   });
 
   test('non-rigid recurring from a prior day, outside flex window, status=done → NOT placed', () => {
@@ -1077,10 +1069,13 @@ describe('rolling recurrence integration', () => {
     expect(d2).not.toContain('2026-05-25'); // old anchor-based date gone
   });
 
-  test('rolling: missed instance nudges anchor +1 day', () => {
+  test('rolling: missed is no longer a terminal status (df8adfa5)', () => {
+    // 'missed' was removed as a task status (df8adfa5, 2026-06-28). The
+    // rolling-anchor missed branch (+1 day nudge) was removed as dead code.
+    // computeRollingAnchor now returns null for non-terminal statuses.
     const { computeRollingAnchor } = require('../src/lib/rolling-anchor');
     const result = computeRollingAnchor('missed', '2026-05-25', '2026-05-18');
-    expect(result).toBe('2026-05-26');
+    expect(result).toBe(null);
   });
 
   test('rolling: skip reanchors to skip date', () => {
@@ -1301,7 +1296,7 @@ describe('R11.16 — legacy reason-code scenarios (999.782)', () => {
   // MISSED — path B (isMissedWindow / TIME_WINDOW):
   // A TIME_WINDOW task whose flex window [preferredTimeMins - flex,
   // preferredTimeMins + flex] has entirely passed → scheduler emits
-  // 'missed' (line 2034) and dual-places with _overdue on the grid.
+  // 'missed' and routes to unplaced[] only (never grid-placed).
   //
   // Scenario: placementMode='time_window', preferred=9:00 AM (540),
   // timeFlex=30, window=[510, 570].  nowMins=600 (10:00 AM) → 600
@@ -1328,19 +1323,13 @@ describe('R11.16 — legacy reason-code scenarios (999.782)', () => {
       }),
     ], 600); // 10:00 AM — window [510,570] entirely past
 
-    // W2 placed-XOR-unplaced (DESIGN-RULING-overdue-vs-unplaceable): a missed TIME_WINDOW task
-    // with a when-block is OVERDUE on the grid ONLY — it is NOT in unplaced[] (the old dual-place
-    // is superseded). Display reads task.overdue (R50.6), not unplaced[] membership.
+    // juggy4 ruling (2026-07-02, supersedes W2): missed-window tasks go to
+    // unplaced[] only — NEVER grid-placed by the scheduler. The persistence
+    // layer (runSchedule.js) writes overdue=1 for rows with prior scheduled_at.
     var u = (r.unplaced || []).find(function(t) { return t.id === 'standup'; });
-    expect(u).toBeUndefined();
-    // It IS pinned on the grid as overdue.
-    var overdueEntry = null;
-    Object.keys(r.dayPlacements || {}).forEach(function(dk) {
-      (r.dayPlacements[dk] || []).forEach(function(p) {
-        if (p.task && p.task.id === 'standup' && p._overdue) overdueEntry = p;
-      });
-    });
-    expect(overdueEntry).not.toBeNull();
-    expect(overdueEntry._overdue).toBe(true);
+    expect(u).not.toBeUndefined();
+    expect(u._unplacedReason).toBe('missed');
+    // NOT grid-placed.
+    expect(isPlaced(r, 'standup')).toBe(false);
   });
 });
