@@ -662,10 +662,9 @@ async function cascadeRecurringDelete(ctx) {
     .select('id', 'status', 'gcal_event_id', 'msft_event_id');
 
   // 999.844 Guard 1: a series-delete must KEEP every history-bearing instance
-  // verbatim — done/cancel/skip AND pause/missed. Only genuinely-active/pending
-  // instances are soft-cancelled (status='cancelled') to stop the series. Before
-  // this, pause/missed were treated as pending and overwritten to 'cancelled',
-  // losing the original terminal state.
+  // verbatim — done/cancel/skip/pause. Only genuinely-active/pending
+  // instances are soft-cancelled (status='cancelled') to stop the series.
+  // (999.1086: 'missed' removed — retired by 999.1044.)
   var TERMINAL_KEEP = ['done', 'cancel', 'skip', 'pause'];
 
   pendingIds = instances
@@ -695,7 +694,7 @@ async function cascadeRecurringDelete(ctx) {
       return TERMINAL_KEEP.indexOf(inst.status || '') !== -1;
     })
     .map(function (inst) { return inst.id; });
-  // R55 + 999.844: history-bearing instances (done/cancel/skip/pause/missed) are
+  // R55 + 999.844: history-bearing instances (done/cancel/skip/pause) are
   // KEPT verbatim as the historical record — never deleted, never overwritten.
   // They are already terminal/frozen and excluded from the scheduler write-set,
   // so no status change is needed.
