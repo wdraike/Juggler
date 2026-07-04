@@ -72,6 +72,9 @@ async function processClientError(args) {
     return { status: 400, error: 'invalid payload: message required' };
   }
   const line = formatLine(body, app);
+  // Emit to stderr so Cloud Run captures it in Cloud Logging (ephemeral containers lose local
+  // files on restart). The local file write below is kept for the log-triage skill's file scanner.
+  console.error(line);
   try {
     await fs.promises.mkdir(path.dirname(path.resolve(logPath)), { recursive: true });
     await rotateIfLarge(logPath, maxLogBytes);
