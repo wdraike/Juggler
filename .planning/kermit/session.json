@@ -1,24 +1,17 @@
 {
-  "leg_id": "sched-mcp-sdk-import-fix",
-  "intent": "Fix MCP server broken in dev: POST /mcp returns HTTP 500 'McpServer is not a constructor' due to @modelcontextprotocol/sdk import path drift",
-  "mode": "bugfix",
+  "leg_id": "",
+  "intent": "",
+  "mode": null,
   "lanes": [],
-  "depth": "standard",
-  "scope": [
-    "juggler-backend",
-    "juggler-mcp"
-  ],
-  "branch": "leg/sched-mcp-sdk-import-fix",
-  "status": "in_review",
-  "wbs": ".planning/kermit/WBS-sched-mcp-sdk-import-fix.md",
-  "spec": null,
-  "traceability": ".planning/kermit/sched-mcp-sdk-import-fix/TRACEABILITY.md",
-  "verdict": "WARN",
-  "owner": {
-    "sse_port": 0,
-    "host": "Williams-MacBook-Pro.local",
-    "started": "2026-07-04T17:05:09Z"
-  },
-  "opened": "2026-07-04T17:05:09Z",
-  "last_update": "2026-07-04T18:00:00Z"
+  "depth": null,
+  "scope": [],
+  "branch": "",
+  "status": "idle",
+  "wbs": "",
+  "spec": "",
+  "traceability": "",
+  "verdict": null,
+  "owner": null,
+  "opened": "",
+  "last_update": "2026-07-04T18:05:00Z"
 }
