@@ -1,0 +1,20 @@
+{
+  "$contract": "intake-brief/v1",
+  "mode": "bugfix",
+  "repro": {
+    "steps": [
+      "curl -s -w '\\nHTTP %{http_code}\\n' -X POST http://localhost:5002/mcp -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"method\":\"initialize\",\"id\":1}'",
+      "observed: HTTP 500 {\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32000,\"message\":\"McpServer is not a constructor\"},\"id\":null}"
+    ],
+    "failing_test_cmd": "cd juggler-backend && npx jest tests/unit/mcp-server.test.js tests/unit/mcp-protocol.test.js"
+  },
+  "root_cause": {
+    "region": "juggler-backend/src/mcp/server.js:5, juggler-mcp/index.js:9-10",
+    "confidence": "high",
+    "explanation": "@modelcontextprotocol/sdk's package.json exports map only exposes bare './server' as {Server}; McpServer/StdioServerTransport live at explicit './server/mcp.js' and './server/stdio.js' subpaths in BOTH installed SDK versions (1.29.0 juggler-backend, 1.27.1 juggler-mcp — confirmed via direct node require tests against each). Commit a7d7dd1 (2026-07-03) reverted these imports to the bare path based on an incorrect claim about Linux exports-map enforcement; verified false. Destructuring {McpServer} from a module that only exports {Server} yields undefined, and `new undefined()` throws 'is not a constructor'."
+  },
+  "risk_flags": ["security-adjacent transport surface (MCP HTTP route is JWT/OAuth authenticated)", "prior commit made the opposite change — contradiction requires independent review"],
+  "prior_decisions": ["a7d7dd1 / efb3a11ba (2026-07-03) — superseded by this leg; that commit's stated rationale confirmed factually incorrect via direct SDK export inspection + CI log analysis"],
+  "recommended_routing": { "lane": "full", "depth": "standard", "rationale": "small mechanical diff but auth-adjacent surface + contradicts a recent intentional commit" },
+  "skipped": false
+}

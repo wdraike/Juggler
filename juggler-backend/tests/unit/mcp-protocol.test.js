@@ -195,9 +195,16 @@ jest.mock('../../src/db', function () {
 // the doMock keys match what juggler-mcp/index.js actually require()s. A bare
 // jest.mock('@modelcontextprotocol/sdk/...') resolves from juggler-backend — a
 // DIFFERENT absolute path — and would never intercept.
+//
+// @modelcontextprotocol/sdk's package.json exports map has always kept
+// McpServer and StdioServerTransport in separate subpath files (server/mcp.js
+// and server/stdio.js — the bare '.../server' index only ever exports Server;
+// confirmed identical in both 1.27.1 and 1.29.0). juggler-mcp/index.js
+// requires each subpath explicitly, so each mock must target its OWN resolved
+// path — they are DIFFERENT files.
 var MCP_DIR = path.resolve(__dirname, '../../../juggler-mcp');
-var SDK_MCP_PATH = require.resolve('@modelcontextprotocol/sdk/server', { paths: [MCP_DIR] });
-var SDK_STDIO_PATH = require.resolve('@modelcontextprotocol/sdk/server', { paths: [MCP_DIR] });
+var SDK_MCP_PATH = require.resolve('@modelcontextprotocol/sdk/server/mcp.js', { paths: [MCP_DIR] });
+var SDK_STDIO_PATH = require.resolve('@modelcontextprotocol/sdk/server/stdio.js', { paths: [MCP_DIR] });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. juggler-mcp/index.js — stdio client protocol tests
