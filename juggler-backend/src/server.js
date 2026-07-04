@@ -171,16 +171,10 @@ async function start() {
     serverLogger.warn('cal-history-cron failed to start', { error: err });
   }
 
-  // Missed Auto-Mark Cron - Phase D
-  // Sharded daily cron for missed auto-mark with leader election
-  try {
-    const MissedAutoMarkCron = require('./jobs/missed-auto-mark-cron');
-    const missedAutoMarkCron = new MissedAutoMarkCron();
-    missedAutoMarkCron.start();
-    serverLogger.info('missed-auto-mark-cron started');
-  } catch (err) {
-    serverLogger.warn('missed-auto-mark-cron failed to start', { error: err });
-  }
+  // MissedAutoMarkCron retired (sched-drop-overdue-column / M-5, 999.1085):
+  // it only ever called markMissedTasks(), which wrote task_instances.overdue —
+  // a column this leg drops. See src/cron/cal-history-cron.js for the retirement
+  // rationale (also satisfies the standing D1 ruling's "no live caller" precondition).
 
   // Start the schedule queue poll loop
   startPollLoop();

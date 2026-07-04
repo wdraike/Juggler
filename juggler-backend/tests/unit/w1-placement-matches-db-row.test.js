@@ -51,7 +51,10 @@ const { _placementMatchesDbRow } = require('../../src/scheduler/runSchedule');
 
 // ── Minimal synthetic placement dbUpdate (a placed row carries no reason fields) ──
 // Mirrors the shape produced by the scheduler's pendingUpdates placement path:
-// scheduled_at, date, day, time, unscheduled=null, overdue=0 — no reason/detail.
+// scheduled_at, date, day, time, unscheduled=null — no reason/detail.
+// sched-drop-overdue-column (M-5): `overdue` field removed — a real placement
+// dbUpdate never carries it anymore (W3 deleted the write-side entirely), and
+// _placementMatchesDbRow no longer compares it (see runSchedule.js:563-569).
 function basePlacedDbUpdate(overrides) {
   return Object.assign({
     scheduled_at: '2026-06-22 09:00:00',
@@ -59,7 +62,6 @@ function basePlacedDbUpdate(overrides) {
     day: 'Monday',
     time: '09:00:00',
     unscheduled: null,
-    overdue: 0,
     // unplaced_reason and unplaced_detail intentionally absent (placement updates
     // do not set them; the batched persist clears them via the repository layer).
   }, overrides);
@@ -74,7 +76,6 @@ function matchingRawRow(overrides) {
     day: 'Monday',
     time: '09:00:00',
     unscheduled: null,
-    overdue: 0,
     unplaced_reason: null,
     unplaced_detail: null,
   }, overrides);

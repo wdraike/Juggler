@@ -536,7 +536,6 @@ describe('BUG-671 regression: floating tasks must never be flagged overdue', () 
       split_total: 1,
       date: STALE_DATE_KEY,                    // stale past date
       scheduled_at: STALE_DATE_KEY + ' 14:00:00', // 9 AM ET (UTC-5 Jan = UTC-4 June → 13:00, but 14:00 also past)
-      overdue: 0,                               // not yet flagged (DB reset)
       dur: 30,
       status: '',                               // non-recurring, non-terminal
       created_at: db.fn.now(),
@@ -629,7 +628,6 @@ describe('BUG-671 regression: floating tasks must never be flagged overdue', () 
       split_total: 1,
       date: STALE_DATE_KEY,                         // stale past date
       scheduled_at: STALE_DATE_KEY + ' 14:00:00',  // non-null time → scheduledMins non-null
-      overdue: 0,
       dur: 30,
       status: '',
       created_at: db.fn.now(),
@@ -687,17 +685,19 @@ describe('BUG-671 regression: floating tasks must never be flagged overdue', () 
       date: '2026-01-15',
       scheduled_at: '2026-01-15 10:00:00',
       status: '',
-      overdue: 0,
       dur: 30,
     });
 
     // First run: verify the scheduler doesn't touch or roll the already-past instance.
     var result1 = await runScheduleAndPersist(USER_ID); // eslint-disable-line no-unused-vars
 
-    // The seeded instance is our concrete past-due instance — flag it overdue
-    // to simulate a prior scheduler run having already pinned it (runSchedule.js
-    // Phase 9's `overdue:1, unscheduled:null` write for a placed past-incomplete
-    // recurring instance). status stays '' — 'missed' is no longer a valid value.
+    // The seeded instance is our concrete past-due instance. W3 (sched-drop-
+    // overdue-column, M-5, 2026-07-03): there is no longer a stored overdue
+    // flag to set — a placed DAILY recurring instance (seedTemplate's default
+    // recur) whose scheduled_at is in the past ALREADY reads overdue:true via
+    // the computed FIXED/isPlacedRecurringInstance branch (taskMappers.js
+    // computeOverdueForRow), with zero write needed. status stays '' —
+    // 'missed' is no longer a valid value.
     var todayInst = await db('task_instances').where('id', 'ac4-inst-seeded').first();
     expect(todayInst).toBeTruthy(); // seeded instance MUST exist — not vacuous
 
@@ -706,22 +706,20 @@ describe('BUG-671 regression: floating tasks must never be flagged overdue', () 
       status: '',
       scheduled_at: OVERDUE_SCHED,
       completed_at: null, // incomplete — not done, never was
-      overdue: 1,          // the current terminal-ish "past, flagged, pinned" marker
       updated_at: db.fn.now(),
     });
 
     // zoe (999.1037/1038/1035 audit, 2026-07-01): captured via real mutation
-    // testing — deleting runSchedule.js's `if (!rawRowPast.overdue) {...}`
-    // guard entirely still passed the ORIGINAL version of this assertion set,
-    // because the guard's own update payload ({overdue:1, unscheduled:null,
-    // updated_at:now()}) is idempotent on status/scheduled_at/overdue when the
-    // row is already overdue:1 — those fields don't change value whether the
-    // guard runs or not. The one field the (removed) guard's write WOULD still
-    // touch is `updated_at` (a fresh timestamp on every unconditional write,
-    // vs. untouched when the guard correctly no-ops). Capture the seeded
-    // updated_at now and assert it is BYTE-IDENTICAL after run 2 — this is
-    // guard-specific: it only stays unchanged when the no-op path is actually
-    // taken, catching the exact mutation zoe demonstrated.
+    // testing — deleting runSchedule.js's Phase 9 guard entirely still passed
+    // the ORIGINAL version of this assertion set, because the guard's own
+    // update payload was idempotent on status/scheduled_at when the row was
+    // already in its final state. The one field a redundant write WOULD still
+    // touch is `updated_at`. Capture the seeded updated_at now and assert it
+    // is BYTE-IDENTICAL after run 2 — this is guard-specific: it only stays
+    // unchanged when no write fires at all, catching the exact false-pass
+    // zoe demonstrated. W3 deletes the Phase 9 overdue-pin write outright (no
+    // computed-equivalent needed — see runSchedule.js), so this instance now
+    // gets ZERO writes on a stable second run rather than an idempotent one.
     var seededRow = await db('task_instances').where('id', todayInst.id).first();
     var seededUpdatedAt = seededRow.updated_at;
 
@@ -739,15 +737,18 @@ describe('BUG-671 regression: floating tasks must never be flagged overdue', () 
     var today = todayKey();
     expect(scheduledDate < today).toBe(true); // not rolled forward
 
-    // Must still have overdue=1 — runSchedule.js's `if (!rawRowPast.overdue)` guard
-    // is a no-op once overdue is already set; a regression that re-clears it or
-    // rolls the instance forward would flip this.
-    expect(row.overdue).toBeTruthy();
+    // Must still compute overdue:true — the read-time computed predicate
+    // (taskMappers.js computeOverdueForRow), not a raw stored column. A
+    // regression that rolls the instance forward or clears its hard-commitment
+    // signal (deadline/implied_deadline/scheduled_at) would flip this.
+    var viewRow = await db('tasks_v').where('id', todayInst.id).first();
+    var task = rowToTask(viewRow, TZ, null, null);
+    expect(task.overdue).toBe(true);
 
     // GUARD-SPECIFIC assertion (zoe mutation-test fix): updated_at must be
-    // UNCHANGED — a redundant write (the guard removed/broken) stamps a fresh
-    // updated_at even when overdue/status/scheduled_at happen to end up at the
-    // same values, so this catches exactly the false-pass zoe demonstrated.
+    // UNCHANGED — a redundant write stamps a fresh updated_at even when every
+    // other field happens to end up at the same values, so this catches
+    // exactly the false-pass zoe demonstrated.
     expect(String(row.updated_at)).toBe(String(seededUpdatedAt));
   });
 });
@@ -836,7 +837,6 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
       split_ordinal: 1,
       split_total: 1,
       scheduled_at: STALE_DATE_UTC, // prior placement on past date -> hasScheduledAt=true -> Case B
-      overdue: 0,
       dur: 30,
       status: '',
       created_at: db.fn.now(),
@@ -845,12 +845,14 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
 
     await runScheduleAndPersist(USER_ID);
 
-    // ASSERTION (RED pre-fix): PATH B writes overdue=1 for time_window floating task.
-    // Post-fix: the fix must apply the no-deadline guard to ALL placement modes.
-    var row = await db('task_instances').where('id', 'b700-tw-inst').first();
+    // W3 (sched-drop-overdue-column, M-5, 2026-07-03): `task_instances.overdue`
+    // is no longer written or stored — assert the computed/API value instead
+    // (a floating no-deadline task always reads overdue:false, matching the
+    // guard's original intent with zero stored-column dependency).
+    var row = await db('tasks_v').where('id', 'b700-tw-inst').first();
     expect(row).toBeTruthy();
-    // task_instances.overdue is tinyint NOT NULL DEFAULT 0 — never null. toBe(0) is exact.
-    expect(row.overdue).toBe(0); // FAILS pre-fix: overdue=1 written by Case B (HOLE 1)
+    var task = rowToTask(row, TZ, null, null);
+    expect(task.overdue).toBe(false);
   });
 
   // ─────────────────────────────────────────────────────────────
@@ -882,7 +884,6 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
       split_ordinal: 1,
       split_total: 1,
       scheduled_at: STALE_DATE_UTC, // prior placement -> hasScheduledAt=true -> Case B
-      overdue: 0,
       dur: 30,
       status: '',
       created_at: db.fn.now(),
@@ -891,10 +892,12 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
 
     await runScheduleAndPersist(USER_ID);
 
-    var row = await db('task_instances').where('id', 'b700-tb-inst').first();
+    // W3 (sched-drop-overdue-column, M-5, 2026-07-03): assert the computed/API
+    // value — see AC1-HOLE1a above for rationale.
+    var row = await db('tasks_v').where('id', 'b700-tb-inst').first();
     expect(row).toBeTruthy();
-    // task_instances.overdue is tinyint NOT NULL DEFAULT 0 — never null. toBe(0) is exact.
-    expect(row.overdue).toBe(0); // FAILS pre-fix: HOLE 1 -- guard skipped for time_blocks -> Case B -> overdue=1
+    var task = rowToTask(row, TZ, null, null);
+    expect(task.overdue).toBe(false);
   });
 
   // ─────────────────────────────────────────────────────────────
@@ -929,7 +932,6 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
       split_ordinal: 1,
       split_total: 1,
       scheduled_at: STALE_DATE_UTC, // PAST date -> original.date < todayKey -> _aInPast=true
-      overdue: 0,
       dur: 30,
       status: '',
       created_at: db.fn.now(),
@@ -938,12 +940,12 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
 
     await runScheduleAndPersist(USER_ID);
 
-    // ASSERTION (RED pre-fix): HOLE 2 -- _aInPast=true causes the ANYTIME guard to
-    // skip the early return -> Case B fires -> overdue=1.
-    var row = await db('task_instances').where('id', 'b700-any-past-inst').first();
+    // W3 (sched-drop-overdue-column, M-5, 2026-07-03): assert the computed/API
+    // value — see AC1-HOLE1a above for rationale.
+    var row = await db('tasks_v').where('id', 'b700-any-past-inst').first();
     expect(row).toBeTruthy();
-    // task_instances.overdue is tinyint NOT NULL DEFAULT 0 — never null. toBe(0) is exact.
-    expect(row.overdue).toBe(0); // FAILS pre-fix: overdue=1 written by Case B
+    var task = rowToTask(row, TZ, null, null);
+    expect(task.overdue).toBe(false);
   });
 
   // ─────────────────────────────────────────────────────────────
@@ -982,7 +984,6 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
       split_ordinal: 1,
       split_total: 1,
       scheduled_at: STALE_DATE_UTC,
-      overdue: 1,      // STALE overdue flag from a prior bad run
       unscheduled: 0,  // Case B state: pinned to calendar position
       dur: 30,
       status: '',
@@ -992,12 +993,22 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
 
     await runScheduleAndPersist(USER_ID);
 
-    // ASSERTION (RED pre-fix): stale overdue=1 must be cleared to 0.
-    // Pre-fix: "already final state" branch fires -> overdue=1 remains unchanged.
-    // Post-fix: the floating-task guard writes overdue=0 explicitly.
-    var row = await db('task_instances').where('id', 'b700-clear-inst').first();
+    // W3 (sched-drop-overdue-column, M-5, 2026-07-03): `task_instances.overdue`
+    // is no longer written by any scheduler path — this assertion previously
+    // checked the RAW stored column post-run; that write is deleted outright
+    // (SPEC.md "Design — write-side sites that become dead"), so the seeded
+    // stale `overdue: 1` above is simply never touched by this run (the row
+    // stays exactly as seeded). The PRODUCTION-VISIBLE value is the computed
+    // read (rowToTask/computeOverdueForRow), which correctly reads false for
+    // this floating (no-deadline) task per 999.671 regardless of any stored
+    // value — asserted via the real read mapper, matching the established
+    // pattern elsewhere in this file (z-3 D-A test above).
+    var row = await db('tasks_v').where('id', 'b700-clear-inst').first();
     expect(row).toBeTruthy();
-    expect(row.overdue).toBe(0); // FAILS pre-fix: overdue stays 1
+    // No nowInfo injected — STALE_DATE_UTC (2026-06-08) is unambiguously past
+    // relative to real wall-clock "now" at test-run time; real now-context is fine.
+    var t = rowToTask(row, TZ, null, null);
+    expect(t.overdue).toBe(false);
   });
 
   // ─────────────────────────────────────────────────────────────
@@ -1031,7 +1042,6 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
       split_ordinal: 1,
       split_total: 1,
       scheduled_at: STALE_DATE_UTC, // prior placement -> hasScheduledAt=true -> Case B
-      overdue: 0,
       dur: 30,
       status: '',
       created_at: db.fn.now(),
@@ -1040,11 +1050,17 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
 
     await runScheduleAndPersist(USER_ID);
 
-    // ASSERTION (GREEN guard): deadline-bearing, past-deadline, unplaceable task
-    // MUST still get overdue=1 after the fix.
-    var row = await db('task_instances').where('id', 'b700-dl-inst').first();
+    // W3 (sched-drop-overdue-column, M-5, 2026-07-03): `task_instances.overdue`
+    // is no longer written (see AC2 above for the same rationale) — the
+    // PRODUCTION-VISIBLE assertion is the computed read (rowToTask), which
+    // reads true for this deadline-bearing, past-deadline task via the
+    // `deadline` hasHardCommitment branch, independent of any stored write.
+    var row = await db('tasks_v').where('id', 'b700-dl-inst').first();
     expect(row).toBeTruthy();
-    expect(row.overdue).toBe(1); // must be GREEN before fix AND after fix
+    // No nowInfo injected — deadline (2025-01-01) is unambiguously past
+    // relative to real wall-clock "now" at test-run time.
+    var t = rowToTask(row, TZ, null, null);
+    expect(t.overdue).toBe(true); // must be GREEN before fix AND after fix
   });
 
   // ─────────────────────────────────────────────────────────────
@@ -1079,7 +1095,6 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
       split_ordinal: 1,
       split_total: 1,
       // No scheduled_at: never placed -> hasScheduledAt=false -> Case C (not Case B)
-      overdue: 0,
       dur: 30,
       status: '',
       created_at: db.fn.now(),
@@ -1088,11 +1103,13 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
 
     await runScheduleAndPersist(USER_ID);
 
-    // ASSERTION (GREEN guard): Case C path -> unscheduled=1, no overdue=1 written.
-    // Both before and after the fix (Case C never writes overdue).
+    // ASSERTION (GREEN guard): Case C path -> unscheduled=1, no overdue write.
+    // Both before and after the fix (Case C never writes overdue). W3
+    // (sched-drop-overdue-column): `overdue` is no longer a stored column at
+    // all, so `row.overdue` is intentionally omitted here (there is nothing to
+    // read) — `unscheduled` is the sole outcome this guard checks.
     var row = await db('task_instances').where('id', 'b700-ac4-inst').first();
     expect(row).toBeTruthy();
-    expect(row.overdue).toBeFalsy(); // Case C: no overdue -- must stay GREEN
     expect(row.unscheduled).toBe(1); // Case C: moves to unscheduled lane
   });
 
@@ -1148,7 +1165,6 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
       split_total: 1,
       date: Z3_STALE_DATE_KEY,   // stale prior date -- must be overwritten to the deadline
       // No scheduled_at: never placed -> hasScheduledAt=false -> Case C (not Case B)
-      overdue: 0,
       dur: 30,
       status: '',
       created_at: db.fn.now(),
@@ -1233,7 +1249,6 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
       split_ordinal: 1,
       split_total: 1,
       // No scheduled_at: never placed -> Case C (unscheduled=1), not Case B
-      overdue: 0,
       dur: 30,
       status: '',
       created_at: db.fn.now(),
@@ -1263,7 +1278,6 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
       split_ordinal: 1,
       split_total: 1,
       scheduled_at: STALE_DATE_UTC, // prior placement -> hasScheduledAt=true -> PATH B Case B
-      overdue: 0,
       dur: 30,
       status: '',
       created_at: db.fn.now(),
@@ -1274,11 +1288,13 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
 
     // ASSERTION: The `!original.deadline` guard at runSchedule.js:1520 must protect
     // the chain-member (task_type='task', dependsOn non-empty) the same way it
-    // protects one-off tasks. overdue MUST remain 0 after the run.
-    // task_instances.overdue is tinyint NOT NULL DEFAULT 0 — never null. toBe(0) is exact.
-    var row = await db('task_instances').where('id', 'b700-chain-member-inst').first();
+    // protects one-off tasks. W3 (sched-drop-overdue-column, M-5, 2026-07-03):
+    // assert the computed/API value (rowToTask) — `overdue` is no longer a
+    // stored column.
+    var row = await db('tasks_v').where('id', 'b700-chain-member-inst').first();
     expect(row).toBeTruthy();
-    expect(row.overdue).toBe(0); // must stay 0: !original.deadline guard at :1520 covers chain-members
+    var task = rowToTask(row, TZ, null, null);
+    expect(task.overdue).toBe(false); // !original.deadline guard at :1520 covers chain-members
   });
 });
 
@@ -1407,7 +1423,6 @@ describe('BUG-142 regression: past recurring instance auto-miss (Plan C)', () =>
       date: null,            // LEGACY: no date column value
       status: '',
       unscheduled: 1,
-      overdue: 0,
       dur: 30,
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
@@ -1479,7 +1494,6 @@ describe('BUG-142 regression: past recurring instance auto-miss (Plan C)', () =>
       date: PAST_DATE_KEY,         // date IS set — the partial-init state
       status: '',
       unscheduled: 1,
-      overdue: 0,
       dur: 30,
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
@@ -1563,7 +1577,6 @@ describe('BUG-142 regression: past recurring instance auto-miss (Plan C)', () =>
       date: tomorrowKey,     // future date — NOT past
       status: '',
       unscheduled: 1,
-      overdue: 0,
       dur: 30,
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
@@ -1624,7 +1637,6 @@ describe('BUG-142 regression: past recurring instance auto-miss (Plan C)', () =>
       date: null,
       status: '',
       unscheduled: 1,
-      overdue: 0,
       dur: 30,
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
@@ -1763,7 +1775,6 @@ describe('BUG-142 regression: past recurring instance auto-miss (Plan C)', () =>
       date: PAST_DATE_KEY,         // past date, but within timeFlex window
       status: '',
       unscheduled: 1,
-      overdue: 0,
       dur: 30,
       created_at: db.fn.now(),
       updated_at: db.fn.now(),

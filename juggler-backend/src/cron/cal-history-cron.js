@@ -2,8 +2,6 @@
 // Daily sharded cron for auto-marking missed tasks and purging old cal_history entries
 
 const crypto = require('crypto');
-const { TERMINAL_STATUSES } = require('../lib/task-status');
-const { shouldAutoMarkMissed } = require('../../../shared/scheduler/missedHelpers');
 const dbModule = require('../lib/db');
 const { createLogger } = require('../lib/logger');
 const logger = createLogger('cron.cal-history');
@@ -67,79 +65,15 @@ async function releaseLock(lockName) {
   }
 }
 
-// In-process single-flight guard (999.555 WARN): markMissedTasks is wired into BOTH
-// CalHistoryCron and MissedAutoMarkCron (server.js), which fire in the SAME process with
-// the SAME INSTANCE_ID. The cron_locks lock is a cross-INSTANCE mutex — it does NOT stop
-// two same-process callers (each read-back matches its own INSTANCE_ID), so without this
-// guard the boot double-run would write duplicate cal_history rows + double status writes.
-// The check+set is synchronous (no await between), so it is atomic on the single JS thread.
-let markMissedInFlight = false;
-
-// Mark missed tasks automatically
-async function markMissedTasks() {
-  if (markMissedInFlight) {
-    logger.info('Skipping markMissedTasks - already running in this process');
-    return;
-  }
-  markMissedInFlight = true;
-  const lockName = 'cal-history-cron:mark-missed';
-  try {
-    if (!await acquireLock(lockName)) {
-      logger.info(`Skipping markMissedTasks - lock ${lockName} held by another process`);
-      return;
-    }
-    try {
-      const knex = getDb();
-      const currentTime = new Date();
-      logger.info('Starting missed tasks auto-mark process...');
-
-      // Find tasks that should be marked as missed.
-      // select task_instances.* explicitly: task_masters ALSO has `scheduled_at` and
-      // `status` columns, so a bare SELECT * across the join clobbers the instance's
-      // values with the master's (NULL scheduled_at) — which made shouldAutoMarkMissed
-      // see scheduled_at=null and mark NOTHING. (999.555 — third latent cron bug.)
-      // overdue = 0 mirrors the `!task.overdue` guard in the loop below — already-
-      // overdue rows are never updated, so filtering them here leaves the UPDATE set
-      // byte-identical (never-missing preserved) while letting the new composite index
-      // idx_task_instances_missed_scan (overdue, scheduled_at) serve an equality+range
-      // scan instead of a full-table scan (999.956).
-      const tasksToMark = await knex('task_instances')
-        .join('task_masters', 'task_instances.master_id', 'task_masters.id')
-        .where('task_instances.overdue', 0)
-        .whereNotNull('task_instances.scheduled_at')
-        .whereNotIn('task_instances.status', TERMINAL_STATUSES)
-        .where(knex.raw('task_instances.scheduled_at < ?', [new Date(currentTime.getTime() - 24 * 60 * 60 * 1000)]))
-        .where(knex.raw('task_instances.scheduled_at < NOW() - INTERVAL 1 HOUR'))
-        .select('task_instances.*');
-
-      let markedCount = 0;
-
-      for (const task of tasksToMark) {
-        // Leg D / no-auto-miss (David, 2026-06-24: "there should not be any auto-miss
-        // feature"). This cron was a SECOND auto-miss path (the scheduler's was removed
-        // in runSchedule.js Phase-9). A past-due incomplete instance is NEVER terminal-
-        // marked 'missed' — per R50 + the never-missing invariant it stays a LIVE,
-        // VISIBLE commitment: flag it OVERDUE (status unchanged, non-terminal), pinned
-        // on its day. Skip if already flagged. No cal_history 'missed' event — there is
-        // no missed event anymore.
-        if (shouldAutoMarkMissed(task, currentTime) && !task.overdue) {
-          await knex('task_instances')
-            .where('id', task.id)
-            .update({ overdue: 1 });
-          markedCount++;
-        }
-      }
-
-      logger.info(`Flagged ${markedCount} past-due tasks overdue`);
-    } catch (error) {
-      logger.error('Error in markMissedTasks:', error);
-    } finally {
-      await releaseLock(lockName);
-    }
-  } finally {
-    markMissedInFlight = false;
-  }
-}
+// markMissedTasks (and the MissedAutoMarkCron job that wrapped it) retired —
+// sched-drop-overdue-column / M-5 (999.1085). Its ENTIRE purpose was writing
+// task_instances.overdue, a column this leg drops (W4); its query/write both
+// referenced that column exclusively. Retiring it also satisfies the standing
+// D1 ruling's precondition (brain 101228/97166/101304: "delete the legacy
+// 2h/24h isTaskMissed/shouldAutoMarkMissed after verifying no live caller") —
+// this cron was that live caller; both legacy helpers are now deleted from
+// shared/scheduler/missedHelpers.js. See SPEC.md "cal-history-cron.js /
+// markMissedTasks — retire the write entirely" for the full rationale.
 
 // Purge old cal_history entries (>12 months)
 async function purgeOldEntries() {
@@ -180,10 +114,10 @@ async function runCalHistoryCron() {
     
     const currentShard = userShards[new Date().getDate() % userShards.length];
     logger.info(`Processing shard ${currentShard}`);
-    
-    await markMissedTasks();
+
+    // markMissedTasks retired (sched-drop-overdue-column / M-5) — see comment above.
     await purgeOldEntries();
-    
+
     logger.info('cal-history cron job completed');
   } catch (error) {
     logger.error('Error in cal-history cron job:', error);
@@ -192,7 +126,6 @@ async function runCalHistoryCron() {
 
 module.exports = {
   runCalHistoryCron,
-  markMissedTasks,
   purgeOldEntries,
   acquireLock,
   releaseLock

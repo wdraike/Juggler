@@ -180,6 +180,191 @@ function buildSourceMap(rows) {
 }
 
 /**
+ * computeOverdueForRow — SINGLE SOURCE OF TRUTH for "is this row overdue",
+ * computed-on-read ONLY (M-5 / 999.1085, leg sched-drop-overdue-column).
+ *
+ * Extracted from rowToTask's `overdue` IIFE (was inline at :348-506). The
+ * stored-flag short-circuit (`if (!!row.overdue) return true;`) has been
+ * REMOVED — `task_instances.overdue` is being dropped as a persisted column;
+ * every consumer (rowToTask below, and the scheduler's continuity checks in
+ * runSchedule.js — W3) now calls this SAME function instead of maintaining a
+ * second implementation or reading a raw stored flag.
+ *
+ * AC6 (David ruling, 2026-07-03): "let's skip the future placement of overdue
+ * items — leave it to the user to change the due date, as needed." No new
+ * comparison rule was needed to implement this — the existing R-OD3 branch
+ * below (`_placedDateKey <= _now.todayKey`) already produces `false` for a
+ * forward-rolled recurring instance placed on a genuinely FUTURE slot (AC6b)
+ * and `true` for a today-or-earlier placement (AC6a). Removing the short-
+ * circuit is sufficient; W3 deletes the write-side persistence that used to
+ * override this computed value.
+ *
+ * Exported (module.exports) so `runSchedule.js` (via the task slice facade,
+ * matching the existing `deriveSchedulePlacements.js`/`SchedulerTaskProvider`
+ * pattern of sourcing task-slice pure helpers) can call the identical
+ * predicate for its own continuity checks instead of re-deriving the rule or
+ * reading a raw column.
+ *
+ * @param {Object} row - a task_instances/task_masters row (raw DB shape,
+ *   snake_case columns), OR the sourceMap-merged row rowToTask builds for a
+ *   recurring instance (TEMPLATE_FIELDS already copied on).
+ * @param {?string} timezone
+ * @param {{todayKey:string,nowMins:number}} [nowInfo] OPTIONAL injected now-context
+ *   (W4 R50.8) — when absent, defaults to computing from the shared contract
+ *   using the row's timezone. Inject a fixed now-context in tests to keep the
+ *   predicate deterministic.
+ * @returns {boolean}
+ */
+function computeOverdueForRow(row, timezone, nowInfo) {
+  // Suppress computed path for terminal-status rows
+  var st = row.status || '';
+  if (isTerminalStatus(st)) return false;
+  // Suppress computed path for disabled (frozen) instances — disabled is not
+  // in TERMINAL_STATUSES (intentionally: it behaves differently elsewhere),
+  // but a frozen recurring instance must never compute as overdue (B1 fix).
+  if (st === 'disabled') return false;
+  // Resolve now-context: inject for tests, default to shared contract for the row's tz
+  var _now = nowInfo || _getNowInTimezone(timezone || _DEFAULT_TIMEZONE); // RC2: null tz → R50.8 default
+  // hasHardCommitment mirrors computeIsPastDue's gate exactly (runSchedule.js:109):
+  //   deadline OR implied_deadline OR FIXED placementMode
+  // Reuse dateColumnToISO (defined at :92) to avoid duplicating Date/string parsing inline.
+  var impliedDeadlineISO = dateColumnToISO(row.implied_deadline);
+  // R50: a PLACED **daily** recurring instance is committed to its scheduled
+  // slot — its recurrence period IS the occurrence day, so once today's time
+  // passes incomplete it pins overdue (can't do today's breakfast tomorrow).
+  // A WEEKLY/flexible-TPC recurrence (timesPerCycle/fillPolicy, roams across the
+  // cycle's days — e.g. "Call Mom" 3×/week) can still be RESCHEDULED to a later
+  // slot in its cycle, so it is NOT overdue until the cycle boundary (honored via
+  // implied_deadline once materialized). A floating one-off (no recurrence, no
+  // deadline) is never committed → 999.671 roll-forward holds.
+  var _recurObj = (typeof row.recur === 'string') ? safeParseJSON(row.recur, null) : row.recur;
+  var _isDailyRecur = !!(_recurObj && _recurObj.type === 'daily');
+  var isPlacedRecurringInstance = !!(row.task_type === 'recurring_instance' &&
+    row.scheduled_at && row.placement_mode !== _PLACEMENT_MODES.FIXED && _isDailyRecur);
+  // R-OD2: implied_deadline is a derived scheduler artifact, not a user commitment.
+  // It should only confer hasHardCommitment for recurring instances (where it represents
+  // the recurrence-period/cycle boundary). A non-recurring flexible task with no user
+  // deadline must never be overdue from a derived implied_deadline alone.
+  var _isRecurringInstance = row.task_type === 'recurring_instance';
+  var hasHardCommitment = !!(row.deadline || (_isRecurringInstance && impliedDeadlineISO) ||
+    row.placement_mode === _PLACEMENT_MODES.FIXED || isPlacedRecurringInstance);
+  if (!hasHardCommitment) return false;
+  // Determine the effective due date key and time (minutes).
+  // For FIXED: the task's scheduled date IS its due — use it directly.
+  //   implied_deadline is a scheduler artifact for non-FIXED tasks; using it
+  //   here causes a cross-day comparison when the scheduler sets it to a
+  //   different day than the actual scheduled_at (ponytail: 999.810 bug).
+  // For deadline: prefer deadline; then implied_deadline; then task date.
+  var dueKey;
+  if (row.placement_mode === _PLACEMENT_MODES.FIXED || isPlacedRecurringInstance) {
+    if (row.scheduled_at) {
+      var _local = utcToLocal(row.scheduled_at, timezone || _DEFAULT_TIMEZONE); // RC2: null tz → R50.8 default
+      dueKey = _local ? _local.date : null;
+    }
+  }
+  if (!dueKey) {
+    // Explicit, user-set deadline is authoritative.
+    dueKey = dateColumnToISO(row.deadline);
+  }
+  // REG-25/F5: tracks whether dueKey below ends up sourced from
+  // impliedDeadlineISO (the recurrence-PERIOD boundary, R50.0) rather than
+  // an explicit user deadline — only the period-boundary case gets the
+  // "missed ON periodEnd" same-day treatment further down.
+  var _dueIsImpliedPeriodEnd = false;
+  if (!dueKey && impliedDeadlineISO) {
+    // implied_deadline is a DERIVED scheduler artifact (recurrence-period
+    // boundary), NOT a user commitment. When the scheduler rolls an instance
+    // forward it can leave implied_deadline in the PAST while the task is now
+    // placed on a FUTURE day — using it raw then marks a future-dated task
+    // overdue (999.810: "future tasks shown as overdue"). A strictly-future
+    // placement supersedes the stale artifact; placed-today / placed-past /
+    // unplaced keep the original behavior (R50.6 case #1).
+    var _implLocal = row.scheduled_at ? utcToLocal(row.scheduled_at, timezone || _DEFAULT_TIMEZONE) : null;
+    var _placedDateKey = _implLocal ? _implLocal.date
+      : (row.date && row.date !== 'TBD' ? row.date : null);
+    if (!_placedDateKey || _placedDateKey <= _now.todayKey) {
+      // R-OD3 RULING (David 2026-06-30, "Keep overdue (revert Exercise fix)"): a
+      // recurring instance's past implied_deadline (recurrence-period boundary) IS a
+      // real overdue signal even when placed today — the R50.6 catch-up contract is
+      // KEPT, no today-placed stale-suppression. Non-recurring tasks never reach this
+      // branch (R-OD2 gates implied_deadline on recurring_instance above).
+      dueKey = impliedDeadlineISO;
+      _dueIsImpliedPeriodEnd = true;
+    }
+  }
+  if (!dueKey || dueKey === 'TBD') return false;
+  // For time-precision (FIXED or scheduled): derive scheduled minutes.
+  // For deadline/implied_deadline: no time check — past-day is sufficient.
+  var scheduledMins = null;
+  if ((row.placement_mode === _PLACEMENT_MODES.FIXED || isPlacedRecurringInstance) && row.scheduled_at) {
+    var _fixedLocal = utcToLocal(row.scheduled_at, timezone || _DEFAULT_TIMEZONE); // RC2: null tz → R50.8 default
+    if (_fixedLocal && _fixedLocal.time) {
+      var _tm = /^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i.exec(_fixedLocal.time);
+      if (_tm) {
+        var _h = parseInt(_tm[1], 10); var _m = parseInt(_tm[2], 10);
+        var _ap = (_tm[3] || '').toUpperCase();
+        if (_ap === 'PM' && _h < 12) _h += 12;
+        if (_ap === 'AM' && _h === 12) _h = 0;
+        scheduledMins = _h * 60 + _m;
+      }
+    }
+  }
+  // Past-due check: day in the past, OR same day with intra-day threshold passed.
+  // Threshold semantics (LOCKED design AC2/AC4):
+  //   FIXED: overdue when scheduled slot time is past (scheduledMins < nowMins).
+  //   Windowed daily recurring (isPlacedRecurringInstance + time_flex != null):
+  //     overdue when WINDOW CLOSES = (preferred_time_mins ?? scheduledMins) + time_flex (AC2b).
+  //     time_flex==0: zero-width window → overdue at the slot (or preferred) minute itself (AC2c).
+  //     The instance is roamable until the window closes — a 08:00 preferred with 3h
+  //     window closes at 11:00; at 09:00 the window is still open → NOT overdue.
+  //     preferred_time_mins (AC2b): window anchors to the preferred time, not the
+  //     placed slot — the task may be placed early but the window is open until
+  //     preferred_time_mins + time_flex.
+  //   Window-less daily recurring (time_flex null, e.g. anytime):
+  //     no intra-day overdue before midnight — falls through to false here; overdue
+  //     fires the next day when dueKey < todayKey (period-boundary = midnight).
+  //   REG-25/F5 (R50.0): a NEVER-PLACED instance (row.scheduled_at falsy — no
+  //     FIXED/daily-recurring anchor was ever committed, so there's no intra-day
+  //     slot/window to wait on) has nothing to roam within its own period —
+  //     the "live through periodEnd-1, missed ON periodEnd" rule applies directly:
+  //     when dueKey is the recurrence-PERIOD boundary itself (_dueIsImpliedPeriodEnd),
+  //     periodEnd===today reads overdue TODAY, not the day after. Scoped tightly to
+  //     avoid two false-positive expansions: (a) an explicit user `deadline` due
+  //     today for an unscheduled task is a DIFFERENT commitment, not R50.0's period
+  //     boundary, and keeps its existing (strict, day-after) behavior; (b) a
+  //     non-daily (e.g. weekly-TPC) instance that WAS placed today (row.scheduled_at
+  //     set) but doesn't qualify for the intra-day scheduledMins branches above (only
+  //     FIXED/daily-recurring compute scheduledMins) still gets the pre-existing
+  //     "boundary day itself is not yet overdue" behavior — the boundary-day
+  //     regression guard in taskMappers-overdue-juggy3.test.js (AC3a-boundary) locks
+  //     this: a placed weekly-TPC instance at its cycle boundary reads overdue only
+  //     the day AFTER, same as before this fix.
+  if (dueKey < _now.todayKey) return true;
+  if (dueKey === _now.todayKey) {
+    if (scheduledMins !== null) {
+      if (row.placement_mode === _PLACEMENT_MODES.FIXED) {
+        // FIXED: overdue once the scheduled slot is past
+        if (scheduledMins < _now.nowMins) return true;
+      } else if (isPlacedRecurringInstance && row.time_flex != null) {
+        // AC2b/AC2c (R50): overdue when the window closes.
+        // window-close = (preferred_time_mins ?? scheduledMins) + time_flex.
+        // time_flex==0: zero-width window → overdue at the slot/preferred minute (AC2c).
+        var preferredTimeMins = (row.preferred_time_mins != null ? row.preferred_time_mins : scheduledMins);
+        var windowCloseMins = preferredTimeMins + row.time_flex;
+        if (_now.nowMins >= windowCloseMins) return true;
+      }
+      // Window-less daily (time_flex null): no intra-day overdue — falls through
+    } else if (_dueIsImpliedPeriodEnd && !row.scheduled_at) {
+      // Never-placed (no scheduled_at at all) recurring instance whose period
+      // ends today — R50.0 "missed ON periodEnd", no intra-day grace to extend
+      // it to tomorrow.
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Map task row from DB to API format. (controller ~333)
  * Derives date/time/day from scheduled_at (UTC) using the user's timezone.
  * If sourceMap is provided, recurring instances inherit template fields from their source.
@@ -345,165 +530,11 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
     preferredTimeMins: row.preferred_time_mins != null ? row.preferred_time_mins : null,
     desiredAt: row.desired_at ? new Date(row.desired_at).toISOString() : null,
     unscheduled: !!row.unscheduled,
-    overdue: (function() {
-      // W4 (R50.6): computed-on-read overdue — OR-ed with the stored flag so a
-      // past-due item shows overdue at read time even before the scheduler runs.
-      // Preserves ALL wrong-for-naive cases (999.671 contract):
-      //   • Floating / no deadline / no implied_deadline / non-FIXED → stored flag only
-      //   • Terminal status → suppress (isTerminalStatus clamp applied above already
-      //     clamps scheduled_at; we also suppress the computed path here)
-      //   • FIXED: scheduled_at IS the hard due — use task.date/time derived above
-      //   • Recurring with no materialized implied_deadline → no computed overdue
-      //   • ANYTIME without hard commitment → no computed overdue (same gate as
-      //     computeIsPastDue: requires deadline OR implied_deadline OR FIXED)
-      if (!!row.overdue) return true; // short-circuit: stored flag wins
-      // Suppress computed path for terminal-status rows
-      var st = row.status || '';
-      if (isTerminalStatus(st)) return false;
-      // Suppress computed path for disabled (frozen) instances — disabled is not
-      // in TERMINAL_STATUSES (intentionally: it behaves differently elsewhere),
-      // but a frozen recurring instance must never compute as overdue (B1 fix).
-      if (st === 'disabled') return false;
-      // Resolve now-context: inject for tests, default to shared contract for the row's tz
-      var _now = nowInfo || _getNowInTimezone(timezone || _DEFAULT_TIMEZONE); // RC2: null tz → R50.8 default
-      // hasHardCommitment mirrors computeIsPastDue's gate exactly (runSchedule.js:109):
-      //   deadline OR implied_deadline OR FIXED placementMode
-      // Reuse dateColumnToISO (defined at :92) to avoid duplicating Date/string parsing inline.
-      var impliedDeadlineISO = dateColumnToISO(row.implied_deadline);
-      // R50: a PLACED **daily** recurring instance is committed to its scheduled
-      // slot — its recurrence period IS the occurrence day, so once today's time
-      // passes incomplete it pins overdue (can't do today's breakfast tomorrow).
-      // A WEEKLY/flexible-TPC recurrence (timesPerCycle/fillPolicy, roams across the
-      // cycle's days — e.g. "Call Mom" 3×/week) can still be RESCHEDULED to a later
-      // slot in its cycle, so it is NOT overdue until the cycle boundary (honored via
-      // implied_deadline once materialized). A floating one-off (no recurrence, no
-      // deadline) is never committed → 999.671 roll-forward holds.
-      var _recurObj = (typeof row.recur === 'string') ? safeParseJSON(row.recur, null) : row.recur;
-      var _isDailyRecur = !!(_recurObj && _recurObj.type === 'daily');
-      var isPlacedRecurringInstance = !!(row.task_type === 'recurring_instance' &&
-        row.scheduled_at && row.placement_mode !== _PLACEMENT_MODES.FIXED && _isDailyRecur);
-      // R-OD2: implied_deadline is a derived scheduler artifact, not a user commitment.
-      // It should only confer hasHardCommitment for recurring instances (where it represents
-      // the recurrence-period/cycle boundary). A non-recurring flexible task with no user
-      // deadline must never be overdue from a derived implied_deadline alone.
-      var _isRecurringInstance = row.task_type === 'recurring_instance';
-      var hasHardCommitment = !!(row.deadline || (_isRecurringInstance && impliedDeadlineISO) ||
-        row.placement_mode === _PLACEMENT_MODES.FIXED || isPlacedRecurringInstance);
-      if (!hasHardCommitment) return false;
-      // Determine the effective due date key and time (minutes).
-      // For FIXED: the task's scheduled date IS its due — use it directly.
-      //   implied_deadline is a scheduler artifact for non-FIXED tasks; using it
-      //   here causes a cross-day comparison when the scheduler sets it to a
-      //   different day than the actual scheduled_at (ponytail: 999.810 bug).
-      // For deadline: prefer deadline; then implied_deadline; then task date.
-      var dueKey;
-      if (row.placement_mode === _PLACEMENT_MODES.FIXED || isPlacedRecurringInstance) {
-        if (row.scheduled_at) {
-          var _local = utcToLocal(row.scheduled_at, timezone || _DEFAULT_TIMEZONE); // RC2: null tz → R50.8 default
-          dueKey = _local ? _local.date : null;
-        }
-      }
-      if (!dueKey) {
-        // Explicit, user-set deadline is authoritative.
-        dueKey = dateColumnToISO(row.deadline);
-      }
-      // REG-25/F5: tracks whether dueKey below ends up sourced from
-      // impliedDeadlineISO (the recurrence-PERIOD boundary, R50.0) rather than
-      // an explicit user deadline — only the period-boundary case gets the
-      // "missed ON periodEnd" same-day treatment further down.
-      var _dueIsImpliedPeriodEnd = false;
-      if (!dueKey && impliedDeadlineISO) {
-        // implied_deadline is a DERIVED scheduler artifact (recurrence-period
-        // boundary), NOT a user commitment. When the scheduler rolls an instance
-        // forward it can leave implied_deadline in the PAST while the task is now
-        // placed on a FUTURE day — using it raw then marks a future-dated task
-        // overdue (999.810: "future tasks shown as overdue"). A strictly-future
-        // placement supersedes the stale artifact; placed-today / placed-past /
-        // unplaced keep the original behavior (R50.6 case #1).
-        var _implLocal = row.scheduled_at ? utcToLocal(row.scheduled_at, timezone || _DEFAULT_TIMEZONE) : null;
-        var _placedDateKey = _implLocal ? _implLocal.date
-          : (row.date && row.date !== 'TBD' ? row.date : null);
-        if (!_placedDateKey || _placedDateKey <= _now.todayKey) {
-          // R-OD3 RULING (David 2026-06-30, "Keep overdue (revert Exercise fix)"): a
-          // recurring instance's past implied_deadline (recurrence-period boundary) IS a
-          // real overdue signal even when placed today — the R50.6 catch-up contract is
-          // KEPT, no today-placed stale-suppression. Non-recurring tasks never reach this
-          // branch (R-OD2 gates implied_deadline on recurring_instance above).
-          dueKey = impliedDeadlineISO;
-          _dueIsImpliedPeriodEnd = true;
-        }
-      }
-      if (!dueKey || dueKey === 'TBD') return false;
-      // For time-precision (FIXED or scheduled): derive scheduled minutes.
-      // For deadline/implied_deadline: no time check — past-day is sufficient.
-      var scheduledMins = null;
-      if ((row.placement_mode === _PLACEMENT_MODES.FIXED || isPlacedRecurringInstance) && row.scheduled_at) {
-        var _fixedLocal = utcToLocal(row.scheduled_at, timezone || _DEFAULT_TIMEZONE); // RC2: null tz → R50.8 default
-        if (_fixedLocal && _fixedLocal.time) {
-          var _tm = /^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i.exec(_fixedLocal.time);
-          if (_tm) {
-            var _h = parseInt(_tm[1], 10); var _m = parseInt(_tm[2], 10);
-            var _ap = (_tm[3] || '').toUpperCase();
-            if (_ap === 'PM' && _h < 12) _h += 12;
-            if (_ap === 'AM' && _h === 12) _h = 0;
-            scheduledMins = _h * 60 + _m;
-          }
-        }
-      }
-      // Past-due check: day in the past, OR same day with intra-day threshold passed.
-      // Threshold semantics (LOCKED design AC2/AC4):
-      //   FIXED: overdue when scheduled slot time is past (scheduledMins < nowMins).
-      //   Windowed daily recurring (isPlacedRecurringInstance + time_flex != null):
-      //     overdue when WINDOW CLOSES = (preferred_time_mins ?? scheduledMins) + time_flex (AC2b).
-      //     time_flex==0: zero-width window → overdue at the slot (or preferred) minute itself (AC2c).
-      //     The instance is roamable until the window closes — a 08:00 preferred with 3h
-      //     window closes at 11:00; at 09:00 the window is still open → NOT overdue.
-      //     preferred_time_mins (AC2b): window anchors to the preferred time, not the
-      //     placed slot — the task may be placed early but the window is open until
-      //     preferred_time_mins + time_flex.
-      //   Window-less daily recurring (time_flex null, e.g. anytime):
-      //     no intra-day overdue before midnight — falls through to false here; overdue
-      //     fires the next day when dueKey < todayKey (period-boundary = midnight).
-      //   REG-25/F5 (R50.0): a NEVER-PLACED instance (row.scheduled_at falsy — no
-      //     FIXED/daily-recurring anchor was ever committed, so there's no intra-day
-      //     slot/window to wait on) has nothing to roam within its own period —
-      //     the "live through periodEnd-1, missed ON periodEnd" rule applies directly:
-      //     when dueKey is the recurrence-PERIOD boundary itself (_dueIsImpliedPeriodEnd),
-      //     periodEnd===today reads overdue TODAY, not the day after. Scoped tightly to
-      //     avoid two false-positive expansions: (a) an explicit user `deadline` due
-      //     today for an unscheduled task is a DIFFERENT commitment, not R50.0's period
-      //     boundary, and keeps its existing (strict, day-after) behavior; (b) a
-      //     non-daily (e.g. weekly-TPC) instance that WAS placed today (row.scheduled_at
-      //     set) but doesn't qualify for the intra-day scheduledMins branches above (only
-      //     FIXED/daily-recurring compute scheduledMins) still gets the pre-existing
-      //     "boundary day itself is not yet overdue" behavior — the boundary-day
-      //     regression guard in taskMappers-overdue-juggy3.test.js (AC3a-boundary) locks
-      //     this: a placed weekly-TPC instance at its cycle boundary reads overdue only
-      //     the day AFTER, same as before this fix.
-      if (dueKey < _now.todayKey) return true;
-      if (dueKey === _now.todayKey) {
-        if (scheduledMins !== null) {
-          if (row.placement_mode === _PLACEMENT_MODES.FIXED) {
-            // FIXED: overdue once the scheduled slot is past
-            if (scheduledMins < _now.nowMins) return true;
-          } else if (isPlacedRecurringInstance && row.time_flex != null) {
-            // AC2b/AC2c (R50): overdue when the window closes.
-            // window-close = (preferred_time_mins ?? scheduledMins) + time_flex.
-            // time_flex==0: zero-width window → overdue at the slot/preferred minute (AC2c).
-            var preferredTimeMins = (row.preferred_time_mins != null ? row.preferred_time_mins : scheduledMins);
-            var windowCloseMins = preferredTimeMins + row.time_flex;
-            if (_now.nowMins >= windowCloseMins) return true;
-          }
-          // Window-less daily (time_flex null): no intra-day overdue — falls through
-        } else if (_dueIsImpliedPeriodEnd && !row.scheduled_at) {
-          // Never-placed (no scheduled_at at all) recurring instance whose period
-          // ends today — R50.0 "missed ON periodEnd", no intra-day grace to extend
-          // it to tomorrow.
-          return true;
-        }
-      }
-      return false;
-    })(),
+    // W1 (M-5 / 999.1085): computed-on-read ONLY — the stored-flag short-circuit
+    // is REMOVED (task_instances.overdue is being dropped, W4). Delegates to the
+    // shared, exported computeOverdueForRow so rowToTask and runSchedule.js (W3,
+    // via the task slice facade) share exactly ONE implementation.
+    overdue: computeOverdueForRow(row, timezone, nowInfo),
     slackMins: row.slack_mins != null ? Number(row.slack_mins) : null,
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
     recurStart: row.recur_start || null,
@@ -669,5 +700,6 @@ module.exports = {
   buildSourceMap,
   rowToTask,
   taskToRow,
-  TEMPLATE_FIELDS
+  TEMPLATE_FIELDS,
+  computeOverdueForRow
 };

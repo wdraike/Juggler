@@ -313,7 +313,8 @@ describe('DST — integration-shaped: real now()/scheduled_at arithmetic at the 
       scheduled_at: null, date: null, time: null, status: '', dur: 30, pri: 'P2',
       project: null, section: null, notes: null, url: null,
       deadline: null, implied_deadline: null, placement_mode: PLACEMENT_MODES.FIXED,
-      overdue: 0, recurring: 0, time_remaining: null, time_flex: null, flex_when: 0,
+      // `overdue` field removed (sched-drop-overdue-column, M-5): stored column gone.
+      recurring: 0, time_remaining: null, time_flex: null, flex_when: 0,
       split: 0, split_min: null, split_ordinal: null, split_total: null, split_group: null,
       occurrence_ordinal: null, recur: null, source_id: null, generated: 0, gcal_event_id: null,
       depends_on: null, location: null, tools: null, when: null, day_req: null, marker: 0,

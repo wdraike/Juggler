@@ -94,8 +94,13 @@ describe('MCP create_task: overdue regression (Phase 19)', () => {
       dur: 30
     });
     await runScheduleAndPersist(USER_ID);
-    var row = await db('task_instances').where('id', t.id).first();
-    expect(Number(row.overdue)).toBe(0);
+    // W3 (sched-drop-overdue-column, M-5, 2026-07-03): `task_instances.overdue`
+    // no longer exists (W4 migration applied) — assert the computed/API value
+    // (rowToTask) instead of a raw stored column, matching the pattern used
+    // for the other tests in this file.
+    var viewRow = await db('tasks_v').where('id', t.id).first();
+    var task = rowToTask(viewRow, TZ, null, null);
+    expect(task.overdue).toBe(false);
   });
 
   test('date-only task seeded as ANYTIME (pre-fix MCP behavior) is floated to today, not marked overdue', async () => {
@@ -115,9 +120,12 @@ describe('MCP create_task: overdue regression (Phase 19)', () => {
       dur: 30
     });
     await runScheduleAndPersist(USER_ID);
-    var row = await db('task_instances').where('id', t.id).first();
+    // W3 (sched-drop-overdue-column, M-5, 2026-07-03): assert the computed/API
+    // value (rowToTask) — `task_instances.overdue` no longer exists.
+    var viewRow = await db('tasks_v').where('id', t.id).first();
+    var task = rowToTask(viewRow, TZ, null, null);
     // ANYTIME past task is floated to today by the scheduler (not marked overdue).
-    expect(Number(row.overdue)).toBe(0);
+    expect(task.overdue).toBe(false);
   });
 
   test('past FIXED task remains anchored at its position AND is flagged overdue — R50.1/R50.2 (D-08 guard)', async () => {
@@ -142,8 +150,16 @@ describe('MCP create_task: overdue regression (Phase 19)', () => {
     var row = await db('task_instances').where('id', t.id).first();
     // Anchored: scheduler never moved the FIXED task off its original position.
     expect(row.scheduled_at).toBe('2026-05-18 18:00:00');
-    // Past-due FIXED event is flagged overdue=1 (block 8.5, R50.1/R50.2).
-    expect(Number(row.overdue)).toBe(1);
+    // W3 (sched-drop-overdue-column, M-5, 2026-07-03): `task_instances.overdue`
+    // is no longer written by block 8.5 (that write is deleted outright, SPEC.md
+    // "Design — write-side sites that become dead") — the PRODUCTION-VISIBLE
+    // assertion is the computed read (rowToTask), which reads true for a
+    // past-due FIXED event via the FIXED-mode dueKey-from-scheduled_at branch,
+    // independent of any stored write. Read via tasks_v for placement_mode
+    // (lives on task_masters, not task_instances).
+    var viewRow = await db('tasks_v').where('id', t.id).first();
+    var task = rowToTask(viewRow, TZ, null, null);
+    expect(task.overdue).toBe(true);
   });
 
 });

@@ -120,7 +120,7 @@ describe('deriveSchedulePlacements', () => {
   test('overdue today-task with past time snaps to last block boundary', async () => {
     // Bug 2 regression guard: an overdue task whose original time has already passed
     // should appear at lastBlockEnd - dur, not at its original (past) time.
-    // `date`/`time`/`overdue` live on task_instances; scheduler derives t.time from scheduled_at.
+    // `date`/`time` live on task_instances; scheduler derives t.time from scheduled_at.
     // The task_instances.time column is MySQL TIME (HH:MM:SS). The scheduler reads scheduled_at
     // (UTC) and converts to local time to derive t.time — so we set scheduled_at, not time.
     //
@@ -128,6 +128,25 @@ describe('deriveSchedulePlacements', () => {
     // runs inside runScheduleAndPersist (lines 1753-1801 of runSchedule.js). The no-cache
     // deriveSchedulePlacements is a read-only helper and does not run the overdue injection.
     // runScheduleAndPersist is the authoritative path for overdue snap behaviour.
+    //
+    // W3 (sched-drop-overdue-column, M-5, 2026-07-03): the fixture previously
+    // seeded a FLOATING (no-deadline) task with a hand-set stored `overdue: 1`
+    // to drive `isOverdueTask` — that only ever worked via the now-deleted
+    // stored-flag short-circuit; per 999.671 (see the two tests below) a
+    // floating task can NEVER be legitimately overdue, computed or stored, so
+    // this was testing an artificial/unreachable state (same category as
+    // TRACEABILITY.md SC-1). Fixed by making it a RECURRING INSTANCE with a
+    // past `implied_deadline` instead (the R-OD3 computed path every other
+    // recurring-overdue assertion in this leg uses) — NOT a plain one-off with
+    // a `deadline`, because a plain one-off's PAST deadline is intercepted by
+    // an entirely different code path first (unifiedScheduleV2.js's D-A guard,
+    // "deadline already passed / before the scheduling horizon start" reroutes
+    // it straight to a MISSED/unplaced classification pinned at the deadline's
+    // OWN date, never reaching the isOverdueTask snap-synthesis this test
+    // exercises — confirmed empirically when this fix was first attempted with
+    // a `deadline` field instead). Recurring instances are explicitly excluded
+    // from that D-A guard (`!item.isRecurring`), so implied_deadline is the
+    // correct, non-colliding hard-commitment signal for this fixture.
     if (!available) return;
     // Get today's date key dynamically (same logic as getNowInTimezone in runSchedule.js)
     var tzParts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'long' })
@@ -143,19 +162,28 @@ describe('deriveSchedulePlacements', () => {
     // The scheduler derives t.time = '1:00 AM' from this UTC value (scheduledMins=60),
     // which is always < nowMins at afternoon test-run time, satisfying the snap condition.
     var scheduledAt = todayKey + ' 05:00:00';
+    // implied_deadline: a real cycle boundary in the past (yesterday) — computed
+    // overdue fires via the R-OD3 branch (_placedDateKey<=todayKey → dueKey<todayKey).
+    var yesterday = new Date(Date.UTC(
+      Number(tzVals.year), Number(tzVals.month) - 1, Number(tzVals.day) - 1
+    ));
+    var impliedDeadline = yesterday.toISOString().slice(0, 10);
     // Strategy for unplaceability: use when='_invalid_window_' which matches no time block.
     // getWhenWindows returns [] → no eligible windows → scheduler cannot place the task →
     // unplaced → cleared (not ANYTIME past or deadline-exceeded) → NOT in placedIds →
     // overdue injection fires: isPastDue=true, startMin<nowMins → snap to lastBlockEnd-dur.
+    // recur type is weekly/TPC (not 'daily') so isPlacedRecurringInstance stays false and
+    // dueKey resolves through the implied_deadline fallback, not the scheduled_at branch.
     await db('task_masters').insert({
-      id: 'gp-snap-001', user_id: USER_ID, text: 'Overdue snap test',
+      id: 'gp-snap-001-tmpl', user_id: USER_ID, text: 'Overdue snap test',
       dur: dur, status: '', when: '_invalid_window_',
+      recurring: 1, recur: JSON.stringify({ type: 'weekly', timesPerCycle: 4, days: 'MTWRSFU' }),
       created_at: db.fn.now(), updated_at: db.fn.now()
     });
     await db('task_instances').insert({
-      id: 'gp-snap-001', master_id: 'gp-snap-001', user_id: USER_ID,
+      id: 'gp-snap-001', master_id: 'gp-snap-001-tmpl', user_id: USER_ID,
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1,
-      date: todayKey, scheduled_at: scheduledAt, overdue: 1,
+      date: todayKey, scheduled_at: scheduledAt, implied_deadline: impliedDeadline,
       dur: dur, status: '', created_at: db.fn.now(), updated_at: db.fn.now()
     });
     // Use runScheduleAndPersist directly: overdue injection (snap + _overdue flag) is in
@@ -199,7 +227,7 @@ describe('deriveSchedulePlacements', () => {
     await db('task_instances').insert({
       id: 'gp-pastdue-001', master_id: 'gp-pastdue-001', user_id: USER_ID,
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1,
-      date: pastDate, scheduled_at: scheduledAt, overdue: 0,
+      date: pastDate, scheduled_at: scheduledAt,
       dur: 30, status: '', created_at: db.fn.now(), updated_at: db.fn.now()
     });
     var result = await runScheduleAndPersist(USER_ID, undefined, { timezone: 'America/New_York' });
@@ -254,7 +282,7 @@ describe('deriveSchedulePlacements', () => {
     await db('task_instances').insert({
       id: 'gp-pastdue-deadline-001', master_id: 'gp-pastdue-deadline-001', user_id: USER_ID,
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1,
-      date: pastDate, scheduled_at: scheduledAt, overdue: 0,
+      date: pastDate, scheduled_at: scheduledAt,
       dur: 30, status: '', created_at: db.fn.now(), updated_at: db.fn.now()
     });
     var result = await runScheduleAndPersist(USER_ID, undefined, { timezone: 'America/New_York' });

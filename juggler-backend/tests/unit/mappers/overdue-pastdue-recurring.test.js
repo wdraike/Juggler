@@ -396,30 +396,16 @@ describe('Past-DAY recurring — yesterday instance → overdue===true', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// CASE 7 — Stored overdue flag short-circuits (regression guard)
+// CASE 7 — [DISPOSED — SC-1, sched-drop-overdue-column / 999.1085]
 //
-// When row.overdue=1 (stored), the computed path must be skipped and return true
-// regardless of placement_mode or time.
+// Previously pinned the stored-flag short-circuit itself (a plain floating
+// task, no deadline, no implied_deadline, stored overdue=1 only). W1 (this
+// leg) deletes that short-circuit from computeOverdueForRow — the fixture now
+// correctly returns overdue:false (no hasHardCommitment signal), which is the
+// intended computed-only behavior. Removed rather than updated to pin a
+// mechanism that no longer exists — see TRACEABILITY.md SC-1 (exhaustive grep
+// found no live writer ever produces this row shape).
 // ═══════════════════════════════════════════════════════════════════════════════
-
-describe('Stored overdue flag short-circuit — stored overdue=1 always wins', () => {
-
-  test('CASE-7: row.overdue=1 stored, anytime non-recurring → overdue===true (short-circuit)', () => {
-    const row = makeBaseRow({
-      task_type: 'task',
-      recurring: 0,
-      source_id: null,
-      placement_mode: 'anytime',
-      scheduled_at: null,
-      deadline: null,
-      implied_deadline: null,
-      status: '',
-      overdue: 1  // stored flag set
-    });
-    const task = rowToTask(row, TZ, null, null, NOW_21_00);
-    expect(task.overdue).toBe(true);
-  });
-});
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // FUTURE-CARE NOTE: flexible-TPC recurring (multiple-per-week)

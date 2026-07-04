@@ -62,6 +62,8 @@ var db = require('../../src/db');
 var { runScheduleAndPersist } = require('../../src/scheduler/runSchedule');
 var { DEFAULT_TIME_BLOCKS, DEFAULT_TOOL_MATRIX } = require('../../src/scheduler/constants');
 var tasksWrite = require('../../src/lib/tasks-write');
+var { rowToTask } = require('../../src/slices/task/domain/mappers/taskMappers');
+var { getNowInTimezone } = require('../../../shared/scheduler/getNowInTimezone');
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -517,7 +519,7 @@ describe('PATH-B — date=NULL AND scheduled_at=past-slot: instance SPARES and r
 
     var surviving = await db('task_instances')
       .where({ id: instance.id })
-      .select('id', 'status', 'scheduled_at', 'overdue', 'unscheduled')
+      .select('id', 'status', 'scheduled_at', 'unscheduled')
       .first();
 
     // Leg D (scheduler-recurring-rework §4, David 2026-06-24): AUTO-MISS REMOVED.
@@ -530,8 +532,14 @@ describe('PATH-B — date=NULL AND scheduled_at=past-slot: instance SPARES and r
     expect(surviving).toBeDefined();
     // NOT auto-missed — status remains open so the user can still complete it.
     expect(surviving.status).toBe('');
-    // Flagged overdue so it surfaces as a past-due live commitment.
-    expect(surviving.overdue).toBe(1);
+    // sched-drop-overdue-column (M-5): `overdue` is no longer a stored column —
+    // select it via tasks_v + compute via the production mapper. Genuine
+    // AC6a-preserve case (daily recurring, placed at its own past slot, not
+    // forward-rolled) — reaches computeOverdueForRow's isPlacedRecurringInstance
+    // FIXED-like branch, computes overdue=true independent of implied_deadline.
+    var survivingView = await db('tasks_v').where({ id: instance.id }).first();
+    var survivingTask = rowToTask(survivingView, TZ, {}, null, getNowInTimezone(TZ));
+    expect(survivingTask.overdue).toBe(true);
     // scheduled_at must be preserved (the original past slot), not nulled.
     expect(surviving.scheduled_at).not.toBeNull();
     // Verify it matches the originally-seeded scheduled_at value.
