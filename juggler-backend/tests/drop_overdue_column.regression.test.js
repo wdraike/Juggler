@@ -67,6 +67,17 @@ var TASKS_WITH_SYNC_V_PRE_FIX_COLUMNS = [
   'master_id', 'gcal_event_id', 'msft_event_id', 'apple_event_id'
 ];
 
+// Columns legitimately added to tasks_v/tasks_with_sync_v by OTHER legs that landed on
+// origin/main after this migration's timestamp but before/around when this leg's branch was
+// merged forward (999.1091 / leg sched-anchor-window, migrations 20260703210000 and
+// 20260703220000 — both run AFTER 20260703190000_drop_overdue_column in the combined chain,
+// confirmed via `ls src/db/migrations/ | sort`). This migration's own anchor-replace logic ran
+// FIRST and only ever touched the `overdue` projection; these columns are unrelated additions,
+// not something this migration should have dropped or that this test should treat as drift.
+// Verified via a live merged-schema check (fresh DB, full migrate:latest, SHOW CREATE VIEW) that
+// both migrations' effects coexist correctly with zero clobbering in either direction.
+var COLUMNS_ADDED_BY_OTHER_LEGS_AFTER_THIS_MIGRATION = ['next_occurrence_anchor', 'rolling_anchor'];
+
 async function columnsOf(table) {
   var rows = await db('information_schema.COLUMNS')
     .where('TABLE_SCHEMA', dbName())
@@ -137,9 +148,16 @@ describe('MIG-1 — 20260703190000_drop_overdue_column (up applied)', () => {
     expect(tvMissing).toEqual([]);
     expect(svMissing).toEqual([]);
 
-    // No NEW column beyond the expected set was accidentally introduced.
-    var tvExtra = tvCols.filter(function (c) { return tvExpected.indexOf(c) === -1; });
-    var svExtra = svCols.filter(function (c) { return svExpected.indexOf(c) === -1; });
+    // No UNEXPECTED column beyond the expected set was accidentally introduced — allow the
+    // documented, verified-coexisting additions from other legs (see the constant above),
+    // but fail loud on anything else (which would indicate this migration's anchor-replace
+    // silently clobbered or duplicated something).
+    var tvExtra = tvCols.filter(function (c) {
+      return tvExpected.indexOf(c) === -1 && COLUMNS_ADDED_BY_OTHER_LEGS_AFTER_THIS_MIGRATION.indexOf(c) === -1;
+    });
+    var svExtra = svCols.filter(function (c) {
+      return svExpected.indexOf(c) === -1 && COLUMNS_ADDED_BY_OTHER_LEGS_AFTER_THIS_MIGRATION.indexOf(c) === -1;
+    });
     expect(tvExtra).toEqual([]);
     expect(svExtra).toEqual([]);
   });

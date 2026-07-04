@@ -37,6 +37,18 @@ var TEST_USER_ID = 'telly-tasksv-anchor-test';
 // tasks_v_completed_at.regression.test.js PRE_FIX_COLUMNS list plus the columns
 // added since (completed_at, implied_deadline, earliest_start, unplaced_reason,
 // unplaced_detail, end_date).
+//
+// `overdue` REMOVED (2026-07-04, reconciling with leg sched-drop-overdue-column /
+// M-5 / 999.1085, merged forward via origin/main after this test was written):
+// task_instances.overdue is now a DROPPED column — overdue is computed-on-read
+// only (taskMappers.js computeOverdueForRow), never a stored/projected column.
+// Migration 20260703190000_drop_overdue_column.js removes it from tasks_v/
+// tasks_with_sync_v; that migration runs BEFORE this leg's own
+// 20260703210000/20260703220000 anchor migrations in the combined chain (verified
+// live: a fresh migrate:latest + SHOW CREATE VIEW check confirms both migrations'
+// effects coexist correctly with zero clobbering in either direction). This is a
+// legitimate floor-list update, not a regression — `overdue`'s absence is the
+// INTENDED state of the merged schema.
 var FLOOR_COLUMNS = [
   'id', 'user_id', 'task_type', 'text', 'dur', 'pri', 'project', 'section',
   'notes', 'url', 'location', 'tools', 'when', 'day_req', 'recurring',
@@ -46,7 +58,7 @@ var FLOOR_COLUMNS = [
   'disabled_reason', 'deadline', 'start_after_at', 'tz', 'weather_precip',
   'weather_cloud', 'weather_temp_min', 'weather_temp_max', 'weather_temp_unit',
   'weather_humidity_min', 'weather_humidity_max', 'source_id', 'scheduled_at',
-  'date', 'day', 'time', 'status', 'time_remaining', 'unscheduled', 'overdue',
+  'date', 'day', 'time', 'status', 'time_remaining', 'unscheduled',
   'slack_mins', 'occurrence_ordinal', 'split_ordinal', 'split_total',
   'split_group', 'generated', 'gcal_event_id', 'depends_on_json',
   'created_at', 'updated_at', 'msft_event_id', 'apple_event_id', 'master_id',
