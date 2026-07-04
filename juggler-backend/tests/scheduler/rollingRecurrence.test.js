@@ -20,6 +20,12 @@ const { createTask } = require('../../test-helpers/tasks');
 const { runScheduler, markInstanceStatus } = require('../../test-helpers/scheduler');
 const { getTaskInstances } = require('../../test-helpers/queries');
 const { getNowInTimezone } = require('../../../shared/scheduler/getNowInTimezone');
+// BUG1 (W1, leg sched-anchor-split-bugs): batchUpdateTasks (PUT /tasks/batch) is the
+// facade entry point markInstanceStatus does NOT exercise (markInstanceStatus calls
+// facade.updateTaskStatus directly — the single-item status-update use-case). The
+// batch describe block below drives the REAL facade.batchUpdateTasks entry point to
+// prove the anchor-projection gap on that separate code path.
+const taskFacade = require('../../src/slices/task/facade');
 
 const TZ = 'America/New_York';
 // The REAL `done` reanchor uses the actual completion date (today in the user's tz),
@@ -514,3 +520,69 @@ describe('TS-100: Rolling recurrence comprehensive integration', () => {
     expect((statusCounts[''] || 0)).toBeGreaterThan(0);
   });
 });
+
+/**
+ * BUG1 (W1) — RED repro, leg sched-anchor-split-bugs.
+ *
+ * Traceability: .planning/kermit/sched-anchor-split-bugs/TRACEABILITY.md BUG1.
+ *
+ * Kermit's hypothesis: batchUpdateTxn (facade.js ~L889-1136) and lockedBatchUpdate
+ * (facade.js ~L817-884) — the two collaborators PUT /tasks/batch (batchUpdateTasks)
+ * routes into — never call applyRollingAnchor, so a rolling-type recurring master's
+ * `rolling_anchor` never advances when the instance is completed via the BATCH
+ * endpoint (only the single-item PUT /tasks/:id/status path, wired through
+ * UpdateTaskStatus.js:236-244, calls applyRollingAnchor).
+ *
+ * CONFIRMED by reading both collaborators end-to-end (facade.js:815-1059): neither
+ * lockedBatchUpdate nor batchUpdateTxn references applyRollingAnchor/isRollingMaster
+ * anywhere — grep across the whole file shows the only two call sites of
+ * applyRollingAnchor are its own definition (L548) and UpdateTaskStatus.js:237. This
+ * test drives the REAL facade.batchUpdateTasks (unlocked path — batchUpdateTxn; no
+ * `sync_locks` row exists for the test user, so task-write-queue.isLocked() returns
+ * false) with the exact single-item call shape
+ * `{ updates: [{ id, status: 'done' }] }` used by
+ * juggler-frontend/src/hooks/useTaskState.js's updateTask(), and asserts
+ * rolling_anchor advances per computeRollingAnchor's done rule (-> completion date)
+ * exactly as the single-item TS-85 test above already proves for the non-batch path.
+ */
+describe('BUG1 (W1): rolling_anchor never advances via PUT /tasks/batch (facade.batchUpdateTasks)', () => {
+  beforeAll(async () => { await setupTestDB(); });
+  afterAll(async () => { await teardownTestDB(); });
+
+  it('done via batchUpdateTasks({updates:[{id,status:"done"}]}) should advance rolling_anchor the same as the single-item path — CURRENTLY FAILS', async () => {
+    const task = await rollingTask({ rollingAnchor: '2026-06-15' });
+    const instance = await createTask({
+      master_id: task.id,
+      text: 'batch instance',
+      dur: 30,
+      status: '',
+      scheduled_at: '2026-06-17T08:00:00Z',
+      date: '2026-06-17'
+    });
+
+    // The real PUT /tasks/batch call shape (useTaskState.js updateTask()).
+    const res = await taskFacade.batchUpdateTasks({
+      userId: '1',
+      body: { updates: [{ id: instance.id, status: 'done' }] }
+    });
+    expect(res.status).toBe(200);
+
+    // Sanity: the instance status write itself DID happen (batchUpdateTxn is not a
+    // total no-op — only the anchor PROJECTION is missing).
+    const writtenInstance = await getTaskInstances({ id: instance.id });
+    expect(writtenInstance[0].status).toBe('done');
+
+    // R32.1 Option B (same rule TS-85 proves for the single-item path): a `done`
+    // instance re-anchors rolling_anchor to the completion date (today).
+    const updatedTask = await getTaskInstances(task.id, true);
+    expect(updatedTask.rollingAnchor).toBe(TODAY);
+  });
+});
+
+/**
+ * BUG1 (W1) — DATA CONSEQUENCE, not directly assertable in this fixture-driven
+ * suite: dev-bed rows for "Cut Grass" / "Wash Red Car" (BUG1-DATA row in
+ * TRACEABILITY.md) have a stale rolling_anchor from real batch-completions that hit
+ * exactly the gap proven above. That remediation is a one-off data script gated on
+ * the BUG1 fix landing, not a repo test.
+ */

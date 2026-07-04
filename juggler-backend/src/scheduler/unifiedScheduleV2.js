@@ -263,51 +263,23 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, _cfg) {
     if (pm === PLACEMENT_MODES.ALL_DAY) return;
     var when = t.when || '';
     // Phase 15: Removed legacy 'allday'/'fixed' strip logic — only placement_mode is used now.
-    // Past ANYTIME recurring instances (recurring=true, date in past, no time anchor)
-    // are dropped — they already passed and should not be rescheduled to today.
-    // TIME_WINDOW tasks from prior days still go through the missed-window path
-    // so they can be force-placed with _overdue on their original day.
-    // FIXED tasks from prior days still go through the force-placement pass.
-    // EXCEPTION (R50.0): flexible-TPC ANYTIME recurring instances whose recurrence
-    // period has NOT yet ended must NOT be dropped here — they will be forward-rolled
-    // by the pastAnchoredPreQueue bypass below. Day-locked instances still drop.
-    if (t.recurring && pm === PLACEMENT_MODES.ANYTIME && t.date && toKey(t.date) < todayIsoKey) {
-      // Compute flexible-TPC inline (mirrors isFlexibleTpc at line 496).
-      var _isFlexTpcCheck = (function() {
-        var _r = t.recur;
-        if (typeof _r === 'string') { try { _r = JSON.parse(_r); } catch (_e) { return false; } }
-        if (!_r || !_r.timesPerCycle || _r.timesPerCycle <= 0) return false;
-        var _sel;
-        if (_r.type === 'daily') _sel = 7;
-        else if (_r.type === 'weekly' || _r.type === 'biweekly') {
-          var _days = _r.days || 'MTWRF';
-          _sel = (typeof _days === 'object' && !Array.isArray(_days)) ? Object.keys(_days).length
-            : (typeof _days === 'string' ? _days.length : 0);
-        } else if (_r.type === 'monthly') { _sel = (_r.monthDays || [1, 15]).length; }
-        else { _sel = 1; }
-        return _r.timesPerCycle < _sel;
-      })();
-      if (_isFlexTpcCheck) {
-        // Flexible-TPC: check if the recurrence period has ended.
-        var _cycleLen = recurringCycleDays(t.recur) || 1;
-        var _anchor = parseDate(toKey(t.date));
-        if (_anchor) {
-          var _periodEnd = new Date(_anchor.getTime());
-          _periodEnd.setDate(_periodEnd.getDate() + _cycleLen);
-          var _todayDate = parseDate(todayIsoKey);
-          if (_todayDate && _todayDate < _periodEnd) {
-            // Within period — do NOT drop; let it flow through to build its item
-            // so the pastAnchoredPreQueue bypass can forward-roll it.
-          } else {
-            return; // Period ended — drop as before
-          }
-        } else {
-          return; // Cannot parse anchor date — drop as before
-        }
-      } else {
-        return; // Day-locked — drop as before
-      }
-    }
+    // BUG2 (W2, leg sched-anchor-split-bugs) FIX: past ANYTIME recurring instances
+    // (recurring=true, date in past) used to be silently DROPPED here — removed from
+    // `items` before ever reaching the queue, tryPlaceQueued, or the pastAnchoredPreQueue/
+    // pastAnchoredRecurrings rescue passes (unifiedScheduleV2.js ~1907/~2578) that already
+    // give TIME_WINDOW/when-block-anchored overdue recurring items the correct "never
+    // grid-place, pin into result.unplaced" treatment (juggy4 B1/B2). That silent drop was
+    // a NEVER-MISSING violation: an incomplete overdue ANYTIME instance (or split chunk)
+    // vanished from BOTH dayPlacements and result.unplaced entirely.
+    // FIX: no early drop — let the item build normally and flow into `items` like every
+    // other placement mode already does. The downstream mechanism below is already
+    // placement-mode-agnostic (gated on item.isRecurring + a past item.anchorDate, not on
+    // pm) and independently re-derives item.isFlexibleTpc (line ~510/582) to decide:
+    //   - flexible-TPC within its recurrence period -> forward-rolled (R50.0, unchanged)
+    //   - everything else (day-locked, flexible-TPC period ended, unparseable anchor)
+    //     -> pinned into pastAnchoredPreQueue / pastAnchoredRecurrings, landing in
+    //        result.unplaced individually (per-split-chunk, no scheduler-level collapse —
+    //        the J2/ernie-juggy4-E1 fix) with _unplacedReason MISSED, date pinned to anchor.
     var pri = normalizePri(t.pri);
     var priRank = PRI_RANK[pri] || 50;
     // fixed = true only for non-recurring calendar events in FIXED mode.

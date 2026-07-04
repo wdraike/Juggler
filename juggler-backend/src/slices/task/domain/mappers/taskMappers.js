@@ -461,13 +461,19 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
       ? row.deadline.toISOString().split('T')[0]
       : String(row.deadline).split('T')[0];
   }
-  // Derive earliestStart from the task_masters DATE column. The live column name
-  // is `start_after_at` (the planned rename never landed on task_masters — writing
-  // the phantom name throws ER_BAD_FIELD_ERROR). 999.866.
-  if (row.start_after_at) {
-    earliestStart = fromDateISO(row.start_after_at instanceof Date
-      ? row.start_after_at.toISOString().split('T')[0]
-      : String(row.start_after_at).split('T')[0]);
+  // Derive earliestStart. Prefer `earliest_start` (migration 20260624120000 —
+  // the newer per-instance column on task_instances, a stable anchor persisted
+  // at materialization time). Fall back to `start_after_at` (the task_masters
+  // DATE column; the planned rename never landed on task_masters — writing the
+  // phantom name throws ER_BAD_FIELD_ERROR, 999.866) for rows that predate the
+  // newer column or are template rows. BUG3 (W3, leg sched-anchor-split-bugs):
+  // `earliest_start` was never read here, so runSchedule.js's stable-anchor
+  // recompute always fell through to the current placement date.
+  var _earliestStartRaw = row.earliest_start || row.start_after_at;
+  if (_earliestStartRaw) {
+    earliestStart = fromDateISO(_earliestStartRaw instanceof Date
+      ? _earliestStartRaw.toISOString().split('T')[0]
+      : String(_earliestStartRaw).split('T')[0]);
   }
   return {
     id: row.id,

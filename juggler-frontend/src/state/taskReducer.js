@@ -227,7 +227,38 @@ export default function taskReducer(state, action) {
     case 'CLEAR_DIRTY_STATUS': {
       var cd = Object.assign({}, state._dirtyStatuses || {});
       delete cd[action.id];
-      return Object.assign({}, state, { _dirtyStatuses: cd });
+      // BUG1 (W1, leg sched-anchor-split-bugs) fix: SET_STATUS also dirties
+      // _dirtyTaskIds[id] when opts.taskFields is present (e.g. a rolling
+      // completion advancing a field alongside status). Clear that marker too
+      // so a redundant debounced flushSave()/CLEAR_DIRTY_TASKS round-trip
+      // doesn't re-fire for a pure status change already confirmed here.
+      //
+      // WARN ernie-w2-cleardirty-overbroad (2026-07-04): _dirtyTaskIds[id] is a
+      // per-FIELD map ({field: true, ...}) shared with UPDATE_TASK/other edit
+      // paths (see file header). Deleting the WHOLE entry silently drops any
+      // OTHER co-pending field edit for the same task id (e.g. a pending `dur`
+      // change queued via UPDATE_TASK before the status PUT resolved). Clear
+      // only the field(s) THIS status update itself dirtied — action.taskFields
+      // carries the exact same object SET_STATUS's markDirtyFields merged in
+      // (useTaskState.js's setStatus passes its own opts.taskFields through to
+      // both dispatches) — mirroring the savedFields per-field clearing
+      // CLEAR_DIRTY_TASKS already does below. A caller that cannot supply
+      // taskFields falls back to the pre-fix whole-entry clear.
+      var cti = Object.assign({}, state._dirtyTaskIds || {});
+      if (cti[action.id]) {
+        if (action.taskFields) {
+          var ctiEntry = Object.assign({}, cti[action.id]);
+          Object.keys(action.taskFields).forEach(function(k) { delete ctiEntry[k]; });
+          if (Object.keys(ctiEntry).length === 0) {
+            delete cti[action.id];
+          } else {
+            cti[action.id] = ctiEntry;
+          }
+        } else {
+          delete cti[action.id];
+        }
+      }
+      return Object.assign({}, state, { _dirtyStatuses: cd, _dirtyTaskIds: cti });
     }
     case 'CLEAR_DIRTY_TASKS': {
       if (action.ids) {

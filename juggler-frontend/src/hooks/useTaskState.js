@@ -228,8 +228,13 @@ export default function useTaskState() {
     if (opts.completedAt) body.completedAt = opts.completedAt;
     markSelfWrite(id);
     apiClient.put(`/tasks/${id}/status`, body).then((res) => {
-      // Clear dirty flag once server confirms the save
-      dispatch({ type: 'CLEAR_DIRTY_STATUS', id });
+      // Clear dirty flag once server confirms the save. Pass the SAME
+      // taskFields this call's SET_STATUS dirtied (WARN ernie-w2-cleardirty-
+      // overbroad, 2026-07-04) so the reducer clears only those specific
+      // _dirtyTaskIds[id] keys — a co-pending edit to an UNRELATED field
+      // (e.g. `dur` queued via UPDATE_TASK before this status PUT resolved)
+      // is not silently dropped.
+      dispatch({ type: 'CLEAR_DIRTY_STATUS', id, taskFields: opts.taskFields });
       // For terminal statuses, the server may clamp scheduled_at to the
       // completion time (rowToTask enforces this). Fetch just this task and
       // upsert — do NOT do a full loadTasks() refresh, which causes a
