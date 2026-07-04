@@ -542,6 +542,10 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
     // Multiday all-day task support: endDate for tasks spanning multiple days
     endDate: row.end_date ? toDateISO(row.end_date) : null,
     rollingAnchor: row.rolling_anchor || null,
+    // Generalized recurrence anchor for ALL non-rolling recur types (999.1091 C1) —
+    // consumed by expandRecurring.js getAnchor. See juggler-backend/src/lib/
+    // next-occurrence-anchor.js for the terminal-event update rule.
+    nextOccurrenceAnchor: row.next_occurrence_anchor || null,
     disabledAt: row.disabled_at ? scheduledAtToISO(row.disabled_at) : null,
     disabledReason: row.disabled_reason || null,
     occurrenceOrdinal: row.occurrence_ordinal != null ? Number(row.occurrence_ordinal) : undefined,

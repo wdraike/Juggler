@@ -15,10 +15,10 @@ module.exports = {
   // Coverage thresholds — baseline minus 2% buffer to catch regressions.
   coverageThreshold: {
     global: {
-      branches: 10,
-      functions: 10,
-      lines: 10,
-      statements: 10
+      branches: 18,
+      functions: 18,
+      lines: 18,
+      statements: 18
     }
   },
   moduleNameMapper: {
