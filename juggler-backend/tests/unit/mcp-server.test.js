@@ -23,9 +23,16 @@ var mockToolRegistry = {};
 // jest.mock('@modelcontextprotocol/...') (resolved from juggler-backend) would
 // intercept. Jest keys module mocks by resolved path, so we must mock the SDK
 // at the exact path juggler-mcp resolves, using jest.doMock with that path.
+//
+// @modelcontextprotocol/sdk's package.json exports map has always kept
+// McpServer and StdioServerTransport in separate subpath files (server/mcp.js
+// and server/stdio.js — the bare '.../server' index only ever exports Server;
+// confirmed identical in both 1.27.1 and 1.29.0). juggler-mcp/index.js
+// requires each subpath explicitly, so each mock must target its OWN resolved
+// path — they are DIFFERENT files.
 var MCP_DIR = path.resolve(__dirname, '../../../juggler-mcp');
-var SDK_MCP_PATH = require.resolve('@modelcontextprotocol/sdk/server', { paths: [MCP_DIR] });
-var SDK_STDIO_PATH = require.resolve('@modelcontextprotocol/sdk/server', { paths: [MCP_DIR] });
+var SDK_MCP_PATH = require.resolve('@modelcontextprotocol/sdk/server/mcp.js', { paths: [MCP_DIR] });
+var SDK_STDIO_PATH = require.resolve('@modelcontextprotocol/sdk/server/stdio.js', { paths: [MCP_DIR] });
 
 jest.doMock(SDK_MCP_PATH, function () {
   var mockServer = {

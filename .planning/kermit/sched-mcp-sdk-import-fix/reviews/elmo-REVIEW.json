@@ -1,0 +1,110 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "elmo",
+  "leg_id": "sched-mcp-sdk-import-fix",
+  "mode": "bugfix",
+  "depth": "standard",
+  "status": "DONE",
+  "summary": "Import-path bugfix only (5 require() strings + test mock paths). No auth/authz/route logic touched. transport.js unchanged. Live: bogus token->401, fix works (no 500). 0 BLOCK 0 WARN 2 INFO.",
+  "ts": "2026-07-04T13:25:00Z",
+  "steps": {
+    "inputs_check": "done",
+    "detect_scope": "done",
+    "scanner_prefilter": "done",
+    "owasp_scan": "done",
+    "frontend_scan": "n/a",
+    "threat_intel": "skipped",
+    "refer_ins": "n/a",
+    "coverage_map": "done",
+    "live_verify": "done"
+  },
+  "proof_of_work": [
+    {
+      "step": "Scope + diff",
+      "action": "git diff main -- <4 files>; git status --porcelain",
+      "result": "Diff = 5 require()/mock path strings + comments only. server.js:5 (1 line), juggler-mcp/index.js:9-10 (2 lines), 2 test files (mock paths + comment blocks), session.json (planning meta). No logic, no routes, no auth code."
+    },
+    {
+      "step": "Confirm auth surface unchanged",
+      "action": "git diff main --name-only | grep -c transport.js / mcp-auth",
+      "result": "transport.js = 0 matches (UNCHANGED, not in diff). auth-client/mcp-auth.js = 0 matches (UNCHANGED). Auth middleware runs at transport.js:65 (authenticateMcpRequest) BEFORE createMcpServerForUser at line 80 — order preserved."
+    },
+    {
+      "step": "Scanner pre-filter (Step 2.5)",
+      "action": "gitleaks 8.30.1; semgrep 1.168.0 --config auto; eslint on changed files",
+      "result": "gitleaks=ran (no leaks). semgrep=ran on server.js + index.js (exit 0, no findings). eslint=errored (ESLint 9 vs legacy .eslintrc config mismatch) -> grep-fallback on the 2 changed source files: only require() path strings edited, no sink/eval/secret -> trivially clean."
+    },
+    {
+      "step": "SDK exports validation",
+      "action": "node require @modelcontextprotocol/sdk/server/{mcp,stdio,index}.js from juggler-mcp",
+      "result": "server/mcp.js exports McpServer (function); server/stdio.js exports StdioServerTransport (function); bare server/index.js exports only {Server}. Confirms the fix targets the correct subpaths and the old bare './server' path was the root cause of 'McpServer is not a constructor'."
+    },
+    {
+      "step": "Tool user-scoping trace (A01 IDOR/BOLA)",
+      "action": "grep userId in mcp/tools/tasks.js; read register* signatures",
+      "result": "register{Task,Schedule,Config,Data}Tools(server, userId) all receive userId. Every DB access in tasks.js constrained: db('tasks_v').where('user_id', userId), where({id, user_id: userId}), task_masters where({id, user_id: userId}), user_config where({user_id: userId}). userId derives from authResult.userId (JWT sub) — no cross-user access path. Scoping intact and untouched by diff."
+    },
+    {
+      "step": "Live verify — unauth POST /mcp",
+      "action": "curl POST /mcp bogus Bearer + no-token (localhost:5002 dev-bed)",
+      "result": "Bogus token -> HTTP 401 {code:-32000,'Invalid or expired token'}. No-token + Accept headers -> HTTP 200 served as dev-user (NODE_ENV=development dev bypass, transport.js:74, production-guarded). NEITHER path 500'd — fix confirmed live. Production posture: bogus/no token both rejected (bypass gated by NODE_ENV!=='production')."
+    }
+  ],
+  "proof_checklist": [
+    { "item": "Required inputs present (--mode + --files)", "checked": true, "evidence": "--mode bugfix, --files = 4 files" },
+    { "item": "Scope confirmed — files list non-empty; count recorded", "checked": true, "evidence": "4 target files; actual code diff = server.js + juggler-mcp/index.js (2 source), 2 test files" },
+    { "item": "Scanner pre-filter run (gitleaks/semgrep/eslint recorded ran/absent/errored)", "checked": true, "evidence": "gitleaks=ran clean; semgrep=ran clean (exit0); eslint=errored(config)->grep-fallback recorded" },
+    { "item": "Mode-appropriate checks run (bugfix)", "checked": true, "evidence": "bugfix: narrow diff threat-model; threat-intel omitted (scope narrow, no new integration/dep)" },
+    { "item": "All OWASP A01-A10 categories scanned", "checked": true, "evidence": "Coverage map full 10/10; diff is import-path strings — no new sink in any category" },
+    { "item": "Authz checked — sensitive route auth middleware verified (A01)", "checked": true, "evidence": "/mcp route auth via authenticateMcpRequest at transport.js:65 before server construction; unchanged" },
+    { "item": "BOLA/IDOR ownership-trace done", "checked": true, "evidence": "tasks.js every query where user_id:userId; userId from JWT sub via authResult; no cross-user id path" },
+    { "item": "BFLA/vertical authz checked", "checked": true, "evidence": "single-tenant per-user tools; no role escalation surface; no admin route in diff" },
+    { "item": "Mass-assignment checked", "checked": true, "evidence": "No req.body spread introduced; diff touches no handler body" },
+    { "item": "Cross-product/tenant authz checked", "checked": true, "evidence": "planCheck(authResult) keys plans[APP_ID] by slug; unchanged (transport.js:26)" },
+    { "item": "CSRF check run", "checked": true, "evidence": "Bearer-token auth only (Authorization header), not cookie — CSRF N/A; exemption noted" },
+    { "item": "JWT algorithm pinning verified as static check (A07)", "checked": true, "evidence": "auth-client/mcp-auth.js:204 jwtVerify(token,getJWKS(),{issuer:'raike-auth'}) — no explicit algorithms pin; jose+asymmetric JWKS rejects alg:none & mitigates HS/RS confusion. Out-of-diff (unchanged). INFO E-2." },
+    { "item": "Prototype-pollution checked", "checked": true, "evidence": "No user-input merge introduced by diff" },
+    { "item": "Path-traversal/upload limits checked", "checked": true, "evidence": "No file/path handling in diff; require() paths are static literals" },
+    { "item": "Secrets scan complete", "checked": true, "evidence": "gitleaks clean; no hardcoded creds in changed lines" },
+    { "item": "Secrets/PII-in-logs scan complete", "checked": true, "evidence": "No new log sink in diff" },
+    { "item": "Supply-chain depth checked (A06)", "checked": true, "evidence": "No package.json/lockfile in diff; SDK version 1.27.1 unchanged; import path correction only. npm audit not in scope (no dep change)." },
+    { "item": "Threat model done if --external (Step 5)", "checked": true, "evidence": "bugfix narrow scope, no new integration — targeted threat-intel omitted per REFERENCE gate" },
+    { "item": "Full threat model of new surface if --mode new", "checked": false, "evidence": "N/A — bugfix, no new surface" },
+    { "item": "npm audit run (A06)", "checked": false, "evidence": "N/A — no dep/lockfile change in scope; recorded 'no dep change in scope — skipped'" },
+    { "item": "Refer-ins from ernie/cookie incorporated", "checked": true, "evidence": "No ernie/cookie REFER->elmo entries for this leg" },
+    { "item": "Security-regression tests referred to telly", "checked": true, "evidence": "No security BLOCK — no regression test refer required" },
+    { "item": "Grep matches triaged not counted", "checked": true, "evidence": "userId scoping matches READ + reasoned; live curl confirmed auth rejection path" },
+    { "item": "Findings carry file:line + severity", "checked": true, "evidence": "2 INFO findings with file:line" },
+    { "item": "Flag-and-refer for out-of-column issues", "checked": true, "evidence": "None — no code-logic/arch/test issue surfaced" },
+    { "item": "Prior knowledge consulted via Scooter", "checked": false, "evidence": "N/A for bugfix — settled auth invariants read from CLAUDE.md; no design decision to relitigate" },
+    { "item": "Knowledge changes reported to Scooter", "checked": false, "evidence": "N/A — no security-standard/approach changed by this leg" },
+    { "item": "Rubric Coverage Map emitted", "checked": true, "evidence": "Coverage: full (10/10), no gaps" },
+    { "item": "elmo-REVIEW.json written + SECURITY-REVIEW.md rendered", "checked": true, "evidence": "this file + render-review.sh" },
+    { "item": "Status line set", "checked": true, "evidence": "DONE" }
+  ],
+  "findings": [
+    {
+      "id": "E-1",
+      "severity": "INFO",
+      "dimension": "A07 Authentication (dev bypass) / out-of-diff observation",
+      "file": "juggler-backend/src/mcp/transport.js",
+      "line": 74,
+      "claim": "The now-working /mcp endpoint serves no-token requests as userId 'dev-user' when NODE_ENV=development (or MCP_DEV_NO_AUTH=true), reachable now that the import fix lets a real McpServer construct.",
+      "evidence": "transport.js:62,74 grant authResult={userId:'dev-user'} on the token-less/dev-token path, guarded by `&& process.env.NODE_ENV !== 'production'`. Live-confirmed: no-token POST to dev-bed (NODE_ENV=development) returned HTTP 200 initialize as server 'juggler'. This bypass is UNCHANGED by this diff (transport.js not in the file list) and is production-guarded — bogus token in prod-equivalent path returned 401. Before the fix the endpoint 500'd at `new McpServer()` AFTER the auth check (line 80 > line 65), so the brokenness was never an auth control; it broke authed and dev paths equally. No control weakened. Recorded so reviewers know the dev-open behavior is now live in development.",
+      "fix": "No action required for this leg. Optional hardening (separate backlog): assert NODE_ENV is explicitly set at boot so an unset NODE_ENV cannot be mistaken for non-production; confirm Cloud Run deploy sets NODE_ENV=production.",
+      "confidence": "high"
+    },
+    {
+      "id": "E-2",
+      "severity": "INFO",
+      "dimension": "A07 Authentication (JWT alg pinning) / out-of-diff surrounding surface",
+      "file": "auth-client/mcp-auth.js",
+      "line": 204,
+      "claim": "JWT verification does not explicitly pin the allowed signature algorithms.",
+      "evidence": "jwtVerify(token, getJWKS(), { issuer: 'raike-auth' }) — no `algorithms` option. Mitigated in practice: jose's jwtVerify rejects alg:none by default, and getJWKS() (createRemoteJWKSet) supplies asymmetric keys so HS/RS key-confusion is not exploitable (an HS256 token is not verified against a JWKS KeyLike as an HMAC secret). File is UNCHANGED by this diff (mcp-auth.js not in file list); flagged only as surrounding-surface awareness, not a defect of this bugfix leg.",
+      "fix": "Out of scope for this leg. Best-practice follow-up (backlog): add explicit `algorithms: ['RS256']` (or the deployed alg) to the jwtVerify options for defense-in-depth.",
+      "confidence": "high"
+    }
+  ],
+  "refers": []
+}

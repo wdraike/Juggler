@@ -1,20 +1,24 @@
 {
-  "leg_id": "h7-driftfix-case-999.1019",
-  "intent": "Fix 999.1019: split_ordinal/split_total CASE branches missing from KnexScheduleRepository.writeChanged batched path",
+  "leg_id": "sched-mcp-sdk-import-fix",
+  "intent": "Fix MCP server broken in dev: POST /mcp returns HTTP 500 'McpServer is not a constructor' due to @modelcontextprotocol/sdk import path drift",
   "mode": "bugfix",
   "lanes": [],
   "depth": "standard",
-  "scope": ["juggler-backend"],
-  "branch": "leg/h7-driftfix-case-999.1019",
+  "scope": [
+    "juggler-backend",
+    "juggler-mcp"
+  ],
+  "branch": "leg/sched-mcp-sdk-import-fix",
   "status": "in_review",
-  "wbs": ".planning/kermit/h7-driftfix-case-999.1019/WBS.md",
-  "traceability": ".planning/kermit/h7-driftfix-case-999.1019/TRACEABILITY.md",
-  "verdict": null,
+  "wbs": ".planning/kermit/WBS-sched-mcp-sdk-import-fix.md",
+  "spec": null,
+  "traceability": ".planning/kermit/sched-mcp-sdk-import-fix/TRACEABILITY.md",
+  "verdict": "WARN",
   "owner": {
     "sse_port": 0,
     "host": "Williams-MacBook-Pro.local",
-    "started": "2026-07-02T22:30:00Z"
+    "started": "2026-07-04T17:05:09Z"
   },
-  "opened": "2026-07-02T22:30:00Z",
-  "last_update": "2026-07-02T22:30:00Z"
+  "opened": "2026-07-04T17:05:09Z",
+  "last_update": "2026-07-04T18:00:00Z"
 }

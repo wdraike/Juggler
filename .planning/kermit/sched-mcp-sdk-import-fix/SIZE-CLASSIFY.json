@@ -1,0 +1,119 @@
+{
+  "$contract": "size-classify/v1",
+  "mode": "bugfix",
+  "recommended": {
+    "lane": "full",
+    "depth": "standard",
+    "test_depth": "service"
+  },
+  "estimate": {
+    "est_sec": 780,
+    "bucket": "full/standard",
+    "source": "calibrated",
+    "basis": "open->close wall clock incl think/idle (matches legs.jsonl duration_sec)"
+  },
+  "mode_hint": {
+    "suggested": "bugfix",
+    "matched": [
+      "bugfix"
+    ],
+    "agrees_with_input": true
+  },
+  "size": {
+    "total": 8,
+    "method": "added-lines",
+    "confidence": "high"
+  },
+  "risky": true,
+  "surfaces": [
+    "security",
+    "cross-service"
+  ],
+  "triggers": {
+    "security_surface": true,
+    "infra_surface": false,
+    "frontend": false,
+    "data_migration": false,
+    "code_surface": true,
+    "docs_only": false,
+    "interface_change": false
+  },
+  "prior_art": [
+    {
+      "keyword": "McpServer",
+      "git_log_hits": 0,
+      "git_log_sample": [],
+      "grep_hits": 23,
+      "grep_sample": [
+        ".mcp.json",
+        ".planning/codebase/ARCHITECTURE.md",
+        ".planning/codebase/INTEGRATIONS.md",
+        ".planning/codebase/STRUCTURE.md",
+        ".planning/kermit/999.892-tz-notnull/INTAKE-BRIEF.json"
+      ],
+      "backlog_closed_hit": false
+    },
+    {
+      "keyword": "StdioServerTransport",
+      "git_log_hits": 0,
+      "git_log_sample": [],
+      "grep_hits": 3,
+      "grep_sample": [
+        "juggler-backend/tests/unit/mcp-protocol.test.js",
+        "juggler-backend/tests/unit/mcp-server.test.js",
+        "juggler-mcp/index.js"
+      ],
+      "backlog_closed_hit": false
+    },
+    {
+      "keyword": "modelcontextprotocol",
+      "git_log_hits": 1,
+      "git_log_sample": [
+        "a7d7dd1 fix(ci): MCP SDK exports map + unifiedSchedule path fixes for Linux runner"
+      ],
+      "grep_hits": 24,
+      "grep_sample": [
+        ".planning/codebase/STACK.md",
+        ".planning/phases/juggler-code-review/baseline/depcheck-backend.json",
+        ".planning/phases/juggler-code-review/baseline/depcheck-mcp.json",
+        ".planning/phases/juggler-code-review/baseline/eslint-unused-backend.json",
+        "juggler-backend/.audits/depcheck.json"
+      ],
+      "backlog_closed_hit": false
+    },
+    {
+      "keyword": "mcp/server.js",
+      "git_log_hits": 0,
+      "git_log_sample": [],
+      "grep_hits": 11,
+      "grep_sample": [
+        ".planning/codebase/INTEGRATIONS.md",
+        ".planning/phases/juggler-code-review/baseline/depcheck-backend.json",
+        ".planning/phases/juggler-code-review/baseline/eslint-unused-backend.json",
+        "juggler-backend/.audits/depcheck.json",
+        "juggler-backend/.audits/eslint-results.json"
+      ],
+      "backlog_closed_hit": false
+    },
+    {
+      "keyword": "juggler-mcp",
+      "git_log_hits": 10,
+      "git_log_sample": [
+        "fd8e10d fix(juggler-mcp): mirror HTTP terminal-schedule guard into MCP set_task_status/update_task (leg 999.895)",
+        "0c18288 refactor(juggler): migrate MCP get_schedule to DB-derived placements; delete /schedule/placements (W3-backend)",
+        "3440e2b refactor(juggler): derive calendar/unplaced views from /tasks DB read, not /schedule/placements (W3 frontend)"
+      ],
+      "grep_hits": 47,
+      "grep_sample": [
+        ".mcp.json",
+        ".planning/codebase/ARCHITECTURE.md",
+        ".planning/codebase/INTEGRATIONS.md",
+        ".planning/codebase/STACK.md",
+        ".planning/codebase/STRUCTURE.md"
+      ],
+      "backlog_closed_hit": false
+    }
+  ],
+  "rationale": "risky surface present — full lane, depth floored >= standard (never trivial/quick)",
+  "ts": "2026-07-04T16:57:52Z"
+}
