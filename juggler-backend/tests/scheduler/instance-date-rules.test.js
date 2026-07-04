@@ -199,10 +199,15 @@ describe('R1/R7-unit: computeIsPastDue overdue gate', () => {
   });
 
   /**
-   * R7 with overdue DB flag (PASS expected):
-   * overdue=1 from DB → computeIsPastDue=true regardless of deadline.
+   * R7 with an already-computed overdue value on the in-memory task object
+   * (PASS expected): sched-drop-overdue-column (M-5) note — `t.overdue` here
+   * is NOT a stored DB column (none exists); computeIsPastDue is UNCHANGED
+   * by this leg and still trusts whatever value is already on the in-memory
+   * task object (built by rowToTask earlier in the same run) — this test
+   * pins that unchanged consumer contract, not a stored-column read.
+   * t.overdue=truthy → computeIsPastDue=true regardless of deadline.
    */
-  it('R7-overdue-flag: overdue=1 DB flag + past date → truthy', () => {
+  it('R7-overdue-flag: pre-computed t.overdue=1 + past date → truthy', () => {
     const t = { deadline: null, overdue: 1, placementMode: 'anytime', date: PAST_3, time: '09:00 AM' };
     expect(computeIsPastDue(t, 540, TIME_INFO)).toBeTruthy(); // PASS
   });
@@ -238,7 +243,8 @@ describe('INV-6-unit: taskMappers.rowToTask — earliestStart from start_after_a
       weather_temp_min: null, weather_temp_max: null, weather_temp_unit: null,
       weather_humidity_min: null, weather_humidity_max: null,
       source_id: null, scheduled_at: null, date: null, day: null, time: null,
-      status: '', time_remaining: null, unscheduled: null, overdue: null,
+      status: '', time_remaining: null, unscheduled: null,
+      // `overdue` field removed (sched-drop-overdue-column, M-5): stored column gone.
       slack_mins: null, occurrence_ordinal: null, split_ordinal: null,
       split_total: null, split_group: null, generated: 0, gcal_event_id: null,
       depends_on_json: null, created_at: new Date(), updated_at: new Date(),
@@ -299,7 +305,7 @@ describe('R1-DB: non-recurring task — null implied_deadline + earliest_start',
     expect(toDateStr(inst.earliest_start)).toBeNull();   // PASS
   });
 
-  it('R1-overdue-zero: non-recurring past-dated task → overdue stays 0 after scheduler run', async () => {
+  it('R1-overdue-zero: non-recurring past-dated task → computed overdue stays false after scheduler run', async () => {
     const master = await createTask({
       text: 'R1 rolls forward',
       dur: 30,
@@ -318,8 +324,13 @@ describe('R1-DB: non-recurring task — null implied_deadline + earliest_start',
 
     const inst = await db('task_instances').where({ master_id: master.id }).first();
     expect(inst).toBeTruthy();
-    // R1: no hard commitment → never overdue (computeIsPastDue returns falsy for floating)
-    expect(inst.overdue).toBeFalsy(); // PASS
+    // sched-drop-overdue-column (M-5): `inst.overdue` is no longer a real column
+    // (would read `undefined`, which is falsy — a silent tautological pass that
+    // would mask a real regression). Compute via the production mapper instead.
+    // R1: no hard commitment → never overdue (computeIsPastDue/computeOverdueForRow
+    // return falsy for floating).
+    const task = rowToTask(Object.assign({ task_type: 'task' }, inst), TZ, {}, null, { todayKey: TODAY, nowMins: 600 });
+    expect(task.overdue).toBeFalsy(); // PASS
   });
 });
 
@@ -600,11 +611,11 @@ describe('R8-DB: implied_deadline recompute-on-move', () => {
 
 // ─── R7: Overdue flag set past implied_deadline ───────────────────────────────
 
-describe('R7-DB: overdue=1 set by scheduler for past placed recurring instance', () => {
+describe('R7-DB: computed overdue=true for past placed recurring instance', () => {
   beforeAll(async () => { await setupTestDB(); });
   afterAll(async () => { await teardownTestDB(); });
 
-  it('R7-daily-overdue: past-placed daily recurring instance gets overdue=1', async () => {
+  it('R7-daily-overdue: past-placed daily recurring instance computes overdue=true', async () => {
     const master = await createTask({
       text: 'R7 past daily',
       dur: 30,
@@ -633,8 +644,15 @@ describe('R7-DB: overdue=1 set by scheduler for past placed recurring instance',
       .first();
 
     expect(inst).toBeTruthy();
-    // R7: past effective deadline + placed → overdue=1 (set at runSchedule.js:1993-1997)
-    expect(inst.overdue).toBeTruthy(); // PASS
+    // sched-drop-overdue-column (M-5): `inst.overdue` is no longer a real column
+    // (would read `undefined`, which is falsy — the OPPOSITE of what this test
+    // needs to prove, so it would fail loud rather than silently pass, but the
+    // right fix is to assert the real computed value, not the absent column).
+    // R7: past effective deadline + placed daily recurring instance → computed
+    // overdue=true via the isPlacedRecurringInstance/FIXED-like branch
+    // (taskMappers.js computeOverdueForRow).
+    const task = rowToTask(Object.assign({ task_type: 'recurring_instance' }, inst), TZ, {}, null, { todayKey: TODAY, nowMins: 600 });
+    expect(task.overdue).toBeTruthy(); // PASS
   });
 });
 

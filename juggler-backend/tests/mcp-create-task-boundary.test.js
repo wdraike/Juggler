@@ -222,7 +222,7 @@ function makeSuccessRow(overrides) {
     master_id: null,
     project: null,
     section: null,
-    overdue: 0,
+    // `overdue` field removed (sched-drop-overdue-column, M-5): stored column gone.
     slack_mins: null,
     // Use a real date string — rowToTask calls new Date(created_at).toISOString()
     created_at: '2026-01-01T00:00:00.000Z',

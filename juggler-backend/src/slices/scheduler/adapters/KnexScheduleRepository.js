@@ -126,8 +126,12 @@ KnexScheduleRepository.prototype.writeChanged = async function writeChanged(delt
 
     // DB-single-source (W1): a row in the batched scheduled_at/dur path is being
     // PLACED — clear any stale unplaced reason from a prior run alongside the
-    // unscheduled/overdue flags, so a now-placed instance never carries a reason.
-    var updateFields = { unscheduled: null, overdue: 0, unplaced_reason: null, unplaced_detail: null, updated_at: this.clock.now() };
+    // unscheduled flag, so a now-placed instance never carries a reason.
+    // W3 (sched-drop-overdue-column, M-5): `overdue` is no longer a stored
+    // column — this hardcoded `overdue:0` is REMOVED (not replaced), which is
+    // also what let the old R-FR1 secondary write in runSchedule.js override
+    // it on the same transaction; both are gone now.
+    var updateFields = { unscheduled: null, unplaced_reason: null, unplaced_detail: null, updated_at: this.clock.now() };
 
     var saChunk = chunk.filter(function (pu) { return !!pu.dbUpdate.scheduled_at; });
     if (saChunk.length > 0) {

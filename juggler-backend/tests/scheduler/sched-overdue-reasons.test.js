@@ -539,7 +539,7 @@ describe('F6 — missed PAST recurring occurrence: unplaced_reason must be "miss
       date: PAST_DATE_KEY,      // date IS set — the partial-init state (BUG-142-AC1b shape)
       status: '',
       unscheduled: 0,           // NOT yet flagged — this run's sweep must be the one to flag it
-      overdue: 0,
+      // `overdue` field removed (sched-drop-overdue-column, M-5): stored column gone.
       dur: 30,
       created_at: db.fn.now(),
       updated_at: db.fn.now(),

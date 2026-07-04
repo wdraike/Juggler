@@ -63,28 +63,15 @@ function computeRecurringDeadline(params, timezone) {
   return dateHelpers.localToUtc(deadlineDateKey, '11:59 PM', timezone);
 }
 
-function isTaskMissed(task, currentTime) {
-  if (!task.scheduled_at) return false;
-  if (task.status === 'done' || task.status === 'cancel' || task.status === 'skip') return false;
-  
-  // Task is considered missed if it's past the scheduled time and not completed
-  const scheduledTime = new Date(task.scheduled_at);
-  const missedThreshold = new Date(scheduledTime.getTime() + (2 * 60 * 60 * 1000)); // 2 hours after scheduled time
-  
-  return currentTime > missedThreshold;
-}
-
-function shouldAutoMarkMissed(task, currentTime) {
-  if (!task.scheduled_at) return false;
-  if (task.status === 'done' || task.status === 'cancel' || task.status === 'skip') return false;
-
-  // Auto-flag overdue if past the resolution window (24h after scheduled_at).
-  // The 'missed' status no longer exists — the cron now sets overdue=1 instead.
-  const scheduledTime = new Date(task.scheduled_at);
-  const resolutionWindow = new Date(scheduledTime.getTime() + (24 * 60 * 60 * 1000));
-
-  return currentTime > resolutionWindow;
-}
+// isTaskMissed / shouldAutoMarkMissed DELETED — sched-drop-overdue-column / M-5
+// (999.1085), executing the standing D1 ruling (brain 101228/97166/101304:
+// "delete the legacy 2h/24h isTaskMissed/shouldAutoMarkMissed after verifying
+// no live caller"). Their only live caller, cal-history-cron.js's
+// markMissedTasks, is itself retired in this leg (its sole purpose was writing
+// the now-dropped task_instances.overdue column). Verified via repo-wide grep:
+// no other live caller remained (only a dead root-level `test-implementation.js`
+// scratch script — removed alongside — and a fully describe.skip'd test file
+// that referenced the names in a comment only, not a live import).
 
 function getMissedResolutionWindow(task) {
   if (!task.scheduled_at) return null;
@@ -95,7 +82,5 @@ function getMissedResolutionWindow(task) {
 
 module.exports = {
   computeRecurringDeadline,
-  isTaskMissed,
-  shouldAutoMarkMissed,
   getMissedResolutionWindow
 };

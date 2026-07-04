@@ -170,7 +170,7 @@ describe('H6 W2 — S5: writeChanged writes ONLY the rows passed (delta, no writ
 
     const fixedNow = new Date('2026-06-16T12:00:00Z');
     await repo.writeChanged([
-      { id: 'placed', dbUpdate: { scheduled_at: fixedNow, date: '2026-06-16', day: 'Tue', time: '08:00:00', unscheduled: null, overdue: 0, updated_at: fixedNow, dur: 30 } },
+      { id: 'placed', dbUpdate: { scheduled_at: fixedNow, date: '2026-06-16', day: 'Tue', time: '08:00:00', unscheduled: null, updated_at: fixedNow, dur: 30 } },
       { id: 'flagged', dbUpdate: { unscheduled: 1, updated_at: fixedNow } }
     ], { userId: 'u-1' });
 

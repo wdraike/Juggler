@@ -227,14 +227,14 @@ async function seedOverdueSplitMaster() {
     {
       id: SPLIT_MASTER_ID + '-y-1', user_id: USER_ID, master_id: SPLIT_MASTER_ID,
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 3, split_group: SPLIT_MASTER_ID + '-y',
-      dur: 30, status: '', date: MISSED_DATE, scheduled_at: null, unscheduled: null, overdue: 0,
+      dur: 30, status: '', date: MISSED_DATE, scheduled_at: null, unscheduled: null,
       implied_deadline: IMPLIED_DEADLINE,
       created_at: db.fn.now(), updated_at: db.fn.now()
     },
     {
       id: SPLIT_MASTER_ID + '-y-2', user_id: USER_ID, master_id: SPLIT_MASTER_ID,
       occurrence_ordinal: 1, split_ordinal: 2, split_total: 3, split_group: SPLIT_MASTER_ID + '-y',
-      dur: 45, status: '', date: MISSED_DATE, scheduled_at: null, unscheduled: null, overdue: 0,
+      dur: 45, status: '', date: MISSED_DATE, scheduled_at: null, unscheduled: null,
       implied_deadline: IMPLIED_DEADLINE,
       created_at: db.fn.now(), updated_at: db.fn.now()
     },
@@ -243,7 +243,7 @@ async function seedOverdueSplitMaster() {
       // (unifiedScheduleV2.js status guard) and left byte-for-byte untouched.
       id: SPLIT_MASTER_ID + '-y-3', user_id: USER_ID, master_id: SPLIT_MASTER_ID,
       occurrence_ordinal: 1, split_ordinal: 3, split_total: 3, split_group: SPLIT_MASTER_ID + '-y',
-      dur: 20, status: 'done', date: MISSED_DATE, scheduled_at: MISSED_DATE + ' 09:00:00', unscheduled: null, overdue: 0,
+      dur: 20, status: 'done', date: MISSED_DATE, scheduled_at: MISSED_DATE + ' 09:00:00', unscheduled: null,
       created_at: db.fn.now(), updated_at: db.fn.now()
     }
   ]);
@@ -269,7 +269,7 @@ async function seedOverdueNonSplitRecurring() {
   await db('task_instances').insert({
     id: NONSPLIT_MASTER_ID + '-y-1', user_id: USER_ID, master_id: NONSPLIT_MASTER_ID,
     occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, split_group: null,
-    dur: 30, status: '', date: MISSED_DATE, scheduled_at: null, unscheduled: null, overdue: 0,
+    dur: 30, status: '', date: MISSED_DATE, scheduled_at: null, unscheduled: null,
     implied_deadline: IMPLIED_DEADLINE,
     created_at: db.fn.now(), updated_at: db.fn.now()
   });

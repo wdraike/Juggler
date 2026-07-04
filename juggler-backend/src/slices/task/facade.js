@@ -329,7 +329,8 @@ async function recurCleanup(ctx) {
             dur: existing.dur || 30,
             status: existing.status || '',
             scheduled_at: existing.scheduled_at || null,
-            overdue: 0,
+            // W3 (sched-drop-overdue-column, M-5): `overdue` is no longer a
+            // stored column/insert-time default — computed-on-read only.
             generated: 0,
             created_at: new Date(),
             updated_at: new Date()
@@ -429,6 +430,26 @@ async function materializeRcInstance(ctx) {
   }
   var srcTime = source.scheduled_at ? utcToLocal(source.scheduled_at, tz).time : null;
   var scheduledAt = localToUtc(localDate, srcTime, tz);
+  // sched-drop-overdue-column follow-up (bert-rollgate-2/3): materialize
+  // implied_deadline at insert time here too — SAME recurringPeriodEndKey(recur,
+  // occurrenceDateKey) call shape runSchedule.js already uses at every other
+  // recurring_instance creation/write site (Phase-1 chunk pre-insert :~1407-1408;
+  // the 999.990 recompute-on-write :~1805-1834). `localDate` (already computed
+  // above from the rc_ id's date digits, M/D form) IS this row's occurrence date
+  // key — parseDate (shared/scheduler/dateHelpers) accepts M/D directly, same as
+  // it does for localToUtc just above. Without this, a row materialized through
+  // this on-demand path can never compute overdue:true via computeOverdueForRow's
+  // hasHardCommitment branch (taskMappers.js), which short-circuits to false
+  // whenever impliedDeadlineISO is null — regressing the standing "past+incomplete
+  // dated MUST stay pinned past-due" invariant now that the write-side overdue
+  // persistence that used to mask this gap is gone (W3, this leg).
+  // Lazy require (mirrors SchedulerTaskProvider.js's own documented rationale):
+  // a plain top-level require of runSchedule.js here risks a facade<->scheduler
+  // circular-require — runSchedule.js instantiates SchedulerTaskProvider at
+  // module scope, which itself requires this facade; many unit tests also
+  // require this facade.js standalone, before runSchedule.js has ever loaded.
+  var recurringPeriodEndKey = require('../../scheduler/runSchedule').recurringPeriodEndKey;
+  var impliedDeadline = source.recur ? recurringPeriodEndKey(source.recur, localDate) : null;
   // P1: created_at/updated_at via new Date() (repo asserts Dates on insert).
   await repo.insertTask({
     id: id,
@@ -439,6 +460,7 @@ async function materializeRcInstance(ctx) {
     recurring: 1,
     scheduled_at: scheduledAt || null,
     status: '',
+    implied_deadline: impliedDeadline,
     created_at: new Date(),
     updated_at: new Date()
   });
@@ -1263,6 +1285,11 @@ module.exports = {
   buildSourceMap: mappers.buildSourceMap,
   safeParseJSON: mappers.safeParseJSON,
   TEMPLATE_FIELDS: mappers.TEMPLATE_FIELDS,
+  // W1/W3 (sched-drop-overdue-column, M-5): the SAME computed-overdue
+  // predicate rowToTask uses internally, re-exported so runSchedule.js (W3)
+  // can replace its raw rawRow.overdue/r.overdue continuity reads with a call
+  // to this single source of truth instead of duplicating the rule.
+  computeOverdueForRow: mappers.computeOverdueForRow,
   validateTaskInput: validation.validateTaskInput,
   checkCalSyncEditGuard: validation.checkCalSyncEditGuard,
   guardFixedCalendarWhen: validation.guardFixedCalendarWhen,

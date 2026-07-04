@@ -202,7 +202,7 @@ function makeRow(overrides) {
     preferred_time_mins: null,
     desired_at: null,
     unscheduled: 0,
-    overdue: 0,
+    // `overdue` field removed (sched-drop-overdue-column, M-5): stored column gone.
     slack_mins: null,
     deadline: null,
     earliest_start_at: null,

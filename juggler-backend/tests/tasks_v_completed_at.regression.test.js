@@ -28,6 +28,12 @@ var TEST_USER_ID = 'telly-tasksv-completed-at-test';
 
 // All columns present in tasks_v BEFORE the fix (63 columns, captured 2026-06-14).
 // After the fix the view must contain ALL of these plus completed_at.
+// 'overdue' removed (sched-drop-overdue-column, M-5, 2026-07-03): tasks_v no
+// longer projects it — an AUTHORIZED, intentional column removal (SPEC.md AC1/
+// MIG-1), not a regression this guard should catch. Per-leg drop_overdue_column
+// migration test (tests/drop_overdue_column.regression.test.js) owns verifying
+// that specific removal; this pre-existing guard's baseline is updated to match
+// the new, permanent tasks_v shape.
 var PRE_FIX_COLUMNS = [
   'id', 'user_id', 'task_type', 'text', 'dur', 'pri', 'project', 'section',
   'notes', 'url', 'location', 'tools', 'when', 'day_req', 'recurring',
@@ -37,7 +43,7 @@ var PRE_FIX_COLUMNS = [
   'disabled_reason', 'deadline', 'start_after_at', 'tz', 'weather_precip',
   'weather_cloud', 'weather_temp_min', 'weather_temp_max', 'weather_temp_unit',
   'weather_humidity_min', 'weather_humidity_max', 'source_id', 'scheduled_at',
-  'date', 'day', 'time', 'status', 'time_remaining', 'unscheduled', 'overdue',
+  'date', 'day', 'time', 'status', 'time_remaining', 'unscheduled',
   'slack_mins', 'occurrence_ordinal', 'split_ordinal', 'split_total',
   'split_group', 'generated', 'gcal_event_id', 'depends_on_json',
   'created_at', 'updated_at', 'msft_event_id', 'apple_event_id', 'master_id'

@@ -10,7 +10,14 @@
  *   1. Past materialized implied_deadline + row.overdue=0 (non-recurring) → overdue:false
  *      (R-OD2, David 2026-06-30: implied_deadline is overdue-signal only for recurring_instance)
  *   2. Past hard deadline + row.overdue=0           → overdue:true
- *   3. Stored flag row.overdue=1, no other due      → overdue:true (short-circuit)
+ *   3. [REMOVED — SC-1, leg sched-drop-overdue-column / 999.1085] Stored flag
+ *      row.overdue=1, no other due → overdue:true (short-circuit). The
+ *      short-circuit itself has been deleted from computeOverdueForRow (W1) —
+ *      task_instances.overdue is no longer read as a stored value anywhere.
+ *      TRACEABILITY.md SC-1: exhaustive grep confirmed no live writer ever
+ *      produced this row shape (stored overdue=1, no deadline, no
+ *      implied_deadline) — this test pinned the mechanism being removed, not a
+ *      real production case, so it is disposed rather than updated.
  *   4. Floating / no deadline / no implied_deadline → overdue:false
  *   5. Terminal status (done/skip/cancel/missed/paused/disabled) → overdue:false
  *   6. FIXED placement + scheduled_at in the past   → overdue:true
@@ -122,12 +129,16 @@ describe('rowToTask — W4 computed-on-read overdue (R50.6)', function() {
     expect(task.overdue).toBe(true);
   });
 
-  // ─── 3. Stored flag row.overdue=1 (no other due) → overdue:true ─────────────
-  it('stored row.overdue=1 → overdue:true (short-circuit)', function() {
-    var row = baseRow({ overdue: 1, deadline: null, implied_deadline: null });
-    var task = rowToTask(row, TZ, null, null, NOW_INFO);
-    expect(task.overdue).toBe(true);
-  });
+  // ─── 3. [DISPOSED — SC-1, sched-drop-overdue-column / 999.1085] ────────────
+  // The 'stored row.overdue=1 → overdue:true (short-circuit)' test previously
+  // here pinned the stored-flag short-circuit itself (a plain floating task,
+  // no deadline, no implied_deadline, overdue=1 stored only). W1 deletes that
+  // short-circuit from computeOverdueForRow — this fixture now correctly
+  // returns overdue:false (no hasHardCommitment signal), which is the
+  // intended, computed-only behavior, not a regression. TRACEABILITY.md SC-1
+  // records the exhaustive-grep evidence that no live writer ever produced
+  // this row shape, so the test is removed rather than updated to pin a
+  // phantom mechanism that no longer exists in the code.
 
   // ─── 4. Floating / no hard commitment → overdue:false ───────────────────────
   it('floating (no deadline, no implied_deadline, anytime) → overdue:false', function() {

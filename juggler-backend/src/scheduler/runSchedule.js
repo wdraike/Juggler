@@ -560,9 +560,13 @@ function placementMatchesDbRow(dbUpdate, rawRow) {
   // time.
   if (_timeOf(dbUpdate.time) !== _timeOf(rawRow.time)) return false;
 
-  // unscheduled / overdue flags (the dbUpdate sets unscheduled:null, overdue:0).
+  // unscheduled flag (the dbUpdate sets unscheduled:null). W3 (sched-drop-
+  // overdue-column, M-5): `overdue` is no longer a stored column — it is
+  // computed-on-read only (taskMappers.js computeOverdueForRow) — so a
+  // dbUpdate never carries an `overdue` field and there is nothing to compare
+  // here anymore (the R-FR1 write-side persistence this comparison used to
+  // protect has been deleted outright, not replaced).
   if (_flagOf(dbUpdate.unscheduled) !== _flagOf(rawRow.unscheduled)) return false;
-  if (_flagOf(dbUpdate.overdue) !== _flagOf(rawRow.overdue)) return false;
 
   // DB-single-source (W1) partition-leak fix (ernie/cookie): a row reaching this
   // PLACEMENT skip is being placed → it carries no unplaced reason. The placement
@@ -1757,15 +1761,10 @@ async function runScheduleAndPersist(userId, _retries, options) {
     var parsedNewDate = parseDate(newDate);
     var newDay = parsedNewDate ? DAY_NAMES[parsedNewDate.getDay()] : null;
 
-    // R-FR1 durability (BLOCK-1 fix): detect whether this recurring instance is
-    // already flagged overdue=1 in the DB from a prior forward-roll. When it is,
-    // overdue=1 must be PRESERVED until the instance is completed (terminal). We
-    // reflect this in the main dbUpdate so placementMatchesDbRow can return true
-    // (idempotent skip) when all placement fields — including overdue — are stable.
-    // The batch path in writeChanged hardcodes overdue:0 regardless of dbUpdate, so
-    // the secondary pendingUpdate below still overrides it when a write IS needed.
+    // W3 (sched-drop-overdue-column, M-5): `overdue` is no longer a stored
+    // column — nothing is written to it here. `_rawRow` is still needed below
+    // for the implied_deadline recompute comparison.
     var _rawRow = rawRowById[taskId];
-    var _rawRowOverdue = (original.recurring && _rawRow && _flagOf(_rawRow.overdue)) ? 1 : 0;
 
     var dbUpdate = {
       scheduled_at: newScheduledAt,
@@ -1773,7 +1772,6 @@ async function runScheduleAndPersist(userId, _retries, options) {
       day: newDay,
       time: newTime || null,
       unscheduled: null,
-      overdue: _rawRowOverdue, // 1 for already-rolled overdue instances, 0 otherwise
       updated_at: _runScheduleCommand.clockNow()
     };
     // Don't overwrite instance.dur when time_remaining drives the effective
@@ -1793,9 +1791,6 @@ async function runScheduleAndPersist(userId, _retries, options) {
     // (rawRowById[taskId]). If all match, the write is a no-op → skip it. Any
     // field that differs, or any field we can't confidently compare, falls
     // through to a real write (conservative — never skips a genuine change).
-    // NOTE: for already-rolled overdue instances, dbUpdate.overdue=1 matches
-    // rawRow.overdue=1, so this skip fires correctly and the batch is not triggered
-    // on stable runs — achieving true idempotency without spurious writes.
     if (placementMatchesDbRow(dbUpdate, rawRowById[taskId])) {
       // No DB change needed. Still emit the SSE patch below on a date/time move
       // is impossible here (a move would have differed), so nothing to push.
@@ -1814,24 +1809,24 @@ async function runScheduleAndPersist(userId, _retries, options) {
     // rules.test.js:528-539), the cycle window is measured from the OCCURRENCE
     // ANCHOR (earliestStart), NOT the placed date — using newDate here would
     // give the wrong (later) deadline on a flexible-TPC roam. Routed as a
-    // SEPARATE pendingUpdate (mirroring the R-FR1 overdue pattern immediately
-    // below): the batched CASE-expression path in KnexScheduleRepository.
-    // writeChanged hand-builds its field list and does not generically copy
-    // implied_deadline off dbUpdate, so folding it into the main dbUpdate above
-    // would be silently dropped on every real move. The per-row otherUpdates
-    // path (tasksWrite.updateTaskById → splitUpdateFields) does write it —
-    // INSTANCE_UPDATE_FIELDS already includes implied_deadline.
+    // SEPARATE pendingUpdate: the batched CASE-expression path in
+    // KnexScheduleRepository.writeChanged hand-builds its field list and does
+    // not generically copy implied_deadline off dbUpdate, so folding it into
+    // the main dbUpdate above would be silently dropped on every real move.
+    // The per-row otherUpdates path (tasksWrite.updateTaskById →
+    // splitUpdateFields) does write it — INSTANCE_UPDATE_FIELDS already
+    // includes implied_deadline.
     if (original.recurring && original.recur) {
       var _impliedAnchor = original.earliestStart || newDate;
       var _recomputedDeadline = recurringPeriodEndKey(original.recur, _impliedAnchor);
       // Skip the write when it's a no-op (matches the main dbUpdate's
       // placementMatchesDbRow discipline above): most real writes here are
-      // driven by an unrelated field (dur/slack_mins/overdue), not a cycle-
-      // boundary move, so recomputing without comparing would fire an extra
-      // per-row UPDATE on every one of them. Also guards the edge case where
-      // both earliestStart and newDate are absent (_recomputedDeadline=null)
-      // from ever clobbering a previously-valid stored deadline — only a
-      // computed value that actually differs from the current row is written.
+      // driven by an unrelated field (dur/slack_mins), not a cycle-boundary
+      // move, so recomputing without comparing would fire an extra per-row
+      // UPDATE on every one of them. Also guards the edge case where both
+      // earliestStart and newDate are absent (_recomputedDeadline=null) from
+      // ever clobbering a previously-valid stored deadline — only a computed
+      // value that actually differs from the current row is written.
       var _rawImplied = _rawRow ? (_rawRow.implied_deadline || null) : undefined;
       if (_rawImplied === undefined || _recomputedDeadline !== _rawImplied) {
         pendingUpdates.push({
@@ -1841,29 +1836,17 @@ async function runScheduleAndPersist(userId, _retries, options) {
       }
     }
 
-    // R-FR1: a recurring instance forward-rolled from a past-due slot must carry
-    // overdue=1 even after placement. The scheduled_at batch path in
-    // KnexScheduleRepository.writeChanged hardcodes overdue:0 for all placed rows
-    // (it cannot per-instance override it in the CASE expression). A separate
-    // overdue-only pendingUpdate routes to the per-row path (otherUpdates) which
-    // writes the individual value — applying AFTER the batch within the same
-    // transaction so the net DB state is overdue=1.
-    //
-    // Two conditions trigger this secondary push:
-    //   (a) Moving run: this run is the one moving the instance from a past slot
-    //       (_preReconDate != null, priorDateIso < todayKey).
-    //   (b) Subsequent runs: the DB already has overdue=1 from a prior roll
-    //       (_rawRowOverdue===1). The batch path would reset it; the secondary
-    //       push preserves it. Combined with the idempotent dbUpdate.overdue=1
-    //       above, stable-placement runs skip this entirely (placementMatchesDbRow
-    //       returns true above); this only fires when some other field changed.
-    if ((original.recurring && original._preReconDate != null && priorDateIso < timeInfo.todayKey) ||
-        (original.recurring && _rawRowOverdue === 1)) {
-      pendingUpdates.push({
-        id: taskId,
-        dbUpdate: { overdue: 1, updated_at: _runScheduleCommand.clockNow() }
-      });
-    }
+    // W3 (sched-drop-overdue-column, M-5): the R-FR1 secondary pendingUpdate
+    // that used to persist overdue=1 across a forward-roll (so it would
+    // survive a future re-placement) is DELETED OUTRIGHT — not replaced with
+    // a computed equivalent. David's ruling (2026-07-03, "let's skip the
+    // future placement of overdue items — leave it to the user to change the
+    // due date, as needed") means there is no longer any behavior to
+    // preserve here: overdue is computed-on-read only (taskMappers.js
+    // computeOverdueForRow), and a forward-rolled instance placed on a
+    // genuinely future slot simply stops being overdue (AC6b) — the
+    // today-or-earlier case (AC6a) is unaffected, produced by the same
+    // existing R-OD3 branch with zero write-side involvement.
 
     if (dateChanged || timeChanged) {
       // Derive day-of-week label for the patch so the frontend can render
@@ -1892,10 +1875,17 @@ async function runScheduleAndPersist(userId, _retries, options) {
       var priorSlackMins = original.slackMins != null ? original.slackMins : null;
       if (newSlackMins !== priorSlackMins) patch.slackMins = newSlackMins;
       if (original.unscheduled) patch.unscheduled = false; // only send on transition
-      // Only signal overdue:false when overdue is genuinely clearing. For
-      // forward-rolled instances (_rawRowOverdue=1 means we are preserving
-      // overdue=1), suppress the false signal — the task stays overdue.
-      if (original.overdue && _rawRowOverdue === 0) patch.overdue = false; // only send on transition
+      // W3 (sched-drop-overdue-column, M-5): overdue is computed-on-read only
+      // now — no stored flag to preserve or clear. Recompute the POST-move
+      // value via the SAME single-source-of-truth rowToTask (sourceMap-merged,
+      // exactly as any subsequent GET /tasks read would compute it) rather
+      // than re-deriving the AC6a/AC6b rule inline, and only emit the patch
+      // on a genuine transition (mirrors the unscheduled pattern above).
+      if (_rawRow) {
+        var _postMoveRow = Object.assign({}, _rawRow, dbUpdate);
+        var _postMoveOverdue = !!rowToTask(_postMoveRow, TIMEZONE, srcMap, null, timeInfo).overdue;
+        if (_postMoveOverdue !== !!original.overdue) patch.overdue = _postMoveOverdue;
+      }
 
       updatedTasks.push({
         id: taskId,
@@ -1945,25 +1935,28 @@ async function runScheduleAndPersist(userId, _retries, options) {
       var hasScheduledAt = rawRec ? !!rawRec.scheduled_at : !!original.scheduledAt;
       if (hasScheduledAt) {
         // R-FR5: past-due rolling instance that couldn't be placed this run.
-        // If its original DB date is in the past the instance is overdue and must be
-        // flagged overdue=1 (pinned on the calendar, NEVER pushed to the next cycle).
-        // Without this write §8 PATH A silently exits and DB stays at overdue=0.
+        // W3 (sched-drop-overdue-column, M-5): overdue is no longer written
+        // here — a placed-in-the-past recurring instance already reads
+        // overdue:true on the next GET via the computed R-OD3 branch
+        // (taskMappers.js computeOverdueForRow), pinned on the calendar,
+        // NEVER pushed to the next cycle. The writes below are scoped to
+        // `unscheduled`/`date`/`scheduled_at`/reason fields only.
         var _origDateRaw = rawRec && rawRec.date ? String(rawRec.date).split('T')[0] : null;
         if (_origDateRaw && _origDateRaw < timeInfo.todayKey) {
           // R-OD1 / W1 fix: when the forward-roll IIFE moved this instance in-memory
           // (forwardRollDeadlineById[t.id] is set), reconcile set t.date=todayKey but
           // placement failed. Persist the date-move so the row advances to today and
-          // appears in the unscheduled lane (overdue=1, unscheduled=1, scheduled_at=null).
-          // Without this only overdue=1 was written and the date stayed at the stale past
-          // date — the live 'Get a Haircut' stuck-at-6/24 symptom (R-OD1 / juggy3 W1).
+          // appears in the unscheduled lane (unscheduled=1, scheduled_at=null;
+          // overdue reads true via the computed branch, not a write here).
+          // Without this the date stayed at the stale past date — the live
+          // 'Get a Haircut' stuck-at-6/24 symptom (R-OD1 / juggy3 W1).
           // When NO forward-roll is pending (forwardRollDeadlineById not set — cycle-ended
-          // or plain unplaced), fall through to the original R-FR5 pin: overdue=1, date
+          // or plain unplaced), fall through to the original R-FR5 pin: date
           // unchanged. AC4/AC1c (cycle-ended stays at past date) rely on this path.
           if (forwardRollDeadlineById[t.id] != null) {
             var _frUnplacedUpd = {
               date: timeInfo.todayKey,
               scheduled_at: null,
-              overdue: 1,
               unscheduled: 1,
               unplaced_reason: t._unplacedReason || REASON_CODES.NO_SLOT,
               unplaced_detail: t._unplacedDetail || 'No available slot in the schedule',
@@ -1975,11 +1968,9 @@ async function runScheduleAndPersist(userId, _retries, options) {
             pendingUpdates.push({ id: t.id, dbUpdate: _frUnplacedUpd });
             return;
           }
-          var _noSlotOverdueUpd = { overdue: 1, unscheduled: null, updated_at: _runScheduleCommand.clockNow() };
-          if (result.slackByTaskId && t.id in result.slackByTaskId) {
-            _noSlotOverdueUpd.slack_mins = result.slackByTaskId[t.id];
-          }
-          pendingUpdates.push({ id: t.id, dbUpdate: _noSlotOverdueUpd });
+          // No forward-roll pending and nothing else to write here — the
+          // computed branch already reads this instance as overdue on the
+          // next GET without any DB write.
         }
         return;
       }
@@ -1999,8 +1990,9 @@ async function runScheduleAndPersist(userId, _retries, options) {
       // 999.700: floating tasks (no deadline) are NEVER past-due (999.671 roll-forward policy).
       // A stale past placement does not make a no-deadline task overdue. Applies to every
       // placement mode (the prior ANYTIME-only guard left non-anytime + anytime-in-past holes).
-      // Also CLEAR a stale overdue=1 so a previously-mis-flagged floating task does not stick
-      // past-due across runs (defeats computeIsPastDue's ||t.overdue branch otherwise).
+      // W3 (sched-drop-overdue-column, M-5): no stale overdue flag to clear anymore —
+      // a floating task's computed overdue (computeOverdueForRow) is already false
+      // (no hasHardCommitment signal), so there is nothing to write here.
       //
       // CONSTRAINT-VIOLATION EXCEPTION: if the task was unplaced due to a structural
       // constraint failure (weather, tool_conflict, location_mismatch, impossible_window),
@@ -2025,9 +2017,6 @@ async function runScheduleAndPersist(userId, _retries, options) {
             unplaced_detail: t._unplacedDetail || 'No available slot in the schedule',
             updated_at: _runScheduleCommand.clockNow()
           };
-          if (rawRow && rawRow.overdue) {
-            _constraintDbUpdate.overdue = 0;
-          }
           if (result.slackByTaskId && t.id in result.slackByTaskId) {
             _constraintDbUpdate.slack_mins = result.slackByTaskId[t.id];
           }
@@ -2035,43 +2024,44 @@ async function runScheduleAndPersist(userId, _retries, options) {
           cleared++;
           return;
         }
-        if (rawRow && rawRow.overdue) {
-          pendingUpdates.push({ id: t.id, dbUpdate: { overdue: 0, updated_at: _runScheduleCommand.clockNow() } });
-        }
         cleared++;
         return;
       }
       // Guard: ANYTIME tasks without a passed deadline are not overdue when they
       // can't fit in today's time grid — the calendar is simply full right now.
-      // Only mark overdue if (a) the task was placed on a prior day (rolled over
-      // without completion) OR (b) its deadline has already passed.
-      // This prevents a full calendar from permanently locking ANYTIME tasks in
-      // overdue=1 on every subsequent scheduler run.
+      // Only pin in place (Case B below) if (a) the task was placed on a prior day
+      // (rolled over without completion) OR (b) its deadline has already passed.
+      // This prevents a full calendar from permanently locking ANYTIME tasks in an
+      // overdue-looking pinned state on every subsequent scheduler run.
       if (original.placementMode === PLACEMENT_MODES.ANYTIME) {
         var _aDeadlineKey = original.deadline ? isoToDateKey(original.deadline) : null;
         var _aInPast = original.date && original.date < timeInfo.todayKey;
         var _aDeadlinePassed = _aDeadlineKey && _aDeadlineKey < timeInfo.todayKey;
         if (!_aInPast && !_aDeadlinePassed) {
-          if (rawRow && rawRow.overdue) {
-            pendingUpdates.push({ id: t.id, dbUpdate: { overdue: 0, updated_at: _runScheduleCommand.clockNow() } });
-          }
           cleared++;
           return;
         }
       }
-      // Case B: was previously placed — pin in place with overdue=1.
-      // Keep unscheduled=0 so the task renders at its scheduled position.
-      var wasAlreadyOverdue = !!(rawRow && rawRow.overdue);
+      // Case B: was previously placed — pin in place. Keep unscheduled=0 so the
+      // task renders at its scheduled position; overdue is computed-on-read
+      // (computeOverdueForRow) from `original.deadline`/date being in the past —
+      // reaching this branch already implies that computed value is true (W3,
+      // sched-drop-overdue-column: no write needed to make it read true).
+      // `original.overdue` is the ALREADY-COMPUTED value from rowToTask at the
+      // top of this run (not a raw column read) — the single source of truth
+      // for "was this already overdue" continuity.
+      var wasAlreadyOverdue = !!original.overdue;
 
       // Only write if there's a state change:
-      // 1. If already overdue + unscheduled already 0 → only write if slack_mins changed
-      // 2. If newly overdue → write the full transition
-      // 3. If already overdue but unscheduled was 1 → fix that
+      // 1. If already in final state (unscheduled=0, no stale reason) → only write if slack_mins changed
+      // 2. If unscheduled/reason needs fixing → write the full transition
       var needsUpdate = false;
       var overdueDbUpdate = {};
+      var _alreadyFinalState = !!(rawRow && rawRow.unscheduled === 0 &&
+        !rawRow.unplaced_reason && !rawRow.unplaced_detail);
 
-      if (wasAlreadyOverdue && rawRow && rawRow.unscheduled === 0) {
-        // Already in final state (overdue=1, unscheduled=0).
+      if (_alreadyFinalState) {
+        // Already in final state (unscheduled=0, no stale reason).
         // Only update if slack_mins changed.
         if (result.slackByTaskId && t.id in result.slackByTaskId &&
             result.slackByTaskId[t.id] !== (rawRow.slack_mins || 0)) {
@@ -2079,10 +2069,9 @@ async function runScheduleAndPersist(userId, _retries, options) {
           needsUpdate = true;
         }
       } else {
-        // Newly overdue OR unscheduled flag needs fixing.
+        // unscheduled flag or stale reason needs fixing.
         overdueDbUpdate.unscheduled = 0;
-        overdueDbUpdate.overdue = 1;
-        // DB-single-source (W1): overdue = pinned on the grid, NOT unplaced. Clear any
+        // DB-single-source (W1): pinned on the grid, NOT unplaced. Clear any
         // reason carried over from a prior run where this row was UNPLACEABLE, so the
         // partition stays mutually exclusive (one row, one state).
         overdueDbUpdate.unplaced_reason = null;
@@ -2157,29 +2146,24 @@ async function runScheduleAndPersist(userId, _retries, options) {
     pendingUpdates.push({ id: t.id, dbUpdate: { unscheduled: null, unplaced_reason: null, unplaced_detail: null, updated_at: _runScheduleCommand.clockNow() } });
   });
 
-  // 8.6. Clear stale overdue flag on tasks that were overdue in the DB but are
-  // now placed. The unplaced loop (§8) writes overdue=1 for newly-unplaceable
-  // tasks; without this sweep those flags are never cleared when the
-  // constraint resolves (e.g. when-tag corrected, new capacity freed up).
-  taskRows.forEach(function(r) {
-    if (!r.overdue) return; // already clear in DB — nothing to do
-    if (unplacedIds[r.id]) return; // still unplaced — §8 handles this
-    // R-FR1 durability: recurring instance overdue is managed by the forward-roll
-    // persist path (§7 R-FR1) and Phase 9 — do not reset it here. When a rolling
-    // instance was forward-rolled and pinned overdue=1, that flag must survive every
-    // subsequent run until the instance goes terminal (done/skip/cancel). §8.6 is
-    // only correct for non-recurring tasks whose unplaceable constraint has resolved.
-    if (r.task_type === 'recurring_instance') return;
-    // DB-single-source (W1): constraint resolved, row is placed again — clear the reason too.
-    pendingUpdates.push({ id: r.id, dbUpdate: { overdue: 0, unplaced_reason: null, unplaced_detail: null, updated_at: _runScheduleCommand.clockNow() } });
-  });
+  // 8.6. [REMOVED — W3, sched-drop-overdue-column / M-5] Previously cleared a
+  // stale stored overdue=1 flag on tasks that were overdue in the DB but are
+  // now placed again (constraint resolved). Overdue is computed-on-read only
+  // now (taskMappers.js computeOverdueForRow) — a task whose unplaceable
+  // constraint has resolved and is placed again simply reads overdue:false on
+  // the next GET (no hasHardCommitment signal survives from a prior run),
+  // with nothing to clear. This entire sweep is dead code once nothing reads
+  // the (soon-to-be-dropped) column.
 
-  // 8.5 — R50.1/R50.2 (999.796): PERSIST overdue=1 for a past-due FIXED/ingested
-  // event. The placement loop skips fixed tasks (user-anchored) and Phase 8/9
-  // early-return them, so without this the DB keeps overdue=0/unscheduled and the
-  // frontend shows the late event in the Unscheduled lane / "Past Scheduled Date"
-  // instead of on its day flagged overdue. (computeIsPastDue treats a fixed event's
-  // scheduled_at as its hard due date.)
+  // 8.5 — R50.1/R50.2 (999.796): a past-due FIXED/ingested event. The placement
+  // loop skips fixed tasks (user-anchored) and Phase 8/9 early-return them.
+  // W3 (sched-drop-overdue-column, M-5): the overdue=1 persistence this block
+  // used to write is REMOVED — a past-due FIXED event already reads
+  // overdue:true on the next GET via computeOverdueForRow's FIXED branch
+  // (dueKey derived directly from scheduled_at, no stored-column dependency).
+  // The `unscheduled` clear is still needed (a stale unscheduled=1 flag is a
+  // DIFFERENT, still-stored field) so the frontend shows the late event on its
+  // day instead of in the Unscheduled lane / "Past Scheduled Date".
   allTasks.forEach(function(t) {
     if (t.generated || t.taskType === 'recurring_template') return;
     if (t.recurring) return; // recurring handled by their own lifecycle (Phase 9)
@@ -2190,17 +2174,18 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (!rawFx) return;
     var schedMinsFx = t.time ? parseTimeToMinutes(t.time) : null;
     if (!computeIsPastDue(t, schedMinsFx, timeInfo)) return; // not past its due date/time
-    var fxUpd = {};
-    if (!rawFx.overdue) fxUpd.overdue = 1;
-    if (rawFx.unscheduled) fxUpd.unscheduled = 0;
-    if (Object.keys(fxUpd).length > 0) {
-      // DB-single-source (W1): a past-due FIXED event is OVERDUE on its day, not
-      // unplaced — clear any stale reason alongside the flag fix.
-      fxUpd.unplaced_reason = null;
-      fxUpd.unplaced_detail = null;
-      fxUpd.updated_at = _runScheduleCommand.clockNow();
-      pendingUpdates.push({ id: t.id, dbUpdate: fxUpd });
-    }
+    if (!rawFx.unscheduled) return; // nothing stale to clear
+    // DB-single-source (W1): a past-due FIXED event is OVERDUE on its day, not
+    // unplaced — clear the stale unscheduled flag + any stale reason alongside it.
+    pendingUpdates.push({
+      id: t.id,
+      dbUpdate: {
+        unscheduled: 0,
+        unplaced_reason: null,
+        unplaced_detail: null,
+        updated_at: _runScheduleCommand.clockNow()
+      }
+    });
   });
 
   // 9. Move remaining past-dated tasks to today
@@ -2288,11 +2273,20 @@ async function runScheduleAndPersist(userId, _retries, options) {
         //     never-missing VIOLATION. Flag unscheduled so it is always visible.
         // (Was: 999.808 freeze-as-missed at last real slot — retired with auto-miss.)
         if (rawRowPast.scheduled_at != null) {
-          if (!rawRowPast.overdue) {
+          // W3 (sched-drop-overdue-column, M-5): overdue is computed-on-read
+          // only — no write needed here, this instance already reads
+          // overdue:true on the next GET via computeOverdueForRow. Only clear
+          // a stale `unscheduled` flag if one was left over from a prior run.
+          if (rawRowPast.unscheduled) {
             pendingUpdates.push({
               id: t.id,
-              dbUpdate: { overdue: 1, unscheduled: null, updated_at: _runScheduleCommand.clockNow() }
+              dbUpdate: { unscheduled: null, updated_at: _runScheduleCommand.clockNow() }
             });
+          }
+          // Emit SSE transition only when crossing placed → overdue. `t.overdue`
+          // is the ALREADY-COMPUTED value from rowToTask at the top of this run
+          // (not a raw column read) — the single source of truth for continuity.
+          if (!t.overdue) {
             updatedTasks.push({
               id: t.id, text: t.text, from: effectiveDate, to: effectiveDate, patch: { overdue: true }
             });

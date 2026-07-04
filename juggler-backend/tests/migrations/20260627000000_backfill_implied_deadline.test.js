@@ -97,7 +97,7 @@ describe('Migration 20260627000000 (implied_deadline backfill)', () => {
       implied_deadline: null,
       dur: 30,
       status: '',
-      overdue: 0,
+      // overdue field removed (sched-drop-overdue-column, M-5): stored column gone.
     });
 
     // Re-run our migration up
@@ -123,7 +123,7 @@ describe('Migration 20260627000000 (implied_deadline backfill)', () => {
       implied_deadline: null,
       dur: 30,
       status: '',
-      overdue: 0,
+      // overdue field removed (sched-drop-overdue-column, M-5): stored column gone.
     });
 
     await db.migrate.down({ name: MIGRATION_NAME });
@@ -145,7 +145,7 @@ describe('Migration 20260627000000 (implied_deadline backfill)', () => {
       implied_deadline: '2026-07-01',
       dur: 30,
       status: '',
-      overdue: 0,
+      // overdue field removed (sched-drop-overdue-column, M-5): stored column gone.
     });
 
     await db.migrate.down({ name: MIGRATION_NAME });

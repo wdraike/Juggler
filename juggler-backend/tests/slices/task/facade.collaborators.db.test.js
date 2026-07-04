@@ -1019,6 +1019,125 @@ describe('materializeRcInstance: updateTaskStatus on an rc_-prefixed id', () => 
       expect([404, 400, 500]).toContain(res.statusCode);
     }
   });
+
+  // sched-drop-overdue-column (M-5) — bert-rollgate-4-fix-applied regression test.
+  //
+  // Prior to this fix, materializeRcInstance (facade.js) never set implied_deadline
+  // on the recurring_instance row it inserts, for ANY recur type — once W3 (this
+  // leg) deleted the write-side `overdue` stored-flag persistence that used to mask
+  // this, a ROLLING-type instance materialized through this on-demand path could
+  // never compute overdue:true via computeOverdueForRow's hasHardCommitment gate
+  // (taskMappers.js), regressing the standing "past+incomplete dated stays
+  // pinned past-due" invariant (R50 / brain #92990) for this specific creation
+  // path. bert's fix (facade.js:451-463) materializes implied_deadline via the
+  // SAME recurringPeriodEndKey(recur, occurrenceDateKey) call shape runSchedule.js
+  // already uses at its own two materialization sites.
+  //
+  // bert's own before/after proof (BERT-LOG.md bert-rollgate-4-fix-applied) was
+  // an ad hoc scratch script run against this same real controller path, deleted
+  // after use — NOT covered by any permanent assertion. This is that permanent
+  // assertion: it drives the REAL (non-stubbed) materializeRcInstance through
+  // controller.updateTaskStatus, for a ROLLING recur type specifically, covering
+  // BOTH the cycle-ended (must regain overdue:true) and live-cycle (must stay
+  // overdue:false, no regression of the AC6b future-placement protection) cases.
+  describe('materializeRcInstance: ROLLING recur type materializes implied_deadline (sched-drop-overdue-column bert-rollgate-4)', () => {
+    var { rowToTask } = require('../../../src/slices/task/domain/mappers/taskMappers');
+    var { getNowInTimezone } = require('../../../../shared/scheduler/getNowInTimezone');
+
+    // rc_ id date-digit encoding mirrors materializeRcInstance's own parser
+    // (facade.js ~L410-416): month>=10 uses a 2-digit month prefix; month<=9
+    // uses a 1-digit month prefix. NOTE: a genuine pre-existing ambiguity in
+    // that parser (untouched by this leg, out of scope to fix here) — month===1
+    // combined with a 2-digit day collides with the 2-digit-month path. Guard
+    // against silently constructing a misencoded test date.
+    function encodeRcDateDigits(dateKey) {
+      var parts = dateKey.split('-');
+      var month = parseInt(parts[1], 10);
+      var day = parts[2];
+      if (month === 1 && parseInt(day, 10) >= 10) {
+        throw new Error('test date ambiguous for rc_ id encoding (month=1, day>=10) — adjust offsets');
+      }
+      return String(month) + day;
+    }
+
+    function addDaysKey(dateKey, n) {
+      var d = new Date(dateKey + 'T00:00:00Z');
+      d.setUTCDate(d.getUTCDate() + n);
+      return d.toISOString().slice(0, 10);
+    }
+
+    // Drives the REAL controller.updateTaskStatus -> UpdateTaskStatus ->
+    // facade.materializeRcInstance path (no stubs) for a rolling-recur source,
+    // then reads the materialized row back via tasks_v (recur/placement_mode
+    // are master-joined, per the lc1-lc3-lifecycle-freeze.test.js finding —
+    // a raw task_instances row lacks them) and runs it through the SAME
+    // production mapper (rowToTask) the API uses.
+    async function materializeRolling(intervalDays, occurrenceOffsetDays) {
+      var { todayKey } = getNowInTimezone('America/New_York');
+      var occDateKey = addDaysKey(todayKey, occurrenceOffsetDays);
+      var now = new Date();
+      var tmplId = 'rc-roll-' + Date.now();
+
+      await db('task_masters').insert({
+        id: tmplId,
+        user_id: USER_ID,
+        text: 'Rolling RC Materialize',
+        dur: 30,
+        pri: 'P3',
+        recurring: 1,
+        status: '',
+        recur: JSON.stringify({ type: 'rolling', intervalDays: intervalDays }),
+        placement_mode: 'anytime',
+        day_req: 'any',
+        scheduled_at: new Date('2026-01-01T10:00:00Z'),
+        created_at: now,
+        updated_at: now
+      });
+      // NOTE: a task_masters row alone is NOT visible through tasks_v (needs an
+      // instance) — mirrors the existing 'rc_ id with valid source' test above.
+      await db('task_instances').insert({
+        id: tmplId,
+        master_id: tmplId,
+        user_id: USER_ID,
+        status: '',
+        occurrence_ordinal: 1,
+        split_ordinal: 1,
+        split_total: 1,
+        dur: 30,
+        created_at: now,
+        updated_at: now
+      });
+
+      var rcId = 'rc_' + tmplId + '_' + encodeRcDateDigits(occDateKey);
+      var req = mockReq({ params: { id: rcId }, body: { status: 'wip' } });
+      var res = mockRes();
+      await controller.updateTaskStatus(req, res);
+
+      // Must actually materialize (200) to exercise the fixed code path — a
+      // 404/500 here would mean the test isn't proving anything.
+      expect(res.statusCode).toBe(200);
+
+      var raw = await db('tasks_v').where({ id: rcId }).first();
+      expect(raw).toBeTruthy();
+      var nowInfo = { todayKey: todayKey, nowMins: 600 };
+      var task = rowToTask(Object.assign({ task_type: 'recurring_instance' }, raw), 'America/New_York', {}, null, nowInfo);
+      return { raw: raw, task: task, todayKey: todayKey };
+    }
+
+    test('cycle-ended rolling instance (intervalDays:3, placed 10 days ago): implied_deadline materialized in the past, overdue:true (the fixed gap)', async () => {
+      var result = await materializeRolling(3, -10);
+      expect(result.raw.implied_deadline).toBeTruthy();
+      expect(String(result.raw.implied_deadline).slice(0, 10) < result.todayKey).toBe(true);
+      expect(result.task.overdue).toBe(true);
+    });
+
+    test('live-cycle rolling instance (intervalDays:60, placed 2 days ago): implied_deadline in the future, overdue:false (no regression of AC6b-style protection)', async () => {
+      var result = await materializeRolling(60, -2);
+      expect(result.raw.implied_deadline).toBeTruthy();
+      expect(String(result.raw.implied_deadline).slice(0, 10) > result.todayKey).toBe(true);
+      expect(result.task.overdue).toBe(false);
+    });
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -134,7 +134,7 @@ async function seedExistingDoneInstance() {
     dur: 30,
     status: 'done',                      // non-empty → NOT soft-cancelled by resetRecurringInstances
     scheduled_at: '2026-01-15 09:00:00', // well in the past → NOT soft-cancelled by resetRecurringInstances
-    overdue: 0,
+    // `overdue` field removed (sched-drop-overdue-column, M-5): stored column gone.
     generated: 0,
     created_at: db.fn.now(),
     updated_at: db.fn.now()
