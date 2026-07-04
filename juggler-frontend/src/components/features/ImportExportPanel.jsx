@@ -401,6 +401,7 @@ export default function ImportExportPanel({ onClose, darkMode, showToast, allTas
   var [icsPreview, setIcsPreview] = useState(null); // { tasks, fileName }
   var [importMode, setImportMode] = useState(null); // { data } while the mode-picker dialog is open
   var fileInputRef = useRef(null);
+  var jsonFileInputRef = useRef(null);
   var cancelImportBtnRef = useRef(null);
   var importTriggerRef = useRef(null);
 
@@ -415,6 +416,26 @@ export default function ImportExportPanel({ onClose, darkMode, showToast, allTas
       return;
     }
     setImportMode({ data: data });
+  }
+
+  // File-upload variant: read a .json file chosen via the file picker,
+  // parse it, and open the same mode-picker dialog that handleImport uses.
+  function handleJSONFileSelect(e) {
+    var file = e.target.files && e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      try {
+        var text = ev.target.result;
+        var data = JSON.parse(text);
+        setImportMode({ data: data });
+      } catch (err) {
+        showToast('Failed to parse .json file: ' + err.message, 'error');
+      }
+    };
+    reader.readAsText(file);
+    // Reset so the same file can be selected again
+    e.target.value = '';
   }
 
   // Step 2: user picked a mode — POST with the matching query params.
@@ -694,6 +715,21 @@ export default function ImportExportPanel({ onClose, darkMode, showToast, allTas
           <div style={{ fontSize: 11, color: theme.textMuted, marginBottom: 8 }}>
             Paste the JSON from your old task tracker (window.storage format) to import all tasks, settings, and config.
             You&rsquo;ll choose to merge (add new, keep your data) or replace everything before anything is imported.
+          </div>
+          <input
+            ref={jsonFileInputRef}
+            type="file"
+            accept=".json,application/json"
+            onChange={handleJSONFileSelect}
+            style={{ display: 'none' }}
+          />
+          <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+            <button onClick={function() { jsonFileInputRef.current && jsonFileInputRef.current.click(); }} style={btnStyle}>
+              &#x1F4C1; Choose .json File
+            </button>
+            <span style={{ fontSize: 11, color: theme.textMuted, alignSelf: 'center' }}>
+              or paste JSON below
+            </span>
           </div>
           <textarea
             value={importText}
