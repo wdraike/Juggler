@@ -130,6 +130,10 @@ var _taskProvider = new SchedulerTaskProvider();
 var rowToTask = _taskProvider.rowToTask;
 var buildSourceMap = _taskProvider.buildSourceMap;
 var _taskToRow = _taskProvider.taskToRow;
+// 999.1102: direct access to the computed-overdue predicate so SSE patches
+// can be verified against the same single source of truth a GET will use,
+// avoiding transient overdue-flag staleness on forward-rolled recurring instances.
+var _computeOverdueForRow = require('../slices/task/facade').computeOverdueForRow;
 // H6 / W3 — the sole persist I/O orchestrator. Every scheduler DB write below
 // routes through this command's W2 adapters (writeChanged / deleteTasksWhere /
 // backfillRollingAnchorIfNull / now); the inline knex flush + the 19 inline
@@ -1882,7 +1886,18 @@ async function runScheduleAndPersist(userId, _retries, options) {
       // than re-deriving the AC6a/AC6b rule inline, and only emit the patch
       // on a genuine transition (mirrors the unscheduled pattern above).
       if (_rawRow) {
-        var _postMoveRow = Object.assign({}, _rawRow, dbUpdate);
+        // 999.1102: fold the separately-routed implied_deadline recompute
+        // (lines ~1823-1841) into the post-move row so computeOverdueForRow
+        // sees the SAME implied_deadline the next GET will read. Without this,
+        // a forward-rolled rolling/weekly-TPC instance can get an SSE
+        // overdue=false (stale implied_deadline) while the next GET returns
+        // overdue=true (recomputed implied_deadline) — a transient divergence
+        // that self-corrects on the next GET/poll but causes a visible flicker.
+        var _postMoveExtra = {};
+        if (typeof _recomputedDeadline !== 'undefined' && _recomputedDeadline !== null) {
+          _postMoveExtra.implied_deadline = _recomputedDeadline;
+        }
+        var _postMoveRow = Object.assign({}, _rawRow, dbUpdate, _postMoveExtra);
         var _postMoveOverdue = !!rowToTask(_postMoveRow, TIMEZONE, srcMap, null, timeInfo).overdue;
         if (_postMoveOverdue !== !!original.overdue) patch.overdue = _postMoveOverdue;
       }
@@ -2286,10 +2301,23 @@ async function runScheduleAndPersist(userId, _retries, options) {
           // Emit SSE transition only when crossing placed → overdue. `t.overdue`
           // is the ALREADY-COMPUTED value from rowToTask at the top of this run
           // (not a raw column read) — the single source of truth for continuity.
+          // 999.1102: verify the overdue value against computeOverdueForRow
+          // using the raw DB row (with any pending unscheduled clear applied),
+          // so the SSE patch matches what the next GET will return. Without
+          // this, a rolling cycle-ended instance can get an SSE overdue=true
+          // while computeOverdueForRow's next GET returns false (e.g. when the
+          // effective deadline check here diverges from computeOverdueForRow's
+          // hasHardCommitment / implied_deadline logic).
           if (!t.overdue) {
-            updatedTasks.push({
-              id: t.id, text: t.text, from: effectiveDate, to: effectiveDate, patch: { overdue: true }
-            });
+            var _patchRow = rawRowPast.unscheduled
+              ? Object.assign({}, rawRowPast, { unscheduled: null })
+              : rawRowPast;
+            var _willBeOverdue = !!_computeOverdueForRow(_patchRow, TIMEZONE, timeInfo);
+            if (_willBeOverdue) {
+              updatedTasks.push({
+                id: t.id, text: t.text, from: effectiveDate, to: effectiveDate, patch: { overdue: true }
+              });
+            }
           }
         } else if (!rawRowPast.unscheduled) {
           // F6 (sched-overdue-reasons leg, David ruling brain 101837): every
