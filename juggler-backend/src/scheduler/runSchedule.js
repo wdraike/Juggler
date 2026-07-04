@@ -2593,8 +2593,11 @@ async function runScheduleAndPersist(userId, _retries, options) {
 
   }); // end transaction
   } catch (err) {
-    if ((err.code === 'ER_LOCK_DEADLOCK' || err.code === 'ER_LOCK_WAIT_TIMEOUT') && retries < MAX_RETRIES) {
-      logger.info('[SCHED] ' + err.code + ' detected, retry ' + (retries + 1) + '/' + MAX_RETRIES);
+    var isTransient = err.code === 'ER_LOCK_DEADLOCK' || err.code === 'ER_LOCK_WAIT_TIMEOUT'
+      || err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT' || err.code === 'PROTOCOL_CONNECTION_LOST'
+      || (err.message && /connection.*(reset|lost|closed|aborted)/i.test(err.message));
+    if (isTransient && retries < MAX_RETRIES) {
+      logger.info('[SCHED] transient error (' + err.code + ') — retry ' + (retries + 1) + '/' + MAX_RETRIES);
       await new Promise(function(r) { setTimeout(r, 500 * (retries + 1)); });
       return runScheduleAndPersist(userId, retries + 1, options);
     }
