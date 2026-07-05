@@ -387,8 +387,30 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
       // the recurrence-period/cycle boundary). A non-recurring flexible task with no user
       // deadline must never be overdue from a derived implied_deadline alone.
       var _isRecurringInstance = row.task_type === 'recurring_instance';
+      // 999.1083 (M-1, SPEC FR-1/FR-2): all_day rows get their own hard-commitment
+      // gate — the day itself (not a deadline/implied_deadline) IS the commitment,
+      // computed ONLY when a day is actually resolvable (never guess a due day
+      // for a dateless/TBD all-day row, AC-5). Resolve dueKey up front here (not
+      // inside the FIXED/isPlacedRecurringInstance dueKey block below, which is
+      // gated on a DIFFERENT placement_mode and must stay byte-identical) so
+      // hasHardCommitment can see whether a day resolved. Priority mirrors SPEC
+      // FR-1 exactly: end_date (multiday) > scheduled_at local date (single day)
+      // > date column (scheduled_at null) — deadline is NOT part of this formula.
+      var _allDayDueKey = null;
+      if (row.placement_mode === _PLACEMENT_MODES.ALL_DAY) {
+        if (row.end_date) {
+          _allDayDueKey = dateColumnToISO(row.end_date);
+        } else if (row.scheduled_at) {
+          var _allDayLocal = utcToLocal(row.scheduled_at, timezone || _DEFAULT_TIMEZONE); // RC2: null tz → R50.8 default
+          _allDayDueKey = _allDayLocal ? _allDayLocal.date : null;
+        } else if (row.date && row.date !== 'TBD') {
+          _allDayDueKey = dateColumnToISO(row.date);
+        }
+      }
+      var _isAllDayWithResolvableDate = row.placement_mode === _PLACEMENT_MODES.ALL_DAY && !!_allDayDueKey;
       var hasHardCommitment = !!(row.deadline || (_isRecurringInstance && impliedDeadlineISO) ||
-        row.placement_mode === _PLACEMENT_MODES.FIXED || isPlacedRecurringInstance);
+        row.placement_mode === _PLACEMENT_MODES.FIXED || isPlacedRecurringInstance ||
+        _isAllDayWithResolvableDate);
       if (!hasHardCommitment) return false;
       // Determine the effective due date key and time (minutes).
       // For FIXED: the task's scheduled date IS its due — use it directly.
@@ -402,6 +424,11 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
           var _local = utcToLocal(row.scheduled_at, timezone || _DEFAULT_TIMEZONE); // RC2: null tz → R50.8 default
           dueKey = _local ? _local.date : null;
         }
+      } else if (_isAllDayWithResolvableDate) {
+        // 999.1083: dueKey already resolved above (_allDayDueKey) — midnight
+        // boundary only, no intra-day check (scheduledMins is never computed
+        // for all_day below, since that block is gated on FIXED/isPlacedRecurringInstance).
+        dueKey = _allDayDueKey;
       }
       if (!dueKey) {
         // Explicit, user-set deadline is authoritative.
@@ -437,7 +464,17 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
       // For time-precision (FIXED or scheduled): derive scheduled minutes.
       // For deadline/implied_deadline: no time check — past-day is sufficient.
       var scheduledMins = null;
-      if ((row.placement_mode === _PLACEMENT_MODES.FIXED || isPlacedRecurringInstance) && row.scheduled_at) {
+      // 999.1083 (M-1, SPEC FR-1/AC-2): isPlacedRecurringInstance is
+      // placement_mode-agnostic (only excludes FIXED, see :383-384) — an
+      // all_day row that is ALSO a placed daily recurring_instance must
+      // NEVER compute an intra-day scheduledMins/window-close threshold;
+      // all_day's only hard-commitment boundary is the midnight dueKey
+      // resolved above. Explicitly excluded here (not just relying on the
+      // isPlacedRecurringInstance gate) so this stays true regardless of
+      // any future change to that predicate.
+      if ((row.placement_mode === _PLACEMENT_MODES.FIXED ||
+           (isPlacedRecurringInstance && row.placement_mode !== _PLACEMENT_MODES.ALL_DAY)) &&
+          row.scheduled_at) {
         var _fixedLocal = utcToLocal(row.scheduled_at, timezone || _DEFAULT_TIMEZONE); // RC2: null tz → R50.8 default
         if (_fixedLocal && _fixedLocal.time) {
           var _tm = /^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i.exec(_fixedLocal.time);
@@ -486,10 +523,13 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
           if (row.placement_mode === _PLACEMENT_MODES.FIXED) {
             // FIXED: overdue once the scheduled slot is past
             if (scheduledMins < _now.nowMins) return true;
-          } else if (isPlacedRecurringInstance && row.time_flex != null) {
+          } else if (isPlacedRecurringInstance && row.placement_mode !== _PLACEMENT_MODES.ALL_DAY && row.time_flex != null) {
             // AC2b/AC2c (R50): overdue when the window closes.
             // window-close = (preferred_time_mins ?? scheduledMins) + time_flex.
             // time_flex==0: zero-width window → overdue at the slot/preferred minute (AC2c).
+            // (placement_mode!==ALL_DAY here is defense-in-depth — scheduledMins is
+            // already null for all_day above, so this branch is unreachable for it,
+            // but the explicit guard keeps this line correct independent of that.)
             var preferredTimeMins = (row.preferred_time_mins != null ? row.preferred_time_mins : scheduledMins);
             var windowCloseMins = preferredTimeMins + row.time_flex;
             if (_now.nowMins >= windowCloseMins) return true;

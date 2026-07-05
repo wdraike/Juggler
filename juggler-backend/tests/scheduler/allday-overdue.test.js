@@ -166,6 +166,24 @@ describe('rowToTask — ALL_DAY computed-on-read overdue (999.1083, M-1)', funct
   });
 
   // ─── AC-5: no resolvable date → overdue:false (never guess a due day) ───────
+  // ─── date-column fallback: scheduled_at null, end_date null, row.date set ───
+  // (telly --re-review, diff-coverage gap: taskMappers.js:407 — the
+  // `row.date && row.date !== 'TBD'` fallback branch — was unexercised by the
+  // original AC-1/AC-3/AC-5 fixtures, which each either set scheduled_at, set
+  // end_date, or left date null/'TBD'. Neither AC-1 nor AC-5 alone reaches the
+  // third priority tier of SPEC FR-1's dueKey resolution.)
+  it('date-column fallback: all_day row, date=YESTERDAY, no scheduled_at, no end_date → overdue:true', function() {
+    var row = baseAllDayRow({ scheduled_at: null, date: '2026-06-20', end_date: null });
+    var task = rowToTask(row, TZ, null, null, NOW_INFO);
+    expect(task.overdue).toBe(true);
+  });
+
+  it('date-column fallback: all_day row, date=TODAY, no scheduled_at, no end_date → overdue:false', function() {
+    var row = baseAllDayRow({ scheduled_at: null, date: '2026-06-21', end_date: null });
+    var task = rowToTask(row, TZ, null, null, NOW_INFO);
+    expect(task.overdue).toBe(false);
+  });
+
   it('AC-5: all_day row, no scheduled_at, no date, no end_date (TBD/null) → overdue:false', function() {
     var row = baseAllDayRow({ scheduled_at: null, date: null, end_date: null });
     var task = rowToTask(row, TZ, null, null, NOW_INFO);
@@ -195,6 +213,49 @@ describe('rowToTask — ALL_DAY computed-on-read overdue (999.1083, M-1)', funct
   it('TZ edge: scheduled_at UTC-tomorrow/local-today (2026-06-22T02:00Z = 06-21 10PM EDT) → overdue:false', function() {
     var row = baseAllDayRow({ scheduled_at: '2026-06-22 02:00:00', date: '2026-06-21' });
     var task = rowToTask(row, TZ, null, null, NOW_INFO);
+    expect(task.overdue).toBe(false);
+  });
+
+  // ─── all_day + daily-recurring + time_flex intra-day leak (ernie REFER→telly,
+  // CODE-REVIEW.md finding ernie-allday-recur-precedence) ─────────────────────
+  // ernie flagged (confidence: low, "currently unreachable" via the app's normal
+  // flow because unifiedScheduleV2.js:263 bypasses all_day at grid-placement, so
+  // an all_day task never gets a live time_flex today) that an all_day row which
+  // is ALSO a placed daily recurring_instance satisfies isPlacedRecurringInstance
+  // (taskMappers.js:383: task_type==='recurring_instance' && scheduled_at &&
+  // placement_mode!=='fixed' && recur.type==='daily') — which is placement_mode-
+  // AGNOSTIC and does not exclude 'all_day'. That branch wins over the new
+  // all_day else-if (taskMappers.js:427) at the dueKey step (harmless, same
+  // day), but ALSO gates scheduledMins computation (:467) and the intra-day
+  // window-close check (:516-522) ON, purely because isPlacedRecurringInstance
+  // is true — with NO placement_mode guard. FR-1/AC-2's "midnight boundary
+  // ONLY" guarantee for all_day is supposed to be unconditional; this fixture
+  // proves it is not, AT THE MAPPER LEVEL, independent of whether the scheduler
+  // ever actually produces this row shape today — rowToTask is a pure function,
+  // callable directly (e.g. by a read/API path) on any row satisfying this
+  // shape, not gated on scheduler reachability.
+  //
+  // Verified empirically (node -e probe, not committed) BEFORE authoring this
+  // test: with time_flex=60, scheduled_at 12:00 local (720 mins), nowMins=1000
+  // (16:40) — windowCloseMins = 720+60 = 780 < 1000 — taskMappers.js:522 returns
+  // true TODAY, violating AC-2. This is EXPECTED RED against current HEAD (a
+  // genuine implementation gap, not a test-form artifact like the CSSOM
+  // findings above) — REFER→bert/ernie: gate scheduledMins/the intra-day window
+  // check on `row.placement_mode !== _PLACEMENT_MODES.ALL_DAY` (or equivalent),
+  // per ernie's suggested option (a), so all_day NEVER computes an intra-day
+  // threshold regardless of isPlacedRecurringInstance.
+  it('all_day + daily-recurring-instance + time_flex, TODAY past window-close → overdue:false (AC-2 midnight-boundary-only has NO exception for placement_mode=all_day)', function() {
+    var row = baseAllDayRow({
+      task_type: 'recurring_instance',
+      master_id: 'm-1',
+      recurring: 1,
+      recur: JSON.stringify({ type: 'daily' }),
+      scheduled_at: '2026-06-21 16:00:00', // 12:00 PM EDT local (720 mins)
+      date: '2026-06-21',
+      time_flex: 60 // window closes at 780 mins (1:00 PM local)
+    });
+    // nowMins=1000 (4:40 PM local) — well past the 780-min window close.
+    var task = rowToTask(row, TZ, null, null, { todayKey: '2026-06-21', nowMins: 1000 });
     expect(task.overdue).toBe(false);
   });
 

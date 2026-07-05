@@ -22,6 +22,7 @@ import { getTheme } from '../../theme/colors';
 import { PAST_OPACITY } from '../../state/constants';
 import { isTerminalStatus } from '../../shared/task-status';
 import { isAllDayTask } from '../../utils/isAllDayTask';
+import { isTaskOverdue } from '../../utils/overdue';
 
 /**
  * Check if a dateKey falls within a task's date range.
@@ -66,16 +67,32 @@ export default function AllDayBanner({ allTasks, dateKey, statuses, onExpand, da
           var fixed = isFixed(t);
           var isMultiday = t.endDate && t.date && t.endDate !== t.date;
           var daySpan = isMultiday ? Math.round((new Date(t.endDate + 'T00:00:00') - new Date(t.date + 'T00:00:00')) / 86400000) + 1 : 0;
+          // 999.1083 (M-1, SPEC FR-3, AC-7): overdue affordance driven by the
+          // frontend single source of truth (utils/overdue.js), same helper
+          // DailyViewTaskBlock/DailyViewUnschedEntry/CalendarView already use —
+          // never re-derive the overdue predicate here. isDone gates it off so
+          // a done/skip/cancel chip is unaffected even if task.overdue is true.
+          var isOverdue = isTaskOverdue(t, isDone);
           return (
             <div
               key={t.id}
               data-testid="all-day-chip"
+              data-overdue={isOverdue ? 'true' : undefined}
+              // bird-002 (UX-REVIEW WARN, WCAG 2.1.1 Keyboard): role/tabIndex/onKeyDown
+              // make the chip keyboard-operable — same div-as-button pattern already
+              // used by TaskCard.jsx and DailyViewTaskBlock.jsx (Enter/Space -> onExpand).
+              role="button"
+              tabIndex={0}
               onClick={function () { if (onExpand) onExpand(t.id); }}
+              onKeyDown={function (e) { if ((e.key === 'Enter' || e.key === ' ') && onExpand) { e.preventDefault(); onExpand(t.id); } }}
               style={{
-                padding: '3px 8px', borderRadius: 6, cursor: 'pointer', fontSize: 12,
-                background: isDone ? theme.badgeBg : (isMultiday ? '#C8942A' + '20' : theme.projectBadgeBg),
-                color: isDone ? theme.textMuted : (isMultiday ? '#C8942A' : theme.projectBadgeText),
-                border: '1px solid ' + (isDone ? theme.border : (isMultiday ? '#C8942A' + '60' : theme.projectBadgeText + '40')),
+                /* bird-003 (UX-REVIEW WARN, WCAG 2.5.8): 5px vertical padding
+                   (was 3px) brings the ~20px click target up to >=24px CSS px
+                   AA minimum: 5px + ~14.4px line-box (12px * ~1.2) + 5px ~= 24.4px. */
+                padding: '5px 8px', borderRadius: 6, cursor: 'pointer', fontSize: 12,
+                background: isDone ? theme.badgeBg : (isOverdue ? theme.redBg : (isMultiday ? '#C8942A' + '20' : theme.projectBadgeBg)),
+                color: isDone ? theme.textMuted : (isOverdue ? theme.redText : (isMultiday ? '#C8942A' : theme.projectBadgeText)),
+                border: '1px solid ' + (isDone ? theme.border : (isOverdue ? theme.redBorder : (isMultiday ? '#C8942A' + '60' : theme.projectBadgeText + '40'))),
                 opacity: (isDone && isPastDay) ? PAST_OPACITY : (isDone ? 0.5 : 1),
                 textDecoration: isDone ? 'line-through' : 'none'
               }}
@@ -84,6 +101,12 @@ export default function AllDayBanner({ allTasks, dateKey, statuses, onExpand, da
               {st === 'skip' && <span style={{ fontSize: 9, marginRight: 2 }}>{'⏭'}</span>}
               {st === 'cancel' && <span style={{ fontSize: 9, marginRight: 2 }}>{'✗'}</span>}
               {fixed && <span style={{ fontSize: 9, marginRight: 2 }}>{'📌'}</span>}
+              {/* bird-001 (UX-REVIEW BLOCK): color-only overdue affordance fails
+                  WCAG 1.4.1 + SPEC FR-3 'per existing overdue affordances' —
+                  pair the red styling with the same '⚠' glyph every sibling
+                  overdue affordance uses (DailyViewTaskBlock/DailyViewUnschedEntry
+                  '⚠ OVERDUE' badge, CalendarView.jsx:232 '⚠' prefix). */}
+              {isOverdue && <span style={{ fontSize: 9, marginRight: 2 }}>{'⚠'}</span>}
               {isMultiday && <span style={{ fontSize: 9, marginRight: 2, fontWeight: 600 }}>{daySpan + 'd'}</span>}
               {t.text}
             </div>
