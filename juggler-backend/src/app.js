@@ -39,6 +39,7 @@ const impersonationRoutes = require('./routes/impersonation.routes');
 // MCP + OAuth (shared module — auth-service handles OAuth, we proxy)
 const { createOAuthProxyRoutes } = require('auth-client/mcp-auth');
 const mcpTransport = require('./mcp/transport');
+const { getServiceJWKSHandler } = require('../vendor/service-auth');
 
 const app = express();
 
@@ -263,6 +264,11 @@ if (process.env.NODE_ENV === 'development') {
   });
 }
 createOAuthProxyRoutes(app, { mcpEndpoint: '/mcp' });
+
+// Service-to-service JWKS (separate from user JWKS) — lets auth-service/
+// payment-service verify the ServiceJWT juggler signs when calling them
+// (MCP API-key introspection + entitlement checks).
+app.get('/.well-known/service-jwks.json', getServiceJWKSHandler());
 
 // MCP Streamable HTTP (stateless, own rate limit)
 app.post('/mcp', mcpLimiter, mcpTransport.handlePost);
