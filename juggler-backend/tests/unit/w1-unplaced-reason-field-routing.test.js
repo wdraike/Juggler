@@ -45,8 +45,9 @@ describe('W1 — tasks-write INSTANCE_UPDATE_FIELDS routing for unplaced_reason/
     test('AC1-d: null values (clearing reason on transition to placed) routed to instance', () => {
       const { instance } = splitUpdateFields({
         unplaced_reason: null,
-        unplaced_detail: null,
-        overdue: 0
+        unplaced_detail: null
+        // `overdue` field removed (sched-drop-overdue-column, M-5): no longer
+        // a real INSTANCE_UPDATE_FIELDS entry — see AC3-a below for the fix.
       });
       // null is a valid value — explicit clear by the scheduler for placed/overdue rows.
       expect(Object.prototype.hasOwnProperty.call(instance, 'unplaced_reason')).toBe(true);
@@ -75,10 +76,14 @@ describe('W1 — tasks-write INSTANCE_UPDATE_FIELDS routing for unplaced_reason/
   describe('AC3: mixed update with standard placement fields', () => {
     test('AC3-a: scheduler placed-update shape — reason cleared, status/unscheduled routed', () => {
       // The scheduler Case C (placed) clears unplaced_reason when placing a task.
+      // sched-drop-overdue-column (M-5): `overdue` removed from the changes shape
+      // and from the assertion below — INSTANCE_UPDATE_FIELDS no longer includes
+      // 'overdue' (tasks-write.js), so splitUpdateFields now silently drops it;
+      // asserting instance.overdue would fail (instance.overdue is undefined,
+      // not 0) since this is no longer a real writable instance field.
       const changes = {
         status: '',
         unscheduled: null,
-        overdue: 0,
         unplaced_reason: null,
         unplaced_detail: null
       };
@@ -86,7 +91,6 @@ describe('W1 — tasks-write INSTANCE_UPDATE_FIELDS routing for unplaced_reason/
       // instance gets placement fields + reason
       expect(instance.status).toBe('');
       expect(instance.unscheduled).toBeNull();
-      expect(instance.overdue).toBe(0);
       expect(instance.unplaced_reason).toBeNull();
       expect(instance.unplaced_detail).toBeNull();
       // master gets status (template lifecycle) but NOT unplaced fields

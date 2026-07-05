@@ -265,10 +265,12 @@ describe('999.566 — Single-instance override for recurring (M-R4)', () => {
 
     test('instance fields (scheduled_at, time_remaining) route to instance', () => {
       // These fields are in INSTANCE_UPDATE_FIELDS
+      // 'overdue' removed (sched-drop-overdue-column, M-5): tasks-write.js's real
+      // INSTANCE_UPDATE_FIELDS no longer includes it — this list must not claim it does.
       var instanceFields = [
         'scheduled_at', 'dur',
         'date', 'day', 'time',
-        'status', 'time_remaining', 'unscheduled', 'overdue', 'generated',
+        'status', 'time_remaining', 'unscheduled', 'generated',
         'split_group',
         'completed_at',
       ];

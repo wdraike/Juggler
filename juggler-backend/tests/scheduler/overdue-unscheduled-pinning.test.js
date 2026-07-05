@@ -380,3 +380,119 @@ describe('Control — NON-overdue recurring + NON-overdue split place exactly as
     expect(reps.length).toBe(2);
   });
 });
+
+/**
+ * BUG2 (W2) — RED repro, leg sched-anchor-split-bugs.
+ *
+ * Traceability: .planning/kermit/sched-anchor-split-bugs/TRACEABILITY.md BUG2.
+ *
+ * Kermit's hypothesis: "recurring split chunks land on identical scheduled_at for
+ * placement_mode:'anytime' overdue occurrences" — i.e. a duplicate-placement bug in
+ * tryPlaceQueued/placeSplitInline (~unifiedScheduleV2.js:1665 / :2153-2170), not
+ * covered by the juggy4 B1/B2 fix (which only routes TIME_WINDOW / when-block-anchored
+ * overdue recurring items into `result.unplaced`).
+ *
+ * OBSERVED (telly, running the fixture below): that is not quite the mechanism.
+ * `buildItems` (unifiedScheduleV2.js:266-310) has an EARLIER, unconditional early-drop
+ * branch for ANYTIME-mode recurring items:
+ *
+ *   if (t.recurring && pm === PLACEMENT_MODES.ANYTIME && t.date && toKey(t.date) < todayIsoKey) {
+ *     ... isFlexTpcCheck ...
+ *     } else {
+ *       return; // Day-locked — drop as before
+ *     }
+ *   }
+ *
+ * For a plain daily recurrence (`recur: {type:'daily'}`, no `timesPerCycle` -> not
+ * flexible-TPC) whose anchor date is in the past, this `return` removes the item from
+ * `items` BEFORE it ever reaches the queue, tryPlaceQueued, placeSplitInline, or the
+ * pastAnchoredPreQueue/stillUnplaced rescue passes B1/B2 added — regardless of
+ * `t.split`/`t.sourceId`. Confirmed empirically (probe script, 2 incomplete split
+ * chunks + 1 completed chunk, all ANYTIME/daily/past-anchored): BOTH incomplete
+ * chunks are ABSENT from `result.dayPlacements` AND `result.unplaced` — not a grid
+ * collision, but total omission from the scheduler's output (a NEVER-MISSING
+ * violation, arguably a step worse than a duplicate scheduled_at). Control probes
+ * confirm this is not split-specific — a single non-split ANYTIME overdue recurring
+ * instance is dropped identically, while the equivalent TIME_WINDOW fixture (this
+ * file's existing B1/B2 tests) correctly lands in `result.unplaced` with
+ * `_unplacedReason: 'missed'`.
+ *
+ * This REFINES Kermit's root-cause file:line: the defect is buildItems' ANYTIME
+ * early-drop branch (:266-310), not the placement passes at :1665/:2153-2170 — those
+ * are never reached because the item is already gone by the time they'd run. The
+ * reported production symptom ("identical scheduled_at") is the DOWNSTREAM
+ * consequence: because these dropped rows never appear in the scheduler's output,
+ * runSchedule.js's persist step (driven off result.unplaced/dayPlacements) never
+ * touches them once they go overdue, so whatever (possibly identical/placeholder)
+ * scheduled_at they carried from their last real placement is frozen forever —
+ * never individually re-pinned the way the TIME_WINDOW fix does.
+ *
+ * This test asserts the SAME invariant the TIME_WINDOW B2 test above established
+ * (every incomplete split chunk present exactly once in result.unplaced, never
+ * grid-placed) against an ANYTIME/daily equivalent fixture. Does NOT modify any
+ * existing TIME_WINDOW test in this file.
+ */
+describe('BUG2 (W2): ANYTIME-mode overdue recurring split chunks — repro (RED)', () => {
+  // Mirrors makePastAnchoredTask above, but ANYTIME placement + explicit daily
+  // recur (non-flexible-TPC: no timesPerCycle) instead of TIME_WINDOW.
+  function makePastAnchoredAnytimeTask(overrides) {
+    return Object.assign({
+      id: 'pa_any_task',
+      text: 'Past-anchored recurring task (anytime)',
+      date: YESTERDAY,
+      dur: 30,
+      pri: 'P2',
+      when: '',
+      dayReq: 'any',
+      status: '',
+      dependsOn: [],
+      location: [],
+      tools: [],
+      recurring: true,
+      recur: { type: 'daily' }, // non-flexible-TPC -> takes the day-locked drop branch
+      generated: false,
+      split: false,
+      section: '',
+      placementMode: PLACEMENT_MODES.ANYTIME,
+      time: undefined,
+      scheduledAt: undefined,
+      tz: TZ,
+    }, overrides || {});
+  }
+
+  test('2 incomplete ANYTIME split chunks + 1 completed chunk of an overdue daily-recurring split task: EACH incomplete chunk should be present individually in result.unplaced (mirrors the TIME_WINDOW B2 invariant) — CURRENTLY FAILS: both silently vanish (never grid-placed AND never unplaced)', () => {
+    const masterId = 'split_master_anytime_1';
+    const chunk1 = makePastAnchoredAnytimeTask({
+      id: 'a_chunk_1', sourceId: masterId, splitTotal: 3, splitOrdinal: 1, split: true, dur: 30, status: '',
+    });
+    const chunk2 = makePastAnchoredAnytimeTask({
+      id: 'a_chunk_2', sourceId: masterId, splitTotal: 3, splitOrdinal: 2, split: true, dur: 45, status: '',
+    });
+    const chunk3Done = makePastAnchoredAnytimeTask({
+      id: 'a_chunk_3', sourceId: masterId, splitTotal: 3, splitOrdinal: 3, split: true, dur: 20, status: 'done',
+    });
+
+    const result = run([chunk1, chunk2, chunk3Done], 0);
+
+    // This part already holds today (never grid-placed) — consistent with "no
+    // duplicate scheduled_at IN THIS PURE FUNCTION" (the collision, if any, is a
+    // downstream persistence-layer artifact, not something visible here).
+    expect(idsOnGrid(result).has('a_chunk_1')).toBe(false);
+    expect(idsOnGrid(result).has('a_chunk_2')).toBe(false);
+
+    // DESIRED (mirrors the TIME_WINDOW B2 invariant above): every incomplete chunk
+    // of the split master is present INDIVIDUALLY in result.unplaced.
+    // RED: reps.length is 0 (both chunks silently dropped at buildItems:266-310),
+    // not 2 — see the refined root-cause note above.
+    const reps = representationsForMaster(result, masterId);
+    expect(reps.length).toBe(2);
+
+    ['a_chunk_1', 'a_chunk_2'].forEach((id) => {
+      const entry = (result.unplaced || []).find((u) => (u.id || (u.task && u.task.id)) === id);
+      expect(entry).toBeTruthy();
+      const task = entry.task || entry;
+      expect(task._unplacedReason).toBe(REASON_CODES.MISSED);
+      expect(task.date).toBe(YESTERDAY);
+    });
+  });
+});

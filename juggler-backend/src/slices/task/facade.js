@@ -91,6 +91,7 @@ var tasksWrite = require('../../lib/tasks-write');
 var { PLACEMENT_MODES } = require('../../lib/placementModes');
 var { isTerminalStatus } = require('../../lib/task-status');
 var { isRollingMaster, computeRollingAnchor } = require('../../lib/rolling-anchor');
+var { isPatternRecurMaster, computeNextOccurrenceAnchor } = require('../../lib/next-occurrence-anchor');
 var { getNowInTimezone } = require('../../../../shared/scheduler/getNowInTimezone');
 var { createLogger } = require('@raike/lib-logger');
 var logger = createLogger('task.facade');
@@ -329,7 +330,8 @@ async function recurCleanup(ctx) {
             dur: existing.dur || 30,
             status: existing.status || '',
             scheduled_at: existing.scheduled_at || null,
-            overdue: 0,
+            // W3 (sched-drop-overdue-column, M-5): `overdue` is no longer a
+            // stored column/insert-time default — computed-on-read only.
             generated: 0,
             created_at: new Date(),
             updated_at: new Date()
@@ -429,6 +431,26 @@ async function materializeRcInstance(ctx) {
   }
   var srcTime = source.scheduled_at ? utcToLocal(source.scheduled_at, tz).time : null;
   var scheduledAt = localToUtc(localDate, srcTime, tz);
+  // sched-drop-overdue-column follow-up (bert-rollgate-2/3): materialize
+  // implied_deadline at insert time here too — SAME recurringPeriodEndKey(recur,
+  // occurrenceDateKey) call shape runSchedule.js already uses at every other
+  // recurring_instance creation/write site (Phase-1 chunk pre-insert :~1407-1408;
+  // the 999.990 recompute-on-write :~1805-1834). `localDate` (already computed
+  // above from the rc_ id's date digits, M/D form) IS this row's occurrence date
+  // key — parseDate (shared/scheduler/dateHelpers) accepts M/D directly, same as
+  // it does for localToUtc just above. Without this, a row materialized through
+  // this on-demand path can never compute overdue:true via computeOverdueForRow's
+  // hasHardCommitment branch (taskMappers.js), which short-circuits to false
+  // whenever impliedDeadlineISO is null — regressing the standing "past+incomplete
+  // dated MUST stay pinned past-due" invariant now that the write-side overdue
+  // persistence that used to mask this gap is gone (W3, this leg).
+  // Lazy require (mirrors SchedulerTaskProvider.js's own documented rationale):
+  // a plain top-level require of runSchedule.js here risks a facade<->scheduler
+  // circular-require — runSchedule.js instantiates SchedulerTaskProvider at
+  // module scope, which itself requires this facade; many unit tests also
+  // require this facade.js standalone, before runSchedule.js has ever loaded.
+  var recurringPeriodEndKey = require('../../scheduler/runSchedule').recurringPeriodEndKey;
+  var impliedDeadline = source.recur ? recurringPeriodEndKey(source.recur, localDate) : null;
   // P1: created_at/updated_at via new Date() (repo asserts Dates on insert).
   await repo.insertTask({
     id: id,
@@ -439,6 +461,7 @@ async function materializeRcInstance(ctx) {
     recurring: 1,
     scheduled_at: scheduledAt || null,
     status: '',
+    implied_deadline: impliedDeadline,
     created_at: new Date(),
     updated_at: new Date()
   });
@@ -518,11 +541,26 @@ function loadMaster(masterId, userId) {
 }
 
 // updateTaskStatus rolling-anchor projection (verbatim — controller L1790-1808).
+// Also projects the GENERALIZED next_occurrence_anchor (999.1091 C1) for every OTHER
+// recurring type (daily/weekly/biweekly/monthly/interval) — a separate column with
+// separate semantics (see juggler-backend/src/lib/next-occurrence-anchor.js header).
+// Both branches share the same preloaded master row to avoid a second DB read.
+//
+// ctx.db (optional): the active knex transaction handle to write through. When the
+// caller runs inside a transaction (batchUpdateTxn), it MUST pass its `trx` here so
+// the rolling_anchor/next_occurrence_anchor UPDATE participates in the same commit/
+// rollback boundary as the rest of the batch — otherwise a getDb() write on the base
+// autocommit connection escapes the transaction (WARN ernie-w1-anchor-trx-escape /
+// cookie-C1, 2026-07-04): a later rollback would leave the anchor advanced while the
+// status change it was derived from reverts. Callers outside a transaction
+// (UpdateTaskStatus.js, lockedBatchUpdate — both already non-transactional, matching
+// this function's pre-existing getDb() default) omit ctx.db and are unaffected.
 async function applyRollingAnchor(ctx) {
   var masterId = ctx.masterId;
   var userId = ctx.userId;
   var status = ctx.status;
   var existing = ctx.existing;
+  var _db = ctx.db || getDb();
   var _masterForAnchor = ctx.preloadedMaster
     || await _repo.getMasterById(masterId, userId);
   if (_masterForAnchor && isRollingMaster(_masterForAnchor)) {
@@ -535,9 +573,25 @@ async function applyRollingAnchor(ctx) {
     var _completionDate = getNowInTimezone(ctx.tz || _masterForAnchor.tz).todayKey;
     var _newAnchor = computeRollingAnchor(status, _instanceDate, _currentAnchor, _completionDate);
     if (_newAnchor) {
-      await getDb()('task_masters')
+      // updated_at: getDb().fn.now() kept literal (not _db.fn.now()) — fn.now()
+      // is a connection-agnostic raw-SQL fragment builder (FIX-4.2 PIN,
+      // facade-fnnow-pin.test.js), unrelated to which knex instance drives the
+      // .update() call below. Atomicity comes from the QUERY executing via
+      // _db (trx when threaded), not from which object built the raw literal.
+      await _db('task_masters')
         .where({ id: masterId, user_id: userId })
         .update({ rolling_anchor: _newAnchor, updated_at: getDb().fn.now() });
+    }
+  } else if (_masterForAnchor && isPatternRecurMaster(_masterForAnchor)) {
+    var _pInstanceDate = existing.date ? String(existing.date).slice(0, 10) : null;
+    var _pCurrentAnchor = _masterForAnchor.next_occurrence_anchor
+      ? String(_masterForAnchor.next_occurrence_anchor).slice(0, 10)
+      : null;
+    var _pNewAnchor = computeNextOccurrenceAnchor(status, _pInstanceDate, _pCurrentAnchor, _masterForAnchor.recur);
+    if (_pNewAnchor) {
+      await _db('task_masters')
+        .where({ id: masterId, user_id: userId })
+        .update({ next_occurrence_anchor: _pNewAnchor, updated_at: getDb().fn.now() });
     }
   }
 }
@@ -608,10 +662,9 @@ async function cascadeRecurringDelete(ctx) {
     .select('id', 'status', 'gcal_event_id', 'msft_event_id');
 
   // 999.844 Guard 1: a series-delete must KEEP every history-bearing instance
-  // verbatim — done/cancel/skip AND pause/missed. Only genuinely-active/pending
-  // instances are soft-cancelled (status='cancelled') to stop the series. Before
-  // this, pause/missed were treated as pending and overwritten to 'cancelled',
-  // losing the original terminal state.
+  // verbatim — done/cancel/skip/pause. Only genuinely-active/pending
+  // instances are soft-cancelled (status='cancelled') to stop the series.
+  // (999.1086: 'missed' removed — retired by 999.1044.)
   var TERMINAL_KEEP = ['done', 'cancel', 'skip', 'pause'];
 
   pendingIds = instances
@@ -641,7 +694,7 @@ async function cascadeRecurringDelete(ctx) {
       return TERMINAL_KEEP.indexOf(inst.status || '') !== -1;
     })
     .map(function (inst) { return inst.id; });
-  // R55 + 999.844: history-bearing instances (done/cancel/skip/pause/missed) are
+  // R55 + 999.844: history-bearing instances (done/cancel/skip/pause) are
   // KEPT verbatim as the historical record — never deleted, never overwritten.
   // They are already terminal/frozen and excluded from the scheduler write-set,
   // so no status change is needed.
@@ -787,8 +840,8 @@ async function lockedBatchUpdate(ctx) {
   var existCheck = await getDb()('tasks_with_sync_v')
     .where('user_id', userId)
     .whereIn('id', idsToCheck)
-    .select('id', 'task_type', 'source_id', 'scheduled_at', 'status',
-            'when', 'gcal_event_id', 'msft_event_id');
+    .select('id', 'task_type', 'source_id', 'master_id', 'scheduled_at', 'status',
+            'when', 'date', 'gcal_event_id', 'msft_event_id');
   var existById = {};
   existCheck.forEach(function (r) { existById[r.id] = r; });
 
@@ -840,6 +893,22 @@ async function lockedBatchUpdate(ctx) {
       await enqueueWrite(userId, qId, 'update', schedulingFields, 'api:batchUpdateTasks');
       queuedCount++;
     }
+
+    // BUG1 (W1, leg sched-anchor-split-bugs) fix: rolling-anchor projection —
+    // mirrors UpdateTaskStatus.js:236-244, which the LOCKED batch path never
+    // called (only the single-item status-update use-case did).
+    if (qExisting && qExisting.task_type === 'recurring_instance') {
+      var qAnchorMasterId = qExisting.master_id || qExisting.source_id;
+      if (qAnchorMasterId && qRow.status !== undefined && ['done', 'skip'].indexOf(qRow.status) >= 0) {
+        await applyRollingAnchor({
+          masterId: qAnchorMasterId,
+          userId: userId,
+          status: qRow.status,
+          existing: qExisting,
+          preloadedMaster: null
+        });
+      }
+    }
   }
 
   return { updatedCount: updatedCount, queuedCount: queuedCount, idsToCheck: idsToCheck };
@@ -862,8 +931,8 @@ async function batchUpdateTxn(ctx) {
   var existingRows = await trx('tasks_with_sync_v')
     .where('user_id', userId)
     .whereIn('id', idsToUpdate)
-    .select('id', 'task_type', 'source_id', 'scheduled_at', 'status',
-            'when', 'gcal_event_id', 'msft_event_id');
+    .select('id', 'task_type', 'source_id', 'master_id', 'scheduled_at', 'status',
+            'when', 'date', 'gcal_event_id', 'msft_event_id');
   var existingById = {};
   existingRows.forEach(function (r) { existingById[r.id] = r; });
 
@@ -986,6 +1055,26 @@ async function batchUpdateTxn(ctx) {
         await twrite.updateTaskById(trx, id, instanceUpdate, userId);
       } else {
         await twrite.updateTaskById(trx, id, {}, userId);
+      }
+
+      // BUG1 (W1, leg sched-anchor-split-bugs) fix: rolling-anchor projection —
+      // mirrors UpdateTaskStatus.js:236-244, which the UNLOCKED batch txn path
+      // never called (only the single-item status-update use-case did).
+      var _batchAnchorMasterId = existing.master_id || existing.source_id;
+      if (_batchAnchorMasterId && row.status !== undefined && ['done', 'skip'].indexOf(row.status) >= 0) {
+        // WARN ernie-w1-anchor-trx-escape / cookie-C1 (2026-07-04): this call site runs
+        // inside batchUpdateTxn's own `trx` — thread it through so the anchor UPDATE
+        // commits/rolls back atomically with the rest of the batch (see applyRollingAnchor
+        // header for the escape hazard this closes). lockedBatchUpdate's call site is
+        // non-transactional already and is intentionally left on the getDb() default.
+        await applyRollingAnchor({
+          masterId: _batchAnchorMasterId,
+          userId: userId,
+          status: row.status,
+          existing: existing,
+          preloadedMaster: null,
+          db: trx
+        });
       }
     } else {
       if (anchorDateVal && taskType === 'recurring_template') {
@@ -1263,6 +1352,11 @@ module.exports = {
   buildSourceMap: mappers.buildSourceMap,
   safeParseJSON: mappers.safeParseJSON,
   TEMPLATE_FIELDS: mappers.TEMPLATE_FIELDS,
+  // W1/W3 (sched-drop-overdue-column, M-5): the SAME computed-overdue
+  // predicate rowToTask uses internally, re-exported so runSchedule.js (W3)
+  // can replace its raw rawRow.overdue/r.overdue continuity reads with a call
+  // to this single source of truth instead of duplicating the rule.
+  computeOverdueForRow: mappers.computeOverdueForRow,
   validateTaskInput: validation.validateTaskInput,
   checkCalSyncEditGuard: validation.checkCalSyncEditGuard,
   guardFixedCalendarWhen: validation.guardFixedCalendarWhen,

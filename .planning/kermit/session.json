@@ -1,20 +1,17 @@
 {
-  "leg_id": "h7-driftfix-case-999.1019",
-  "intent": "Fix 999.1019: split_ordinal/split_total CASE branches missing from KnexScheduleRepository.writeChanged batched path",
-  "mode": "bugfix",
+  "leg_id": "",
+  "intent": "",
+  "mode": null,
   "lanes": [],
-  "depth": "standard",
-  "scope": ["juggler-backend"],
-  "branch": "leg/h7-driftfix-case-999.1019",
-  "status": "in_review",
-  "wbs": ".planning/kermit/h7-driftfix-case-999.1019/WBS.md",
-  "traceability": ".planning/kermit/h7-driftfix-case-999.1019/TRACEABILITY.md",
+  "depth": null,
+  "scope": [],
+  "branch": "",
+  "status": "idle",
+  "wbs": "",
+  "spec": "",
+  "traceability": "",
   "verdict": null,
-  "owner": {
-    "sse_port": 0,
-    "host": "Williams-MacBook-Pro.local",
-    "started": "2026-07-02T22:30:00Z"
-  },
-  "opened": "2026-07-02T22:30:00Z",
-  "last_update": "2026-07-02T22:30:00Z"
+  "owner": null,
+  "opened": "",
+  "last_update": "2026-07-04T18:05:00Z"
 }

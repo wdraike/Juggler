@@ -1,0 +1,16 @@
+{
+  "mode": "bugfix",
+  "project_root": ".",
+  "base_ref": "",
+  "files": [
+    "juggler-backend/src/mcp/server.js",
+    "juggler-mcp/index.js",
+    "juggler-backend/tests/unit/mcp-server.test.js",
+    "juggler-backend/tests/unit/mcp-protocol.test.js"
+  ],
+  "added_lines": 8,
+  "acceptance_criteria": null,
+  "new_files": 0,
+  "wbs_text": "Fix broken @modelcontextprotocol/sdk import subpaths after SDK drifted to 1.29.0: McpServer and StdioServerTransport moved from '@modelcontextprotocol/sdk/server' to explicit '@modelcontextprotocol/sdk/server/mcp.js' and '@modelcontextprotocol/sdk/server/stdio.js' subpaths (package.json exports wildcard requires explicit .js). Live-broken: POST /mcp returned HTTP 500 'McpServer is not a constructor'. Fix juggler-backend/src/mcp/server.js:5 and juggler-mcp/index.js:9-10 import lines, and correct two existing test files' SDK-mock resolved paths (mcp-server.test.js, mcp-protocol.test.js) which had a pre-existing copy-paste bug computing the identical resolved path for both McpServer and StdioServerTransport doMock targets, silently no-op-ing one mock and causing 5-9 tests to fail (RED, confirmed pre-fix). Touches MCP HTTP transport surface (auth-proxied /mcp route, OAuth-adjacent) and the standalone stdio MCP client used by Claude Code.",
+  "intent_keywords": ["McpServer", "StdioServerTransport", "modelcontextprotocol", "mcp/server.js", "juggler-mcp"]
+}

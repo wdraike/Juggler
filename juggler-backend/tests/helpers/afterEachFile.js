@@ -118,8 +118,27 @@ function isTruncTarget() {
 }
 
 // Canonical HEAD view DDL, captured once from a pristine `make init-juggler` into
-// test-helpers/canonical-views-restore.sql (one `CREATE OR REPLACE VIEW ...;` per
+// tests/helpers/canonical-views-restore.sql (one `CREATE OR REPLACE VIEW ...;` per
 // line, tasks_v before its dependent tasks_with_sync_v). Loaded lazily + cached.
+//
+// ⚠ MUST BE REGENERATED whenever a migration changes tasks_v/tasks_with_sync_v's
+// shape (add/remove/rename a projected column) — otherwise THIS restore silently
+// reverts the new shape after every test file, for the rest of the suite's
+// lifetime, masking the change everywhere except a test that runs completely
+// alone. This is exactly how `rolling_anchor` went undetected-missing from both
+// views for weeks (999.1094) — this snapshot never had it either, until the
+// 999.1091/999.1094 regeneration. Regenerate via (run against a freshly
+// migrate:latest'd *_test DB):
+//   node -e "const mysql=require('mysql2/promise');(async()=>{const c=await
+//     mysql.createConnection({host:'127.0.0.1',port:3407,user:'root',
+//     password:'rootpass',database:'<your _test db>'});const v=(await
+//     c.query('SHOW CREATE VIEW tasks_v'))[0];const s=(await c.query(
+//     'SHOW CREATE VIEW tasks_with_sync_v'))[0];const p=x=>String(x).replace(
+//     /^CREATE\s+ALGORITHM=\S+\s+DEFINER=`[^`]+`@`[^`]+`\s+SQL SECURITY
+//     (\w+)\s+VIEW/i,'CREATE OR REPLACE SQL SECURITY $1 VIEW');require('fs')
+//     .writeFileSync('tests/helpers/canonical-views-restore.sql',
+//     p(v[0]['Create View'])+';\n'+p(s[0]['Create View'])+';\n');await
+//     c.end();})();"
 var _canonicalViewStmts = null;
 function loadCanonicalViewStmts() {
   if (_canonicalViewStmts !== null) return _canonicalViewStmts;

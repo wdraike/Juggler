@@ -415,7 +415,7 @@ describe('F5 — overdue reads one day late for a never-placed recurring occurre
       recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU', every: 1 }),
       placement_mode: 'anytime',
       scheduled_at: null,
-      overdue: 0,
+      // `overdue` field removed (sched-drop-overdue-column, M-5): stored column gone.
       unscheduled: 1,
       time_flex: null,
       preferred_time_mins: null,

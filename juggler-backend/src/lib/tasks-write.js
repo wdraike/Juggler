@@ -49,7 +49,7 @@ var _INSTANCE_FIELDS = [
   'id', 'master_id', 'user_id',
   'occurrence_ordinal', 'split_ordinal', 'split_total',
   'scheduled_at', 'dur',
-  'status', 'time_remaining', 'unscheduled', 'overdue', 'generated',
+  'status', 'time_remaining', 'unscheduled', 'generated',
   'created_at', 'updated_at'
 ];
 
@@ -73,7 +73,7 @@ var MASTER_UPDATE_FIELDS = [
 var INSTANCE_UPDATE_FIELDS = [
   'scheduled_at', 'dur',
   'date', 'day', 'time',
-  'status', 'time_remaining', 'unscheduled', 'overdue', 'generated',
+  'status', 'time_remaining', 'unscheduled', 'generated',
   'split_ordinal', 'split_total', 'split_group',
   // juggler-cal-history Plan A/C: completed_at column on task_instances.
   'completed_at',
@@ -124,7 +124,8 @@ function pickInstance(row, id, masterId, occOrdinal) {
     status: row.status != null ? row.status : '',
     time_remaining: row.time_remaining != null ? row.time_remaining : null,
     unscheduled: row.unscheduled != null ? row.unscheduled : null,
-    overdue: row.overdue != null ? row.overdue : 0,
+    // W3 (sched-drop-overdue-column, M-5): `overdue` is no longer a stored
+    // column/insert-time default — computed-on-read only (taskMappers.js).
     generated: row.generated ? 1 : 0
   };
   // Derived local-tz caches — written by the scheduler when placing chunks

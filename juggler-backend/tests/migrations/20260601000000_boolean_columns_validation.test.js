@@ -735,13 +735,18 @@ describe('D) Gap analysis — columns needing CHECK constraints', () => {
     // exist in the live schema without dedicated CHECK constraints. They are
     // covered by NOT NULL + DEFAULT or other implicit constraints instead.
     // See file header §B for the full rationale.
+    // 'task_instances.overdue' removed (sched-drop-overdue-column, M-5,
+    // 2026-07-03): the column itself is dropped (not just its CHECK
+    // constraint) — it no longer appears in the gap list at all, since a
+    // dropped column can't be an unconstrained boolean column. Authorized,
+    // intentional removal (SPEC.md AC1/MIG-1), a strict simplification of
+    // this gap list, not a regression.
     var KNOWN_GAPS = [
       { table: 'ai_usage_outbox',  column: 'error_flag'   },
       { table: 'cal_sync_ledger',  column: 'done_frozen'  },
       { table: 'cal_sync_ledger',  column: 'event_all_day' },
       { table: 'oauth_auth_codes', column: 'used'         },
       { table: 'task_instances',   column: 'generated'    },
-      { table: 'task_instances',   column: 'overdue'      },
       { table: 'user_calendars',   column: 'enabled'      },
     ];
 

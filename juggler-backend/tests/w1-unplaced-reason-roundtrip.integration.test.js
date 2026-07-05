@@ -146,9 +146,11 @@ describe('W1 — unplaced_reason round-trip (tasks-write → task_instances → 
       });
 
       // Then clear it (simulating scheduler placing the task in a subsequent run).
+      // `overdue` field removed (sched-drop-overdue-column, M-5): stored column
+      // gone; updateTaskById's INSTANCE_UPDATE_FIELDS allowlist no longer
+      // includes it either way.
       await updateTaskById(db, id, {
         unscheduled: null,
-        overdue: 0,
         unplaced_reason: null,
         unplaced_detail: null,
         updated_at: db.fn.now()

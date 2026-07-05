@@ -131,6 +131,10 @@ app.use('/api/client-errors', clientErrorLimiter, express.json({ limit: '16kb' }
   clientErrors.createClientErrorsRouter({ app: 'juggler', logPath: clientErrorsLogPath }),
   clientErrors.bodyErrorGuard);
 
+// Import route needs a larger body limit than the global 1MB — mount
+// BEFORE the global bodyParser.json so it takes precedence for /api/data/import.
+app.use('/api/data/import', express.text({ type: 'text/csv', limit: '10mb' }), bodyParser.json({ limit: '10mb' }));
+
 app.use(bodyParser.json({ limit: '1mb' }));
 app.use(bodyParser.urlencoded({ extended: true }));
 // NOTE: GET /api/events accepts JWT via ?token= query param (EventSource limitation).
@@ -384,7 +388,6 @@ app.get('/api/events', (req, res) => {
 app.use('/health', healthLimiter, healthRoutes);
 app.use('/api/health', authenticateJWT, healthLimiter, healthRoutes);
 app.use('/api/ai', aiLimiter, aiRoutes);
-app.use('/api/data/import', express.text({ type: 'text/csv', limit: '2mb' }), bodyParser.json({ limit: '2mb' }));
 app.use('/api', apiLimiter);
 app.use('/api/tasks', authenticateJWT, writeRateLimiter, taskRoutes);
 app.use('/api/config', authenticateJWT, writeRateLimiter, configRoutes);

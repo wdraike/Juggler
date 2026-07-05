@@ -16,6 +16,7 @@ const { enqueueScheduleRun } = require('../../scheduler/scheduleQueue');
 const { isLocked, enqueueWrite, splitFields } = require('../../lib/task-write-queue');
 const tasksWrite = require('../../lib/tasks-write');
 const { isRollingMaster, computeRollingAnchor } = require('../../lib/rolling-anchor');
+const { isPatternRecurMaster, computeNextOccurrenceAnchor } = require('../../lib/next-occurrence-anchor');
 const { getNowInTimezone } = require('../../../../shared/scheduler/getNowInTimezone');
 const { safeTimezone } = require('../../../../shared/scheduler/dateHelpers');
 const { createLogger } = require('../../lib/logger');
@@ -427,7 +428,8 @@ function registerTaskTools(server, userId) {
 
       await tasksWrite.updateTaskById(db, id, update, userId);
 
-      // Rolling anchor update
+      // Rolling anchor update (+ generalized next_occurrence_anchor for non-rolling
+      // recurring types — 999.1091 C1 — mirrors facade.js applyRollingAnchor).
       var _mcpMasterId = existing.master_id || existing.source_id;
       if (_mcpMasterId && ['done', 'skip'].includes(status)) {
         var _mcpMaster = await db('task_masters').where({ id: _mcpMasterId, user_id: userId }).first();
@@ -441,6 +443,15 @@ function registerTaskTools(server, userId) {
             await db('task_masters')
               .where({ id: _mcpMasterId, user_id: userId })
               .update({ rolling_anchor: _mcpNewAnchor, updated_at: db.fn.now() });
+          }
+        } else if (_mcpMaster && isPatternRecurMaster(_mcpMaster)) {
+          var _mcpPDate = existing.date ? String(existing.date).slice(0, 10) : null;
+          var _mcpPCurrentAnchor = _mcpMaster.next_occurrence_anchor ? String(_mcpMaster.next_occurrence_anchor).slice(0, 10) : null;
+          var _mcpPNewAnchor = computeNextOccurrenceAnchor(status, _mcpPDate, _mcpPCurrentAnchor, _mcpMaster.recur);
+          if (_mcpPNewAnchor) {
+            await db('task_masters')
+              .where({ id: _mcpMasterId, user_id: userId })
+              .update({ next_occurrence_anchor: _mcpPNewAnchor, updated_at: db.fn.now() });
           }
         }
       }

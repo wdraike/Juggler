@@ -67,6 +67,8 @@ process.env.NODE_ENV = 'test';
 var db = require('../../src/db');
 var { runScheduleAndPersist } = require('../../src/scheduler/runSchedule');
 var { assertDbAvailable } = require('../helpers/requireDB');
+var { rowToTask } = require('../../src/slices/task/domain/mappers/taskMappers');
+var { getNowInTimezone } = require('../../../shared/scheduler/getNowInTimezone');
 
 // ── UpdateTaskStatus dependencies (LC-3 only) ──────────────────────────────
 var { v7: uuidv7 } = require('uuid');
@@ -199,7 +201,7 @@ async function seedPlacedInstance(id, masterId, extraOverrides) {
     split_total: 1,
     date: OCCURRENCE_DATE_KEY,
     scheduled_at: PLACED_SLOT_UTC,
-    overdue: 0,
+    // `overdue` field removed (sched-drop-overdue-column, M-5): stored column gone.
     dur: 30,
     status: '',
     created_at: db.fn.now(),
@@ -294,9 +296,20 @@ describe('LC-1: placed recurring instance freezes at last real scheduled_at (RED
       expect(afterRow.status).toBe('');
 
       // ── LC-1 ASSERTION (c): flagged overdue, pinned at its original slot ──────
-      // runSchedule.js:1841-1850 — placed past recurring → overdue=1, NOT moved.
+      // sched-drop-overdue-column (M-5): `afterRow.overdue` is no longer a real
+      // column — compute via the production mapper instead. This is a genuine
+      // AC6a-preserve case (daily recurring, placed at its own PAST slot, not
+      // forward-rolled): computeOverdueForRow reaches the isPlacedRecurringInstance
+      // FIXED-like branch (scheduled_at's own past date), independent of the
+      // rolling-type implied_deadline gap documented elsewhere in this sweep.
+      // Must read via `tasks_v` (not a raw task_instances select) — recur/
+      // placement_mode/task_type are master-inherited fields the view joins in;
+      // a raw task_instances row lacks them entirely, which would silently
+      // force hasHardCommitment=false regardless of the real recur type.
       // scheduled_at stays the original user slot (NOT windowClose, NOT today).
-      expect(Number(afterRow.overdue)).toBe(1);
+      var afterViewRow = await db('tasks_v').where('id', instId).first();
+      var afterTask = rowToTask(afterViewRow, TZ, {}, null, getNowInTimezone(TZ));
+      expect(afterTask.overdue).toBe(true);
       expect(afterRow.scheduled_at).toBe(PLACED_SLOT_UTC);
 
       // Not terminal → completed_at stays null (it was never completed).

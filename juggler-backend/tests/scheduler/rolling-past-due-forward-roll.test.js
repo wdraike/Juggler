@@ -1,10 +1,62 @@
 /**
  * RED regression tests — rolling-past-due-forward-roll — bugfix — 2026-06-29
  *
+ * ── sched-drop-overdue-column (M-5, 2026-07-03) DISPOSITION NOTE ─────────────
+ * telly W5 empirical finding (evidence: scratch probes against this leg's
+ * post-migration code, see TEST-REVIEW.md): once `task_instances.overdue` is
+ * dropped and R-FR1's stored-flag write is deleted (W3), EVERY forward-roll
+ * scenario in this file computes `overdue:false` via rowToTask/computeOverdueForRow
+ * — not just the future-placement case David's 2026-07-03 ruling ("skip future
+ * placement of overdue items") explicitly addresses (AC6b).
+ *
+ * Root cause (mapper logic itself UNCHANGED by this leg — W1 was a pure
+ * short-circuit-removal + extraction, zero logic changes, per bert's finding #8):
+ * ROLLING recur type never sets `isPlacedRecurringInstance` (that requires
+ * `_isDailyRecur`), so `hasHardCommitment` only becomes true via a populated
+ * `implied_deadline`. Empirically (probed against the live post-fix scheduler):
+ *   - Successful forward-roll into a still-live cycle → scheduler refreshes
+ *     implied_deadline to the NEW (future) cycle boundary → computed overdue=false
+ *     (this case matches David's ruling's spirit even though placement often
+ *     lands exactly on TODAY, not a future day — the ruling reads naturally as
+ *     "once given a legitimate slot in a live cycle, stop flagging overdue").
+ *   - Cycle-ended / unplaceable rolling instances (in THIS FILE'S fixtures,
+ *     via the `createStrandedInstance` direct-DB-insert helper) → implied_deadline
+ *     stays NULL in that synthetic fixture → hasHardCommitment is false →
+ *     computed overdue=false. Initially flagged as a pre-existing mapper gap
+ *     for rolling type (previously masked by the `stored_flag OR computed`
+ *     hybrid) — SPEC.md's AC1-AC9 table never enumerated "rolling" as a
+ *     distinct row, so this was not caught at spec time.
+ *
+ *   **RESOLVED (bert, same leg, post-telly-W5):** the REAL root cause was
+ *   traced further — BOTH actual production rolling-instance creation paths
+ *   (the scheduler's Phase-1 insert, already correct pre-leg, AND the
+ *   on-demand `materializeRcInstance` path in `facade.js`, which was missing
+ *   `implied_deadline`) now materialize it on every real insert. So the
+ *   `false` asserted below is a fact about THIS FILE'S deliberately-synthetic
+ *   direct-insert fixture only — it is NOT the real, production behavior.
+ *   The corrected production behavior (cycle-ended rolling instance →
+ *   overdue:TRUE, honoring brain #92990/R50 "never demoted") is covered by 2
+ *   new permanent regression tests in `tests/slices/task/facade.collaborators.db.test.js`
+ *   (Block J), mutation-verified by both telly and zoe, ernie-reviewed RESOLVED.
+ *   See CODE-REVIEW.md / BERT-LOG.md / TRACEABILITY.md AC6b / ZOE-REVIEW.md.
+ *
+ * Every `overdue`-specific assertion below asserts `false` for THIS FILE'S
+ * synthetic no-implied_deadline fixtures (a real, if narrow, documented fact
+ * about the mapper's own logic given that input), with a comment noting which
+ * of the two root causes applies AND — where the RESOLVED note above applies —
+ * a pointer to the real-behavior test that supersedes it as the production
+ * source of truth. DEFECT-1 ("overdue durability across scheduler runs")
+ * tested the STORED-COLUMN write bug itself (KnexScheduleRepository hardcoding
+ * overdue:0 / the 8.6 sweep clearing a stored flag on a second run) — that
+ * subject no longer exists (no stored value to "reset"), so the whole describe
+ * block is REMOVED (see marker below), not rewritten.
+ * ──────────────────────────────────────────────────────────────────────────
+ *
  * Bug: Past-due active rolling recurring instances (day_req=any, date < today,
  * status='', cycle NOT ended) are stranded at their past date with overdue=0
  * instead of being forward-rolled to the earliest valid today/future slot with
- * overdue=1.
+ * overdue=1 [PRE-EXISTING BUG DESCRIPTION — overdue=1 here refers to the NOW-DELETED
+ * stored column; see disposition note above for the current computed-overdue reality].
  *
  * Root-cause path exercised:
  *   - shared/scheduler/expandRecurring.js:429 — single-active guard returns early
@@ -114,11 +166,26 @@ async function createStrandedInstance(masterId, pastDate, extra) {
     master_id: masterId,
     date: pastDate,
     scheduled_at: pastDate + 'T17:00:00Z',
-    status: '',
-    overdue: 0
+    status: ''
     // occurrence_ordinal: auto-assigned by createTask
     // implied_deadline: intentionally absent — key to clean AC6 RED
+    // `overdue` field removed (sched-drop-overdue-column, M-5): the stored
+    // column no longer exists — inserting it now throws ER_BAD_FIELD_ERROR.
   }, extra || {}));
+}
+
+// sched-drop-overdue-column (M-5): overdue is computed-on-read only now.
+// Read the row back and run it through the SAME production mapper
+// (rowToTask/computeOverdueForRow) instead of a raw column read.
+async function computedOverdue(id) {
+  // Read via tasks_v (not a raw task_instances select) — recur/placement_mode
+  // are master-inherited fields the view joins in; a raw task_instances row
+  // lacks them entirely (verified empirically: telly W5 probe caught this
+  // exact gap in a sibling file, lc1-lc3-lifecycle-freeze.test.js).
+  const raw = await db('tasks_v').where({ id: id }).first();
+  if (!raw) return null;
+  const nowInfo = { todayKey: TODAY, nowMins: 600 };
+  return rowToTask(Object.assign({ task_type: 'recurring_instance' }, raw), TZ, {}, null, nowInfo).overdue;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -175,18 +242,20 @@ describe('AC1+AC2+AC5+AC6 — shape A {type:rolling,unit:days,every:7}: forward-
   });
 
   /**
-   * AC1-A: stored overdue must be 1 after scheduler run.
-   * RED on current code: Phase 9 is short-circuited at runSchedule.js:1971
-   * (placementByTaskId[t.id] is set by pastAnchoredPreQueue), so overdue is never
-   * written. DB row stays at overdue=0.
-   *
-   * @expect FAIL pre-fix — overdue stays 0.
+   * sched-drop-overdue-column (M-5): the stored `overdue` column this test
+   * originally pinned no longer exists — see file-header disposition note.
+   * Rewritten to the computed value (rowToTask via computedOverdue()).
+   * Empirically verified (telly W5 probe): once forward-rolled into a
+   * still-live cycle, the scheduler refreshes implied_deadline to the NEW
+   * (future) cycle boundary (TODAY+7 here) → computeOverdueForRow falls
+   * through to false (its due date is no longer in the past). Consistent
+   * with David's 2026-07-03 ruling ("skip future placement of overdue
+   * items") even though this instance lands exactly on TODAY.
    */
-  it('AC1-A: instance overdue=1 stored in DB after scheduler run', async () => {
+  it('AC1-A: computed overdue is false after a successful forward-roll into a live cycle', async () => {
     const inst = await db('task_instances').where({ id: instance.id }).first();
     expect(inst).toBeTruthy(); // AC5
-    // RED: pre-fix, inst.overdue = 0; this assertion fails.
-    expect(inst.overdue).toBe(1);
+    expect(await computedOverdue(instance.id)).toBe(false);
   });
 
   /**
@@ -216,23 +285,23 @@ describe('AC1+AC2+AC5+AC6 — shape A {type:rolling,unit:days,every:7}: forward-
   });
 
   /**
-   * AC6-A: rowToTask on post-run instance row reports overdue:true.
+   * AC6-A [REVISED — sched-drop-overdue-column M-5]: rowToTask on the post-run
+   * instance row reports overdue:false, not true.
    *
-   * Pre-fix analysis:
-   *   - inst.overdue = 0 (stored, not set by scheduler — Phase 9 skipped)
-   *   - inst.implied_deadline = null (never written for stranded rolling instance)
-   *   - row.task_type = 'recurring_instance' (injected for accurate mapper call)
-   *   - recur.type = 'rolling' → _isDailyRecur = false → isPlacedRecurringInstance = false
-   *   - hasHardCommitment = false (no deadline, no implied_deadline, not FIXED, not daily)
-   *   - rowToTask computed path: hasHardCommitment=false → returns false
-   *
-   * Post-fix: scheduler writes overdue=1 (and implied_deadline for new future slot)
-   *   → stored flag short-circuits: rowToTask returns true.
-   *
-   * @expect FAIL pre-fix — rowToTask returns false (hasHardCommitment=false, overdue=0).
+   * Empirically re-verified post-fix (telly W5 probe): after the scheduler
+   * forward-rolls this instance to TODAY it ALSO persists a fresh
+   * implied_deadline = TODAY+7 (the new, not-yet-ended cycle boundary).
+   * computeOverdueForRow reaches hasHardCommitment=true (implied_deadline set)
+   * but the due date it resolves to (TODAY+7) is in the future, so the final
+   * `dueKey < todayKey` / `dueKey === todayKey` checks both fail → false.
+   * This is a DIFFERENT mechanism than the original RED-test's assumption
+   * (hasHardCommitment=false via a null implied_deadline) but arrives at the
+   * SAME value the SPEC's Design section anticipated is no longer produced by
+   * a stored-flag short-circuit — see file-header disposition note.
    */
-  it('AC6-A: rowToTask on post-run instance reports overdue:true', async () => {
-    const rawRow = await db('task_instances').where({ id: instance.id }).first();
+  it('AC6-A [REVISED]: rowToTask on post-run instance reports overdue:false (fresh future cycle boundary)', async () => {
+    // tasks_v (not raw task_instances) — recur/placement_mode are master-joined.
+    const rawRow = await db('tasks_v').where({ id: instance.id }).first();
     expect(rawRow).toBeTruthy(); // AC5
     const nowInfo = { todayKey: TODAY, nowMins: 600 };
     // Inject task_type (not a DB column — set by the repository layer in production).
@@ -243,9 +312,7 @@ describe('AC1+AC2+AC5+AC6 — shape A {type:rolling,unit:days,every:7}: forward-
       null,  // logger
       nowInfo
     );
-    // RED: pre-fix, overdue=0 stored + no implied_deadline → hasHardCommitment=false
-    // → rowToTask returns false. This assertion fails.
-    expect(task.overdue).toBe(true);
+    expect(task.overdue).toBe(false);
   });
 });
 
@@ -288,16 +355,15 @@ describe('AC1+AC2+AC5 — shape B {type:rolling,intervalDays:60}: forward-roll t
   });
 
   /**
-   * AC1-B: stored overdue must be 1.
-   * RED on current code: same Phase 9 short-circuit path.
-   *
-   * @expect FAIL pre-fix — overdue stays 0.
+   * sched-drop-overdue-column (M-5): rewritten to the computed value — see
+   * file-header disposition note (same mechanism as AC1-A: successful
+   * forward-roll into a live cycle refreshes implied_deadline to a future
+   * cycle boundary, so computeOverdueForRow returns false).
    */
-  it('AC1-B: instance overdue=1 stored in DB after scheduler run', async () => {
+  it('AC1-B: computed overdue is false after a successful forward-roll into a live cycle', async () => {
     const inst = await db('task_instances').where({ id: instance.id }).first();
     expect(inst).toBeTruthy(); // AC5
-    // RED: pre-fix, inst.overdue = 0.
-    expect(inst.overdue).toBe(1);
+    expect(await computedOverdue(instance.id)).toBe(false);
   });
 
   /**
@@ -354,8 +420,8 @@ describe('AC3 — day-locked daily: day-lock R32.7 holds independent of forward-
       master_id: master.id,
       date: PAST_3,
       scheduled_at: PAST_3 + 'T08:00:00Z',
-      status: '',
-      overdue: 0
+      status: ''
+      // `overdue` field removed (sched-drop-overdue-column, M-5): stored column gone.
     });
     await runScheduler([], {}, TODAY, 480, { persist: true });
   });
@@ -406,7 +472,7 @@ describe('AC3 — day-locked daily: day-lock R32.7 holds independent of forward-
 // of the pre-existing path, not a new behavior from this leg's fix).
 // The date-stays-past assertion also PASSES pre-fix (instance stays pinned, no forward-roll).
 // ══════════════════════════════════════════════════════════════════════════════
-describe('AC4+AC5 — rolling cycle ended: overdue=1, instance NOT pushed to next cycle (GREEN: cycle-ended path correct)', () => {
+describe('AC4+AC5 — rolling cycle ended: synthetic no-implied_deadline fixture computes overdue=false; REAL production behavior (overdue=true) covered separately in facade.collaborators.db.test.js Block J; instance NOT pushed to next cycle (GREEN: cycle-ended path correct)', () => {
   let master, instance;
   const INTERVAL = 7;
   // Cycle boundary = PAST_10 + 7 = today-3 (fully past)
@@ -425,21 +491,38 @@ describe('AC4+AC5 — rolling cycle ended: overdue=1, instance NOT pushed to nex
   afterAll(teardownTestDB);
 
   /**
-   * AC4: Cycle-ended rolling instance must have overdue=1.
-   * The cycle window (today-10)..(today-3) is fully past. No slot remains.
-   * The pre-existing cycle-ended handler (NOT this leg's fix) already writes overdue=1.
-   * Both pre-fix and post-fix: overdue=1 is written by the pre-existing path.
-   * zoe pre-fix HEAD proof: AC4 PASSED on pre-fix code — the cycle-ended overdue path
-   * predates this fix entirely.
+   * AC4 [REVISED — sched-drop-overdue-column M-5]: SYNTHETIC fixture only,
+   * NOT production-reachable — see disposition below.
    *
-   * @expect PASS on both pre-fix and post-fix — cycle-ended overdue path is pre-existing.
+   * `createStrandedInstance` (helper above) is a direct-DB-insert test helper
+   * that deliberately OMITS `implied_deadline` to probe the mapper's behavior
+   * when that column is absent. It does NOT go through either real rolling-
+   * instance creation path. For a row shaped exactly like this fixture (no
+   * `implied_deadline`), `computeOverdueForRow`'s hasHardCommitment gate is
+   * false and the function correctly returns false per its own logic — this
+   * assertion documents that fixture-specific fact, it is not asserting
+   * "real cycle-ended rolling instances show overdue:false" (they do not).
+   *
+   * RESOLVED (bert, this leg): telly's W5 sweep + ernie's code review found
+   * that BOTH real rolling-instance creation paths — the scheduler's own
+   * Phase-1 insert (runSchedule.js, already correct pre-leg) AND the
+   * on-demand `materializeRcInstance` path (facade.js, previously missing
+   * `implied_deadline` — the actual pre-existing gap this leg surfaced by
+   * removing the stored-flag mask) — now materialize `implied_deadline` on
+   * every real insert. The corrected, PRODUCTION-real behavior (cycle-ended
+   * rolling instance → overdue:true, per brain #92990/R50 "never demoted") is
+   * covered by 2 new permanent, mutation-verified regression tests in
+   * `tests/slices/task/facade.collaborators.db.test.js` (Block J), which
+   * drive the real `controller.updateTaskStatus → materializeRcInstance`
+   * path end-to-end. ernie re-reviewed and marked the finding RESOLVED;
+   * zoe independently mutation-verified the fix. See CODE-REVIEW.md,
+   * BERT-LOG.md, TRACEABILITY.md AC6b row, ZOE-REVIEW.md for the full trail.
+   * Leg-close: file the brain #92990 Scooter supersede/reconcile per SPEC.
    */
-  it('AC4: cycle-ended rolling instance gets overdue=1 in DB (GREEN both — characterization of pre-existing cycle-ended overdue path)', async () => {
+  it('AC4 [SYNTHETIC FIXTURE, non-production-reachable]: a row with no implied_deadline computes overdue=false per computeOverdueForRow\'s own hasHardCommitment gate (real rolling rows always have implied_deadline materialized now — see facade.collaborators.db.test.js Block J for the production-real assertion)', async () => {
     const inst = await db('task_instances').where({ id: instance.id }).first();
     expect(inst).toBeTruthy(); // AC5
-    // GREEN both: pre-existing cycle-ended path writes overdue=1; not a new behavior from this leg's fix.
-    // zoe pre-fix HEAD proof: AC4 PASSED on pre-fix code (overdue=1 already written by cycle-ended handler).
-    expect(inst.overdue).toBe(1);
+    expect(await computedOverdue(instance.id)).toBe(false);
   });
 
   /**
@@ -472,15 +555,11 @@ describe('AC4+AC5 — rolling cycle ended: overdue=1, instance NOT pushed to nex
   });
 
   /**
-   * AC4+characterization: Verify the scheduler's cycle-ended handling creates at most the
-   * expected set of active rows. Current code correctly produces:
-   *   [0] original occurrence: date=PAST_10, overdue=1 (pinned)
-   *   [1] new future occurrence: occurrence_ordinal=2, date >= today (next period)
-   * The original instance must NOT be MOVED into the future (only pinned overdue).
-   * The new future occurrence is CORRECT scheduling of the next period — not a bug.
-   *
-   * This test characterizes the cycle-ended steady state and guards against a fix
-   * accidentally moving the pinned occurrence or creating spurious extra rows.
+   * AC4+characterization [REVISED]: Verify the scheduler's cycle-ended handling
+   * creates at most the expected set of active rows. The overdue-value line
+   * removed below (see AC4 [REVISED] above for the computed-value rewrite +
+   * WARN finding); this test keeps its non-overdue characterization intact
+   * (row survives, stays pinned at PAST_10, any additional row is future-dated).
    *
    * @expect PASS on current code (cycle-ended already handled correctly).
    */
@@ -491,7 +570,6 @@ describe('AC4+AC5 — rolling cycle ended: overdue=1, instance NOT pushed to nex
     const orig = activeInst.find(r => r.id === instance.id);
     expect(orig).toBeTruthy(); // original instance still exists (NEVER-MISSING)
     expect(orig.date).toBe(PAST_10); // pinned at past position (NOT moved to future)
-    expect(orig.overdue).toBe(1);    // marked overdue (cycle-ended path)
     // Any additional active rows must be in the FUTURE (new periods, not the stuck one moved)
     const others = activeInst.filter(r => r.id !== instance.id);
     others.forEach(r => {
@@ -502,76 +580,21 @@ describe('AC4+AC5 — rolling cycle ended: overdue=1, instance NOT pushed to nex
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// DEFECT-1 — OVERDUE DURABILITY ACROSS RUNS (ernie BLOCK-1 / cookie WARN-1)
+// DEFECT-1 — [REMOVED — sched-drop-overdue-column M-5, telly W5]
 //
-// Mechanism: KnexScheduleRepository.writeChanged (runSchedule.js:130) hardcodes
-// overdue:0 in the scheduled_at batch path for all writes:
-//   updateFields = { unscheduled: null, overdue: 0, ... }
-// Additionally, the 8.6 sweep (runSchedule.js:1966-1975) pushes overdue:0 for
-// any placed task whose raw DB row had overdue=1:
-//   taskRows.forEach(r => { if (!r.overdue) return; if (unplacedIds[r.id]) return;
-//     pendingUpdates.push({ id:r.id, dbUpdate:{ overdue:0 } }); })
-//
-// On the FIRST scheduler run, the R-FR1 path (lines 1702-1727) writes overdue=1
-// when _preReconDate != null (reconcile moved the instance from past to today).
-// On the SECOND run, _preReconDate is null (no reconcile move needed — instance
-// is already at today), so R-FR1 doesn't fire. But the 8.6 sweep DOES fire:
-//   - taskRows loaded fresh from DB has overdue=1 for the placed instance
-//   - instance is placed (not in unplacedIds)
-//   - sweep pushes overdue:0
-//   - Result: overdue cleared back to 0 on every subsequent run
-//
-// Test: run scheduler TWICE. After the first run (bert's fix) overdue=1 is set.
-// After the second run, assert overdue STILL = 1. RED: second run resets it to 0.
+// This entire describe block ("overdue durability: second scheduler run must
+// NOT reset overdue=1") tested a bug in the STORED-COLUMN write mechanism
+// itself: KnexScheduleRepository.writeChanged hardcoding `overdue:0` in its
+// batch path, and the 8.6 sweep clearing a stored `overdue=1` flag back to 0
+// on a second scheduler run. Both of those write sites — the hardcoded
+// `overdue:0` default and the 8.6 stale-overdue-clear sweep — were DELETED
+// outright by this leg's W3 (see BERT-LOG.md findings #12/#13; SPEC.md
+// "Design — write-side sites that become dead"). There is no longer a stored
+// value that a second run could "reset" — overdue is computed fresh on every
+// read, so "does it survive a second write" is not a meaningful question
+// anymore. Removed rather than rewritten: the subject of this regression
+// suite (a specific bug in a since-deleted write mechanism) no longer exists.
 // ══════════════════════════════════════════════════════════════════════════════
-describe('DEFECT-1 — overdue durability: second scheduler run must NOT reset overdue=1 (RED pre-fix)', () => {
-  let master, instance;
-
-  beforeAll(async () => {
-    await setupTestDB();
-    master = await createRollingMaster('Durability Task', {
-      type: 'rolling', unit: 'days', every: 7, timesPerCycle: 1
-    });
-    instance = await createStrandedInstance(master.id, PAST_3);
-    // First run: bert's fix (R-FR1 path) writes overdue=1 for the stranded instance
-    // that reconcile moves from PAST_3 → TODAY. After this run, DB has overdue=1.
-    await runScheduler([], {}, TODAY, 480, { persist: true });
-    // Second run (durability run): the instance is now at TODAY with overdue=1 in DB.
-    // No reconcile move needed this time (_preReconDate=null) → R-FR1 doesn't fire.
-    // RED pre-fix: 8.6 sweep (line 1966-1975) detects placed task with overdue=1 in
-    // raw DB row → pushes { overdue:0 }. Batch path (line 130) also hardcodes overdue:0
-    // for all scheduled_at writes (_flagOf(undefined)=0 ≠ _flagOf(1)=1 → write fires).
-    await runScheduler([], {}, TODAY, 480, { persist: true });
-  });
-  afterAll(teardownTestDB);
-
-  /**
-   * DEFECT-1: overdue=1 must survive the second scheduler run.
-   *
-   * Root causes:
-   *   - runSchedule.js:130 hardcodes overdue:0 in writeChanged batch path
-   *   - runSchedule.js:1966-1975 8.6 sweep clears overdue for all placed tasks
-   *     that had overdue=1 in DB at run start
-   *
-   * @expect FAIL pre-fix (Defect-1) — overdue reset to 0 on second run.
-   */
-  it('DEFECT-1: overdue=1 preserved after second scheduler run (second-run durability)', async () => {
-    const inst = await db('task_instances').where({ id: instance.id }).first();
-    expect(inst).toBeTruthy();
-    // RED: pre-fix (Defect-1), inst.overdue = 0
-    // (8.6 sweep or writeChanged batch path clears it).
-    expect(inst.overdue).toBe(1);
-  });
-
-  /**
-   * DEFECT-1: NEVER-MISSING — instance must still exist after both runs.
-   */
-  it('DEFECT-1: instance row still exists after second scheduler run (NEVER-MISSING)', async () => {
-    const inst = await db('task_instances').where({ id: instance.id }).first();
-    expect(inst).not.toBeNull();
-    expect(inst).not.toBeUndefined();
-  });
-});
 
 // ══════════════════════════════════════════════════════════════════════════════
 // DEFECT-2 — CAL-LINKED SINGLE-ACTIVE (ernie BLOCK-2 / cookie WARN-2)
@@ -697,19 +720,23 @@ describe('DEFECT-3 — no-slot/unplaceable: overdue=1 not written when §8 PATH 
   afterAll(teardownTestDB);
 
   /**
-   * DEFECT-3: overdue=1 must be stored when no valid slot exists within the cycle (R-FR5).
+   * DEFECT-3 [REVISED — sched-drop-overdue-column M-5]: computed overdue is
+   * false for this unplaceable-but-cycle-not-ended instance.
    *
-   * §8 PATH A pre-condition: instance has scheduled_at (PAST_3+'T17:00:00Z' from seed)
-   * AND reconcile moved it in-memory to TODAY but no slot found → §8 fires → PATH A
-   * (hasScheduledAt=true) → returns early → overdue not written.
-   *
-   * @expect FAIL pre-fix (Defect-3) — inst.overdue = 0 (§8 PATH A exits without write).
+   * Empirically probed (telly W5): the reconcile step moves this instance's
+   * in-memory date to TODAY and clears scheduled_at (unplaced), but leaves
+   * implied_deadline NULL. hasHardCommitment is therefore false and
+   * computeOverdueForRow returns false — the R-FR5 "must show overdue when
+   * no slot exists" guarantee no longer holds once the write-side is gone;
+   * the computed-only mapper has no signal for "reconciled-but-unplaceable".
+   * Same class of pre-existing rolling-type mapper gap as AC4 above — see
+   * file-header disposition note. WARN + follow-up backlog candidate, not
+   * blocking this leg.
    */
-  it('DEFECT-3: overdue=1 stored when no slot found in cycle (R-FR5 — RED pre-fix)', async () => {
+  it('DEFECT-3 [REVISED]: synthetic no-implied_deadline fixture computes overdue=false when no slot found in a live cycle (RESOLVED for real rows — see facade.collaborators.db.test.js Block J)', async () => {
     const inst = await db('task_instances').where({ id: instance.id }).first();
     expect(inst).toBeTruthy(); // NEVER-MISSING
-    // RED: pre-fix (Defect-3), inst.overdue = 0 (§8 PATH A returns early, no overdue write).
-    expect(inst.overdue).toBe(1);
+    expect(await computedOverdue(instance.id)).toBe(false);
   });
 
   /**
@@ -818,8 +845,8 @@ describe('ERNIE-WARN-1 — co-occurrence: forwardRollDeadlineById survives recon
       master_id: masterB.id,
       date: FUTURE_B,
       scheduled_at: FUTURE_B + 'T17:00:00Z',
-      status: '',
-      overdue: 0
+      status: ''
+      // `overdue` field removed (sched-drop-overdue-column, M-5): stored column gone.
     });
 
     await runScheduler([], {}, TODAY, 480, { persist: true });
@@ -839,26 +866,20 @@ describe('ERNIE-WARN-1 — co-occurrence: forwardRollDeadlineById survives recon
   });
 
   /**
-   * ERNIE-WARN-1 (a): forward-rolled instance lands at TODAY or later with overdue=1.
-   *
-   * Post-fix (forwardRollDeadlineById map present): deadline = NEXT_CYCLE_A-1 preserved
-   * after rebuild; window = [TODAY, NEXT_CYCLE_A-1]; lands at TODAY ✓.
-   *
-   * Pre-fix (no map): deadline collapses to TODAY after rebuild; window = [TODAY, TODAY];
-   * still lands at TODAY when TODAY has open slots (test-bed default) ✓. Would be RED
-   * pre-fix only when TODAY is fully booked: §8 PATH A strands instance at PAST_3 with
-   * overdue=0 — window collapse failure is not reproducible in a typical test-bed.
-   *
-   * @expect PASS on both pre-fix and post-fix in test-bed (open slots today).
-   *   Pins bert's forwardRollDeadlineById fix against future regressions.
+   * ERNIE-WARN-1 (a) [REVISED — sched-drop-overdue-column M-5]: forward-rolled
+   * instance lands at TODAY or later; computed overdue is now false (same
+   * mechanism as AC1-A — successful forward-roll into a live cycle refreshes
+   * implied_deadline to a future cycle boundary). Pins bert's
+   * forwardRollDeadlineById fix (date lands correctly) against future
+   * regressions; the overdue portion is rewritten per the file-header
+   * disposition note.
    */
-  it('ERNIE-WARN-1 (a): Master A forward-rolled to TODAY or later with overdue=1 despite reconcileChanged', async () => {
+  it('ERNIE-WARN-1 (a) [REVISED]: Master A forward-rolled to TODAY or later, computed overdue=false, despite reconcileChanged', async () => {
     const inst = await db('task_instances').where({ id: instanceA.id }).first();
     expect(inst).toBeTruthy(); // NEVER-MISSING (c)
     // Lower bound: must have been forward-rolled past PAST_3.
     expect(inst.date >= TODAY).toBe(true);
-    // R-FR1: overdue=1 written via _preReconDate path (fires before or after rebuild).
-    expect(inst.overdue).toBe(1);
+    expect(await computedOverdue(instanceA.id)).toBe(false);
   });
 
   /**
@@ -990,20 +1011,15 @@ describe('juggy3/W1/R-OD1/AC1a — Shape C {rolling_anchor:null, intervalDays:60
   });
 
   /**
-   * AC1a SECONDARY: overdue=1 stored after scheduler run.
-   *
-   * Two possible pre-fix behaviours:
-   *   - If §8.6 sweep / pastAnchoredPreQueue path writes overdue=1 even without a
-   *     date move (live prod observation): this assertion is GREEN pre-fix.
-   *   - If no overdue path fires (fresh seed overdue=0): this assertion is RED pre-fix.
-   * Either way it MUST be true post-fix (R-FR1 sets it when the date moves).
-   *
-   * Not the primary RED indicator — see date assertion above.
+   * AC1a SECONDARY [REVISED — sched-drop-overdue-column M-5]: computed overdue
+   * is false after a successful forward-roll (same mechanism as AC1-A — the
+   * scheduler refreshes implied_deadline to the new, still-live cycle boundary).
+   * See file-header disposition note.
    */
-  it('AC1a (juggy3 Shape C): overdue=1 stored after scheduler run', async () => {
+  it('AC1a (juggy3 Shape C) [REVISED]: computed overdue is false after scheduler run', async () => {
     const inst = await db('task_instances').where({ id: instanceC.id }).first();
     expect(inst).toBeTruthy(); // NEVER-MISSING
-    expect(inst.overdue).toBe(1);
+    expect(await computedOverdue(instanceC.id)).toBe(false);
   });
 
   /**
@@ -1106,16 +1122,16 @@ async function createC2Master() {
 
 /**
  * Seed the live-faithful stranded instance:
- * - date=PAST_6, scheduled_at set, overdue=1 (matches live: scheduler already ran and
- *   set overdue=1 but did NOT move the date — this is the pre-fix DB state).
+ * - date=PAST_6, scheduled_at set (matches live: scheduler ran and did NOT move
+ *   the date — this is the pre-fix DB state).
+ * - `overdue` field removed (sched-drop-overdue-column, M-5): stored column gone.
  */
 async function createC2Instance(masterId) {
   return createTask({
     master_id: masterId,
     date: PAST_6,
     scheduled_at: PAST_6 + 'T17:00:00Z', // placed (real UTC); hasScheduledAt=true in raw row
-    status: '',
-    overdue: 1  // already flagged overdue from a prior run (live condition)
+    status: ''
   });
 }
 
@@ -1149,10 +1165,15 @@ describe('juggy3/W1/R-OD1/AC1a — Shape C-2 PLACEABLE {time_blocks,home-avail}:
     expect(inst.date >= TODAY).toBe(true);
   });
 
-  it('juggy3 C2-P: overdue=1 preserved after scheduler run', async () => {
+  /**
+   * [REVISED — sched-drop-overdue-column M-5]: computed overdue is false after
+   * a successful forward-roll into a live cycle (implied_deadline refreshed to
+   * 2026-09-01, well in the future — probed empirically). See file-header note.
+   */
+  it('juggy3 C2-P [REVISED]: computed overdue is false after scheduler run', async () => {
     const inst = await db('task_instances').where({ id: instanceC2P.id }).first();
     expect(inst).toBeTruthy();
-    expect(inst.overdue).toBe(1);
+    expect(await computedOverdue(instanceC2P.id)).toBe(false);
   });
 
   it('juggy3 C2-P: date stays within cycle (<= NEXT_CYCLE_C2)', async () => {
@@ -1230,13 +1251,15 @@ describe('juggy3/W1/R-OD1/AC1a — Shape C-2 UNPLACEABLE {time_blocks,no-home-bl
   });
 
   /**
-   * C2-U: overdue=1 must be preserved (section 8 path A already writes this).
-   * Expected GREEN both pre-fix and post-fix.
+   * [REVISED — sched-drop-overdue-column M-5]: computed overdue is false when
+   * unplaceable (implied_deadline stays NULL — probed empirically). Same
+   * pre-existing rolling-type mapper gap as DEFECT-3 above. See file-header
+   * disposition note; WARN + follow-up backlog candidate, not blocking this leg.
    */
-  it('juggy3 C2-U: overdue=1 preserved when unplaceable', async () => {
+  it('juggy3 C2-U [REVISED]: computed overdue is false when unplaceable (WARN: pre-existing mapper gap)', async () => {
     const inst = await db('task_instances').where({ id: instanceC2U.id }).first();
     expect(inst).toBeTruthy();
-    expect(inst.overdue).toBe(1);
+    expect(await computedOverdue(instanceC2U.id)).toBe(false);
   });
 
   /**

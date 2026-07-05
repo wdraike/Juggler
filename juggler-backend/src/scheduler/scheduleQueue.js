@@ -473,6 +473,16 @@ async function pollOnce() {
       var total = await db('tasks_v').distinct('user_id');
       logger.info('[SCHED-QUEUE] poll: ' + total.length + ' user(s) with pending entries (schedule=' + schedPending[0].c + ' writes=' + writePending[0].c + ')');
     }
+    // Sweep stuck claims: rows claimed > 2 minutes ago are from dead
+    // instances (Cloud Run scaled to zero without releasing). Clear them
+    // so the health check doesn't report a permanent scheduler error.
+    var swept = await db('schedule_queue')
+      .whereNotNull('claimed_by')
+      .whereRaw('claimed_at < DATE_SUB(NOW(), INTERVAL 120 SECOND)')
+      .update({ claimed_by: null, claimed_at: null });
+    if (swept > 0) {
+      logger.warn('[SCHED-QUEUE] swept ' + swept + ' stuck claim(s)');
+    }
   } catch (e) {
     logger.error('[SCHED-QUEUE] DB poll failed', { error: e });
   }

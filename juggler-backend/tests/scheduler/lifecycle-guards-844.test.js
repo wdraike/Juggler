@@ -2,9 +2,10 @@
  * 999.844 — pencil-vs-pen lifecycle guards (narrow scope, David ruling 2026-06-23).
  *
  * Guard 1 (MASTER-DELETE): a series-delete must KEEP every history-bearing
- *   instance verbatim — done/cancel/skip/pause/missed — and soft-cancel only
+ *   instance verbatim — done/cancel/skip/pause — and soft-cancel only
  *   genuinely-pending instances + the master (status='cancelled'). No hard delete.
- *   Before the fix, pause/missed were treated as pending → overwritten to 'cancelled'.
+ *   Before the fix, pause was treated as pending → overwritten to 'cancelled'.
+ *   (999.1086: 'missed' status retired by 999.1044 — removed from seeds/assertions.)
  *
  * Guard 2 (TERMINAL one-way, narrow): the SCHEDULER must never flip a terminal
  *   instance back to active/pending. Terminal rows load as terminalDedupRows and
@@ -87,13 +88,12 @@ async function seedInst(suffix, status, ord) {
   });
 }
 
-describe('999.844 Guard 1 — series-delete keeps history (done/skip/pause/missed) verbatim', () => {
-  it('soft-cancels only pending + master; preserves done/skip/pause/missed/cancel verbatim', async () => {
+describe('999.844 Guard 1 — series-delete keeps history (done/skip/pause/cancel) verbatim', () => {
+  it('soft-cancels only pending + master; preserves done/skip/pause/cancel verbatim', async () => {
     await seedMaster();
     await seedInst('done', 'done', 1);
     await seedInst('skip', 'skip', 2);
     await seedInst('pause', 'pause', 3);
-    await seedInst('missed', 'missed', 4);
     await seedInst('cancel', 'cancel', 5);
     await seedInst('pending', '', 6);
 
@@ -109,7 +109,6 @@ describe('999.844 Guard 1 — series-delete keeps history (done/skip/pause/misse
     expect(await statusOf('done')).toBe('done');
     expect(await statusOf('skip')).toBe('skip');
     expect(await statusOf('pause')).toBe('pause');   // RED before fix (was 'cancelled')
-    expect(await statusOf('missed')).toBe('missed'); // RED before fix (was 'cancelled')
     expect(await statusOf('cancel')).toBe('cancel');
     // Genuinely-pending → soft-cancelled (series stops generating).
     expect(await statusOf('pending')).toBe('cancelled');
@@ -120,22 +119,22 @@ describe('999.844 Guard 1 — series-delete keeps history (done/skip/pause/misse
 });
 
 describe('999.844 Guard 2 — scheduler never reactivates a terminal instance', () => {
-  it('a past terminal (done/skip/missed) instance keeps its status after a scheduler run', async () => {
+  it('a past terminal (done/skip/pause) instance keeps its status after a scheduler run', async () => {
     await seedMaster();
     await seedInst('done', 'done', 1);
     await seedInst('skip', 'skip', 2);
-    await seedInst('missed', 'missed', 3);
+    await seedInst('pause', 'pause', 3);
 
     await runScheduleAndPersist(USER_ID);
 
     var rows = await db('task_instances')
-      .whereIn('id', [MASTER_ID + '-done', MASTER_ID + '-skip', MASTER_ID + '-missed'])
+      .whereIn('id', [MASTER_ID + '-done', MASTER_ID + '-skip', MASTER_ID + '-pause'])
       .select('id', 'status');
     var byId = {};
     rows.forEach(function (r) { byId[r.id] = r.status; });
     // System must NOT flip terminal → '' / 'wip'.
     expect(byId[MASTER_ID + '-done']).toBe('done');
     expect(byId[MASTER_ID + '-skip']).toBe('skip');
-    expect(byId[MASTER_ID + '-missed']).toBe('missed');
+    expect(byId[MASTER_ID + '-pause']).toBe('pause');
   });
 });

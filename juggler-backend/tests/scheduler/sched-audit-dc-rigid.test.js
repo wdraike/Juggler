@@ -314,7 +314,7 @@ describe('D-C test 3 — overdue FIXED task remains pinned at its own fixed slot
       scheduled_at: YESTERDAY + ' 14:00:00', // UTC 14:00 = 10:00 AM EDT, matches the scheduler fixture's 10:00 AM anchor
       date: YESTERDAY, time: null, status: '', dur: 30, pri: 'P2', project: null,
       section: null, notes: null, url: null, deadline: null, implied_deadline: null,
-      placement_mode: 'fixed', overdue: 0, recurring: 0, time_remaining: null,
+      placement_mode: 'fixed', recurring: 0, time_remaining: null,
       time_flex: null, flex_when: 0, split: 0, split_min: null, split_ordinal: null,
       split_total: null, split_group: null, occurrence_ordinal: null, recur: null,
       source_id: null, generated: 0, gcal_event_id: null, depends_on: null,
@@ -346,7 +346,7 @@ describe('D-C test 3 — overdue FIXED task remains pinned at its own fixed slot
       scheduled_at: TODAY + ' 18:00:00', // 2:00 PM EDT — later than now (10:00 AM)
       date: TODAY, time: null, status: '', dur: 30, pri: 'P2', project: null,
       section: null, notes: null, url: null, deadline: null, implied_deadline: null,
-      placement_mode: 'fixed', overdue: 0, recurring: 0, time_remaining: null,
+      placement_mode: 'fixed', recurring: 0, time_remaining: null,
       time_flex: null, flex_when: 0, split: 0, split_min: null, split_ordinal: null,
       split_total: null, split_group: null, occurrence_ordinal: null, recur: null,
       source_id: null, generated: 0, gcal_event_id: null, depends_on: null,

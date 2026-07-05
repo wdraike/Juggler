@@ -1,6 +1,16 @@
 {
-  "last_leg": "sibling-knexfile-tls-deadbranch", "mode": "chore", "verdict": "PASS", "completed": "2026-06-12T23:03:12Z",
-  "commits": {"payment-service":"6f07f24","bug-reporter-service":"8b6e73e","superrepo":"c598a37"},
-  "summary": "Removed dead ssl:{rejectUnauthorized:false} TCP-fallback branch from payment + bug-reporter knexfiles (repeat of 999.436). Both dead-branch verified (socketPath, DB_SSL unset). elmo PASS 0BLOCK/0WARN/3INFO. Merged leg→main in both submodules, superrepo pointers bumped.",
-  "backlog_items": ["999.441 (stray uncommitted @raike/lib-db dep in bug-reporter package.json — confirm origin)"]
+  "last_leg": "sched-mcp-sdk-import-fix",
+  "mode": "bugfix",
+  "verdict": "WARN",
+  "completed": "2026-07-04T18:05:00Z",
+  "summary": "Fixed @modelcontextprotocol/sdk import subpaths (McpServer/StdioServerTransport) broken by commit a7d7dd1; POST /mcp was 500ing \"McpServer is not a constructor\", now returns valid MCP responses. Oscar: 0 BLOCK (telly/ernie/elmo/cookie), 3 non-blocking architectural WARNs re: SDK version drift between juggler-backend/juggler-mcp -- David approved backlogging. Commits: juggler ce01dc5 (merged origin/main 6a12e3e via PR #9), superrepo 98495a703+5972d9e07+6937c52cf (merged origin/main e89963d via PR #16). Discovered + fixed a live id collision (999.1113 renumbered to 999.1119) against a concurrent session batch.",
+  "commits": {
+    "juggler": "6a12e3e4f3e2e39452ccc560e87de1fa2e88f6a3",
+    "superrepo": "e89963d6a7eee6f2a037358855086fd20f10d571"
+  },
+  "backlog_items": [
+    "999.1119 (amended from 999.1113 collision fix -- CI Gate juggler-mcp deps gap)",
+    "999.1118 (new -- SDK version drift + cross-package test-boundary architecture)"
+  ],
+  "retro_flag": "RETRO-DUE set by leg-complete.sh -- actual 2412s > 1.5x est 780s; targeted retro recommended next Kermit invocation"
 }
