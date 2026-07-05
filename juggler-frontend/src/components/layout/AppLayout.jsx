@@ -886,6 +886,22 @@ export default function AppLayout() {
     });
   }, []);
 
+  // 999.1109: Issues tab click → switch to Day view at the task's date, then expand.
+  var handleIssuesExpand = useCallback(function(id) {
+    var tasks = allTasksRef.current;
+    var task = tasks.find(function(t) { return t.id === id; });
+    if (task && task.date && task.date !== 'TBD') {
+      var td = parseDate(task.date);
+      if (td && !isNaN(td.getTime())) {
+        var t0 = new Date(); t0.setHours(12, 0, 0, 0);
+        var diff = Math.round((td - t0) / 86400000);
+        setDayOffset(diff);
+      }
+    }
+    setViewMode('daily');
+    handleExpand(id);
+  }, [handleExpand, setViewMode, setDayOffset]);
+
   // Keep the open detail view (expandedTaskData) in sync with SSE task mutations.
   // expandedTaskData is otherwise populated only on form-open, so backend changes
   // (scheduler re-runs, other-tab edits, MCP writes) wouldn't reach the open form.
@@ -1350,7 +1366,7 @@ export default function AppLayout() {
             <ConflictsView
               allTasks={visibleTasks} statuses={statuses}
               unplaced={unplaced} backlog={backlogTasks} schedulerWarnings={schedulerWarnings}
-              onStatusChange={handleStatusChange} onExpand={handleExpand} onUpdateTask={handleUpdateTask}
+              onStatusChange={handleStatusChange} onExpand={handleIssuesExpand} onUpdateTask={handleUpdateTask}
               onDelete={requestDelete}
               darkMode={darkMode} isMobile={isMobile} todayDate={today}
               weatherByDate={weatherByDate}
