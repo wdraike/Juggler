@@ -10,6 +10,7 @@
 var StreamableHTTPServerTransport = require('@modelcontextprotocol/sdk/server/streamableHttp.js').StreamableHTTPServerTransport;
 var { createMcpServerForUser } = require('./server');
 var { authenticateMcpRequest, sendMcpUnauthorized } = require('auth-client/mcp-auth');
+var { apiKeyValidator } = require('./api-key-auth');
 var db = require('../db');
 
 var MCP_TIMEOUT = 120000; // 2 minutes max per MCP request
@@ -62,7 +63,7 @@ async function handlePost(req, res) {
       if (token === 'dev-token' && (process.env.NODE_ENV === 'development' || process.env.MCP_DEV_NO_AUTH === 'true') && process.env.NODE_ENV !== 'production') {
         authResult = { userId: 'dev-user' };
       } else {
-        authResult = await authenticateMcpRequest(token, db, { planCheck: planCheck });
+        authResult = await authenticateMcpRequest(token, db, { apiKeyValidator: apiKeyValidator, planCheck: planCheck });
         if (!authResult) {
           return res.status(401).json({
             jsonrpc: '2.0',

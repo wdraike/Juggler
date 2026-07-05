@@ -52,9 +52,9 @@ JUGGLER_TOKEN=<jwt-token>
 
 ### Get Token
 
-```bash
-# Login to Juggler, then copy token from browser localStorage or API response
-```
+Mint an MCP API key via auth-service's AccountSecurityPage UI (log in, then
+Account Security → API Keys → create a key of type `mcp`) and use it as
+`JUGGLER_TOKEN` — no browser localStorage scraping required.
 
 ### settings.json Entry
 
@@ -118,7 +118,7 @@ add_dependency({ taskId: "B", dependsOnId: "A" })
 | Issue | Cause | Fix |
 |-------|-------|-----|
 | `No JUGGLER_TOKEN set` | Token not in env or file | Set `JUGGLER_TOKEN` env var or create `~/.juggler-mcp-token` |
-| `API 401` | Token expired | Regenerate token via login |
+| `API 401` | Key expired or revoked | Mint a new MCP API key via auth-service's AccountSecurityPage UI |
 | `API 404` | Wrong JUGGLER_API_URL | Verify backend is running on correct port |
 | Tool not found | MCP not in settings.json | Add config to `.claude/settings.json` or project `.mcp.json` |
 

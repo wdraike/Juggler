@@ -2,7 +2,7 @@
 type: mcp-server
 service: juggler
 status: active
-last_updated: 2026-05-31
+last_updated: 2026-07-05
 tags:
   - type/mcp-server
   - service/juggler
@@ -13,7 +13,7 @@ tags:
 
 # Juggler MCP Server
 
-**Last Updated:** 2026-05-31
+**Last Updated:** 2026-07-05
 
 Juggler exposes its task and scheduling capabilities as an MCP server. Two transport modes exist for different client types.
 
@@ -24,17 +24,19 @@ Juggler exposes its task and scheduling capabilities as an MCP server. Two trans
 ### Embedded Streamable HTTP (primary — for MCP-over-HTTP clients)
 
 **Endpoint:** `POST /mcp`
-**Auth:** Bearer JWT (issued by auth-service)
-**Implementation:** `src/mcp/transport.js` + `src/mcp/server.js`
+**Auth:** Bearer token — either a JWT issued by auth-service, **or** an auth-service-minted MCP API key (`key_type='mcp'`)
+**Implementation:** `src/mcp/transport.js` + `src/mcp/server.js` + `src/mcp/api-key-auth.js`
 
 Stateless — each `POST /mcp` creates a fresh `McpServer` instance scoped to the authenticated user, then tears it down after the response. No session state is maintained. Works correctly across multiple Cloud Run instances.
+
+The bearer token is authenticated by the shared `authenticateMcpRequest()` (`auth-client/mcp-auth.js`): JWTs (3 dot-separated segments) are verified via JWKS as before; anything else is handed to `api-key-auth.js`'s `apiKeyValidator`, which POSTs the raw key to auth-service's `POST /internal/api-keys/introspect` (service-to-service, ServiceJWT-authenticated) and, on `{valid:true, key_type:'mcp'}`, checks payment-service's `GET /internal/users/:userId/entitlement?product=juggler` **fresh on every request** (no caching) before granting access. Either failure (invalid/expired/wrong-type key, or no entitlement) is fail-closed — `401`.
 
 Dev mode: token `dev-token` is accepted without verification when `NODE_ENV=development`.
 
 ### stdio (for Claude Code / ClimbRS)
 
 **Entry point:** `juggler-mcp/index.js`
-**Auth:** JWT stored in `~/.juggler-mcp-token` or `JUGGLER_TOKEN` env var
+**Auth:** Token stored in `~/.juggler-mcp-token` or `JUGGLER_TOKEN` env var — now an auth-service-minted MCP API key (see `docs/mcp/juggler-mcp.md`); the same token is sent as the Bearer credential to the embedded HTTP server above, so it goes through the same API-key introspection + entitlement path.
 **Implementation:** Thin HTTP proxy — each tool call makes a REST API call to the juggler backend.
 
 ```bash
@@ -61,18 +63,29 @@ The server name comes from `src/service-identity.js` (`SERVICE_NAME`, overridabl
 
 ## Authentication & Authorization
 
-The embedded server authenticates via `auth-client/mcp-auth`:
+The embedded server authenticates via `auth-client/mcp-auth`'s `authenticateMcpRequest()`, which tries two branches:
 
-1. Extracts Bearer token from `Authorization` header
-2. Validates JWT against auth-service JWKS endpoint
-3. Auto-provisions a user record if the JWT is valid but the user doesn't exist locally
-4. Checks `plans.juggler` claim in JWT for active subscription
+**JWT branch** (token has 3 dot-separated segments):
+1. Validates JWT against auth-service's JWKS endpoint
+2. Auto-provisions a user record if the JWT is valid but the user doesn't exist locally
+3. Checks `plans.juggler` claim in JWT for active subscription — this is a JWT-claims-only check (no round-trip to payment-service)
 
-Plan check uses JWT claims directly (no round-trip to payment-service). If no plan claim is present, access is still granted — plan enforcement is route-level, not server-level.
+**API-key branch** (anything else, via `src/mcp/api-key-auth.js`'s `apiKeyValidator`):
+1. Introspects the raw key against auth-service's `POST /internal/api-keys/introspect` (service-to-service; rejects non-`mcp` or invalid/expired/revoked keys)
+2. Calls payment-service's `GET /internal/users/:userId/entitlement?product=juggler` for the resolved user — checked fresh on every request, no per-connection cache
+3. Synthesizes a `plans.juggler` claim so the shared `planCheck` (below) passes without a second entitlement round-trip
+
+Both branches run the same `planCheck`: if `plans.juggler` is not truthy, the request is rejected with `402 Active subscription required`. (Fixed 2026-07 — the API-key branch previously skipped this check entirely, a live entitlement-bypass bug; it now runs `planCheck` identically to the JWT branch.) A request with no active plan is rejected on both paths — this is server-level enforcement, not route-level.
 
 ---
 
 ## OAuth Discovery (for MCP clients that require it)
+
+**Superseded as the recommended path (brain:59595):** the MCP API key described above is now
+the recommended auth mechanism for juggler-mcp and ClimbRS. This OAuth discovery/redirect flow
+remains mounted for MCP clients that specifically require RFC 8414/9728 discovery and a full
+authorization-code exchange; see `auth-service/docs/api/oauth-mcp-flow.md` (marked
+legacy/deprecated) for the endpoint-level detail of the flow these routes proxy to.
 
 The backend exposes OAuth endpoints at:
 

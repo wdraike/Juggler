@@ -17,10 +17,12 @@ const API_URL = process.env.JUGGLER_API_URL || 'http://localhost:5002';
 const AUTH_INSTRUCTIONS = `Juggler MCP not authenticated.
 
 To connect:
-1) Open http://localhost:3002 and log in
-2) Open DevTools → Application → Local Storage → copy 'token'
-3) Save: echo TOKEN > ~/.juggler-mcp-token
-4) Reconnect MCP: /mcp`;
+1) Mint an MCP API key via auth-service's AccountSecurityPage UI (log in, then
+   Account Security → API Keys → create a key of type "mcp")
+2) Save: echo YOUR_KEY > ~/.juggler-mcp-token
+3) Reconnect MCP: /mcp
+
+(Or set JUGGLER_TOKEN to the key instead of writing the file.)`;
 
 function getToken() {
   if (process.env.JUGGLER_TOKEN) return process.env.JUGGLER_TOKEN;

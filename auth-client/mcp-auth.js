@@ -188,8 +188,26 @@ async function authenticateMcpRequest(token, db, options) {
   // Fall back to API key if validator provided
   if (options.apiKeyValidator) {
     try {
-      return await options.apiKeyValidator(token);
+      var apiKeyResult = await options.apiKeyValidator(token);
+      if (apiKeyResult) {
+        // Plan check if configured — same enforcement as the JWT branch above.
+        if (options.planCheck) {
+          var apiKeyPlanResult = await options.planCheck(apiKeyResult);
+          if (apiKeyPlanResult && !apiKeyPlanResult.hasActivePlan) {
+            var planErr = new Error('Active subscription required');
+            planErr.status = 402;
+            throw planErr;
+          }
+          if (apiKeyPlanResult) {
+            apiKeyResult.planId = apiKeyPlanResult.planId;
+            apiKeyResult.planFeatures = apiKeyPlanResult.features;
+          }
+        }
+      }
+      return apiKeyResult;
     } catch (e) {
+      // Re-throw plan check errors (402); swallow API key validation failures
+      if (e.status === 402) throw e;
       // API key validation failed
     }
   }
