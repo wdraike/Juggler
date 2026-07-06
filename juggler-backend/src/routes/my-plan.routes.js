@@ -26,7 +26,9 @@ async function getPlanName(planId) {
       const plan = data.plans?.find(p => p.planId === planId);
       return plan?.name || planId;
     }
-  } catch { /* empty */}
+  } catch (err) {
+    logger.warn(`[getPlanName] payment-service plan-name lookup failed for planId=${planId}, falling back to raw planId:`, err.message);
+  }
   return planId;
 }
 
@@ -163,3 +165,4 @@ router.get('/', authenticateJWT, resolvePlanFeatures, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.getPlanName = getPlanName; // exported for unit testing (999.1194)
