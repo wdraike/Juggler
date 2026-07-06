@@ -624,15 +624,22 @@ describe('Phase-21: Status columns validation', () => {
     });
 
     test('TERMINAL_STATUSES contains exactly the expected values', () => {
-      expect(TERMINAL_STATUSES).toEqual(['done', 'cancel', 'skip', 'pause', 'missed']);
+      expect(TERMINAL_STATUSES).toEqual(['done', 'cancel', 'cancelled', 'skip', 'pause', 'missed']);
     });
 
     test('ACTIVE_STATUSES contains exactly the expected values', () => {
       expect(ACTIVE_STATUSES).toEqual(['', 'wip']);
     });
 
-    test('TASK_STATUSES equals STATUS_OPTIONS', () => {
-      expect(TASK_STATUSES).toEqual(STATUS_OPTIONS);
+    // 999.1294: 'cancelled' is a valid, terminal status (like 'missed') but is
+    // system-set, not user-toggleable — so it's in TASK_STATUSES but deliberately
+    // excluded from STATUS_OPTIONS. TASK_STATUSES == STATUS_OPTIONS no longer holds.
+    test('STATUS_OPTIONS is a subset of TASK_STATUSES (user-toggleable ⊆ all valid)', () => {
+      STATUS_OPTIONS.forEach((s) => expect(TASK_STATUSES).toContain(s));
+    });
+
+    test("TASK_STATUSES' only addition over STATUS_OPTIONS is 'cancelled' (system-set, not user-toggleable)", () => {
+      expect(TASK_STATUSES.filter((s) => !STATUS_OPTIONS.includes(s))).toEqual(['cancelled']);
     });
   });
 
@@ -654,14 +661,14 @@ describe('Phase-21: Status columns validation', () => {
     // — API users cannot directly set disabled/archived/restored/pending.
 
     test('shared TaskStatus values are a subset of DB task_masters enum', () => {
-      const dbTaskMasterStatuses = ['', 'wip', 'done', 'cancel', 'skip', 'pause', 'disabled', 'missed', 'pending', 'archived', 'restored'];
+      const dbTaskMasterStatuses = ['', 'wip', 'done', 'cancel', 'skip', 'pause', 'disabled', 'missed', 'pending', 'archived', 'restored', 'cancelled'];
       TASK_STATUSES.forEach((s) => {
         expect(dbTaskMasterStatuses).toContain(s);
       });
     });
 
     test('shared TaskStatus values are a subset of DB task_instances enum', () => {
-      const dbTaskInstanceStatuses = ['', 'wip', 'done', 'cancel', 'skip', 'pause', 'disabled', 'missed', 'pending', 'archived', 'restored'];
+      const dbTaskInstanceStatuses = ['', 'wip', 'done', 'cancel', 'skip', 'pause', 'disabled', 'missed', 'pending', 'archived', 'restored', 'cancelled'];
       TASK_STATUSES.forEach((s) => {
         expect(dbTaskInstanceStatuses).toContain(s);
       });

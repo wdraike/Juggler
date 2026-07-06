@@ -36,12 +36,12 @@ describe('state/constants — juggler-cal-history Plan B', () => {
     expect(STATUS_OPTIONS.find((s) => s.value === 'cancelled')).toBeUndefined();
   });
 
-  test('isTerminalStatus(missed) === false (removed status)', () => {
-    expect(isTerminalStatus('missed')).toBe(false);
+  test('isTerminalStatus(missed) === true (999.844: system-applied terminal status)', () => {
+    expect(isTerminalStatus('missed')).toBe(true);
   });
 
   test('isTerminalStatus preserves existing terminal classifications', () => {
-    ['done', 'cancel', 'skip', 'pause'].forEach((s) => {
+    ['done', 'cancel', 'cancelled', 'skip', 'pause', 'missed'].forEach((s) => {
       expect(isTerminalStatus(s)).toBe(true);
     });
   });
@@ -55,7 +55,7 @@ describe('state/constants — juggler-cal-history Plan B', () => {
   });
 
   test('isTerminalStatus returns false for non-terminal values', () => {
-    ['', 'disabled', 'missed'].forEach((s) => {
+    ['', 'disabled'].forEach((s) => {
       expect(isTerminalStatus(s)).toBe(false);
     });
   });

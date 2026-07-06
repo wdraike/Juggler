@@ -72,7 +72,12 @@ describe('TaskStatus — closed enum (characterized from STATUS_OPTIONS)', () =>
   );
 
   test('isTerminal matches lib TERMINAL_STATUSES exactly', () => {
-    TERMINAL_STATUSES.forEach((s) => expect(new TaskStatus(s).isTerminal()).toBe(true));
+    // Only user-selectable (STATUS_OPTIONS) statuses can be constructed into a
+    // TaskStatus VO. System-only terminal statuses (cancelled, missed) aren't in
+    // STATUS_OPTIONS, so they're covered by the direct array-equality check above
+    // ('canonical set EQUALS lib STATUS_OPTIONS') instead of via construction here.
+    TERMINAL_STATUSES.filter((s) => STATUS_OPTIONS.includes(s))
+      .forEach((s) => expect(new TaskStatus(s).isTerminal()).toBe(true));
     [''].forEach((s) => expect(new TaskStatus(s).isTerminal()).toBe(false));
   });
 });

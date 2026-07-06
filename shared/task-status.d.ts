@@ -6,6 +6,7 @@ declare const TaskStatus: {
     readonly EMPTY: '';
     readonly DONE: 'done';
     readonly CANCEL: 'cancel';
+    readonly CANCELLED: 'cancelled';
     readonly SKIP: 'skip';
     readonly PAUSE: 'pause';
 };
@@ -14,6 +15,7 @@ declare const TASK_STATUSES: readonly [
     '',
     'done',
     'cancel',
+    'cancelled',
     'skip',
     'pause'
 ];
@@ -21,8 +23,10 @@ declare const TASK_STATUSES: readonly [
 declare const TERMINAL_STATUSES: readonly [
     'done',
     'cancel',
+    'cancelled',
     'skip',
-    'pause'
+    'pause',
+    'missed'
 ];
 
 declare const ACTIVE_STATUSES: readonly [''];
