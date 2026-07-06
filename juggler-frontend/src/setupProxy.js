@@ -1,11 +1,12 @@
 const { createProxyMiddleware } = require('http-proxy-middleware');
+const { services } = require('juggler-shared/proxy-config');
 
 module.exports = function(app) {
   // Proxy feedback routes to bug-reporter-service (must be before generic /api proxy)
   app.use(
     '/api/feedback',
     createProxyMiddleware({
-      target: 'http://localhost:5030',
+      target: services.bugs.backend,
       changeOrigin: true
     })
   );
@@ -13,7 +14,7 @@ module.exports = function(app) {
   app.use(
     '/api',
     createProxyMiddleware({
-      target: 'http://localhost:5002',
+      target: services.juggler.backend,
       changeOrigin: true
     })
   );
@@ -21,7 +22,7 @@ module.exports = function(app) {
   app.use(
     '/health',
     createProxyMiddleware({
-      target: 'http://localhost:5002',
+      target: services.juggler.backend,
       changeOrigin: true
     })
   );

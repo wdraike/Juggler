@@ -1,15 +1,16 @@
+/* global window */
 /**
  * Service URL Resolution — Shared across all Raike frontends & backends
  *
- * Detects the environment (localhost, localdev, production) and resolves
- * all service URLs automatically. Single source of truth for the entire
- * platform — no hardcoded URLs needed in app code.
+ * Detects the environment (localhost, localdev, production, ci-test) and
+ * resolves all service URLs automatically. Single source of truth for the
+ * entire platform — no hardcoded URLs needed in app code.
  *
  * Frontend usage (browser — detects via window.location.hostname):
- *   const { authServiceUrl, billingFrontendUrl } = require('./proxy-config');
+ *   const { authServiceUrl, billingFrontendUrl } = require('juggler-shared/proxy-config');
  *
  * Backend usage (Node.js — detects via RAIKE_ENV or individual env vars):
- *   const { services } = require('./proxy-config');
+ *   const { services } = require('../../shared/proxy-config');
  *   const paymentUrl = services.billing.backend;
  */
 
@@ -49,6 +50,7 @@ const ENVIRONMENTS = {
       resume:  { frontend: 'http://localhost:3000', backend: 'http://localhost:5001' },
       billing: { frontend: 'http://localhost:3003', backend: 'http://localhost:5020' },
       bugs:    { frontend: 'http://localhost:3004', backend: 'http://localhost:5030' },
+      landing: { frontend: 'http://localhost:3005' },
     },
     cookieDomain: 'localhost',
     homeUrl: 'http://localhost:3001',
@@ -58,16 +60,50 @@ const ENVIRONMENTS = {
 // ─── Environment detection ──────────────────────────────────────────────
 
 function detect() {
-  // Browser: detect from hostname (must use bracket notation to avoid CRA inlining)
-  var w = typeof window !== 'undefined' ? window : null;
-  var hostname = w && w.location ? w.location.hostname : '';
+  // Browser: detect from hostname
+  if (typeof window !== 'undefined' && window.location) {
+    var hostname = window.location.hostname;
 
-  // Check most-specific first (localdev before raikegroup.com)
-  if (hostname.indexOf('.localdev.raikegroup.com') >= 0) {
-    return { name: 'localdev', ...ENVIRONMENTS.localdev };
+    // Check most-specific first (localdev before raikegroup.com)
+    if (hostname.indexOf('.localdev.raikegroup.com') >= 0) {
+      return { name: 'localdev', ...ENVIRONMENTS.localdev };
+    }
+    if (hostname.indexOf('.raikegroup.com') >= 0) {
+      return { name: 'production', ...ENVIRONMENTS.production };
+    }
+
+    // CI test/uat env — Caddy reverse proxy on .raike.local domains.
+    // Caddy routes by subdomain on the same port (e.g. :8443), so each
+    // service URL is the current origin with the subdomain swapped.
+    if (hostname.indexOf('.raike.local') >= 0) {
+      var protocol = window.location.protocol + '//';
+      var host = window.location.host; // includes port
+      var baseUrl = protocol + host;
+      return {
+        name: 'ci-test',
+        suffix: '.raike.local',
+        services: {
+          auth:    { url: baseUrl.replace(/\/\/[^.]+\./, '//auth.') },
+          juggler: { url: baseUrl.replace(/\/\/[^.]+\./, '//juggler.') },
+          resume:  { url: baseUrl.replace(/\/\/[^.]+\./, '//ro.') },
+          billing: { url: baseUrl.replace(/\/\/[^.]+\./, '//payment.') },
+          bugs:    { url: baseUrl.replace(/\/\/[^.]+\./, '//bugs.') },
+        },
+        cookieDomain: '.raike.local',
+        homeUrl: baseUrl.replace(/\/\/[^.]+\./, '//auth.'),
+      };
+    }
   }
-  if (hostname.indexOf('.raikegroup.com') >= 0) {
-    return { name: 'production', ...ENVIRONMENTS.production };
+
+  // Node.js backend: detect from RAIKE_ENV or NODE_ENV
+  if (typeof process !== 'undefined' && process.env) {
+    var envName = process.env.RAIKE_ENV;
+    if (envName && ENVIRONMENTS[envName]) {
+      return { name: envName, ...ENVIRONMENTS[envName] };
+    }
+    if (process.env.NODE_ENV === 'production') {
+      return { name: 'production', ...ENVIRONMENTS.production };
+    }
   }
 
   return { name: 'localhost', ...ENVIRONMENTS.localhost };
@@ -77,9 +113,9 @@ const env = detect();
 const isProxied = env.name !== 'localhost';
 
 // ─── Service URL resolver ───────────────────────────────────────────────
-// In proxied environments (localdev/production), frontend and backend share
-// the same URL — Caddy routes /api/* to the backend, everything else to frontend.
-// On localhost, they're separate ports.
+// In proxied environments (localdev/production/ci-test), frontend and
+// backend share the same URL — Caddy routes /api/* to the backend,
+// everything else to frontend. On localhost, they're separate ports.
 
 function resolveService(name) {
   const svc = env.services[name];
@@ -157,8 +193,11 @@ const appId = (() => {
 
 // ─── Exports ────────────────────────────────────────────────────────────
 
-export {
+module.exports = {
   services,
+  environment: env.name,
+  cookieDomain: env.cookieDomain,
+  homeUrl: env.homeUrl,
   ENVIRONMENTS,
   productLabelToServiceKey,
   appId,
@@ -169,7 +208,3 @@ export {
   googleAuthorizedOrigins,
   isGoogleOrigin,
 };
-
-export const environment = env.name;
-export const cookieDomain = env.cookieDomain;
-export const homeUrl = env.homeUrl;

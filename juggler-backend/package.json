@@ -10,6 +10,7 @@
     "migrate:rollback": "node scripts/migrate-guard.js migrate:rollback",
     "migrate:status": "npx knex migrate:status",
     "db:validate": "node scripts/db-validate.js",
+    "pretest": "npm run verify-sync",
     "test": "jest --forceExit --runInBand",
     "test:adapter": "node scripts/test-adapter.js",
     "verify-sync": "node ../shared/verify-sync.js",

@@ -6,7 +6,6 @@
   "exports": {
     ".": "./auth-client.js",
     "./mcp-auth": "./mcp-auth.js",
-    "./proxy-config": "./proxy-config.js",
     "./service-auth": "./service-auth.js"
   },
   "dependencies": {
