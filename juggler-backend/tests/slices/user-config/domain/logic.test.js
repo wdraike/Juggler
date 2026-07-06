@@ -336,11 +336,11 @@ describe('entitlement.decideResolvePlan (== resolvePlanFeatures branches, H7-6)'
     expect(d.planFeatures).toBeNull();
   });
 
-  test('free fallback: planId not in catalog but free exists → planId="free" + free features', () => {
+  test('unknown paid planId not in catalog → 503 unavailable (per 999.891, no silent free-downgrade)', () => {
     const d = entitlement.decideResolvePlan('plan-unknown', CATALOG);
-    expect(d.outcome).toBe('resolve');
-    expect(d.planId).toBe('free');
-    expect(d.planFeatures).toEqual({ limits: { active_tasks: 5 } });
+    expect(d.outcome).toBe('unavailable');
+    expect(d.status).toBe(503);
+    expect(d.planFeatures).toBeNull();
   });
 
   test('unavailable: planId not in catalog AND no free → 503', () => {

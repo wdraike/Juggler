@@ -80,14 +80,14 @@ describe('CheckEntitlement (== resolvePlanFeatures)', () => {
     expect(res.body.error).toMatch(/Plan configuration unavailable/);
   });
 
-  test('plan missing from catalog but a "free" plan exists → falls back to free', async () => {
+  test('plan missing from catalog → 503 (per 999.891, no silent free-downgrade)', async () => {
     var entitlement = new MockEntitlementAdapter({
       catalogSource: function () { return [{ planId: 'free', features: { limits: { active_tasks: 1 } } }]; },
       activePlansSource: function () { return { juggler: 'plan-unknown' }; }
     });
     var res = await new App.CheckEntitlement({ entitlement: entitlement }).execute({ user: { id: 'u1' } });
-    expect(res.status).toBe(200);
-    expect(res.entitlement.planId).toBe('free');
+    expect(res.status).toBe(503);
+    expect(res.body.error).toMatch(/Plan configuration unavailable/);
   });
 
   test('no user id → 401 Authentication required', async () => {

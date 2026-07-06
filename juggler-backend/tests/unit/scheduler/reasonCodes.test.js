@@ -86,10 +86,11 @@ describe('REASON_CODES — enum string values (output contract)', () => {
     expect(REASON_CODES.TPC_BUDGET).toBe('tpc_budget');
   });
 
-  test('REASON_CODES contains exactly 10 entries (no undocumented codes)', () => {
+  test('REASON_CODES contains exactly 12 entries (no undocumented codes)', () => {
     // Guards against silent addition of undocumented codes without updating REQUIREMENTS.md.
     // If a new code is legitimately added: update REQUIREMENTS.md, SPEC, and increment this count.
-    expect(Object.keys(REASON_CODES).length).toBe(10);
+    // 10 → 12: DEP_BLOCKED (999.1084) + SPACING_BLOCKED (999.874) added.
+    expect(Object.keys(REASON_CODES).length).toBe(12);
   });
 
   test('REASON_CODES is frozen (immutable — cannot be monkey-patched at runtime)', () => {

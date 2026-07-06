@@ -27,7 +27,11 @@ const TERMINAL_STATUSES = Object.freeze([
   TaskStatus.DONE,
   TaskStatus.CANCEL,
   TaskStatus.SKIP,
-  TaskStatus.PAUSE
+  TaskStatus.PAUSE,
+  'missed' // ponytail: not in TaskStatus enum (retired as user-settable by 999.1044),
+           // but the scheduler still auto-misses past recurring instances and the DB
+           // CHECK constraint lists it as terminal. Cal-sync must treat it as terminal
+           // so missed tasks get their calendar events cleaned up.
 ]);
 
 const ACTIVE_STATUSES = Object.freeze([

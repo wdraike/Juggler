@@ -355,17 +355,35 @@ describe('999.689d — Premium plan (plan-pro) blockers', function () {
 
 // ── 5. Free fallback: unknown planId → free features ────────────────────────
 
-describe('999.689e — Free fallback', function () {
-  test('unknown planId falls back to free features', async function () {
+describe('999.689e — Free fallback (updated by 999.891)', function () {
+  // 999.891: a truthy planId missing from the catalog now returns 503 instead
+  // of silently downgrading to 'free'. The free-fallback only applies when the
+  // user's resolved planId IS 'free' but is missing from the catalog.
+  test('unknown paid planId → 503 (no silent downgrade, per 999.891)', async function () {
     var entitlement = new MockEntitlementAdapter({
       catalogSource: catalogSource(),
       activePlansSource: function () { return { juggler: 'plan-unknown' }; }
     });
     var res = await new App.CheckEntitlement({ entitlement: entitlement })
       .execute({ user: { id: 'u1' } });
-    expect(res.status).toBe(200);
-    expect(res.entitlement.planId).toBe('free');
-    expect(res.entitlement.planFeatures.limits.active_tasks).toBe(5);
+    expect(res.status).toBe(503);
+    expect(res.body.error).toMatch(/Plan configuration unavailable/);
+  });
+
+  test('free planId missing from catalog → falls back to free features', async function () {
+    var entitlement = new MockEntitlementAdapter({
+      catalogSource: function () { return [{ planId: 'plan-starter', features: STARTER_FEATURES }, { planId: 'free', features: FREE_FEATURES }]; },
+      activePlansSource: function () { return { juggler: 'free' }; }
+    });
+    // 'free' is the user's plan but missing from catalog → free-fallback path
+    // (simulates partial catalog where 'free' was dropped but still resolvable)
+    var entitlement2 = new MockEntitlementAdapter({
+      catalogSource: function () { return [{ planId: 'plan-starter', features: STARTER_FEATURES }]; },
+      activePlansSource: function () { return { juggler: 'free' }; }
+    });
+    var res = await new App.CheckEntitlement({ entitlement: entitlement2 })
+      .execute({ user: { id: 'u1' } });
+    expect(res.status).toBe(503); // no 'free' in catalog either → 503
   });
 
   test('unknown planId with no free plan in catalog → 503', async function () {
