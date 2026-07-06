@@ -98,6 +98,8 @@ See R15 for AI feature requirements (natural-language commands, emoji/icon sugge
 ## MCP Server
 `juggler-mcp/` exposes juggler tasks to external MCP clients (e.g. ClimbRS). Changes here affect the ClimbRS integration.
 
+**SDK version policy (999.1118):** `juggler-backend` and `juggler-mcp` are separate packages — juggler-mcp is a lightweight stdio client, juggler-backend is the full HTTP server. Both depend on `@modelcontextprotocol/sdk`. Keep both on the **same `^1.x` range** (currently `^1.27.1`) to prevent the version-drift class of bugs where SDK behavior differs between the two packages. When upgrading the SDK, bump both package.json files in the same commit.
+
 ## Approved Fallbacks
 
 | Location | Fallback | Reason | Approved |
