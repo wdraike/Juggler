@@ -5,7 +5,11 @@
  * Falls back to X-Internal-Key if service-auth not initialized.
  */
 
-const { getProductId, PRODUCT_LABEL } = require('../middleware/plan-features.middleware');
+// ponytail: PRODUCT_LABEL from service-identity (not plan-features.middleware)
+// breaks the layering inversion (lib -> middleware). resolveProductId is injected
+// by the facade (999.1194) so usage-reporter no longer reaches up into the middleware.
+const { PRODUCT_LABEL } = require('../service-identity');
+const { paymentFetch } = require('./payment-service-client');
 const { libUsageReporterLogger } = require('./logger');
 const FLUSH_INTERVAL = 30000;
 const FLUSH_SIZE = 50;
@@ -13,6 +17,20 @@ const FLUSH_SIZE = 50;
 const buffer = [];
 let flushTimer = null;
 let _serviceAuthReady = false;
+
+// Injected by the facade (src/slices/user-config/facade.js) — delegates to the
+// singleton PaymentServiceEntitlementAdapter.resolveProductId. Falls back to
+// requiring plan-features.middleware.getProductId for backward compat if no
+// injector has run (so existing callers that don't wire the facade still work).
+let _resolveProductId = null;
+function getProductId() {
+  if (_resolveProductId) return _resolveProductId();
+  // ponytail: lazy require preserves backward compat — the facade injects the
+  // adapter-based resolver, but a standalone require (no facade wiring) still works.
+  try { return require('../middleware/plan-features.middleware').getProductId(); }
+  catch { return Promise.resolve(null); }
+}
+function setProductIdResolver(fn) { _resolveProductId = fn; }
 
 try {
 const { initServiceAuth } = require('../../vendor/service-auth');
@@ -54,17 +72,15 @@ async function flush() {
         body: { productId: await getProductId() || PRODUCT_LABEL, events }
       });
     } else {
-      const PAYMENT_URL = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
       const INTERNAL_KEY = process.env.INTERNAL_SERVICE_KEY;
       if (!INTERNAL_KEY) return;
-      await fetch(`${PAYMENT_URL}/api/usage/report`, {
+      await paymentFetch('/api/usage/report', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-Internal-Key': INTERNAL_KEY
         },
-        body: JSON.stringify({ productId: await getProductId() || PRODUCT_LABEL, events }),
-        signal: AbortSignal.timeout(30000)
+        body: JSON.stringify({ productId: await getProductId() || PRODUCT_LABEL, events })
       });
     }
   } catch (err) {
@@ -88,4 +104,4 @@ function _stopForTests() {
   try { process.removeListener('beforeExit', flush); } catch (e) { /* no-op */ }
 }
 
-module.exports = { reportUsage, flush, _stopForTests };
+module.exports = { reportUsage, flush, _stopForTests, setProductIdResolver };

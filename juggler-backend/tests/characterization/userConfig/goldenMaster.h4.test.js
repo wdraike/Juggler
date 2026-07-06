@@ -199,7 +199,8 @@ jest.mock('../../../src/lib/task-write-queue', () => ({
 
 // ─── usage-reporter mock ─────────────────────────────────────────────────────
 jest.mock('../../../src/lib/usage-reporter', () => ({
-  reportUsage: jest.fn()
+  reportUsage: jest.fn(),
+  setProductIdResolver: jest.fn()
 }));
 
 // ─── logger mock ─────────────────────────────────────────────────────────────
@@ -1867,25 +1868,25 @@ describe('Surface 7 — plan-features: slug-keying (H7), fallback (H13), cache T
     expect(userPlanFetchesTotal).toBeGreaterThanOrEqual(2);
   });
 
-  // H13: PAYMENT_SERVICE_URL fallback
-  test('H13-1: getProductId uses PAYMENT_SERVICE_URL || "http://localhost:5020"', () => {
+  // H13: PAYMENT_SERVICE_URL fallback — now in payment-service-client.js (999.1194 consolidation)
+  test('H13-1: payment-service-client uses PAYMENT_SERVICE_URL || "http://localhost:5020"', () => {
     const src = require('fs').readFileSync(
-      require('path').join(__dirname, '../../../src/middleware/plan-features.middleware.js'),
+      require('path').join(__dirname, '../../../src/lib/payment-service-client.js'),
       'utf8'
     );
-    // The pre-approved fallback must be preserved verbatim
+    // The pre-approved fallback must be preserved verbatim in the single owner
     expect(src).toContain("process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020'");
   });
 
-  test('H13-2: fetchPlanFeatures uses PAYMENT_SERVICE_URL || "http://localhost:5020"', () => {
+  test('H13-2: plan-features.middleware delegates to paymentFetch (no inline PAYMENT_SERVICE_URL)', () => {
     const src = require('fs').readFileSync(
       require('path').join(__dirname, '../../../src/middleware/plan-features.middleware.js'),
       'utf8'
     );
-    // Occurrences expected (getProductId, fetchPlanFeatures). The 3rd (getUserPlanId)
-    // was removed with the vestigial dead user-plan cache chain (leg jug-h4-vestigial-plancache).
-    const count = (src.match(/process\.env\.PAYMENT_SERVICE_URL \|\| 'http:\/\/localhost:5020'/g) || []).length;
-    expect(count).toBeGreaterThanOrEqual(2);
+    // 999.1194: the inline PAYMENT_SERVICE_URL fallbacks were moved to payment-service-client.js.
+    // plan-features.middleware now uses paymentFetch from that module.
+    expect(src).toContain("require('../lib/payment-service-client')");
+    expect(src).not.toContain("process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020'");
   });
 
   // H7: product discovery URL shape — /internal/products/${PRODUCT_LABEL} (slug)
@@ -1916,11 +1917,12 @@ describe('Surface 7 — plan-features: slug-keying (H7), fallback (H13), cache T
     } catch (_) { /* isolation */ }
 
     // Verify via source: the URL template uses PRODUCT_LABEL (= 'juggler')
+    // 999.1194: now via paymentFetch with a relative path that payment-service-client prepends
     const src = require('fs').readFileSync(
       require('path').join(__dirname, '../../../src/middleware/plan-features.middleware.js'),
       'utf8'
     );
-    expect(src).toContain('`${paymentUrl}/internal/products/${PRODUCT_LABEL}`');
+    expect(src).toContain('/internal/products/${PRODUCT_LABEL}');
     global.fetch = origFetch;
   });
 
@@ -2443,16 +2445,15 @@ describe('Cross-cutting invariants (H11, H13)', () => {
     }
   });
 
-  test('H13-verified: PAYMENT_SERVICE_URL fallback appears 2 times (live: getProductId + fetchPlanFeatures)', () => {
-    // Was 3 before leg jug-h4-vestigial-plancache; the 3rd occurrence lived in the
-    // now-removed dead getUserPlanId. The 2 live fallbacks (getProductId, fetchPlanFeatures)
-    // must be preserved verbatim.
+  test('H13-verified: PAYMENT_SERVICE_URL fallback lives in payment-service-client.js (999.1194)', () => {
+    // 999.1194: the fallback was consolidated from 2 inline copies in plan-features.middleware
+    // into the single payment-service-client.js owner. Verify it's there exactly once.
     const src = require('fs').readFileSync(
-      require('path').join(__dirname, '../../../src/middleware/plan-features.middleware.js'),
+      require('path').join(__dirname, '../../../src/lib/payment-service-client.js'),
       'utf8'
     );
     const matches = src.match(/process\.env\.PAYMENT_SERVICE_URL \|\| 'http:\/\/localhost:5020'/g) || [];
-    expect(matches.length).toBeGreaterThanOrEqual(2);
+    expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 
   test('H7-final: feature-catalog PRODUCT_ID field uses PRODUCT_LABEL (slug "juggler")', async () => {

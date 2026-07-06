@@ -7,6 +7,7 @@
 const router = require('express').Router();
 const { authenticateJWT } = require('../middleware/jwt-auth');
 const { resolvePlanFeatures, getProductId, PRODUCT_LABEL } = require('../middleware/plan-features.middleware');
+const { paymentFetch } = require('../lib/payment-service-client');
 // W5 (juggler-hex-h2): route through lib/db's shared singleton (single pool).
 const db = require('../lib/db').getDefaultDb();
 const { countActiveTasks, countRecurringTemplates, countProjects, countLocations, countScheduleTemplates } = require('../middleware/entity-limits');
@@ -16,9 +17,8 @@ const logger = createLogger('my-plan.routes');
 // Fetch plan name from payment service
 async function getPlanName(planId) {
   try {
-    const paymentUrl = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
     const productId = await getProductId() || PRODUCT_LABEL;
-    const res = await fetch(`${paymentUrl}/api/plans?product=${productId}&include_all=true`, {
+    const res = await paymentFetch(`/api/plans?product=${productId}&include_all=true`, {
       signal: AbortSignal.timeout(30000)
     });
     if (res.ok) {
@@ -123,12 +123,10 @@ router.get('/', authenticateJWT, resolvePlanFeatures, async (req, res) => {
     let subscriptionStatus = null;
     let trialEnd = null;
     try {
-      const paymentUrl = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
       const internalKey = process.env.INTERNAL_SERVICE_KEY || '';
       const productId = await getProductId() || PRODUCT_LABEL;
-      const subRes = await fetch(`${paymentUrl}/internal/users/${userId}/subscriptions?product=${productId}`, {
-        headers: { 'X-Internal-Key': internalKey, 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(30000)
+      const subRes = await paymentFetch(`/internal/users/${userId}/subscriptions?product=${productId}`, {
+        headers: { 'X-Internal-Key': internalKey, 'Content-Type': 'application/json' }
       });
       if (subRes.ok) {
         const subData = await subRes.json();
@@ -138,7 +136,11 @@ router.get('/', authenticateJWT, resolvePlanFeatures, async (req, res) => {
           trialEnd = sub.trial_end;
         }
       }
-    } catch { /* empty */}
+    } catch (err) {
+      // 999.1194: surface the failure — previously a silent empty catch masked
+      // payment-service outages (user saw null subscription status, no log).
+      logger.warn('[my-plan] subscription-status lookup failed:', err.message);
+    }
 
     // Count disabled items so the frontend can show a badge/notification
     let disabledCount = 0;

@@ -9,7 +9,7 @@
  * value_order: higher = more prominent in plan cards (100+ headline, 50-99 important, 1-49 secondary)
  */
 
-const { PRODUCT_LABEL } = require('../middleware/plan-features.middleware');
+const { PRODUCT_LABEL } = require('../service-identity');
 
 const CATALOG = {
   product_id: PRODUCT_LABEL, // Resolved to UUID at request time

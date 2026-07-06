@@ -15,6 +15,7 @@ const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('plan-features');
 
 const { PRODUCT_LABEL } = require('../service-identity');
+const { paymentFetch, paymentUrl } = require('../lib/payment-service-client');
 const _proxyConfig = require('../proxy-config');
 const CATALOG_CACHE_TTL_MS = 5 * 60 * 1000;
 const USER_PLAN_CACHE_TTL_MS = 2 * 60 * 1000;
@@ -27,13 +28,11 @@ async function getProductId() {
   if (_productId) return _productId;
   if (_productDiscoveryPromise) return _productDiscoveryPromise;
 
+  const internalKey = process.env.INTERNAL_SERVICE_KEY || '';
   _productDiscoveryPromise = (async () => {
-    const paymentUrl = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
-    const internalKey = process.env.INTERNAL_SERVICE_KEY || '';
     try {
-      const res = await fetch(`${paymentUrl}/internal/products/${PRODUCT_LABEL}`, {
-        headers: { 'X-Internal-Key': internalKey, 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(30000)
+      const res = await paymentFetch(`/internal/products/${PRODUCT_LABEL}`, {
+        headers: { 'X-Internal-Key': internalKey, 'Content-Type': 'application/json' }
       });
       if (!res.ok) throw new Error(`Product discovery failed (${res.status})`);
       const data = await res.json();
@@ -56,12 +55,10 @@ let _cacheTimestamp = 0;
 let _fetchPromise = null;
 
 async function fetchPlanFeatures() {
-  const paymentUrl = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
   const productId = await getProductId();
   const filter = productId ? `?product=${productId}` : `?product=${PRODUCT_LABEL}`;
-  const response = await fetch(`${paymentUrl}/api/plans${filter}&include_all=true`, {
-    headers: { 'Content-Type': 'application/json' },
-    signal: AbortSignal.timeout(30000)
+  const response = await paymentFetch(`/api/plans${filter}&include_all=true`, {
+    headers: { 'Content-Type': 'application/json' }
   });
 
   if (!response.ok) throw new Error(`Payment service returned ${response.status}`);

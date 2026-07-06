@@ -299,6 +299,9 @@ function enforceDowngradeLimits(userId, planFeatures) {
 // shape (Surface-6 mocks src/db). These are private to feature-gate.js, so the
 // facade re-derives them over the same getDb()/usage-reporter the legacy used.
 var usageReporter = require('../../lib/usage-reporter');
+// 999.1194: inject the adapter-based resolveProductId so usage-reporter no longer
+// reaches up into plan-features.middleware (layering inversion fix).
+usageReporter.setProductIdResolver(function () { return _entitlement.resolveProductId(); });
 function logFeatureEvent(reqOrUserId, featureKey, eventType, value) {
   var userId = typeof reqOrUserId === 'object' ? (reqOrUserId.user && reqOrUserId.user.id) : reqOrUserId;
   var planId = typeof reqOrUserId === 'object' ? reqOrUserId.planId : 'free';

@@ -178,7 +178,7 @@ describe('B1 — REGRESSION (real facade): plan-catalog cache split-brain after 
         };
       });
       jest.mock('../../../../src/lib/usage-reporter', function () {
-        return { reportUsage: jest.fn() };
+        return { reportUsage: jest.fn(), setProductIdResolver: jest.fn() };
       });
       jest.mock('@raike/lib-logger', function () {
         var noop = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() };
@@ -308,7 +308,7 @@ describe('B1 — REGRESSION (real facade): plan-catalog cache split-brain after 
         };
       });
       jest.mock('../../../../src/lib/usage-reporter', function () {
-        return { reportUsage: jest.fn() };
+        return { reportUsage: jest.fn(), setProductIdResolver: jest.fn() };
       });
       jest.mock('@raike/lib-logger', function () {
         var noop = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() };
@@ -467,7 +467,7 @@ describe('B2 — REGRESSION (real facade): renameTasks passes updated_at as knex
       });
 
       jest.mock('../../../../src/lib/usage-reporter', function () {
-        return { reportUsage: jest.fn() };
+        return { reportUsage: jest.fn(), setProductIdResolver: jest.fn() };
       });
       jest.mock('@raike/lib-logger', function () {
         var noop = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() };
