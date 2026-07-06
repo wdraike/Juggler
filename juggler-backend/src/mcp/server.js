@@ -12,8 +12,11 @@ const { registerDataTools } = require('./tools/data');
  * Create an McpServer with all tools registered, scoped to a specific user.
  */
 function createMcpServerForUser(userId) {
+  // MCP-protocol display name — the product brand (StriveRS), not
+  // SERVICE_NAME (the internal engineering codename, 'juggler', used
+  // elsewhere for DB/service-auth/logging identity).
   const server = new McpServer({
-    name: require('../service-identity').SERVICE_NAME,
+    name: 'strivers',
     version: '1.0.0'
   });
 
