@@ -272,6 +272,32 @@ describe('PUT /api/locations', () => {
     expect(res.body.locations).toHaveLength(1);
   });
 
+  // zoe WARN-1 (999-1221 fix-loop): locationReplaceSchema's `.max(500)` upper
+  // bound (route-schemas.js) was a changed line with no test exercising the
+  // reject-when-over-500 branch — a mutation dropping `.max(500)` survived all
+  // prior tests, because facade.js's own locationsBodySchema max(50) cap ALSO
+  // rejects 501 items (200-at-route, 400-at-facade), masking the route-level
+  // regression under a status-only assertion. mockPlanFeatures.limits.locations
+  // stays -1 (unlimited, see beforeEach) so checkLocationLimit never blocks
+  // first. Asserting the route-layer message ('Validation failed', from
+  // validate.js) instead of the facade's distinct 'Invalid locations payload'
+  // proves THIS schema's own bound rejects the request before the facade is
+  // ever reached — self-verified: reverting locationReplaceSchema's
+  // `.max(500)` (leaving the wrapper shape intact) flips this assertion RED
+  // (message becomes 'Invalid locations payload'), confirming it is not
+  // tautological with the facade's redundant lower cap.
+  test('rejects locations array exceeding 500 items', async () => {
+    const locations = Array.from({ length: 501 }, (_, i) => ({ id: `loc-${i}`, name: `Location ${i}` }));
+
+    const res = await request(app)
+      .put('/api/locations')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+      .send({ locations });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Validation failed');
+  });
+
   test('returns 401 without auth token', async () => {
     const res = await request(app)
       .put('/api/locations')

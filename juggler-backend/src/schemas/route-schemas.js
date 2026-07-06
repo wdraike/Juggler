@@ -49,14 +49,18 @@ const projectReorderSchema = z.object({
 }).passthrough();
 
 // ── location.routes.js: replace all ─────────────────────────────────────────
-const locationReplaceSchema = z.array(
-  z.object({}).passthrough()
-).max(500);
+// Body is an object wrapper ({ locations: [...] }), mirroring facade.js:103
+// (locationsBodySchema) — not a bare array. See BUG-999.1221.
+const locationReplaceSchema = z.object({
+  locations: z.array(z.object({}).passthrough()).max(500),
+}).passthrough();
 
 // ── tool.routes.js: replace all ─────────────────────────────────────────────
-const toolReplaceSchema = z.array(
-  z.object({}).passthrough()
-).max(500);
+// Body is an object wrapper ({ tools: [...] }), mirroring facade.js:110
+// (toolsBodySchema) — not a bare array. See BUG-999.1221.
+const toolReplaceSchema = z.object({
+  tools: z.array(z.object({}).passthrough()).max(500),
+}).passthrough();
 
 // ── impersonation.routes.js: start (sensitive — admin-only) ─────────────────
 const impersonationStartSchema = z.object({
