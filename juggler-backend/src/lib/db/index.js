@@ -64,11 +64,25 @@ function getDefaultDb() {
   return defaultDb;
 }
 
+// ponytail: test-only reset so isolated-DB suites can bust the singleton cache
+// after setting process.env.DB_NAME. Without this, the first require('../../src/db')
+// in a maxWorkers:1 jest run permanently binds to whatever DB_NAME was set at that
+// moment — later files that override DB_NAME get the stale connection (999.1176).
+// Ceiling: none — production never calls this; it's behind the test-only export.
+function _resetForTests() {
+  if (defaultDb) {
+    try { defaultDb.destroy(); } catch (e) { /* no-op */ }
+  }
+  defaultDb = null;
+  defaultDbCached = false;
+}
+
 module.exports = {
   createKnex,
   withTransaction,
   TransactionContext,
   defaultPoolConfig,
   ENVIRONMENTS,
-  getDefaultDb
+  getDefaultDb,
+  _resetForTests
 };

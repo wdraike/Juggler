@@ -26,7 +26,21 @@ process.env.NODE_ENV = 'test';
 // the testbed-juggler-test-pollution class already hit once (2026-06-21).
 // Reassert unconditionally so this file's isolation always wins.
 process.env.DB_NAME = 'juggler_splitpart_test';
+process.env.DB_HOST = process.env.DB_HOST || '127.0.0.1';
+process.env.DB_PORT = process.env.DB_PORT || '3407';
+process.env.DB_USER = process.env.DB_USER || 'root';
+process.env.DB_PASSWORD = process.env.DB_PASSWORD || 'rootpass';
 
+// 999.1176: reset the db singleton cache so getDefaultDb() re-reads
+// process.env.DB_NAME on the next require. Without this, a prior test file's
+// require('../../src/db') permanently caches a connection to juggler_test
+// (from .env.test), and this file's DB_NAME override is silently ignored —
+// the test runs against the shared juggler_test and flakes when other
+// suites leave interfering state.
+var dbLib = require('../../src/lib/db');
+if (typeof dbLib._resetForTests === 'function') dbLib._resetForTests();
+
+var knexLib = require('knex');
 var db = require('../../src/db');
 var { runScheduleAndPersist } = require('../../src/scheduler/runSchedule');
 var { DEFAULT_TIME_BLOCKS, DEFAULT_TOOL_MATRIX } = require('../../src/scheduler/constants');
@@ -50,16 +64,48 @@ async function cleanup() {
   await db('users').where('id', USER_ID).del();
 }
 
+// 999.1176: self-provision the isolated DB (create + migrate) so the test
+// doesn't depend on juggler_splitpart_test being pre-created by globalSetup
+// (which only migrates juggler_test). Mirrors overdue-split-persistence-e3.test.js.
+async function ensureIsolatedDbProvisioned() {
+  var bootstrap = knexLib({
+    client: 'mysql2',
+    connection: {
+      host: process.env.DB_HOST,
+      port: Number(process.env.DB_PORT),
+      user: process.env.DB_USER,
+      password: process.env.DB_PASSWORD
+    }
+  });
+  try {
+    await bootstrap.raw('SELECT 1');
+  } catch (e) {
+    await bootstrap.destroy();
+    throw new Error('TEST-FR-001: test-bed MySQL not reachable at ' + process.env.DB_HOST + ':' + process.env.DB_PORT + '. Run: cd test-bed && make up');
+  }
+  await bootstrap.raw(
+    'CREATE DATABASE IF NOT EXISTS ?? CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci',
+    [process.env.DB_NAME]
+  );
+  await bootstrap.destroy();
+  await db.migrate.latest();
+}
+
 beforeAll(async () => {
-  try { await db.raw('SELECT 1'); dbAvailable = true; } catch (e) { dbAvailable = false; }
-  if (!dbAvailable) throw new Error('TEST-FR-001: test-bed DB not reachable. Run: cd test-bed && make up');
+  try { await ensureIsolatedDbProvisioned(); dbAvailable = true; } catch (e) { dbAvailable = false; throw e; }
   await cleanup();
   await db('users').insert({ id: USER_ID, email: 'splitpart@test.com', timezone: TZ, created_at: db.fn.now(), updated_at: db.fn.now() });
   await db('user_config').insert({ user_id: USER_ID, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) });
   await db('user_config').insert({ user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) });
 }, 20000);
 
-afterAll(async () => { if (dbAvailable) await cleanup(); await db.destroy(); });
+afterAll(async () => {
+  if (dbAvailable) await cleanup();
+  await db.destroy();
+  // 999.1176: reset the singleton so the next test file gets a fresh connection
+  // to whatever DB_NAME it sets, not our juggler_splitpart_test.
+  if (typeof dbLib._resetForTests === 'function') dbLib._resetForTests();
+});
 
 beforeEach(async () => {
   if (!dbAvailable) return;
