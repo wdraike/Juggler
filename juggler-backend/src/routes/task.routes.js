@@ -6,6 +6,7 @@ const { resolvePlanFeatures } = require('../middleware/plan-features.middleware'
 const { checkTaskOrRecurringLimit, checkBatchTaskLimits } = require('../middleware/entity-limits');
 const { validate } = require('../middleware/validate');
 const { taskCreateSchema, taskUpdateSchema } = require('../schemas/task.schema');
+const { batchCreateRouteSchema, batchUpdateRouteSchema, taskStatusRouteSchema } = require('../schemas/route-schemas');
 // 999.950: confirmed — taskCreateSchema and taskUpdateSchema are applied via validate()
 // on POST (line 68) and PUT (line 75) routes respectively.
 const aiEnrichment = require('../slices/ai-enrichment/facade');
@@ -68,9 +69,9 @@ router.get('/:id', taskController.getTask);
 // a core feature on all plans including free; the real limits are enforced by
 // checkTaskOrRecurringLimit / checkBatchTaskLimits (limits.active_tasks).
 router.post('/', checkTaskOrRecurringLimit, validate(taskCreateSchema), taskController.createTask);
-router.post('/batch', checkBatchTaskLimits, taskController.batchCreateTasks);
-router.put('/batch', taskController.batchUpdateTasks);
-router.put('/:id/status', taskController.updateTaskStatus);
+router.post('/batch', checkBatchTaskLimits, validate(batchCreateRouteSchema), taskController.batchCreateTasks);
+router.put('/batch', validate(batchUpdateRouteSchema), taskController.batchUpdateTasks);
+router.put('/:id/status', validate(taskStatusRouteSchema), taskController.updateTaskStatus);
 router.put('/:id/re-enable', taskController.reEnableTask);
 router.post('/:id/take-ownership', taskController.takeOwnership);
 router.post('/:id/undo', taskController.undoTask);

@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { authenticateJWT } = require('../middleware/jwt-auth');
 const authenticateAdmin = require('../middleware/authenticateAdmin');
+const { validate } = require('../middleware/validate');
+const { impersonationStartSchema } = require('../schemas/route-schemas');
 const {
   startImpersonation,
   stopImpersonation,
@@ -13,7 +15,7 @@ const {
 router.use(authenticateJWT);
 
 // Admin-only: start, get targets, get log
-router.post('/start', authenticateAdmin, startImpersonation);
+router.post('/start', authenticateAdmin, validate(impersonationStartSchema), startImpersonation);
 router.get('/targets', authenticateAdmin, getImpersonationTargets);
 router.get('/log', authenticateAdmin, getImpersonationLog);
 
