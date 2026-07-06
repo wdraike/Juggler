@@ -39,7 +39,9 @@ const authenticateJWT = async (req, res, next) => {
         if (browserTz && typeof browserTz === 'string' && browserTz !== localUser.timezone) {
           try {
             Intl.DateTimeFormat(undefined, { timeZone: browserTz });
-            db('users').where('id', localUser.id).update({ timezone: browserTz }).catch(function() {});
+            db('users').where('id', localUser.id).update({ timezone: browserTz }).catch(function(err) {
+              logger.warn('jwt-auth: timezone update failed (non-fatal, fire-and-forget)', { userId: localUser.id, browserTz, error: err.message });
+            });
           } catch (_e) { /* invalid IANA name — skip */ }
         }
       } else {
