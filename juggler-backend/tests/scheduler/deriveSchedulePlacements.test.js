@@ -240,3 +240,70 @@ describe('deriveSchedulePlacements — timezone resolution', function() {
     expect(entry.start).toBe(540); // 9:00 AM = 540 min
   });
 });
+
+// 999.1183 — this backend copy had NO terminal-status branch at all, so a
+// done/cancelled/skipped/paused task carrying unscheduled=1 (e.g. an orphaned
+// split chunk resolved via sibling propagation) was reported as unplaced by
+// MCP get_schedule while the frontend grids or drops it — MCP clients (ClimbRS)
+// saw different schedule truth than the UI. Mirrors derivePlacements.js.
+describe('deriveSchedulePlacements — terminal statuses are never unplaced (999.1183)', function() {
+  test('done + unscheduled=1 + a scheduledAt slot → grids, NOT unplaced', async function() {
+    seedTasks([{ id: 't-done', status: 'done', unscheduled: true, scheduledAt: '2026-06-22T13:00:00.000Z', dur: 30 }]);
+    var result = await deriveSchedulePlacements('u1', { timezone: TZ });
+    expect(result.unplaced.map(function(t) { return t.id; })).not.toContain('t-done');
+    expect(result.dayPlacements['2026-06-22']).toBeDefined();
+    expect(result.dayPlacements['2026-06-22'][0].task.id).toBe('t-done');
+  });
+
+  test('cancelled + unscheduled=1 + NO scheduledAt → drops out of both (no slot to grid)', async function() {
+    seedTasks([{ id: 't-cancelled', status: 'cancelled', unscheduled: true, scheduledAt: null }]);
+    var result = await deriveSchedulePlacements('u1', { timezone: TZ });
+    expect(result.unplaced.map(function(t) { return t.id; })).not.toContain('t-cancelled');
+    expect(Object.keys(result.dayPlacements)).toHaveLength(0);
+  });
+
+  test('missed + unscheduled=1 → NOT unplaced (999.844/999.1181: missed is terminal)', async function() {
+    seedTasks([{ id: 't-missed', status: 'missed', unscheduled: true, scheduledAt: null }]);
+    var result = await deriveSchedulePlacements('u1', { timezone: TZ });
+    expect(result.unplaced.map(function(t) { return t.id; })).not.toContain('t-missed');
+  });
+
+  test('a NON-terminal unscheduled task still goes to unplaced (guard not over-broad)', async function() {
+    seedTasks([{ id: 't-pending', status: '', unscheduled: true, scheduledAt: null }]);
+    var result = await deriveSchedulePlacements('u1', { timezone: TZ });
+    expect(result.unplaced.map(function(t) { return t.id; })).toContain('t-pending');
+  });
+
+  test('done with completedAt → end = actual elapsed, not start+dur (JUG-CLOSE-NOW)', async function() {
+    // start 9:00 AM (13:00Z), completed 9:20 AM (13:20Z), dur=30 (would estimate end=9:30)
+    seedTasks([{
+      id: 't-completed', status: 'done', scheduledAt: '2026-06-22T13:00:00.000Z',
+      completedAt: '2026-06-22T13:20:00.000Z', dur: 30
+    }]);
+    var result = await deriveSchedulePlacements('u1', { timezone: TZ });
+    var entry = result.dayPlacements['2026-06-22'][0];
+    expect(entry.start).toBe(540); // 9:00 AM
+    expect(entry.end).toBe(560);   // 9:20 AM, not 570 (9:30 estimated)
+  });
+
+  test('done with completedAt BEFORE start (midnight rollover) → falls back to estimated end', async function() {
+    // start 11:50 PM ET on 6/22 (03:50Z on 6/23), completed 12:10 AM ET on 6/23
+    // (04:10Z) — completedAt's local time-of-day (10 min) is less than start's
+    // (1430 min), so the guard must reject it and fall back to start+dur.
+    seedTasks([{
+      id: 't-rollover', status: 'done', scheduledAt: '2026-06-23T03:50:00.000Z',
+      completedAt: '2026-06-23T04:10:00.000Z', dur: 30
+    }]);
+    var result = await deriveSchedulePlacements('u1', { timezone: TZ });
+    var entry = result.dayPlacements['2026-06-22'][0];
+    expect(entry.start).toBe(1430); // 11:50 PM
+    expect(entry.end).toBe(entry.start + 30); // estimated fallback, not the bogus earlier time
+  });
+
+  test('done without completedAt → end = start+dur (unchanged legacy behavior)', async function() {
+    seedTasks([{ id: 't-done-nocompleted', status: 'done', scheduledAt: '2026-06-22T13:00:00.000Z', dur: 30 }]);
+    var result = await deriveSchedulePlacements('u1', { timezone: TZ });
+    var entry = result.dayPlacements['2026-06-22'][0];
+    expect(entry.end).toBe(entry.start + 30);
+  });
+});
