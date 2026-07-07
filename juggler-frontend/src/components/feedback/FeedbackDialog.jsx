@@ -10,11 +10,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import html2canvas from 'html2canvas';
 import { useAuth } from '../auth/AuthProvider';
 import { createBugReporterClient } from 'bug-reporter-client';
+import { getAccessToken } from '../../services/apiClient';
 import AnnotationCanvas from './AnnotationCanvas';
 
 var bugReporter = createBugReporterClient({
   baseUrl: '/api',
-  getToken: function() { return localStorage.getItem('token'); },
+  getToken: getAccessToken,
   sourceApp: 'juggler'
 });
 
