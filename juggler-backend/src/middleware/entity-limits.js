@@ -13,16 +13,17 @@
  * are reproduced inside the use-case (golden-master H9-*).
  *
  * ── count* functions (kept HERE) ──
- * The per-entity count functions are STILL exported from this module: they are
+ * The per-entity count functions STAY EXPORTED from this module: they are
  * consumed directly by my-plan.routes.js, billing-webhooks.controller.js, and the
- * task slice facade (and called directly by the golden-master). They are the same
- * queries the EnforceEntityLimit use-case runs through the repo (one source of the
- * query shape), and retain `../db` for those external/maintenance call sites.
+ * task slice facade (and called directly by the golden-master). Their bodies now
+ * DELEGATE to the user-config facade's count* passthroughs (999.1188 delta-closure),
+ * which run over the SAME wired repo instance the EnforceEntityLimit use-case counts
+ * through — one query source for plan-limit enforcement and my-plan display, instead
+ * of the two verbatim copies this module used to carry independently.
  */
 
 'use strict';
 
-const db = require('../db');
 const facade = require('../slices/user-config/facade');
 
 /** Build the request-shaped ctx the EnforceEntityLimit use-case reads. */
@@ -36,63 +37,18 @@ function applyGate(result, res, next) {
   return res.status(result.status).json(result.body);
 }
 
-// --- Count functions for each entity type (kept here for external consumers) ---
+// --- Count functions for each entity type (kept here for external consumers; ---
+// --- bodies delegate to the user-config facade — single query source) ---
 
-async function countActiveTasks(userId) {
-  const result = await db('tasks_v')
-    .where('user_id', userId)
-    .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled', 'cancelled'])
-    .where(function () {
-      this.whereNull('task_type').orWhereNot('task_type', 'recurring_template');
-    })
-    .count('* as count')
-    .first();
-  return parseInt(result.count, 10);
-}
+function countActiveTasks(userId) { return facade.countActiveTasks(userId); }
 
-async function countRecurringTemplates(userId) {
-  const result = await db('tasks_v')
-    .where('user_id', userId)
-    .where('task_type', 'recurring_template')
-    .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled', 'cancelled'])
-    .count('* as count')
-    .first();
-  return parseInt(result.count, 10);
-}
+function countRecurringTemplates(userId) { return facade.countRecurringTemplates(userId); }
 
-async function countProjects(userId) {
-  const result = await db('projects')
-    .where('user_id', userId)
-    .count('* as count')
-    .first();
-  return parseInt(result.count, 10);
-}
+function countProjects(userId) { return facade.countProjects(userId); }
 
-async function countLocations(userId) {
-  const result = await db('locations')
-    .where('user_id', userId)
-    .count('* as count')
-    .first();
-  return parseInt(result.count, 10);
-}
+function countLocations(userId) { return facade.countLocations(userId); }
 
-async function countScheduleTemplates(userId) {
-  const row = await db('user_config')
-    .where({ user_id: userId, config_key: 'time_blocks' })
-    .first();
-  if (!row || !row.config_value) return 0;
-  try {
-    const blocks = typeof row.config_value === 'string'
-      ? JSON.parse(row.config_value) : row.config_value;
-    // Count unique day configurations that have blocks defined
-    return Object.keys(blocks).filter(k => {
-      const v = blocks[k];
-      return Array.isArray(v) ? v.length > 0 : !!v;
-    }).length;
-  } catch {
-    return 0;
-  }
-}
+function countScheduleTemplates(userId) { return facade.countScheduleTemplates(userId); }
 
 // --- Pre-built middleware for each entity (THIN — delegate to the facade) ---
 

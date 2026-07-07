@@ -41,8 +41,11 @@
  *     (Surface-6 mocks src/db + pins the FLAG-2 log shape) — injected from
  *     feature-gate.js so the thin middleware delegation keeps the exact DB sequence.
  *   - entity-limits' count* functions stay exported from entity-limits.js (consumed
- *     by my-plan.routes + billing-webhooks + the task facade) — the EnforceEntityLimit
- *     use-case counts via the repo (same tasks_v/projects/locations queries).
+ *     by my-plan.routes + billing-webhooks + the task facade) — but the query bodies
+ *     now DELEGATE here (999.1188 delta-closure): the facade exposes count*
+ *     passthroughs over the SAME wired repo instance the EnforceEntityLimit use-case
+ *     counts through, so plan-limit enforcement and my-plan display run one query
+ *     source instead of two verbatim copies.
  *   - billing's enforceDowngradeLimits (touches tasks_v + cal_sync_ledger, outside
  *     this slice) is injected from billing-webhooks.controller.js.
  */
@@ -609,6 +612,31 @@ function enforceLocationLimit(ctx, incomingCount) { return _enforceEntityLimit.c
 function enforceTaskOrRecurringLimit(ctx, taskType) { return _enforceEntityLimit.checkTaskOrRecurring(ctx, taskType); }
 function enforceBatchTaskLimits(ctx, items) { return _enforceEntityLimit.checkBatch(ctx, items); }
 
+// ── entity-limits.js count* passthroughs (999.1188 delta-closure) ────────────
+// Same wired _repo instance the EnforceEntityLimit use-case counts through —
+// ONE query source for plan-limit enforcement and my-plan display. Preserves
+// the characterized quirk: countRecurringTemplates is effectively always 0
+// (tasks_v NULL status + NOT IN exclusion) — not a bug fixed here.
+function countActiveTasks(userId) { return _repo.countActiveTasks(userId); }
+function countRecurringTemplates(userId) { return _repo.countRecurringTemplates(userId); }
+function countProjects(userId) { return _repo.countProjects(userId); }
+function countLocations(userId) { return _repo.countLocations(userId); }
+// countScheduleTemplates: read the time_blocks config row, parse, count unique
+// day keys with blocks (W2 countScheduleTemplatesFromBlocks) — mirrors
+// EnforceEntityLimit.js:245-256's inner try/catch (parse failure → 0), reusing
+// the same pure domain function rather than a third copy of the counting loop.
+async function countScheduleTemplates(userId) {
+  var row = await _repo.getConfigRow(userId, 'time_blocks');
+  if (!row || !row.config_value) return 0;
+  try {
+    var blocks = typeof row.config_value === 'string'
+      ? JSON.parse(row.config_value) : row.config_value;
+    return domain.entityLimit.countScheduleTemplatesFromBlocks(blocks);
+  } catch {
+    return 0;
+  }
+}
+
 module.exports = {
   // facade operations (one per handler/gate) the thin controllers/middleware delegate to
   getAllConfig: getAllConfig,
@@ -639,6 +667,11 @@ module.exports = {
   enforceLocationLimit: enforceLocationLimit,
   enforceTaskOrRecurringLimit: enforceTaskOrRecurringLimit,
   enforceBatchTaskLimits: enforceBatchTaskLimits,
+  countActiveTasks: countActiveTasks,
+  countRecurringTemplates: countRecurringTemplates,
+  countProjects: countProjects,
+  countLocations: countLocations,
+  countScheduleTemplates: countScheduleTemplates,
 
   // domain ports + adapter implementations (named exports; mirror task/weather)
   ConfigRepositoryPort: ConfigRepositoryPort,

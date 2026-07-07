@@ -2186,7 +2186,10 @@ describe('Surface 8 — entity-limits: count/limit enforcement (H9)', () => {
     checkLocationLimit,
     checkTaskOrRecurringLimit,
     checkBatchTaskLimits,
-    countScheduleTemplates
+    countScheduleTemplates,
+    countRecurringTemplates,
+    countProjects,
+    countLocations
   } = require('../../../src/middleware/entity-limits');
 
   function makeReq(planFeatures, body) {
@@ -2379,6 +2382,59 @@ describe('Surface 8 — entity-limits: count/limit enforcement (H9)', () => {
 
   test('H9-12: countScheduleTemplates — no row returns 0', async () => {
     resolveQueue.push(null);
+    const count = await countScheduleTemplates('user-1');
+    expect(count).toBe(0);
+  });
+
+  // POST-999.1188 NEW BEHAVIOR (not a pre-existing H9 pin — do NOT treat as
+  // pre-refactor baseline). Degenerate case: config_value JSON-parses to a
+  // bare string primitive (e.g. stored value was `"hello"`, not an object of
+  // day→blocks). OLD inline entity-limits.js code did `Object.keys(blocks)`
+  // directly on the string, which autoboxes and iterates CHARACTER INDICES —
+  // it would have returned the string's length (character count), not 0.
+  // NEW facade path delegates to domain.entityLimit.countScheduleTemplatesFromBlocks,
+  // which guards `typeof blocks !== 'object'` and returns 0 for a primitive
+  // string. elmo judged the degenerate shape unreachable in practice (time_blocks
+  // config is always written as a day-keyed object) and the new behavior (0)
+  // intended — this pin locks that NEW value in so a future change to the facade
+  // can't silently drift it again without flipping this test RED.
+  test('H9-new-1 (post-999.1188): countScheduleTemplates — config_value parses to a bare string primitive → 0 (NEW behavior; old inline code counted string characters)', async () => {
+    resolveQueue.push({ config_value: JSON.stringify('hello') });
+    const count = await countScheduleTemplates('user-1');
+    expect(count).toBe(0);
+  });
+
+  // 999.1188 delta-closure — B1 coverage-gap closure: these three exported
+  // count* functions are consumed directly by my-plan.routes.js (destructured
+  // at require-time — a name/signature slip breaks it silently, intake-brief
+  // risk_flags), but were not exercised by any pre-existing suite through their
+  // NEW delegation body (entity-limits.js:countX → facade.countX → repo.countX).
+  // Each pin below drives the export end-to-end through the mocked db chain,
+  // proving the delegation wiring is real (not just statically plausible).
+  test('H9-new-2 (post-999.1188): countRecurringTemplates — exported delegate returns the parsed repo count end-to-end', async () => {
+    resolveQueue.push({ count: 0 }); // characterized quirk: tasks_v NULL-status exclusion → effectively always 0
+    const count = await countRecurringTemplates('user-1');
+    expect(count).toBe(0);
+  });
+
+  test('H9-new-3 (post-999.1188): countProjects — exported delegate returns the parsed repo count end-to-end', async () => {
+    resolveQueue.push({ count: 4 });
+    const count = await countProjects('user-1');
+    expect(count).toBe(4);
+  });
+
+  test('H9-new-4 (post-999.1188): countLocations — exported delegate returns the parsed repo count end-to-end', async () => {
+    resolveQueue.push({ count: 2 });
+    const count = await countLocations('user-1');
+    expect(count).toBe(2);
+  });
+
+  // Pre-existing branch (not new post-999.1188 behavior, but previously unpinned
+  // by any suite): countScheduleTemplates' try/catch — a config_value that fails
+  // JSON.parse must fall back to 0, same as no-row (H9-12). Preserved verbatim
+  // through the facade delegation (facade.js countScheduleTemplates catch{}).
+  test('H9-new-5: countScheduleTemplates — malformed config_value (JSON.parse throws) → 0', async () => {
+    resolveQueue.push({ config_value: '{not valid json' });
     const count = await countScheduleTemplates('user-1');
     expect(count).toBe(0);
   });
