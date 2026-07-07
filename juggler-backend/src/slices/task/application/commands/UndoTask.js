@@ -50,7 +50,6 @@
 
 var assertDeps = require('../_assertDeps');
 
-var _TERMINAL_STATUSES = ['done', 'skip', 'cancel'];
 var UNDOABLE_ACTION_TYPES = ['status_change', 'field_update', 'delete'];
 
 /**

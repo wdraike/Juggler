@@ -73,6 +73,8 @@ declare function isValidCalHistoryStatus(status: string | null | undefined): boo
 
 declare function isCalHistoryTerminalStatus(status: string | null | undefined): boolean;
 
+declare function getCalHistoryStatusDisplayName(status: string): string;
+
 declare function isValidBooleanValue(value: number | null | undefined): boolean;
 
 declare function validateStatusValue(status: string | null | undefined, context?: string): boolean;
@@ -95,6 +97,7 @@ export {
     getTaskStatusDescription,
     isValidCalHistoryStatus,
     isCalHistoryTerminalStatus,
+    getCalHistoryStatusDisplayName,
     isValidBooleanValue,
     validateStatusValue,
     canTransition

@@ -1,53 +1,19 @@
-var CalHistoryStatus = Object.freeze({
-  SCHEDULED: 'SCHEDULED',
-  COMPLETED: 'COMPLETED',
-  MISSED: 'MISSED',
-  CANCELLED: 'CANCELLED'
-});
-
-var CAL_HISTORY_STATUSES = Object.freeze([
-  CalHistoryStatus.SCHEDULED,
-  CalHistoryStatus.COMPLETED,
-  CalHistoryStatus.MISSED,
-  CalHistoryStatus.CANCELLED
-]);
-
-var CAL_HISTORY_TERMINAL_STATUSES = Object.freeze([
-  CalHistoryStatus.COMPLETED,
-  CalHistoryStatus.MISSED,
-  CalHistoryStatus.CANCELLED
-]);
-
-function isValidCalHistoryStatus(status) {
-  if (status == null) return false;
-  return CAL_HISTORY_STATUSES.indexOf(status) !== -1;
-}
-
-function isTerminalCalHistoryStatus(status) {
-  if (status == null) return false;
-  return CAL_HISTORY_TERMINAL_STATUSES.indexOf(status) !== -1;
-}
-
-function getCalHistoryStatusDisplayName(status) {
-  switch (status) {
-    case CalHistoryStatus.SCHEDULED:
-      return 'Scheduled';
-    case CalHistoryStatus.COMPLETED:
-      return 'Completed';
-    case CalHistoryStatus.MISSED:
-      return 'Missed';
-    case CalHistoryStatus.CANCELLED:
-      return 'Cancelled';
-    default:
-      return 'Unknown';
-  }
-}
+/**
+ * CalHistory status constants — re-exports from shared/task-status.js
+ *
+ * The canonical source of truth lives in shared/task-status.js. This used
+ * to be a full hand-copied duplicate that had already diverged in function
+ * naming (999.1181) — it is now a thin re-export shim. `isTerminalCalHistoryStatus`
+ * is kept as the local name (canonical calls it `isCalHistoryTerminalStatus`)
+ * for backward compatibility with existing callers/tests.
+ */
+var shared = require('../../../shared/task-status');
 
 module.exports = {
-  CalHistoryStatus: CalHistoryStatus,
-  CAL_HISTORY_STATUSES: CAL_HISTORY_STATUSES,
-  CAL_HISTORY_TERMINAL_STATUSES: CAL_HISTORY_TERMINAL_STATUSES,
-  isValidCalHistoryStatus: isValidCalHistoryStatus,
-  isTerminalCalHistoryStatus: isTerminalCalHistoryStatus,
-  getCalHistoryStatusDisplayName: getCalHistoryStatusDisplayName
+  CalHistoryStatus: shared.CalHistoryStatus,
+  CAL_HISTORY_STATUSES: shared.CAL_HISTORY_STATUSES,
+  CAL_HISTORY_TERMINAL_STATUSES: shared.CAL_HISTORY_TERMINAL_STATUSES,
+  isValidCalHistoryStatus: shared.isValidCalHistoryStatus,
+  isTerminalCalHistoryStatus: shared.isCalHistoryTerminalStatus,
+  getCalHistoryStatusDisplayName: shared.getCalHistoryStatusDisplayName,
 };

@@ -18,15 +18,7 @@
  *   • otherwise (no date / no time / plain backlog)             → absent from both
  */
 import { parseTimeToMinutes } from '../scheduler/dateHelpers';
-
-// Terminal/resolved statuses — mirrors shared/task-status.js TERMINAL_STATUSES
-// exactly (done/cancel/cancelled/skip/pause). Kept local — the shared
-// task-status module is a symlinked pkg jest won't transform. cancelled + pause
-// were previously missing, so a placed cancelled/pause task was routed through
-// the non-terminal path (could land in unplaced) instead of onto the calendar
-// grid (999.882 — calendar must show every lifecycle state).
-var TERMINAL_STATUSES = { done: 1, cancel: 1, cancelled: 1, skip: 1, pause: 1 };
-function isTerminalStatus(s) { return !!TERMINAL_STATUSES[s]; }
+import { isTerminalStatus } from '../shared/task-status';
 
 /**
  * @param {Array} tasks — array of task objects from GET /tasks (may be null/undefined)

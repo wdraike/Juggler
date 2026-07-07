@@ -165,6 +165,26 @@ function isCalHistoryTerminalStatus(status) {
 }
 
 /**
+ * Gets the display name for a cal_history status value.
+ * @param {string} status
+ * @returns {string}
+ */
+function getCalHistoryStatusDisplayName(status) {
+  switch (status) {
+    case CalHistoryStatus.SCHEDULED:
+      return 'Scheduled';
+    case CalHistoryStatus.COMPLETED:
+      return 'Completed';
+    case CalHistoryStatus.MISSED:
+      return 'Missed';
+    case CalHistoryStatus.CANCELLED:
+      return 'Cancelled';
+    default:
+      return 'Unknown';
+  }
+}
+
+/**
  * Validates boolean values to ensure they are 0/1 only
  * @param {number|null|undefined} value
  * @returns {boolean}
@@ -238,6 +258,7 @@ if (typeof module !== 'undefined' && module.exports) {
     getTaskStatusDescription,
     isValidCalHistoryStatus,
     isCalHistoryTerminalStatus,
+    getCalHistoryStatusDisplayName,
     isValidBooleanValue,
     validateStatusValue,
     canTransition
