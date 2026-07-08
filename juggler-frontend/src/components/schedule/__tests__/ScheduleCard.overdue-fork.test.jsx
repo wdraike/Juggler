@@ -100,4 +100,36 @@ describe('ScheduleCard overdue badge (999.1224 predicate fork)', () => {
     );
     expect(screen.queryByText(/OVERDUE/i)).toBeNull();
   });
+
+  test('a compact (non-lg) overdue card still surfaces its deadline/date — a bare badge with no context is a bug', () => {
+    var item = makeItem({ task: { overdue: true, deadline: '2026-07-07' }, item: {} });
+    render(
+      <div style={{ width: 200, height: 24 }}>
+        <ScheduleCard
+          item={item} status="" onStatusChange={null} onDelete={null} onExpand={null}
+          darkMode={false} isBlocked={false} isMobile={false} layoutMode="grid"
+          cardHeight={24} weatherDay={null}
+        />
+      </div>
+    );
+    expect(screen.getByText(/OVERDUE/i)).toBeInTheDocument();
+    expect(screen.getByText(/2026-07-07/)).toBeInTheDocument();
+  });
+
+  test('an overdue task whose deadline equals its date is not silently suppressed on a large card', () => {
+    var item = makeItem({
+      task: { overdue: true, deadline: '2026-07-07', date: '2026-07-07' },
+      item: {},
+    });
+    render(
+      <div style={{ width: 200, height: 90 }}>
+        <ScheduleCard
+          item={item} status="" onStatusChange={null} onDelete={null} onExpand={null}
+          darkMode={false} isBlocked={false} isMobile={false} layoutMode="grid"
+          cardHeight={90} weatherDay={null}
+        />
+      </div>
+    );
+    expect(screen.getByText(/deadline 2026-07-07/)).toBeInTheDocument();
+  });
 });

@@ -82,6 +82,13 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
     if (task.recurring && task.time && startLabel && task.time !== startLabel) {
       d.push('Preferred: ' + task.time);
     }
+    // Overdue cards must always surface a reason, even on compact (non-'lg') cards
+    // where the details block below is skipped — a bare badge with no context
+    // leaves the user unable to tell why it's overdue.
+    if (isOverdue && !showDetails) {
+      var overdueReason = task.deadline || task.date;
+      if (overdueReason) d.push('\uD83D\uDCC5 ' + overdueReason);
+    }
     if (showDetails) {
       // timeRange is now shown inline in Row 2; no need to repeat in details.
       if (task.location && task.location.length > 0) {
@@ -98,7 +105,7 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
         if (ti.length > 0) d.push(ti.join(' '));
       }
       if (task.date) d.push('\uD83D\uDCC6 ' + task.date);
-      if (task.deadline && task.deadline !== task.date) d.push('\uD83D\uDCC5 deadline ' + task.deadline);
+      if (task.deadline && (task.deadline !== task.date || isOverdue)) d.push('\uD83D\uDCC5 deadline ' + task.deadline);
       if (task.notes) d.push(task.notes.replace(/\n/g, ' ').substring(0, 40));
       if (task.dependsOn && task.dependsOn.length > 0) d.push('\u26D3 ' + task.dependsOn.length + ' dep');
     }
