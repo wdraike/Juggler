@@ -52,6 +52,25 @@ function getAnchor(src, startDate) {
   })();
 }
 
+// Stable, non-advancing cycle epoch for TPC (timesPerCycle) fulfillment-accounting
+// purposes ONLY (999.1372, jug-weekly-recur-reshow). Unlike getAnchor(), this NEVER
+// resolves to src.nextOccurrenceAnchor — that column advances on every terminal
+// (done/skip) event (999.1091 computeNextOccurrenceAnchor), which would otherwise
+// redefine the TPC cycle boundary itself mid-cycle (cycleStart = anchor +
+// k*cycleDays) and re-orphan an earlier-in-cycle day's fulfillment the moment a
+// scheduler run lands on/after the terminal event (root-cause mechanism 2,
+// INTAKE-BRIEF.json). Falls back identically to getAnchor()'s non-anchor chain
+// (recur_start, then src.date, then startDate) so behavior for masters with no
+// live anchor advance — i.e. every pre-existing test/caller — is byte-identical.
+// Only consumed inside expandRecurring's TPC block; getAnchor()/its mutable
+// nextOccurrenceAnchor-aware result is untouched everywhere else (candidate-window
+// filtering, day-match predicate, target-interval pick positioning, rolling).
+function getStableEpoch(src, startDate) {
+  return parseAnchor(src.recurStart) || parseAnchor(src.date) || (function() {
+    var d = new Date(startDate); d.setHours(0, 0, 0, 0); return d;
+  })();
+}
+
 function doesDayMatch(dow, daysSpec, dayMap) {
   if (typeof daysSpec === 'object' && !Array.isArray(daysSpec)) {
     return daysSpec[DOW_TO_CODE[dow]] ? { match: true, state: daysSpec[DOW_TO_CODE[dow]] } : { match: false };
@@ -69,7 +88,20 @@ function doesDayMatch(dow, daysSpec, dayMap) {
 // forward-search (juggler-backend/src/lib/next-occurrence-anchor.js, via
 // nextMatchingDate) share ONE implementation of "what counts as a match" — they can
 // never drift apart. Behavior is byte-identical to the inline block this replaced.
-function matchesRecurrenceDay(cursor, r, anchor, dayMap) {
+//
+// `parityAnchor` (999.1372 candidate-B, zoe-jwrr-biweekly-pick-generation-parity-split):
+// OPTIONAL override for the biweekly PARITY computation only (the `anchor` param still
+// governs day-of-week matching and interval counting, unchanged). Defaults to `anchor`
+// when omitted, so every pre-existing caller (nextMatchingDate's forward search, and any
+// generation-gate call for a non-TPC-filtered source) is byte-identical. expandRecurring's
+// generation gate passes the SAME `stableEpoch` here that the TPC candidate-pool step
+// (below) uses for its own biweekly parity filter, for TPC-filtered biweekly sources ONLY
+// — so pool and gate compute parity from the literal same Date value and can never
+// structurally disagree, regardless of how far the mutable `anchor` (nextOccurrenceAnchor)
+// has advanced. This eliminates the whole deadlock CLASS (not just the probed fixture):
+// there is only one epoch value feeding the modulo-14 parity test on either side of the
+// pool/gate seam, so no drift between two epochs is possible to reintroduce it.
+function matchesRecurrenceDay(cursor, r, anchor, dayMap, parityAnchor) {
   if (!r) return false;
   if (r.type === 'daily') return true;
   if (r.type === 'weekly' || r.type === 'biweekly') {
@@ -78,7 +110,8 @@ function matchesRecurrenceDay(cursor, r, anchor, dayMap) {
     var dayResult = doesDayMatch(dow, days, dayMap);
     if (!dayResult.match) return false;
     if (r.type === 'biweekly') {
-      var daysDiff = Math.round((cursor.getTime() - anchor.getTime()) / 86400000);
+      var parityRef = parityAnchor || anchor;
+      var daysDiff = Math.round((cursor.getTime() - parityRef.getTime()) / 86400000);
       if (Math.floor(daysDiff / 7) % 2 !== 0) return false;
     }
     return true;
@@ -118,6 +151,39 @@ function matchesRecurrenceDay(cursor, r, anchor, dayMap) {
     }
   }
   return false;
+}
+
+// Enumerate the ACTUAL booked/pending instance dates for `sourceId` that fall
+// within [cycleStart, cycleEnd) — regardless of any window/startDate
+// restriction AND regardless of whether the date matches `r`'s recurrence
+// pattern (999.1372 continued — BLOCK zoe-jwrr-roamed-done-invisible). Used
+// ONLY for TPC fulfillment-accounting (bookedKeys/existingInCycle/
+// fulfilledInCycle/_fulfilledInCycle/_pendingBudget/hasSkipInCycle).
+//
+// This SUPERSEDES an earlier pattern-day-walk approach (walking every calendar
+// day via matchesRecurrenceDay and checking which ones happened to be booked):
+// that made an off-pattern booking — a done/pending instance manually moved to
+// a day outside the master's configured days/monthDays — invisible to
+// fulfillment accounting, since it would never be produced by the pattern walk.
+// `datesBySourceAll` (built once in expandRecurring, from existingBySourceDate +
+// pendingBookedByDate) already has the full set of ACTUAL dates this source has
+// an instance/pending booking on; this just filters that set into the cycle
+// range being asked about. The NEW-pick pool (`available`, in expandRecurring's
+// TPC block) stays window-bound/pattern-restricted and is NOT built from this
+// function.
+function enumerateBookedDatesInCycle(sourceId, cycleStart, cycleEnd, datesBySourceAll) {
+  var keys = (datesBySourceAll && datesBySourceAll[sourceId]) || [];
+  var seen = {};
+  var out = [];
+  for (var i = 0; i < keys.length; i++) {
+    var k = keys[i];
+    if (seen[k]) continue;
+    seen[k] = true;
+    var d = parseAnchor(k);
+    if (!d) continue;
+    if (d >= cycleStart && d < cycleEnd) out.push({ date: d, key: k });
+  }
+  return out;
 }
 
 // Pure forward search (999.1091 C1): the first date AFTER `afterDateKey` (a
@@ -226,6 +292,14 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
   // _targetDate (ideal placement day) and _deadlineDate (last acceptable day).
   // Key: sourceId → { 'M/D': { target: 'YYYY-MM-DD', deadline: 'YYYY-MM-DD' } }
   var tpcTargetDates = {};
+  // 999.1372 candidate-B (zoe-jwrr-biweekly-pick-generation-parity-split): the
+  // stableEpoch used below to build the TPC candidate pool's biweekly parity filter,
+  // persisted per source so the main generation loop's gate (matchesRecurrenceDay)
+  // can be handed the SAME value for its own biweekly parity check — see the
+  // matchesRecurrenceDay comment above. Only populated for sources that actually go
+  // through TPC filtering (the guarded block below); absent/undefined for every other
+  // source, which keeps the generation gate on the mutable `anchor` exactly as before.
+  var tpcStableEpochBySource = {};
 
   // Caller (runSchedule) passes a map of pending recurring_instance dates so
   // the tpc slot accounting can count them as booked. Without this, pending
@@ -235,6 +309,29 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
   // some of the cycle's picks — leading to the "skip → new pick today →
   // skip → repeat" loop.
   var pendingBookedByDate = (opts && opts.pendingBookedByDate) || {};
+
+  // All ACTUAL instance/pending date keys per source, regardless of whether the
+  // date matches the master's recurrence pattern (999.1372 continued — BLOCK
+  // zoe-jwrr-roamed-done-invisible). A 'done'/pending instance can sit on a date
+  // OFF the recurrence pattern (e.g. the user drags/completes it on a day the
+  // master's `days`/`monthDays` config doesn't include — juggler permits this),
+  // and it must still count toward its cycle's fulfillment. Built ONCE from
+  // existingBySourceDate (real rows above) + pendingBookedByDate (opts-provided
+  // pending dates that may have been filtered out of allTasks — see comment
+  // above) so enumerateBookedDatesInCycle (below) never needs to walk the
+  // pattern to find these dates — it just filters the ACTUAL booked dates for
+  // this source into the cycle's [cycleStart, cycleEnd) range.
+  var datesBySourceAll = {};
+  function _indexSourceDateKey(compositeKey) {
+    var idx = compositeKey.indexOf('|');
+    if (idx < 0) return;
+    var sid = compositeKey.slice(0, idx);
+    var dk = compositeKey.slice(idx + 1);
+    if (!datesBySourceAll[sid]) datesBySourceAll[sid] = [];
+    datesBySourceAll[sid].push(dk);
+  }
+  Object.keys(existingBySourceDate).forEach(_indexSourceDateKey);
+  Object.keys(pendingBookedByDate).forEach(_indexSourceDateKey);
 
   // Budget-aware TPC (999.013): dayMinutes maps date strings to available
   // minutes on that day. When provided, the TPC picker caps slotsNeeded per
@@ -274,6 +371,14 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
     else cycleDays = 7; // daily and weekly
     var targetInterval = cycleDays / tpc;
     var anchor = getAnchor(src, startDate);
+    // Stable cycle-boundary epoch (999.1372) — decoupled from nextOccurrenceAnchor's
+    // terminal-event advancement. Used ONLY for cycleStart/cycleEnd + the widened
+    // fulfillment-count enumeration below; `anchor` (mutable) still governs the
+    // candidate-window filter just below and target-interval pick positioning.
+    var stableEpoch = getStableEpoch(src, startDate);
+    // 999.1372 candidate-B: persist so the generation-gate call below (same src.id)
+    // can share this exact epoch for biweekly parity — see matchesRecurrenceDay comment.
+    tpcStableEpochBySource[src.id] = stableEpoch;
 
     // 1. Collect all candidate dates in the expansion window
     var candidates = [];
@@ -291,7 +396,21 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
             var days = r.days || 'MTWRF';
             if (doesDayMatch(cDow, days, dayMap).match) {
               if (r.type === 'biweekly') {
-                var dd = Math.round((c.getTime() - anchor.getTime()) / 86400000);
+                // Parity basis single-sourced onto stableEpoch (999.1372
+                // continued — WARN cookie-jwrr-biweekly-parity-coupling /
+                // ernie-jwrr-biweekly-parity-basis): previously this compared
+                // against the mutable `anchor` (nextOccurrenceAnchor-aware)
+                // while the fulfillment side's cycle boundaries/parity used
+                // `stableEpoch` — two epochs computing the same "which week is
+                // the biweekly on-week" concept, safe only via an unenforced
+                // cross-module invariant in next-occurrence-anchor.js. Using
+                // stableEpoch here too means the pick pool, cycle boundaries,
+                // and fulfillment accounting all agree on ONE epoch. The
+                // window lower bound (`c >= anchor`, above) and the
+                // target-interval pick-positioning (`ref`/`idealDate` in the
+                // greedy-pick loop below) are UNCHANGED — only this
+                // parity/cycle-membership test moved to stableEpoch.
+                var dd = Math.round((c.getTime() - stableEpoch.getTime()) / 86400000);
                 isCandidate = Math.floor(dd / 7) % 2 === 0;
               } else {
                 isCandidate = true;
@@ -317,18 +436,21 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
     }
 
     // 2. Pick best tpc dates per cycle using target-interval steering.
-    // Cycle boundaries are anchored to `anchor + k*cycleDays` so they are
-    // deterministic and independent of window position. lastPlaced evolves
-    // from picks within this call only — it is not pre-seeded from DB rows.
+    // Cycle boundaries are anchored to `stableEpoch + k*cycleDays` (999.1372 —
+    // previously `anchor + k*cycleDays`, which shifted mid-cycle whenever a
+    // terminal event advanced nextOccurrenceAnchor; stableEpoch never shifts) so
+    // they are deterministic and independent of window position AND of
+    // terminal-event anchor advancement. lastPlaced evolves from picks within
+    // this call only — it is not pre-seeded from DB rows.
     var picked = {};
     var lastPlaced = null;
 
     if (candidates.length > 0) {
       var firstCandMs = candidates[0].date.getTime();
-      var anchorMs = anchor.getTime();
-      var daysFromAnchor = Math.floor((firstCandMs - anchorMs) / 86400000);
-      var kStart = Math.floor(daysFromAnchor / cycleDays);
-      var cycleStart = new Date(anchor);
+      var stableEpochMs = stableEpoch.getTime();
+      var daysFromEpoch = Math.floor((firstCandMs - stableEpochMs) / 86400000);
+      var kStart = Math.floor(daysFromEpoch / cycleDays);
+      var cycleStart = new Date(stableEpoch);
       cycleStart.setDate(cycleStart.getDate() + kStart * cycleDays);
 
       var ci = 0;
@@ -341,12 +463,29 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
           ci++;
         }
 
+        // Widened fulfillment-count enumeration (999.1372 continued — BLOCK
+        // zoe-jwrr-roamed-done-invisible): ALL ACTUAL booked/pending dates for
+        // this source in this STABLE [cycleStart, cycleEnd) range, not just the
+        // window-bound `cycleCandidates` (which never contains a date earlier
+        // than `startDate`/'today') and NOT restricted to pattern-matching days
+        // (a done/pending instance manually moved to an off-pattern day must
+        // still fulfill its cycle). An earlier-in-cycle done/skip instance must
+        // still be consulted here even when the scheduler run lands on/after it,
+        // and even when the fulfilling day is off the master's configured
+        // days/monthDays — instanceStatusBySourceDate/existingBySourceDate
+        // already cover the FULL unwindowed task list, so the data exists;
+        // enumerateBookedDatesInCycle just supplies the ACTUAL dates to look it
+        // up by (via datesBySourceAll, built once above). The NEW-pick POOL
+        // (`available`, below) stays window-bound/pattern-restricted — built
+        // from `cycleCandidates`, unchanged.
+        var widenedCycleCandidates = enumerateBookedDatesInCycle(src.id, cycleStart, cycleEnd, datesBySourceAll);
+
         // Cycle bookings: terminal-blocked (done/skip/cancel) + pending.
         // Both count against the tpc budget. Dedup via a Set since a date
         // could theoretically be in both maps.
         var bookedKeys = {};
         var pendingKeys = {};
-        cycleCandidates.forEach(function(cd) {
+        widenedCycleCandidates.forEach(function(cd) {
           var key = src.id + '|' + cd.key;
           if (existingBySourceDate[key]) bookedKeys[cd.key] = true;
           if (pendingBookedByDate[key]) { bookedKeys[cd.key] = true; pendingKeys[cd.key] = true; }
@@ -386,7 +525,10 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
         var slotsNeeded;
         if (fillPolicy === 'backfill') {
           var fulfilledInCycle = 0;
-          cycleCandidates.forEach(function(cd) {
+          // 999.1372: iterate the WIDENED set (not window-bound cycleCandidates)
+          // so an earlier-in-cycle done instance still counts toward the target
+          // even when it falls before startDate/'today'.
+          widenedCycleCandidates.forEach(function(cd) {
             if (!bookedKeys[cd.key]) return;
             var status = instanceStatusBySourceDate[src.id + '|' + cd.key] || '';
             // Anything other than 'skip' counts toward the target: done/cancel
@@ -395,7 +537,8 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
           });
           slotsNeeded = Math.max(0, tpc - fulfilledInCycle);
         } else {
-          var hasSkipInCycle = cycleCandidates.some(function(cd) {
+          // 999.1372: widened set, same reasoning as fulfilledInCycle above.
+          var hasSkipInCycle = widenedCycleCandidates.some(function(cd) {
             return bookedKeys[cd.key] &&
                    (instanceStatusBySourceDate[src.id + '|' + cd.key] || '') === 'skip';
           });
@@ -612,19 +755,29 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
         if (he && cursor > he) return;
       }
 
-      // Match predicate extracted to matchesRecurrenceDay (999.1091 C1) — byte-identical
-      // behavior, now shared with computeNextOccurrenceAnchor's forward search.
-      var match = matchesRecurrenceDay(cursor, r, anchor, dayMap);
-      if (!match) return;
-
-      // timesPerCycle: pre-computed optimal dates are in tpcPickedDates.
-      // If this source has tpc filtering, only generate on picked dates.
-      // Budget-unscheduled instances (picked[date] === '_tpcBudgetUnscheduled')
-      // are still generated but flagged so the scheduler can skip placement.
+      // timesPerCycle: pre-computed optimal dates are in tpcPickedDates. Computed
+      // BEFORE the match predicate (hoisted from below, 999.1372 candidate-B) so we
+      // know whether this source went through TPC-biweekly candidate filtering and,
+      // if so, can hand matchesRecurrenceDay the SAME stableEpoch the pool used.
       var selectedDayCount = getSelectedDayCount(r);
       var tpc = r.timesPerCycle || 0;
+      var isTpcFiltered = tpc > 0 && tpc < selectedDayCount;
+
+      // Match predicate extracted to matchesRecurrenceDay (999.1091 C1) — byte-identical
+      // behavior, now shared with computeNextOccurrenceAnchor's forward search.
+      // 999.1372 candidate-B (zoe-jwrr-biweekly-pick-generation-parity-split): for a
+      // TPC-filtered biweekly source, pass the persisted stableEpoch as the parity
+      // override so this gate's biweekly parity check is computed from the exact same
+      // epoch the candidate pool used — pool and gate can then never disagree, closing
+      // the deadlock class rather than just this fixture. Every other source (non-TPC,
+      // or non-biweekly) is untouched: tpcParityAnchor is undefined and
+      // matchesRecurrenceDay falls back to `anchor`, byte-identical to before.
+      var tpcParityAnchor = (isTpcFiltered && r.type === 'biweekly') ? tpcStableEpochBySource[src.id] : undefined;
+      var match = matchesRecurrenceDay(cursor, r, anchor, dayMap, tpcParityAnchor);
+      if (!match) return;
+
       var isTpcBudgetUnscheduled = false;
-      if (tpc > 0 && tpc < selectedDayCount) {
+      if (isTpcFiltered) {
         if (!tpcPickedDates[src.id] || !tpcPickedDates[src.id][dateStr]) return;
         // Check if this instance is budget-unscheduled (not enough time in cycle)
         if (tpcPickedDates[src.id][dateStr] === '_tpcBudgetUnscheduled') {
