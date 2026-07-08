@@ -176,6 +176,18 @@ async function start() {
   // a column this leg drops. See src/cron/cal-history-cron.js for the retirement
   // rationale (also satisfies the standing D1 ruling's "no live caller" precondition).
 
+  // 999.1408 — proactive early-morning schedule trigger so anytime-flexible
+  // tasks get a fair shot at the morning work block on days a user makes no
+  // task edit until midday. Non-fatal: server continues if cron init fails.
+  try {
+    const MorningScheduleCron = require('./jobs/morning-schedule-cron');
+    const morningScheduleCron = new MorningScheduleCron();
+    morningScheduleCron.start();
+    serverLogger.info('morning-schedule-cron started');
+  } catch (err) {
+    serverLogger.warn('morning-schedule-cron failed to start', { error: err });
+  }
+
   // Start the schedule queue poll loop
   startPollLoop();
   serverLogger.info('Schedule queue poll loop started');
