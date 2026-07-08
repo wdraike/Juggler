@@ -194,6 +194,53 @@ describe('runScheduleAndPersist: immutable tasks', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════
+// 999.1410 regression: empty-when tasks must be eligible for the
+// weekday "biz" work blocks (biz1 8am-12pm, biz2 1pm-5pm), not just
+// morning/lunch/evening/night. The prior ALL_WINDOWS default
+// ('morning,lunch,afternoon,evening,night') predated the biz1/biz2
+// split and never included the 'biz' tag — biz1 (starts before noon)
+// never even got buildWindowsFromBlocks' biz→afternoon alias, so an
+// empty-when task could NEVER land in the 8am-12pm block, no matter
+// how early the scheduler ran or how open that block was.
+// ═══════════════════════════════════════════════════════════════
+
+describe('runScheduleAndPersist: empty-when eligible for biz1 (999.1410)', () => {
+  // Pick a future weekday so the test is independent of real wall-clock
+  // "now" (the nowSlot gate only applies to the actual current day) and
+  // of weekend block layout (weekends have no 'biz' tag at all).
+  function nextWeekdayKey(daysOut) {
+    var d = new Date();
+    d.setDate(d.getDate() + daysOut);
+    while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
+    var y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), day = String(d.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + day;
+  }
+
+  test('lands in biz1 (8am-12pm) when morning + lunch are already full and when is unset', async () => {
+    if (!available) return;
+    var dateKey = nextWeekdayKey(10);
+    // Fill morning (360-480, 120min) and lunch (720-780, 60min) completely.
+    await seedTask({ id: 'fill-morning', text: 'Fills morning', when: 'morning', dur: 120, date: dateKey });
+    await seedTask({ id: 'fill-lunch', text: 'Fills lunch', when: 'lunch', dur: 60, date: dateKey });
+    // Target: no `when` set at all — production default for a plain task.
+    await seedTask({ id: 'no-when-task', text: 'Anytime task', dur: 60, date: dateKey, placement_mode: 'anytime' });
+
+    await runScheduleAndPersist(USER_ID);
+
+    var row = await db('tasks_v').where('id', 'no-when-task').first();
+    expect(row.scheduled_at).toBeTruthy();
+    // scheduled_at is stored tz-less local time (dateStrings:true) — read the
+    // raw column directly to avoid the documented dateStrings misparse trap.
+    var rawRow = await db('task_instances').where('id', 'no-when-task').first();
+    var timeStr = String(rawRow.time); // 'HH:MM:SS'
+    var parts = timeStr.split(':');
+    var mins = Number(parts[0]) * 60 + Number(parts[1]);
+    expect(mins).toBeGreaterThanOrEqual(480); // biz1 start
+    expect(mins).toBeLessThan(720);           // biz1 end (lunch start)
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
 // Recurring instance handling
 // ═══════════════════════════════════════════════════════════════
 

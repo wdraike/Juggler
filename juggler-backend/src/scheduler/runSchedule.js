@@ -729,10 +729,18 @@ async function runScheduleAndPersist(userId, _retries, options) {
       _rollingBackfills.map(function(b) { return b.id + '→' + b.anchor; }).join(', '));
   }
 
-  // 2a. Normalize empty `when` to all five standard day windows. Users treat
+  // 2a. Normalize empty `when` to the literal 'anytime' sentinel. Users treat
   // no-when-set as "place whenever," not "skip scheduling" — the placement
   // phase requires a non-empty when-tag to match against day windows.
-  var ALL_WINDOWS = 'morning,lunch,afternoon,evening,night';
+  // 999.1410: the prior hand-maintained tag list ('morning,lunch,afternoon,
+  // evening,night') predates the biz1/biz2 work-block split and never
+  // included the 'biz' tag, so an empty-when task could NEVER be placed in
+  // the 8am-12pm work block (biz1 starts before noon, so it doesn't even
+  // get buildWindowsFromBlocks' biz→afternoon alias — only biz2 does).
+  // 'anytime' resolves via getWhenWindows to windows.anytime, the
+  // already-correct true union of every block for the day — matching the
+  // comment's own stated intent with no tag list to keep in sync.
+  var ALL_WINDOWS = 'anytime';
   allTasks.forEach(function(t) {
     if (t.when == null || t.when === '') t.when = ALL_WINDOWS;
   });
