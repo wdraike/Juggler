@@ -11,6 +11,7 @@ import { getTaskIcon } from '../../utils/taskIcon';
 import { getTheme } from '../../theme/colors';
 import StatusToggle from '../schedule/StatusToggle';
 import { parseDate } from '../../scheduler/dateHelpers';
+import { isTaskOverdue } from '../../utils/overdue';
 
 var TERMINAL_BORDER_COLORS = {
   done:   { light: '#2D6A4F', dark: '#6EE7B7' },
@@ -33,7 +34,7 @@ function TaskCard({ task, status, onStatusChange, onDelete, onExpand, darkMode, 
   var priColor = PRI_COLORS[task.pri] || PRI_COLORS.P3;
   var isDone = isTerminalStatus(status);
   var isMarker = !!task.marker;
-  var isOverdue = !isDone && !!task.overdue;
+  var isOverdue = isTaskOverdue(task, isDone);
   var borderColor = isMarker ? '#4338CA' : (isOverdue ? theme.error : priColor);
   var durLabel = task.dur ? (task.dur >= 60 ? Math.round(task.dur / 60 * 10) / 10 + 'h' : task.dur + 'm') : '';
   var isPastDue = !isDone && task.deadline && (function() { var d = parseDate(task.deadline); var t = todayDate || new Date(); if (!todayDate) t.setHours(0,0,0,0); return d && d < t; })();

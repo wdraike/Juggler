@@ -14,6 +14,15 @@
  *   - ../value-objects/PlacementMode      (closed-enum VO over placement_mode — pure)
  *   - ../../../../../../shared/scheduler/expandRecurring  (isAnchorDependentRecur
  *      — pure recur-shape predicate, no I/O)
+ *   - ../../../../../../shared/scheduler/getNowInTimezone  (getNowInTimezone/
+ *      DEFAULT_TIMEZONE — pure Intl.DateTimeFormat computation, no injected
+ *      clock support needed here since the create-time plausibility check
+ *      only needs "today's date key", not a mockable instant; same helper
+ *      computeOverdueForRow — taskMappers.js:227 — uses as the display SSOT)
+ *   - ../../../../scheduler/dateHelpers  (isoToDateKey — re-exports
+ *      shared/scheduler/dateHelpers.js; pure regex-based date-key
+ *      normalization, format-aware for the MCP-documented "YYYY-MM-DD or
+ *      M/D" deadline contract — see ernie-tz-2, no Date-object round-trip)
  * All data enters via arguments.
  *
  * ── NO NEW FALLBACKS ──────────────────────────────────────────────────────────
@@ -26,6 +35,8 @@
 
 var PlacementMode = require('../value-objects/PlacementMode');
 var { isAnchorDependentRecur } = require('../../../../../../shared/scheduler/expandRecurring');
+var { getNowInTimezone, DEFAULT_TIMEZONE } = require('../../../../../../shared/scheduler/getNowInTimezone');
+var { isoToDateKey } = require('../../../../scheduler/dateHelpers');
 
 // Verbatim from task.controller.js ~745.
 var VALID_WHEN_KEYWORDS = ['', 'fixed', 'allday', 'anytime'];
@@ -156,6 +167,42 @@ function validateTaskInput(body) {
   if (body.deadline !== undefined && body.deadline !== null && body.deadline !== '') {
     var dlDate = new Date(body.deadline);
     if (isNaN(dlDate.getTime())) errors.push('Deadline must be a valid date');
+    else if (body._requireText) {
+      // Creation-time plausibility check (BUG-5 / AC4): a deadline already in
+      // the past on CREATE mints a task overdue from the moment it exists
+      // (computeOverdueForRow — taskMappers.js:270). Gated on _requireText
+      // (the existing create-only discriminator, see CreateTask.js:101/104)
+      // so update paths (editing an already-overdue task) are unaffected.
+      //
+      // ernie-tz-1 (re-review fix): comparing a UTC-parsed date-only `dlDate`
+      // against a server-LOCAL midnight `new Date()` skews by the server's
+      // UTC offset and false-rejects legitimate same-day deadlines (west-of-
+      // UTC servers/users — fires every evening on Cloud Run, TZ=UTC). Resolve
+      // "today" the SAME tz-aware way the display SSOT does (computeOverdueForRow
+      // — taskMappers.js:227, via getNowInTimezone) and compare date-only KEYS
+      // as strings, never raw Date objects, so create-time rejection agrees
+      // with the display predicate that decides overdue-ness afterward.
+      //
+      // ernie-tz-2 (re-review fix): `String(body.deadline).slice(0,10)` is
+      // only a correct date KEY when body.deadline is already a zero-padded
+      // ISO string. The MCP create_task contract documents "YYYY-MM-DD or
+      // M/D format" (src/mcp/tools/tasks.js:89) and the format-validity check
+      // above admits ANY Date-parseable string, so a lexicographic compare of
+      // an un-normalized prefix gives wrong answers in both directions for
+      // non-zero-padded input (e.g. '2026-1-5'). Normalize with the same
+      // format-aware, pure (no Date/tz round-trip) parser the rest of the
+      // codebase uses for this exact "calendar date, not an instant" model.
+      // A deadline string in neither documented format (isoToDateKey ->
+      // null) is not one the create-time plausibility check can key against;
+      // skip the past-deadline check for it rather than risk a wrong
+      // comparison — the "Deadline must be a valid date" check above still
+      // catches non-Date-parseable garbage.
+      var _todayKey = getNowInTimezone(body.timezone || DEFAULT_TIMEZONE).todayKey;
+      var _dlKey = isoToDateKey(body.deadline);
+      if (_dlKey !== null && _dlKey < _todayKey) {
+        errors.push('Deadline must not be in the past');
+      }
+    }
   }
   // earliestStart validation
   if (body.earliestStart !== undefined && body.earliestStart !== null && body.earliestStart !== '') {

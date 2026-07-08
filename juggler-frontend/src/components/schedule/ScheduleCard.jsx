@@ -12,6 +12,7 @@ import { getTheme } from '../../theme/colors';
 import { getTaskIcon } from '../../utils/taskIcon';
 import { checkWeatherMatch, hasWeatherRestrictions } from '../../utils/weatherMatch';
 import { parseWhen } from '../../scheduler/timeBlockHelpers';
+import { isTaskOverdue } from '../../utils/overdue';
 import StatusToggle from './StatusToggle';
 
 var TOOL_ICON_MAP = {};
@@ -42,11 +43,9 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
            : 'lg';
   var compact = size === 'xs' || size === 'sm';
   var showDetails = size === 'lg';
-  // Overdue: scheduler placed this at its original time because the user's
-  // window has passed (missed flex recurring, past-day recurring, or rigid
-  // recurring whose time already elapsed). Show a red border + OVERDUE badge
-  // so the user acknowledges it; suppress when the task is already terminal.
-  var isOverdue = !!item._overdue && !isDone;
+  // Overdue: delegate to the SSOT predicate (utils/overdue.js) so this view
+  // never disagrees with Calendar/Issues on whether a task is overdue.
+  var isOverdue = isTaskOverdue(task, isDone);
   var containerStyle = React.useMemo(function() {
     var baseBorder = '1px ' + (task.recurring ? 'dashed' : 'solid') + ' ' + (isCompletedLook ? theme.border : priColor + '40');
     return {
