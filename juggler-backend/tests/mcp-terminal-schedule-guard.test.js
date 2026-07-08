@@ -1,45 +1,50 @@
 /**
  * 999.895 — MCP terminal-requires-schedule guard regression test
  *
- * Covers: BUG 999.895 — set_task_status and update_task in src/mcp/tools/tasks.js
- * bypass the terminal-requires-schedule guard present on the HTTP path
- * (UpdateTaskStatus.js:147-160). This suite FAILS on pre-fix code (R1/R5 RED)
- * and will turn fully green after bert applies the guard.
+ * jug-mcp-facade AFTER-state (David RULING, 2026-07-07, exception a / 999.1216):
+ * the original 999.895 reject-based guard (terminalScheduleBlock, removed from
+ * tasks.js by the WI-2 facade migration) is REPLACED by facade.updateTaskStatus's
+ * D-B snap-then-write behavior (parity with HTTP — UpdateTaskStatus.js:147-160).
+ * A terminal status write on an UNSCHEDULED non-rolling task NO LONGER rejects —
+ * it SUCCEEDS and snaps `scheduled_at` to now() as part of the same write. This
+ * file pinned the BEFORE state (reject) through WI-2; R1/R5 are now re-authored
+ * to pin the AFTER state (snap-then-write success). R2/R3/R4/R4b/R5b are
+ * untouched — those scenarios were never part of the ruled exception and must
+ * stay green exactly as before.
  *
- * Requirements:
+ * Requirements (AFTER migration):
  *   R1  set_task_status({id, status:'done'|'skip'|'cancel'}) on UNSCHEDULED
- *       non-rolling task → result.isError===true, text contains "without a
- *       scheduled time", DB status unchanged.
- *       RED now: handler has no guard. DB check constraint
- *       chk_task_instances_terminal_scheduled prevents the write (terminal
- *       status requires scheduled_at IS NOT NULL), so the handler throws a
- *       raw MySQL error rather than returning isError:true. After the fix the
- *       guard fires BEFORE the DB write and returns isError:true cleanly.
+ *       non-rolling task → result.isError falsy, DB status becomes the
+ *       requested terminal status, DB scheduled_at is SNAPPED to ~now (was
+ *       null before the call) — the D-B snap-then-write behavior.
  *
  *   R2  set_task_status({id, status:'done'}) on SCHEDULED task → success (no
- *       isError), DB status becomes 'done'. Passes now and after fix (guard
- *       only fires when scheduled_at is null).
+ *       isError), DB status becomes 'done'. Unaffected by the ruling (guard
+ *       only ever fired when scheduled_at was null); still green.
  *
  *   R3  set_task_status({id, status:''}) on UNSCHEDULED task → success.
- *       Non-terminal statuses must never be blocked. Passes now and after fix.
+ *       Non-terminal statuses must never be blocked. Still green.
  *
  *   R4  set_task_status({id, status:'done'}) on a SCHEDULED ROLLING-recurring
- *       instance → success (rolling exempt). Passes now and after fix. Rolling
- *       instances normally have scheduled_at set (placed by the scheduler); the
- *       relevant exemption to preserve is that the fix must NOT over-block rolling
- *       instances that already have scheduling info. Uses scheduled_at non-null to
- *       satisfy chk_task_instances_terminal_scheduled (the DB-level constraint that
- *       independently enforces terminal-requires-schedule; the app guard and the DB
- *       constraint both enforce this invariant, each at its own layer).
+ *       instance → success (rolling exempt, scheduled_at NOT re-snapped —
+ *       already had a value). Still green.
+ *
+ *   R4b set_task_status({id, status:'done'}) on an UNSCHEDULED ROLLING-recurring
+ *       instance → the rolling exemption in facade.updateTaskStatus's
+ *       `_isRollingInstance` check means _snapUnscheduledToNow is FALSE for
+ *       rolling instances (unlike R1's non-rolling case) — the DB CHECK
+ *       constraint chk_task_instances_terminal_scheduled still fires because
+ *       scheduled_at stays null. Still green (still rejects, via the DB layer
+ *       not the app layer — the discriminating assertion is unchanged: no
+ *       app-guard "without a scheduled time" text).
  *
  *   R5  update_task(id, {status:'done'}) on UNSCHEDULED non-rolling task with NO
- *       date/scheduledAt in the call → result.isError===true, text contains
- *       "without a scheduled time", DB status unchanged.
- *       RED now: handler has no guard. DB check constraint fires and the handler
- *       throws a raw MySQL error rather than returning isError:true. After the fix
- *       the guard fires before the DB write.
+ *       date/scheduledAt in the call → result.isError falsy, DB status becomes
+ *       'done', DB scheduled_at is SNAPPED to ~now (update_task routes any
+ *       `status` field through facade.updateTaskStatus per the RULED exception).
  *       update_task(id, {status:'done', date:'12/1'}) → success (scheduling in
- *       same call exempts). Passes now (no guard); must still pass after fix.
+ *       same call). Still green (date wins over the snap — scheduled_at reflects
+ *       the supplied date, not "now").
  *
  * Test-bed: MySQL on 3407 (juggler_sweep_test). Requires test-bed up.
  * Isolation: unique USER_ID prefix; full teardown in afterAll.
@@ -47,7 +52,8 @@
  *      DB_NAME=juggler_sweep_test NODE_ENV=test
  *      npx jest tests/mcp-terminal-schedule-guard.test.js --runInBand --forceExit
  *
- * Traceability: .planning/kermit/999.895/TRACEABILITY.md BUG row
+ * Traceability: .planning/kermit/999.895/TRACEABILITY.md BUG row (BEFORE state);
+ *               .planning/kermit/jug-mcp-facade/TRACEABILITY.md B-7 (AFTER state)
  */
 
 'use strict';
@@ -77,6 +83,20 @@ var UPD_WITH_DATE_ID      = 'g895-upd-dated';
 
 // ── Captured handlers (one per userId; shared across all tests) ───────────────
 var handlers;
+
+// ── "snapped to now" assertion helper ──────────────────────────────────────────
+// knexfile.js connection uses timezone:'+00:00' + dateStrings:true — DB values are
+// UTC wall-clock strings with NO 'Z'/offset suffix. `new Date(dbString)` in Node
+// mis-parses that as LOCAL time (the documented dateStrings/new Date() misparse
+// trap), producing a spurious multi-hour "diff" whenever the process TZ isn't UTC.
+// Do the comparison IN MySQL (TIMESTAMPDIFF against UTC_TIMESTAMP()) instead of
+// re-parsing the string in JS, so the assertion is TZ-independent.
+async function secondsSinceSnappedToNow(table, id) {
+  var row = await db(table).where('id', id)
+    .select(db.raw('ABS(TIMESTAMPDIFF(SECOND, scheduled_at, UTC_TIMESTAMP())) as diff_seconds'))
+    .first();
+  return row ? Number(row.diff_seconds) : null;
+}
 
 // ── Seed helper ───────────────────────────────────────────────────────────────
 
@@ -191,57 +211,72 @@ afterAll(async () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// R1 — set_task_status: terminal status on UNSCHEDULED non-rolling → reject
+// R1 — set_task_status: terminal status on UNSCHEDULED non-rolling
+//      → D-B snap-then-write (AFTER state, David RULING 2026-07-07, exception a)
 // ═══════════════════════════════════════════════════════════════════════════════
 //
-// RED on pre-fix code: no guard exists; handler writes the terminal status and
-// returns success. These tests will FAIL until the guard is added.
+// AFTER migration: facade.updateTaskStatus's _snapUnscheduledToNow branch fires
+// (non-rolling, no existing/incoming schedule) — the write SUCCEEDS and
+// scheduled_at is snapped to new Date() as part of the SAME write, instead of
+// being rejected. Pinning both the response AND the DB row so a future revert
+// of the ruling flips both assertions loudly.
+//
+// TELLY FIX (order-independence, BASE-TESTING §5): each response+DB pair is
+// ONE atomic test, not split call/DB-check pairs — under `jest --randomize`
+// (jest-circus randomizes execution order WITHIN a file, not just across
+// files) a "call the handler" test and its separate "check the DB" test can
+// run OUT of the written order, since they share fixtures seeded once in
+// beforeAll with no ordering guarantee between sibling `it()` blocks. Merging
+// removes the possibility entirely rather than relying on execution order.
 
-describe('R1 — set_task_status: terminal on unscheduled non-rolling task', () => {
+describe('R1 — set_task_status: terminal on unscheduled non-rolling task → snap-then-write', () => {
 
-  it('R1a: set_task_status done → isError true + "without a scheduled time"', async () => {
+  it('R1a: set_task_status done → isError falsy, no reject text; DB status becomes \'done\' AND scheduled_at is snapped to ~now (was null)', async () => {
     var result = await handlers['set_task_status']({ id: UNSCHEDULED_DONE_ID, status: 'done' });
 
-    // RED on current code: result.isError is undefined (handler returns success, no guard).
-    expect(result.isError).toBe(true);
+    expect(result.isError).toBeFalsy();
     var text = result.content[0].text;
-    expect(text).toMatch(/without a scheduled time/i);
-  });
+    expect(text).not.toMatch(/without a scheduled time/i);
 
-  it('R1a DB: status in DB is unchanged (still \'\') after rejected done', async () => {
-    // RED on current code: handler wrote 'done' to the instance row.
     var row = await db('task_instances')
       .where({ id: UNSCHEDULED_DONE_ID, user_id: USER_ID }).first();
     expect(row).toBeTruthy();
-    expect(row.status).toBe('');
+    expect(row.status).toBe('done');
+    expect(row.scheduled_at).not.toBeNull();
+    // "snapped to now" — within a generous window of the test run (MySQL-side
+    // comparison, TZ-independent — see secondsSinceSnappedToNow header comment).
+    var diffSeconds = await secondsSinceSnappedToNow('task_instances', UNSCHEDULED_DONE_ID);
+    expect(diffSeconds).toBeLessThan(60);
   });
 
-  it('R1b: set_task_status skip → isError true + "without a scheduled time"', async () => {
+  it('R1b: set_task_status skip → isError falsy, no reject text; DB status becomes \'skip\' AND scheduled_at is snapped to ~now', async () => {
     var result = await handlers['set_task_status']({ id: UNSCHEDULED_SKIP_ID, status: 'skip' });
 
-    expect(result.isError).toBe(true);
+    expect(result.isError).toBeFalsy();
     var text = result.content[0].text;
-    expect(text).toMatch(/without a scheduled time/i);
-  });
+    expect(text).not.toMatch(/without a scheduled time/i);
 
-  it('R1b DB: status in DB is unchanged after rejected skip', async () => {
     var row = await db('task_instances')
       .where({ id: UNSCHEDULED_SKIP_ID, user_id: USER_ID }).first();
-    expect(row.status).toBe('');
+    expect(row.status).toBe('skip');
+    expect(row.scheduled_at).not.toBeNull();
+    var diffSeconds = await secondsSinceSnappedToNow('task_instances', UNSCHEDULED_SKIP_ID);
+    expect(diffSeconds).toBeLessThan(60);
   });
 
-  it('R1c: set_task_status cancel → isError true + "without a scheduled time"', async () => {
+  it('R1c: set_task_status cancel → isError falsy, no reject text; DB status becomes \'cancel\' AND scheduled_at is snapped to ~now', async () => {
     var result = await handlers['set_task_status']({ id: UNSCHEDULED_CANCEL_ID, status: 'cancel' });
 
-    expect(result.isError).toBe(true);
+    expect(result.isError).toBeFalsy();
     var text = result.content[0].text;
-    expect(text).toMatch(/without a scheduled time/i);
-  });
+    expect(text).not.toMatch(/without a scheduled time/i);
 
-  it('R1c DB: status in DB is unchanged after rejected cancel', async () => {
     var row = await db('task_instances')
       .where({ id: UNSCHEDULED_CANCEL_ID, user_id: USER_ID }).first();
-    expect(row.status).toBe('');
+    expect(row.status).toBe('cancel');
+    expect(row.scheduled_at).not.toBeNull();
+    var diffSeconds = await secondsSinceSnappedToNow('task_instances', UNSCHEDULED_CANCEL_ID);
+    expect(diffSeconds).toBeLessThan(60);
   });
 
 });
@@ -334,27 +369,53 @@ describe('R4 — set_task_status: terminal on SCHEDULED rolling instance → not
 // left all 13 tests green — the exemption branch was wholly unprotected.
 //
 // R4b fixes this by seeding an UNSCHEDULED rolling instance (scheduled_at=null):
-//   willBeScheduled = false            → does NOT exit early
-//   masterId = ROLLING_MASTER_ID       → set (instance.master_id via tasks_v)
-//   isRollingMaster(master) = true     → recur.type='rolling'
-//   terminalScheduleBlock returns null → app guard exempted (rolling path)
-//   updateTaskById writes terminal + null scheduled_at → DB CHECK constraint fires
+//   willBeScheduled = false                 → does NOT exit early
+//   masterId = ROLLING_MASTER_ID            → set (instance.master_id via tasks_v)
+//   isRollingMaster(master) = true          → recur.type='rolling'
+//   _isRollingInstance = true (UpdateTaskStatus.js:152)
+//   _snapUnscheduledToNow = false (UpdateTaskStatus.js:162 — rolling instances are
+//     exempted from the snap; scheduled_at is left null, unlike R1's non-rolling case)
+//   repo.updateTaskById writes status='done' with scheduled_at STILL null
+//     → DB CHECK constraint chk_task_instances_terminal_scheduled fires
+//     → the write's promise REJECTS (UpdateTaskStatus.execute has no try/catch around
+//       this call, and tasks.js's set_task_status handler has no try/catch around the
+//       facade call either — the raw DB error propagates OUT of the MCP handler as a
+//       thrown/rejected error, NOT an { isError: true } response envelope)
+//   → the row is left UNCHANGED (status stays '', scheduled_at stays null) — the failed
+//     UPDATE does not partially apply
 //
-// Expected: the error/result text does NOT contain "without a scheduled time"
-// (that phrase is the app-guard message; the DB constraint produces a different error).
-// This proves the exemption fired, not the app guard.
+// (999.895's original app-level terminalScheduleBlock guard — and its "without a
+// scheduled time" message — was REMOVED ENTIRELY by the WI-2 facade migration (see file
+// header, and tasks.js:46/454 for the only remaining, non-executable comment references).
+// No live code path can produce that string anymore, so a not.toMatch of it is
+// unconditionally true post-migration and pins nothing — zoe-jug-mcp-facade-r4b-vacuous-
+// post-migration (2026-07-08).)
 //
-// Mutation contract: if the exemption block is removed/neutered, terminalScheduleBlock
-// returns the block message → result.isError=true, text="Cannot mark task done without
-// a scheduled time" → R4b fails (RED). Restore → R4b passes (GREEN).
+// AFTER-state expected observable (confirmed via direct DB-level repro, 2026-07-08):
+// caughtError is truthy (the handler call throws — it is NOT a normal isError:true
+// response); caughtError.code === 'ER_CHECK_CONSTRAINT_VIOLATED'; caughtError.message
+// matches /chk_task_instances_terminal_scheduled/; the DB row is UNCHANGED (status stays
+// '', scheduled_at stays null) — proving the APP-level rolling exemption fired (no
+// isError:true "without a scheduled time" 400 was returned) while the DB-level invariant
+// still correctly held.
+//
+// Mutation contract: if the rolling exemption is removed/neutered (_isRollingInstance
+// forced false), _snapUnscheduledToNow becomes true — the write instead SNAPS
+// scheduled_at to now and SUCCEEDS (no thrown error; row.status becomes 'done',
+// scheduled_at becomes non-null) — R4b fails RED (no caughtError, row mutated,
+// status !== ''). Restore → R4b passes GREEN.
 
 describe('R4b — set_task_status: terminal on UNSCHEDULED rolling instance → exemption exercised', () => {
 
-  it('R4b: set_task_status done on UNSCHEDULED rolling instance → app guard does NOT fire', async () => {
+  it('R4b: set_task_status done on UNSCHEDULED rolling instance → app-level rolling exemption fires (no isError guard-reject), DB CHECK constraint rejects the unsnapped write, row unchanged', async () => {
     // willBeScheduled=false, masterId=ROLLING_MASTER_ID, isRollingMaster=true →
-    // terminalScheduleBlock returns null (exempted). The DB CHECK constraint then fires
-    // because terminal + null scheduled_at. The discriminating assertion: whatever error
-    // or result occurs, it must NOT be the app-guard "without a scheduled time" message.
+    // _isRollingInstance=true → _snapUnscheduledToNow=false (UpdateTaskStatus.js:152/162):
+    // the APP-level rolling exemption fires (no 400/isError guard-reject — that code path
+    // was removed by the WI-2 migration). scheduled_at is therefore left null and the
+    // subsequent repo.updateTaskById write violates the DB CHECK constraint
+    // chk_task_instances_terminal_scheduled, which REJECTS the promise (no try/catch
+    // anywhere between the repo call and the MCP handler — see header) rather than
+    // returning an { isError: true } response.
     var result;
     var caughtError;
     try {
@@ -363,44 +424,52 @@ describe('R4b — set_task_status: terminal on UNSCHEDULED rolling instance → 
       caughtError = err;
     }
 
-    if (caughtError) {
-      // Handler threw — expect DB constraint error, NOT the app-guard message.
-      expect(caughtError.message).not.toMatch(/without a scheduled time/i);
-    } else {
-      // Handler returned a result — text must NOT be the app-guard message.
-      var text = result.content[0].text;
-      expect(text).not.toMatch(/without a scheduled time/i);
-    }
+    // Discriminates the app-level exemption from the (removed) app-level guard: a thrown
+    // DB-layer error, not a normal { isError: true } response.
+    expect(result).toBeUndefined();
+    expect(caughtError).toBeTruthy();
+    expect(caughtError.code).toBe('ER_CHECK_CONSTRAINT_VIOLATED');
+    expect(caughtError.message).toMatch(/chk_task_instances_terminal_scheduled/);
+
+    // Discriminates a genuinely-rejected write from a partially-applied one: the failed
+    // UPDATE must not have mutated the row (also proves this is NOT the old app guard,
+    // which never attempted the write at all — same observable end-state, different path).
+    var row = await db('task_instances')
+      .where({ id: ROLLING_UNSC_INST_ID, user_id: USER_ID }).first();
+    expect(row.status).toBe('');
+    expect(row.scheduled_at).toBeNull();
   });
 
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// R5 — update_task: terminal status + no scheduling info → reject
+// R5 — update_task: terminal status + no scheduling info
+//      → D-B snap-then-write (AFTER state, David RULING 2026-07-07, exception a)
 // ═══════════════════════════════════════════════════════════════════════════════
 //
-// RED on pre-fix code: no guard in update_task; handler writes 'done' and succeeds.
-// After fix: reject when status is terminal AND neither the existing row nor the
-// update call provides scheduling info. Allow when date/scheduledAt is in the call
-// (scheduling-in-same-call exemption, matching HTTP-path semantics).
+// AFTER migration: update_task routes any `status` field through
+// facade.updateTaskStatus (tasks.js:383-392) — the SAME D-B snap-then-write
+// behavior as R1 applies here too. Allow-with-date (R5b) is unaffected: date
+// wins over the snap because it's part of the facade.updateTask call that
+// runs FIRST (tasks.js:373-382), so by the time facade.updateTaskStatus runs,
+// scheduled_at is already non-null and _snapUnscheduledToNow does not fire.
 
-describe('R5 — update_task: terminal status with no scheduling info → reject', () => {
+describe('R5 — update_task: terminal status with no scheduling info → snap-then-write', () => {
 
-  it('R5a: update_task status:done on unscheduled, no date → isError + "without a scheduled time"', async () => {
+  it('R5a: update_task status:done on unscheduled, no date → isError falsy, no reject text; DB status becomes \'done\' AND scheduled_at is snapped to ~now (was null)', async () => {
     var result = await handlers['update_task']({ id: UPD_UNSCHEDULED_ID, status: 'done' });
 
-    // RED on current code: result.isError is undefined (no guard; handler writes 'done').
-    expect(result.isError).toBe(true);
+    expect(result.isError).toBeFalsy();
     var text = result.content[0].text;
-    expect(text).toMatch(/without a scheduled time/i);
-  });
+    expect(text).not.toMatch(/without a scheduled time/i);
 
-  it('R5a DB: status in DB is unchanged after rejected update_task', async () => {
-    // RED on current code: handler wrote 'done' to the instance row.
     var row = await db('task_instances')
       .where({ id: UPD_UNSCHEDULED_ID, user_id: USER_ID }).first();
     expect(row).toBeTruthy();
-    expect(row.status).toBe('');
+    expect(row.status).toBe('done');
+    expect(row.scheduled_at).not.toBeNull();
+    var diffSeconds = await secondsSinceSnappedToNow('task_instances', UPD_UNSCHEDULED_ID);
+    expect(diffSeconds).toBeLessThan(60);
   });
 
   it('R5b: update_task status:done + date:\'12/1\' in same call → success (scheduling-in-call exemption)', async () => {

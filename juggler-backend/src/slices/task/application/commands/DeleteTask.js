@@ -83,8 +83,8 @@ DeleteTask.prototype.execute = async function execute(input) {
   var task = await this.repo.fetchTaskWithEventIds(id, userId);
   if (!task) return { status: 404, body: { error: 'Task not found' } };
 
-  // When scope=instance is specified for a recurring_instance, skip the soft-skip
-  // and do a hard delete instead (delete just this one instance).
+  // When scope=instance is specified for a recurring_instance, standardDelete()
+  // soft-cancels just this one instance (R55 — status='cancelled', row kept).
   // For non-recurring tasks, scope makes no difference — single delete.
   var _isRecurringTemplate = task.task_type === 'recurring_template' || (task.recurring && task.task_type !== 'recurring_instance');
   var isRecurringInstance = task.task_type === 'recurring_instance';
@@ -147,8 +147,9 @@ DeleteTask.prototype.execute = async function execute(input) {
   }
 
   // ── scope=instance ────────────────────────────────────────────────────────
-  // For any task type: delete just that single row (no cascade).
-  // For recurring_instance: hard-delete the instance instead of soft-skip.
+  // For any task type: soft-cancel just that single row (no cascade), via
+  // standardDelete() -> twrite.softCancelById (R55 — row kept, status='cancelled').
+  // For recurring_instance: soft-cancels just this instance, same as above.
   // For recurring template: like standard delete but without the recurring cascade.
   // For non-recurring: same as standard delete.
   if (scope === 'instance') {

@@ -8,7 +8,16 @@
  * queries include .where({ id, user_id: userId }) — a task owned by user A returns
  * nothing when queried with user B's userId, and the handler returns isError: true.
  *
- * These tests use a fully in-memory mock DB (no real DB required).
+ * These tests were AUTHORED against a fully in-memory mock DB (no real DB required) —
+ * but that is no longer accurate for any write-mutation path (update_task, delete_task,
+ * set_task_status, batch_update_tasks). Since the jug-mcp-facade migration routed these
+ * tools through slices/task/facade.js's KnexTaskRepository (which requires '../../lib/db',
+ * a module this file never mocks), every mutating handler now reaches a REAL DB connection
+ * (test-bed 3407 in CI/local) where the in-memory `taskStore` fixture does not exist —
+ * 999.1381 (tracked, declined-this-leg). get_task/list_tasks (read-only, still routed
+ * through the mocked '../src/db') are UNAFFECTED and remain fully in-memory. See the
+ * KNOWN-RED comment on the batch_update_tasks describe() block below for a second,
+ * distinct gap discovered on top of 999.1381.
  */
 
 'use strict';
@@ -224,7 +233,12 @@ jest.mock('../src/lib/task-write-queue', function() {
 });
 
 jest.mock('../src/lib/sse-emitter', function() {
-  return { emitTasksChanged: function() {} };
+  // Real module (src/lib/sse-emitter.js) exports { addClient, emit, clientCount, getStats }.
+  // facade.js's enqueueScheduleRun (S4/S6 mutation->schedule trigger) calls sseEmitter.emit(...)
+  // directly — the facade migration surfaced this call; a mock stubbing only the legacy
+  // emitTasksChanged name throws "sseEmitter.emit is not a function" and crashes every mutating
+  // handler (update/delete/set_status/batch_update) before its assertions run.
+  return { emitTasksChanged: function() {}, emit: function() {} };
 });
 
 // ── Tool handler capture ───────────────────────────────────────────────────────
@@ -391,11 +405,35 @@ describe('MCP cross-user isolation — list_tasks', function() {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// KNOWN-RED (telly, 2026-07-08 — corrects the prior "cross-user 5/5 PASS" overstatement,
+// zoe-jug-mcp-facade-crossuser-triage-overstated): the emit stub above fixed the CRASH
+// (facade.js:144 sseEmitter.emit was unmocked), so this assertion now RUNS — but it still
+// FAILS, for a real, different reason, blocked on TWO stacked gaps:
+//  (1) 999.1381 (pre-existing, tracked): this file mocks only '../src/db', not
+//      '../../lib/db' — facade.batchUpdateTasks's unlocked path runs through the REAL
+//      KnexTaskRepository (test-bed 3407), where TASK_ID does not exist at all, so
+//      `existing` is undefined for every id regardless of which user calls it;
+//  (2) NEWLY DISCOVERED this pass: batchUpdateTxn (facade.js, non-recurring-instance
+//      branch, ~L1084/L1106) increments `updatedCount` once per ITERATED update item,
+//      unconditionally — it never inspects tasksWrite.updateTaskById's own returned
+//      `{masterUpdated, instanceUpdated}` affected-row counts. So even once (1) is fixed,
+//      `batch_update_tasks` will report `updated:1` for ANY id passed to it (foreign,
+//      nonexistent, or owned) as long as it reaches this branch — the underlying DB WRITE
+//      is correctly user_id-scoped (tasks-write.js:220, KnexTaskRepository) and mutates
+//      ZERO rows for a foreign/nonexistent id, so there is NO actual cross-user data
+//      mutation — but the API's reported count is not a truthful signal of what happened.
+// This assertion intentionally continues to pin the CORRECT/intended behavior
+// (updated===0 for a foreign id) rather than being weakened to match the current buggy
+// count — it will go GREEN once BOTH gaps are closed. See telly-REVIEW.json findings for
+// this leg (Pass 4) for the full root-cause + REFER.
 describe('MCP cross-user isolation — batch_update_tasks', function() {
 
   test('User B batch_update_tasks on User A task is skipped (0 updates)', async function() {
-    // batch_update_tasks pre-loads existingRows with WHERE user_id = userId.
-    // A task not in that set is skipped — no data is mutated.
+    // batch_update_tasks pre-loads existingRows with WHERE user_id = userId (the MCP
+    // adapter's OWN fixed-mode-guard pre-check, tasks.js:576-578) — but the actual write
+    // routes through facade.batchUpdateTasks -> batchUpdateTxn, which does NOT re-check
+    // ownership before counting an item as updated (see KNOWN-RED note above). Currently
+    // fails; tracked, not silently accepted.
     var handlers = captureHandlers(USER_B);
     var result = await handlers['batch_update_tasks']({
       updates: [{ id: TASK_ID, text: 'Batch hijack' }]

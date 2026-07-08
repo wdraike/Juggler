@@ -6,15 +6,9 @@ const { z } = require('zod');
 const safeStringify = require('../safeStringify');
 const db = require('../../db');
 const { rowToTask } = require('../../controllers/task.controller');
-const { safeTimezone } = require('../../../../shared/scheduler/dateHelpers');
+const getUserTimezone = require('../getUserTimezone');
 
 function registerDataTools(server, userId) {
-
-  // Helper: get user timezone
-  async function getUserTimezone() {
-    var user = await db('users').where('id', userId).select('timezone').first();
-    return safeTimezone(user ? user.timezone : null, 'America/New_York');
-  }
 
   // ── export_data ──
   server.tool(
@@ -22,7 +16,7 @@ function registerDataTools(server, userId) {
     'Export all user data as JSON (tasks, projects, locations, tools, config). Useful for backups.',
     {},
     async () => {
-      var tz = await getUserTimezone();
+      var tz = await getUserTimezone(userId);
 
       var { fetchTasksWithEventIds } = require('../../controllers/task.controller');
       var [taskRows, locationRows, toolRows, projectRows, configRows] = await Promise.all([

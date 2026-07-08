@@ -43,8 +43,13 @@ var { z } = require('zod');
 
 var USER = 'r41-user';
 
+// jug-mcp-facade telly finding jug-mcp-facade-adjacent-red-r41 (REFER->telly,
+// bert-REVIEW.json): this local copy had drifted from the real enum in TWO
+// ways — missing 'wip' (added) and still carrying 'missed' (removed) — see
+// facade.js's statusUpdateSchema (the single real enum, ['', 'wip', 'done',
+// 'cancel', 'skip', 'pause', 'disabled']). Synced to match exactly.
 var statusUpdateSchema = z.object({
-  status: z.enum(['', 'done', 'cancel', 'skip', 'pause', 'disabled', 'missed']),
+  status: z.enum(['', 'wip', 'done', 'cancel', 'skip', 'pause', 'disabled']),
   completedAt: z.string().optional(),
   direction: z.string().optional()
 }).passthrough();

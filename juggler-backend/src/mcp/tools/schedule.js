@@ -5,15 +5,9 @@
 const safeStringify = require('../safeStringify');
 const { runScheduleAndPersist, deriveSchedulePlacements } = require('../../slices/scheduler/facade');
 const { withLock } = require('../../lib/sync-lock');
-const db = require('../../db');
-const { safeTimezone } = require('../../../../shared/scheduler/dateHelpers');
+const getUserTimezone = require('../getUserTimezone');
 
 function registerScheduleTools(server, userId) {
-
-  async function getUserTimezone() {
-    var user = await db('users').where('id', userId).select('timezone').first();
-    return safeTimezone(user ? user.timezone : null, 'America/New_York');
-  }
 
   // ── get_schedule ──
   server.tool(
@@ -21,7 +15,7 @@ function registerScheduleTools(server, userId) {
     'Get the current schedule placements (read-only, does not modify tasks). Returns day-by-day placements, unplaced tasks, and deadline misses.',
     {},
     async () => {
-      var tz = await getUserTimezone();
+      var tz = await getUserTimezone(userId);
       const result = await deriveSchedulePlacements(userId, { timezone: tz });
       return { content: [{ type: 'text', text: safeStringify(result) }] };
     }
@@ -33,7 +27,7 @@ function registerScheduleTools(server, userId) {
     'Run the scheduler and persist date/time changes to tasks. Returns stats on tasks moved, cleared, and reset.',
     {},
     async () => {
-      var tz = await getUserTimezone();
+      var tz = await getUserTimezone(userId);
       // Wrap the run in the per-user sync lock so this MCP path can't race
       // against the REST /schedule/run endpoint or the background queue
       // worker. Retry a few times with backoff if the lock is held, then

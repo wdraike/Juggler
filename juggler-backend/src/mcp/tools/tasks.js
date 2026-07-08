@@ -4,24 +4,69 @@
  * Accepts both scheduledAt (UTC ISO) and date+time (local strings) —
  * UTC takes precedence. `deadline` and `earliestStart` are date-only
  * (YYYY-MM-DD). Always returns both scheduled_at formats in responses.
+ *
+ * ── jug-mcp-facade WI-2 (999.1182) ────────────────────────────────────────────
+ * The 6 write tools (create_task, create_tasks, update_task, set_task_status,
+ * delete_task, batch_update_tasks) now route through `slices/task/facade.js`'s
+ * use-cases instead of an independent db()/tasksWrite reimplementation — the
+ * SAME orchestration (row shaping, cal-sync guards, lock/queue, recurring
+ * template/instance routing, and — highest-care — the rolling/next-occurrence
+ * anchor projection) the HTTP path already uses. Read tools (list_tasks,
+ * get_task, search_tasks) are unchanged read-only db() access — out of scope.
+ *
+ * Each write tool keeps a thin MCP-specific ADAPTER layer in front of the
+ * facade call:
+ *   - pre-write guards that produce a byte-identical error string to the
+ *     pre-migration behavior for a condition the facade also independently
+ *     enforces (validateTaskInput, create_task's AND-based fixed-mode check)
+ *     are kept verbatim so that string never has to round-trip the facade;
+ *   - an ALL_DAY placement-mode backstop is computed HERE, not left to the
+ *     facade's own backstop, because the facade's version keys off an `allDay`
+ *     boolean field the MCP zod schema has never exposed (MCP infers all_day
+ *     from date-without-time, matching today's behavior — see
+ *     behavior_contract "ALL_DAY backstop" in INTAKE-BRIEF.json);
+ *   - `mapFacadeErrorText` translates the facade's structured
+ *     `{status, body:{error, code?, blockedFields?}}` into the EXACT free-text
+ *     string tasks.js has always returned for the SAME condition
+ *     (behavior_contract: byte-identical error strings, not just
+ *     equivalent-meaning);
+ *   - the success payload is UNWRAPPED from the facade's `{status,body}`
+ *     envelope to today's bare-object shape, and (for create_task/
+ *     update_task/set_task_status) re-read via `rowToTask(row, tz)` using the
+ *     user's ACTUAL resolved timezone — the facade's own use-cases format
+ *     their `body.task` with `rowToTask(row, null)` (a hardcoded default tz,
+ *     fine for HTTP where the client re-derives local fields, but wrong for
+ *     MCP callers like ClimbRS who consume the server-formatted local fields
+ *     directly). See bert-REVIEW.json for the one known residual gap (the
+ *     create_task/create_tasks LOCKED/queued response, which has no DB row
+ *     to re-read yet and so still carries the facade's default-tz formatting).
+ *
+ * ── RULED EXCEPTIONS (David, 2026-07-07) — intentional behavior changes ──────
+ * 1. set_task_status / update_task: terminal-on-unscheduled status changes no
+ *    longer REJECT (the old `terminalScheduleBlock` guard, 999.895) — calling
+ *    facade.updateTaskStatus gives the D-B snap-then-write behavior (parity
+ *    with HTTP) naturally. update_task routes any `status` field through
+ *    facade.updateTaskStatus (not the plain row.status field UpdateTask's own
+ *    shaping would otherwise write with zero terminal-schedule handling).
+ * 2. delete_task: routes through facade.deleteTask, which already R55
+ *    soft-cancels (status='cancelled', row kept) instead of the old hard
+ *    `tasksWrite.deleteTaskById()` — no prerequisite fix needed (999.1215 was
+ *    stale, closed by WI-1).
+ * 3. batch_update_tasks: gains the rolling/next-occurrence anchor projection
+ *    it never had (a silent MCP-only gap) as a side effect of routing through
+ *    facade's lockedBatchUpdate/batchUpdateTxn, which already call
+ *    applyRollingAnchor on a done/skip transition.
  */
 
 const { z } = require('zod');
 const safeStringify = require('../safeStringify');
 const db = require('../../db');
-const { rowToTask, taskToRow, guardFixedCalendarWhen, ensureProject, applySplitDefault, buildSourceMap, TEMPLATE_FIELDS, validateTaskInput } = require('../../controllers/task.controller');
-const { isFixedRecurringConflict } = require('../../slices/task/domain/validation/taskValidation');
+const { rowToTask, buildSourceMap, validateTaskInput } = require('../../controllers/task.controller');
 const { PLACEMENT_MODES } = require('../../lib/placementModes');
-const { enqueueScheduleRun } = require('../../scheduler/scheduleQueue');
-const { isLocked, enqueueWrite, splitFields } = require('../../lib/task-write-queue');
-const tasksWrite = require('../../lib/tasks-write');
-const { isRollingMaster, computeRollingAnchor } = require('../../lib/rolling-anchor');
-const { isPatternRecurMaster, computeNextOccurrenceAnchor } = require('../../lib/next-occurrence-anchor');
-const { getNowInTimezone } = require('../../../../shared/scheduler/getNowInTimezone');
-const { safeTimezone } = require('../../../../shared/scheduler/dateHelpers');
-const { createLogger } = require('../../lib/logger');
-
-const logger = createLogger('mcp.tools.tasks');
+const facade = require('../../slices/task/facade');
+const getUserTimezone = require('../getUserTimezone');
+const { isAnchorDependentRecur } = require('../../../../shared/scheduler/expandRecurring');
+const dateHelpers = require('../../../../shared/scheduler/dateHelpers');
 
 // Shared Zod fields for task input (used by create_task, create_tasks, update_task)
 var taskInputFields = {
@@ -69,29 +114,75 @@ var taskInputFields = {
   preferredTimeMins: z.number().optional().describe('Preferred time as minutes from midnight in user local timezone (e.g. 720 = 12:00 PM, 420 = 7:00 AM). For recurring tasks in Time Window mode.')
 };
 
-var TERMINAL_REQUIRES_SCHEDULE = ['done', 'skip', 'cancel'];
-// Mirror of the HTTP terminal-requires-schedule guard (UpdateTaskStatus.js:147-160):
-// a task cannot move to a terminal status without a scheduled time, UNLESS it is a
-// rolling-recurring instance (anchor-based, exempt). Returns the rejection message
-// string when blocked, else null.
-async function terminalScheduleBlock(existing, status, willBeScheduled, userId) {
-  if (TERMINAL_REQUIRES_SCHEDULE.indexOf(status) === -1) return null;
-  if (willBeScheduled) return null;
-  var masterId = existing.master_id || existing.source_id;
-  if (masterId) {
-    var master = await db('task_masters').where({ id: masterId, user_id: userId }).first();
-    if (master && isRollingMaster(master)) return null;
+// ── ALL_DAY placement-mode backstop (MCP-specific bridge) ────────────────────
+// The facade's own ALL_DAY backstop (CreateTask/UpdateTask) keys off an
+// `allDay` boolean field the MCP zod schema never exposes. MCP has always
+// inferred all_day from "date present, no time/scheduledAt, no explicit
+// placementMode" — replicate that inference on the body BEFORE handing off to
+// the facade, so the facade's own row-shaping sees an explicit placementMode
+// and its incompatible `allDay`-keyed backstop is a no-op either way.
+function applyAllDayBackstop(fields) {
+  var timeWasSet = fields.time !== undefined || fields.scheduledAt !== undefined;
+  if (!timeWasSet && fields.date !== undefined && fields.placementMode === undefined) {
+    fields.placementMode = PLACEMENT_MODES.ALL_DAY;
   }
-  return 'Cannot mark task ' + status + ' without a scheduled time. Schedule it first.';
+}
+
+// ── recurStart default for anchor-dependent recur (cookie BLOCK-1, jug-mcp-facade WI-2) ──
+// CreateTask.js sets _requireRecurStartIfAnchor=true, so the facade hard-rejects a
+// biweekly/interval/times-per-cycle recur (isAnchorDependentRecur) with no recurStart.
+// The OLD MCP path never required it — recur_start persisted null and the scheduler's
+// getAnchor (expandRecurring.js) fell back recur_start -> src.date -> startDate. The MCP
+// zod schema exposes NO recurStart field, so a ClimbRS caller has no way to satisfy the
+// facade's new requirement. Default it here to the SAME value getAnchor's src.date
+// fallback would have produced: the task's derived local date (from date/scheduledAt in
+// the user's timezone), else today's local date if neither is present. Boundary-correct
+// home is the MCP adapter, NOT CreateTask.js (which deliberately reproduces the HTTP/UI
+// reject for all callers — do not touch it).
+function defaultRecurStartIfAnchorDependent(task, tz) {
+  if (task.recurStart !== undefined && task.recurStart !== null && String(task.recurStart).trim() !== '') return;
+  if (!isAnchorDependentRecur(task.recur)) return;
+  var derivedDate = null;
+  if (task.date !== undefined) {
+    derivedDate = dateHelpers.toDateISO(task.date) || null;
+  } else if (task.scheduledAt !== undefined) {
+    // Pass a real Date object, not the raw ISO string: the MCP schema's scheduledAt
+    // already carries a trailing 'Z' ('2026-08-04T14:00:00.000Z'), but utcToLocal's
+    // string-handling branch assumes a MySQL-style space-separated string with NO
+    // trailing 'Z' and appends one itself (`.replace(' ','T')+'Z'`) — double-Z on an
+    // already-Z-terminated ISO string produces Invalid Date and silently falls
+    // through to the today-fallback below (telly WARN jug-mcp-facade-recurstart-scheduledat-bug).
+    derivedDate = dateHelpers.utcToLocal(new Date(task.scheduledAt), tz).date;
+  }
+  if (!derivedDate) {
+    derivedDate = dateHelpers.utcToLocal(new Date(), tz).date;
+  }
+  task.recurStart = derivedDate;
+}
+
+// ── facade error -> MCP free-text translator ──────────────────────────────────
+// behavior_contract: MCP's free-text isError strings must stay byte-identical
+// for the SAME condition. The facade returns structured { error, code?,
+// blockedFields? } bodies; known conditions are mapped to the EXACT legacy MCP
+// string. Anything else (a facade-only guard tasks.js never had, e.g.
+// TASK_DISABLED / PROVIDER_ORIGIN_DELETE_BLOCKED / the DB-backed reference
+// existence check) falls back to a generic 'Error: <message>' / 'Validation
+// error: <message>' — new-but-reasonable text for a condition MCP could not
+// previously produce cleanly (see bert-REVIEW.json findings).
+function mapFacadeErrorText(result) {
+  var body = (result && result.body) || {};
+  if (result.status === 404) return 'Error: Task not found';
+  if (body.code === 'CAL_SYNCED_READONLY') {
+    return 'Error: This task is synced from an external calendar. Only status and notes can be changed. Blocked fields: ' +
+      (body.blockedFields || []).join(', ');
+  }
+  if (result.status === 400 && typeof body.error === 'string') {
+    return 'Validation error: ' + body.error;
+  }
+  return 'Error: ' + (body.error || 'Request failed');
 }
 
 function registerTaskTools(server, userId) {
-
-  // Helper: get user timezone
-  async function getUserTimezone() {
-    var user = await db('users').where('id', userId).select('timezone').first();
-    return safeTimezone(user ? user.timezone : null, 'America/New_York');
-  }
 
   // ── list_tasks ──
   server.tool(
@@ -105,7 +196,7 @@ function registerTaskTools(server, userId) {
       limit: z.number().optional().describe('Max number of tasks to return')
     },
     async ({ status, includeDone, project, date, limit }) => {
-      var tz = await getUserTimezone();
+      var tz = await getUserTimezone(userId);
       var query = db('tasks_v').where('user_id', userId);
       if (status !== undefined) {
         // Explicit status filter takes precedence over includeDone.
@@ -147,47 +238,47 @@ function registerTaskTools(server, userId) {
     'Create a single task. Use date+time for scheduling (server converts timezone automatically). Returns both UTC and local fields.',
     Object.assign({ id: z.string().optional().describe('Task ID (auto-generated UUID if omitted)'), text: z.string().describe('Task description/title') }, taskInputFields),
     async (params) => {
-      // Validate input
+      // Validate input (same shared domain function the facade also calls —
+      // kept here so the SAME error text returns without a facade round-trip).
       var valErrors = validateTaskInput(Object.assign({ _requireText: true }, params));
       if (valErrors.length > 0) {
         return { content: [{ type: 'text', text: 'Validation error: ' + valErrors.join('; ') }], isError: true };
       }
-      var tz = await getUserTimezone();
+      var tz = await getUserTimezone(userId);
       var task = Object.assign({}, params);
-      if (!task.id) {
-        var uuidv7 = require('uuid').v7;
-        task.id = uuidv7();
-      }
-      var row = taskToRow(task, userId, tz);
-      if (!row.task_type) row.task_type = 'task';
-      row.created_at = db.fn.now();
-      // Validate: fixed mode requires a date and time.
-      if (row.placement_mode === PLACEMENT_MODES.FIXED) {
+      applyAllDayBackstop(task);
+      defaultRecurStartIfAnchorDependent(task, tz);
+
+      // create_task's OWN AND-based fixed-mode guard (date+time BOTH required,
+      // unlike validateTaskInput's OR-based check above) — reachable whenever
+      // exactly one of date/time is supplied without scheduledAt. Preserved
+      // verbatim (dead only for the both-missing case, which validateTaskInput
+      // already rejects above — see mcp-tasks-write-tools-db-side-effects
+      // characterization test + telly's dead-code finding).
+      if (task.placementMode === PLACEMENT_MODES.FIXED) {
         var _hasDate = task.date !== undefined || task.scheduledAt !== undefined;
         var _hasTime = task.time !== undefined || task.scheduledAt !== undefined;
         if (!_hasDate || !_hasTime) {
           return { content: [{ type: 'text', text: 'Validation error: placementMode "fixed" requires a date and time.' }], isError: true };
         }
       }
-      var _timeWasSet = task.time !== undefined || task.scheduledAt !== undefined;
-      if (!_timeWasSet && task.date !== undefined && row.placement_mode === undefined) {
-        row.placement_mode = PLACEMENT_MODES.ALL_DAY;
-      }
-      await applySplitDefault(row, userId);
-      await ensureProject(userId, task.project);
 
-      var locked = await isLocked(userId);
-      if (locked) {
-        row.user_id = userId;
-        await enqueueWrite(userId, row.id, 'create', row, 'mcp:create_task');
-        enqueueScheduleRun(userId, 'mcp:create_task', [row.id]);
-        return { content: [{ type: 'text', text: safeStringify(Object.assign(rowToTask(row, tz), { queued: true })) }] };
+      var result = await facade.createTask({ userId: userId, body: task, timezoneHeader: tz });
+      if (result.status >= 400) {
+        return { content: [{ type: 'text', text: mapFacadeErrorText(result) }], isError: true };
       }
-
-      await tasksWrite.insertTask(db, row);
-      enqueueScheduleRun(userId, 'mcp:create_task', [row.id]);
-      var created = await db('tasks_with_sync_v').where('id', row.id).first();
-      return { content: [{ type: 'text', text: safeStringify(rowToTask(created, tz)) }] };
+      var body = result.body || {};
+      var payload;
+      if (body.queued) {
+        // LOCKED/queued path: no DB row exists yet to re-read — use the
+        // facade's own optimistic task shape (known gap: formatted with the
+        // facade's default tz, not the user's actual tz — see file header).
+        payload = Object.assign({}, body.task, { queued: true });
+      } else {
+        var created = await db('tasks_with_sync_v').where('id', body.task.id).first();
+        payload = rowToTask(created, tz);
+      }
+      return { content: [{ type: 'text', text: safeStringify(payload) }] };
     }
   );
 
@@ -207,49 +298,27 @@ function registerTaskTools(server, userId) {
           return { content: [{ type: 'text', text: 'Validation error on task ' + vi + ': ' + vErrs.join('; ') }], isError: true };
         }
       }
-      var tz = await getUserTimezone();
+      var tz = await getUserTimezone(userId);
       var uuidv7 = require('uuid').v7;
-      var prefs = await db('user_config').where({ user_id: userId, config_key: 'preferences' }).first();
-      var splitDefault = prefs ? (typeof prefs.config_value === 'string' ? JSON.parse(prefs.config_value) : prefs.config_value).splitDefault : false;
-
-      var projects = new Set();
-      var rows = tasks.map(function(t) {
-        if (!t.id) t.id = uuidv7();
-        if (t.project) projects.add(t.project);
-        var row = taskToRow(t, userId, tz);
-        row.created_at = db.fn.now();
-        if (row.split === undefined || row.split === null) {
-          row.split = splitDefault ? 1 : 0;
-        }
-        var _tTimeWasSet = t.time !== undefined || t.scheduledAt !== undefined;
-        if (!_tTimeWasSet && t.date !== undefined && row.placement_mode === undefined) {
-          row.placement_mode = PLACEMENT_MODES.ALL_DAY;
-        }
-        return row;
+      // The facade's BatchCreateTasks use-case does not return generated ids —
+      // pre-assign them here (same as tasks.js has always done) so the
+      // response's {created, ids} shape can be reconstructed without them.
+      var preparedTasks = tasks.map(function(t) {
+        var task = Object.assign({}, t);
+        if (!task.id) task.id = uuidv7();
+        applyAllDayBackstop(task);
+        defaultRecurStartIfAnchorDependent(task, tz);
+        return task;
       });
 
-      for (var p of projects) {
-        await ensureProject(userId, p);
+      var result = await facade.batchCreateTasks({ userId: userId, body: { tasks: preparedTasks }, timezoneHeader: tz });
+      if (result.status >= 400) {
+        return { content: [{ type: 'text', text: mapFacadeErrorText(result) }], isError: true };
       }
-
-      var locked = await isLocked(userId);
-      if (locked) {
-        for (var qi = 0; qi < rows.length; qi++) {
-          rows[qi].user_id = userId;
-          await enqueueWrite(userId, rows[qi].id, 'create', rows[qi], 'mcp:create_tasks');
-        }
-        enqueueScheduleRun(userId, 'mcp:create_tasks', rows.map(function(r) { return r.id; }));
-        return { content: [{ type: 'text', text: safeStringify({ created: rows.length, ids: rows.map(function(r) { return r.id; }), queued: true }) }] };
-      }
-
-      await db.transaction(async function(trx) {
-        for (var i = 0; i < rows.length; i++) {
-          await tasksWrite.insertTask(trx, rows[i]);
-        }
-      });
-
-      enqueueScheduleRun(userId, 'mcp:create_tasks', rows.map(function(r) { return r.id; }));
-      return { content: [{ type: 'text', text: safeStringify({ created: rows.length, ids: rows.map(function(r) { return r.id; }) }) }] };
+      var ids = preparedTasks.map(function(t) { return t.id; });
+      var payload = { created: result.body.created, ids: ids };
+      if (result.body.queued) payload.queued = true;
+      return { content: [{ type: 'text', text: safeStringify(payload) }] };
     }
   );
 
@@ -262,201 +331,136 @@ function registerTaskTools(server, userId) {
       status: z.string().optional()
     }, taskInputFields),
     async ({ id, ...fields }) => {
-      // Validate input
-      var valErrors = validateTaskInput(fields);
+      var tz = await getUserTimezone(userId);
+
+      var updateFields = Object.assign({}, fields);
+      applyAllDayBackstop(updateFields);
+
+      // update_task's OWN legacy fixed-mode guard (ernie BLOCK-1, jug-mcp-facade
+      // WI-2), reproduced byte-identically BEFORE the facade call: facade.updateTask's
+      // own guard (UpdateTask.js:256-260) is AND-based (requires date AND time) and
+      // returns a DIFFERENT string ('Fixed mode requires a date and time.') for a
+      // BROADER reject set than the pre-migration OR-based guard this adapter always
+      // had (date OR time OR scheduledAt OR the EXISTING row's scheduled_at satisfies
+      // it). Kept verbatim, mirroring create_task's own pre-guard pattern, so the
+      // byte-identical ClimbRS error contract holds without a facade round-trip.
+      //
+      // MOVED BEFORE validateTaskInput (bert iter2, telly WARN
+      // jug-mcp-facade-fixedguard-validatetaskinput-ordering-gap): the shared
+      // validateTaskInput's own fixed-mode cross-field check (taskValidation.js:
+      // 317-324) is existing-blind and, when called first, unconditionally
+      // re-rejects the exact "fixed + no inline date/time, but the row already
+      // HAS a scheduled_at" case this guard exempts below — making that legacy
+      // exemption unreachable. Running this DB-aware guard first restores it.
+      var _uFixedExemptByExisting = false;
+      if (updateFields.placementMode === PLACEMENT_MODES.FIXED) {
+        var _uHasDate = updateFields.date !== undefined && updateFields.date !== null && updateFields.date !== '';
+        var _uHasTime = updateFields.time !== undefined && updateFields.time !== null && updateFields.time !== '';
+        var _uHasScheduledAt = updateFields.scheduledAt !== undefined && updateFields.scheduledAt !== null && updateFields.scheduledAt !== '';
+        if (!_uHasDate && !_uHasTime && !_uHasScheduledAt) {
+          var _uExisting = await db('tasks_with_sync_v').where({ id: id, user_id: userId }).first();
+          if (!_uExisting || !_uExisting.scheduled_at) {
+            return { content: [{ type: 'text', text: 'Validation error: placementMode "fixed" requires a date, time, or scheduledAt' }], isError: true };
+          }
+          _uFixedExemptByExisting = true;
+        }
+      }
+
+      // Validate input (same shared domain function the facade also calls). When
+      // the guard above exempted this call via the row's EXISTING scheduled_at,
+      // validate a CLONE carrying that existing value as scheduledAt so
+      // validateTaskInput's own (existing-blind) OR-based fixed-mode check also
+      // sees the requirement satisfied — `fields`/`updateFields` (what's actually
+      // sent to the facade below) are untouched, so no extra write is introduced;
+      // the row's real scheduled_at is left exactly as-is.
+      //
+      // NOTE (bert iter2 self-verify finding, NOT resolved by this reorder alone):
+      // facade.updateTask's own UpdateTask.js:110 independently calls the SAME
+      // existing-blind `validateTaskInput(body)` on the REAL (unpadded) body
+      // BEFORE its own existing-aware AND-based guard (UpdateTask.js:256-260) —
+      // a duplicate of this exact shadowing bug one layer down, not cited by
+      // telly's finding. This tasks.js-level reorder is necessary but, per direct
+      // repro, NOT sufficient: the end-to-end call still rejects via the facade's
+      // internal check. See REFER→cookie / REFER→ernie below.
+      var valInputFields = _uFixedExemptByExisting
+        ? Object.assign({}, fields, { scheduledAt: _uExisting.scheduled_at })
+        : fields;
+      var valErrors = validateTaskInput(valInputFields);
       if (valErrors.length > 0) {
         return { content: [{ type: 'text', text: 'Validation error: ' + valErrors.join('; ') }], isError: true };
       }
-      var tz = await getUserTimezone();
-      var existing = await db('tasks_with_sync_v').where({ id: id, user_id: userId }).first();
-      if (!existing) {
-        return { content: [{ type: 'text', text: 'Error: Task not found' }], isError: true };
-      }
 
-      // 999.875: merged-state XOR check — effective values by KEY PRESENCE, not by
-      // matching the conflicting literal. Only run when exactly one side is in the
-      // body; validateTaskInput above already caught the both-present conflict.
-      var _mHasPM = 'placementMode' in fields;
-      var _mHasRec = 'recurring' in fields;
-      if (_mHasPM !== _mHasRec) {
-        var _mIsExistingRecurring = !!(existing.recurring || existing.task_type === 'recurring_template' || existing.task_type === 'recurring_instance');
-        var _mEffPM = _mHasPM ? fields.placementMode : existing.placement_mode;
-        var _mEffRec = _mHasRec ? !!fields.recurring : _mIsExistingRecurring;
-        if (isFixedRecurringConflict({ placementMode: _mEffPM, recurring: _mEffRec })) {
-          return { content: [{ type: 'text', text: 'Validation error: invalid_combination' }], isError: true };
-        }
-      }
+      // RULED (999.1216): status transitions route through
+      // facade.updateTaskStatus so the D-B snap-then-write terminal-schedule
+      // handling + rolling-anchor projection apply — UpdateTask's own row
+      // shaping would otherwise write `status` directly with NO terminal
+      // guard at all. Non-status fields (if any) are applied first via
+      // facade.updateTask, then the status transition — this lets
+      // update_task(id,{status:'done',date:'12/1'}) schedule-and-complete in
+      // one call (the date lands before updateTaskStatus checks scheduled_at),
+      // matching pre-migration semantics for that combination.
+      var hasStatus = 'status' in updateFields;
+      var statusValue = updateFields.status;
+      var nonStatusFields = Object.assign({}, updateFields);
+      delete nonStatusFields.status;
 
-      // Guard: only CALENDAR-BORN tasks are restricted to status/notes — a task is calendar-born
-      // when it has an active cal_sync_ledger row whose origin is a provider (not 'juggler').
-      // origin='juggler' means the task pre-existed in Juggler (pushed-out/adopted) → stays editable.
-      var calBornRow = await db('cal_sync_ledger')
-        .where({ user_id: userId, task_id: id, status: 'active' })
-        .whereNot('origin', 'juggler')
-        .first();
-      var isCalSynced = !!calBornRow;
-      if (isCalSynced) {
-        var allowedKeys = ['status', 'notes'];
-        var blocked = Object.keys(fields).filter(function(k) { return allowedKeys.indexOf(k) === -1; });
-        if (blocked.length > 0) {
-          return { content: [{ type: 'text', text: 'Error: This task is synced from an external calendar. Only status and notes can be changed. Blocked fields: ' + blocked.join(', ') }], isError: true };
-        }
-      }
-
-      // Cross-field: fixed placementMode requires scheduling info
-      if (fields.placementMode === 'fixed') {
-        var _hasDate = fields.date !== undefined && fields.date !== null && fields.date !== '';
-        var _hasTime = fields.time !== undefined && fields.time !== null && fields.time !== '';
-        var _hasScheduledAt = fields.scheduledAt !== undefined && fields.scheduledAt !== null && fields.scheduledAt !== '';
-        if (!_hasDate && !_hasTime && !_hasScheduledAt && !existing.scheduled_at) {
-          return { content: [{ type: 'text', text: 'Validation error: placementMode "fixed" requires a date, time, or scheduledAt' }], isError: true };
-        }
-      }
-
-      var row = taskToRow(fields, userId, tz, existing);
-      delete row.user_id;
-      delete row.created_at;
-
-      if (fields.project) await ensureProject(userId, fields.project);
-
-      // ALL_DAY backstop: date-only update without time → default to all_day mode
-      var _updateTimeWasSet = fields.time !== undefined || fields.scheduledAt !== undefined;
-      if (!_updateTimeWasSet && fields.date !== undefined && row.placement_mode === undefined) {
-        row.placement_mode = PLACEMENT_MODES.ALL_DAY;
-      }
-
-      // Recurrings cannot have dependencies — strip if provided
-      if (existing.task_type === 'recurring_template' || existing.task_type === 'recurring_instance') {
-        delete row.depends_on;
-      }
-
-      // Route template fields to source for recurring instances (uses module-level TEMPLATE_FIELDS)
-      var taskType = existing.task_type || 'task';
-      var isRecurringInstance = taskType === 'recurring_instance' && existing.source_id;
-
-      // Guard: don't let calendar-linked fixed tasks lose their 'fixed' tag.
-      // Instance edits route `when` to the source template, so guard against it.
-      if (row.when !== undefined) {
-        var _mGuardOpts = { allowUnfix: !!fields._allowUnfix };
-        if (isRecurringInstance) {
-          var _srcT = await db('tasks_with_sync_v').where({ id: existing.source_id, user_id: userId }).first();
-          guardFixedCalendarWhen(row, _srcT, _mGuardOpts);
-        } else {
-          guardFixedCalendarWhen(row, existing, _mGuardOpts);
-        }
-      }
-
-      var _willBeScheduled = !!existing.scheduled_at
-        || (fields.scheduledAt !== undefined && fields.scheduledAt !== null && fields.scheduledAt !== '')
-        || (fields.date !== undefined && fields.date !== null && fields.date !== '');
-      var _termBlock = await terminalScheduleBlock(existing, fields.status, _willBeScheduled, userId);
-      if (_termBlock) { return { content: [{ type: 'text', text: _termBlock }], isError: true }; }
-
-      // Lock check: if scheduling lock is held, split and queue
-      var locked = await isLocked(userId);
-      if (locked) {
-        var { schedulingFields, nonSchedulingFields } = splitFields(row);
-        if (Object.keys(nonSchedulingFields).length > 0) {
-          nonSchedulingFields.updated_at = db.fn.now();
-          await tasksWrite.updateTaskById(db, id, nonSchedulingFields, userId);
-        }
-        if (Object.keys(schedulingFields).length > 0) {
-          await enqueueWrite(userId, id, 'update', schedulingFields, 'mcp:update_task');
-        }
-        enqueueScheduleRun(userId, 'mcp:update_task', [id]);
-        var allRows = await db('tasks_with_sync_v').where('user_id', userId).select();
-        var srcMap = buildSourceMap(allRows);
-        var updatedRow = allRows.find(function(r) { return r.id === id; });
-        return { content: [{ type: 'text', text: safeStringify(Object.assign(rowToTask(updatedRow, tz, srcMap), { queued: true })) }] };
-      }
-
-      if (isRecurringInstance) {
-        var templateUpdate = {};
-        var instanceUpdate = {};
-        Object.keys(row).forEach(function(k) {
-          if (k === 'updated_at') return;
-          if (TEMPLATE_FIELDS.indexOf(k) >= 0) {
-            templateUpdate[k] = row[k];
-          } else {
-            instanceUpdate[k] = row[k];
-          }
+      var lastResult = null;
+      if (!hasStatus || Object.keys(nonStatusFields).length > 0) {
+        lastResult = await facade.updateTask({
+          id: id, userId: userId,
+          body: hasStatus ? nonStatusFields : updateFields,
+          timezoneHeader: tz
         });
-        if (Object.keys(templateUpdate).length > 0) {
-          templateUpdate.updated_at = db.fn.now();
-          await tasksWrite.updateTaskById(db, existing.source_id, templateUpdate, userId);
+        if (lastResult.status >= 400) {
+          return { content: [{ type: 'text', text: mapFacadeErrorText(lastResult) }], isError: true };
         }
-        if (Object.keys(instanceUpdate).length > 0) {
-          instanceUpdate.updated_at = db.fn.now();
-          await tasksWrite.updateTaskById(db, id, instanceUpdate, userId);
-        } else {
-          await tasksWrite.updateTaskById(db, id, { updated_at: db.fn.now() }, userId);
+      }
+      if (hasStatus) {
+        lastResult = await facade.updateTaskStatus({
+          id: id, userId: userId,
+          body: { status: statusValue },
+          timezoneHeader: tz
+        });
+        if (lastResult.status >= 400) {
+          return { content: [{ type: 'text', text: mapFacadeErrorText(lastResult) }], isError: true };
         }
-      } else {
-        await tasksWrite.updateTaskById(db, id, row, userId);
       }
 
-      enqueueScheduleRun(userId, 'mcp:update_task', [id]);
-      // eslint-disable-next-line no-redeclare
       var allRows = await db('tasks_with_sync_v').where('user_id', userId).select();
-      // eslint-disable-next-line no-redeclare
       var srcMap = buildSourceMap(allRows);
-      // eslint-disable-next-line no-redeclare
       var updatedRow = allRows.find(function(r) { return r.id === id; });
-      return { content: [{ type: 'text', text: safeStringify(rowToTask(updatedRow, tz, srcMap)) }] };
+      var payload = rowToTask(updatedRow, tz, srcMap);
+      if (lastResult && lastResult.body && lastResult.body.queued) payload.queued = true;
+      return { content: [{ type: 'text', text: safeStringify(payload) }] };
     }
   );
 
   // ── set_task_status ──
   server.tool(
     'set_task_status',
-    'Set task status (e.g. "", "done", "dropped").',
+    'Set task status (e.g. "", "done", "cancel").',
     {
       id: z.string().describe('Task ID'),
-      status: z.string().describe('New status: "" (active), "done", "dropped"')
+      status: z.string().describe('New status. Valid values: "" (active), "wip", "done", "cancel", "skip", "pause", "disabled"')
     },
     async ({ id, status }) => {
-      var tz = await getUserTimezone();
-      var existing = await db('tasks_v').where({ id: id, user_id: userId }).first();
-      if (!existing) {
-        return { content: [{ type: 'text', text: 'Error: Task not found' }], isError: true };
+      var tz = await getUserTimezone(userId);
+
+      // Routes through facade.updateTaskStatus — eliminates tasks.js's own
+      // byte-copy of the rolling/next-occurrence anchor recompute (999.1098)
+      // in favor of the facade's applyRollingAnchor (which has the
+      // trx-threading fix this copy lacked), and gives the D-B snap-then-write
+      // terminal-schedule behavior (999.1216 RULED) in place of the old
+      // reject-based terminalScheduleBlock guard.
+      var result = await facade.updateTaskStatus({
+        id: id, userId: userId,
+        body: { status: status },
+        timezoneHeader: tz
+      });
+      if (result.status >= 400) {
+        return { content: [{ type: 'text', text: mapFacadeErrorText(result) }], isError: true };
       }
 
-      var _termBlock = await terminalScheduleBlock(existing, status, !!existing.scheduled_at, userId);
-      if (_termBlock) { return { content: [{ type: 'text', text: _termBlock }], isError: true }; }
-
-      var update = { status: status || '', updated_at: db.fn.now() };
-
-      await tasksWrite.updateTaskById(db, id, update, userId);
-
-      // Rolling anchor update (+ generalized next_occurrence_anchor for non-rolling
-      // recurring types — 999.1091 C1 — mirrors facade.js applyRollingAnchor).
-      var _mcpMasterId = existing.master_id || existing.source_id;
-      if (_mcpMasterId && ['done', 'skip'].includes(status)) {
-        var _mcpMaster = await db('task_masters').where({ id: _mcpMasterId, user_id: userId }).first();
-        if (_mcpMaster && isRollingMaster(_mcpMaster)) {
-          var _mcpDate = existing.date ? String(existing.date).slice(0, 10) : null;
-          var _mcpCurrentAnchor = _mcpMaster.rolling_anchor ? String(_mcpMaster.rolling_anchor).slice(0, 10) : null;
-          // Option B: anchor `done` to the actual completion date (today in user tz).
-          var _mcpCompletionDate = getNowInTimezone(_mcpMaster.tz).todayKey;
-          var _mcpNewAnchor = computeRollingAnchor(status, _mcpDate, _mcpCurrentAnchor, _mcpCompletionDate);
-          if (_mcpNewAnchor) {
-            await db('task_masters')
-              .where({ id: _mcpMasterId, user_id: userId })
-              .update({ rolling_anchor: _mcpNewAnchor, updated_at: db.fn.now() });
-          }
-        } else if (_mcpMaster && isPatternRecurMaster(_mcpMaster)) {
-          var _mcpPDate = existing.date ? String(existing.date).slice(0, 10) : null;
-          var _mcpPCurrentAnchor = _mcpMaster.next_occurrence_anchor ? String(_mcpMaster.next_occurrence_anchor).slice(0, 10) : null;
-          var _mcpPNewAnchor = computeNextOccurrenceAnchor(status, _mcpPDate, _mcpPCurrentAnchor, _mcpMaster.recur);
-          if (_mcpPNewAnchor) {
-            await db('task_masters')
-              .where({ id: _mcpMasterId, user_id: userId })
-              .update({ next_occurrence_anchor: _mcpPNewAnchor, updated_at: db.fn.now() });
-          }
-        }
-      }
-
-      enqueueScheduleRun(userId, 'mcp:set_task_status', [id]);
       var updated = await db('tasks_with_sync_v').where({ id: id, user_id: userId }).first();
       return { content: [{ type: 'text', text: safeStringify(rowToTask(updated, tz)) }] };
     }
@@ -470,57 +474,16 @@ function registerTaskTools(server, userId) {
       id: z.string().describe('Task ID to delete')
     },
     async ({ id }) => {
-      var task = await db('tasks_with_sync_v').where({ id: id, user_id: userId }).first();
-      if (!task) {
-        return { content: [{ type: 'text', text: 'Error: Task not found' }], isError: true };
+      // RULED (delete_task hard-delete -> R55 soft-cancel): facade.deleteTask
+      // already routes every scope through soft-cancel (standardDelete ->
+      // twrite.softCancelById) — no prerequisite fix needed (999.1215 was
+      // stale, closed by WI-1). The response envelope is reconstructed to the
+      // pinned {deleted:true,id} shape regardless of which internal branch
+      // the facade took (it returns a scope-specific `message` field instead).
+      var result = await facade.deleteTask({ id: id, userId: userId });
+      if (result.status >= 400) {
+        return { content: [{ type: 'text', text: mapFacadeErrorText(result) }], isError: true };
       }
-
-      // In ingest-only mode, prevent deletion of calendar-linked tasks
-      if (task.gcal_event_id || task.msft_event_id) {
-        var _csRow = await db('user_config')
-          .where({ user_id: userId, config_key: 'cal_sync_settings' }).first();
-        var _csSettings = _csRow
-          ? (typeof _csRow.config_value === 'string' ? JSON.parse(_csRow.config_value) : _csRow.config_value)
-          : {};
-        var _isIngest = (task.gcal_event_id && _csSettings.gcal && _csSettings.gcal.mode === 'ingest')
-                     || (task.msft_event_id && _csSettings.msft && _csSettings.msft.mode === 'ingest');
-        if (_isIngest) {
-          return { content: [{ type: 'text', text: 'Error: Calendar-linked tasks cannot be deleted in ingest-only mode. Delete the event from your calendar instead.' }], isError: true };
-        }
-      }
-
-      await db.transaction(async function(trx) {
-        var deletedDeps = typeof task.depends_on === 'string'
-          ? JSON.parse(task.depends_on || '[]') : (task.depends_on || []);
-        var affected = await trx('tasks_v')
-          .where('user_id', userId)
-          .whereRaw('JSON_CONTAINS(depends_on, ?)', [JSON.stringify(id)])
-          .select('id', 'depends_on');
-        for (var i = 0; i < affected.length; i++) {
-          var other = affected[i];
-          var deps = typeof other.depends_on === 'string'
-            ? JSON.parse(other.depends_on || '[]') : (other.depends_on || []);
-          var newDeps = deps.filter(function(d) { return d !== id; });
-          deletedDeps.forEach(function(d) { if (newDeps.indexOf(d) === -1) newDeps.push(d); });
-          await tasksWrite.updateTaskById(trx, other.id, {
-            depends_on: JSON.stringify(newDeps), updated_at: db.fn.now()
-          }, userId);
-        }
-
-        if (task.gcal_event_id || task.msft_event_id || task.apple_event_id) {
-          // status='deleted_local' so the next sync doesn't recreate the task
-          // from the still-existing calendar event
-          await trx('cal_sync_ledger')
-            .where({ user_id: userId, task_id: id })
-            .where('status', 'active')
-            .update({ status: 'deleted_local', task_id: null, provider_event_id: null, synced_at: db.fn.now() })
-            .catch(function(err) { logger.error('[silent-catch]', { error: err }); });
-        }
-
-        await tasksWrite.deleteTaskById(trx, id, userId);
-      });
-
-      enqueueScheduleRun(userId, 'mcp:delete_task', [id]);
       return { content: [{ type: 'text', text: safeStringify({ deleted: true, id: id }) }] };
     }
   );
@@ -533,7 +496,7 @@ function registerTaskTools(server, userId) {
       id: z.string().describe('Task ID')
     },
     async ({ id }) => {
-      var tz = await getUserTimezone();
+      var tz = await getUserTimezone(userId);
       var rows = await db('tasks_v').where('user_id', userId);
       var srcMap = buildSourceMap(rows);
       var row = rows.find(function(r) { return r.id === id; });
@@ -556,7 +519,7 @@ function registerTaskTools(server, userId) {
       limit: z.number().optional().describe('Max results (default 20)')
     },
     async ({ query, status, includeDone, project, limit }) => {
-      var tz = await getUserTimezone();
+      var tz = await getUserTimezone(userId);
       var dbQuery = db('tasks_v').where('user_id', userId);
       if (status !== undefined) {
         dbQuery = dbQuery.where('status', status);
@@ -598,200 +561,61 @@ function registerTaskTools(server, userId) {
       if (updates.length > 200) {
         return { content: [{ type: 'text', text: 'Error: Batch limited to 200 items' }], isError: true };
       }
+      var tz = await getUserTimezone(userId);
 
-      // Guard: only CALENDAR-BORN tasks are restricted to status/notes — calendar-born = has an
-      // active cal_sync_ledger row whose origin is a provider (not 'juggler'). Tasks Juggler
-      // pushed-out/adopted (origin='juggler') stay fully editable.
-      var idsToCheck = updates.map(function(u) { return u.id; });
-      var syncCheck = await db('tasks_with_sync_v')
-        .where('user_id', userId)
-        .whereIn('id', idsToCheck)
-        .select('id', 'gcal_event_id', 'msft_event_id', 'apple_event_id');
-      var syncById = {};
-      syncCheck.forEach(function(r) { syncById[r.id] = r; });
-      var calBornRows = await db('cal_sync_ledger')
-        .where({ user_id: userId, status: 'active' })
-        .whereIn('task_id', idsToCheck)
-        .whereNot('origin', 'juggler')
-        .distinct('task_id');
-      var calBornIds = new Set(calBornRows.map(function(r) { return r.task_id; }));
-      for (var si = 0; si < updates.length; si++) {
-        var sUpdate = updates[si];
-        var sId = sUpdate.id;
-        var sExisting = syncById[sId];
-        if (!sExisting) continue;
-        var isCalSynced = calBornIds.has(sId);
-        if (isCalSynced) {
-          var allowedKeys = ['status', 'notes'];
-          var sFields = {};
-          Object.keys(sUpdate).forEach(function(k) { if (k !== 'id') sFields[k] = sUpdate[k]; });
-          var blocked = Object.keys(sFields).filter(function(k) { return allowedKeys.indexOf(k) === -1; });
-          if (blocked.length > 0) {
-            return { content: [{ type: 'text', text: 'Error: This task is synced from an external calendar. Only status and notes can be changed. Blocked fields: ' + blocked.join(', ') }], isError: true };
-          }
-        }
-      }
-
-      var tz = await getUserTimezone();
-      var updatedCount = 0;
-
-      // Uses module-level TEMPLATE_FIELDS imported from task.controller
-
-      // Lock check: if scheduling lock is held, split and queue
-      var locked = await isLocked(userId);
-      if (locked) {
-        // eslint-disable-next-line no-redeclare
-        var idsToCheck = updates.map(function(u) { return u.id; });
-        var existCheck = await db('tasks_v')
-          .where('user_id', userId)
-          .whereIn('id', idsToCheck)
-          .select('id', 'task_type', 'source_id', 'scheduled_at');
-        var existById = {};
-        existCheck.forEach(function(r) { existById[r.id] = r; });
-        var queuedCount = 0;
-
-        for (var qi = 0; qi < updates.length; qi++) {
-          var qUpdate = updates[qi];
-          var qId = qUpdate.id;
-          if (!qId || !existById[qId]) continue;
-          var qFields = {};
-          Object.keys(qUpdate).forEach(function(k) { if (k !== 'id') qFields[k] = qUpdate[k]; });
-          if (qFields.placementMode === 'fixed') {
-            var _qHasDate = qFields.date !== undefined && qFields.date !== null && qFields.date !== '';
-            var _qHasTime = qFields.time !== undefined && qFields.time !== null && qFields.time !== '';
-            var _qHasScheduledAt = qFields.scheduledAt !== undefined && qFields.scheduledAt !== null && qFields.scheduledAt !== '';
-            if (!_qHasDate && !_qHasTime && !_qHasScheduledAt && !existById[qId].scheduled_at) {
-              return { content: [{ type: 'text', text: 'Validation error: placementMode "fixed" requires a date, time, or scheduledAt' }], isError: true };
-            }
-          }
-          var qRow = taskToRow(qFields, userId, tz, existById[qId]);
-          delete qRow.user_id;
-          delete qRow.created_at;
-          delete qRow._pendingTimeOnly;
-          // PHASE 19 D-04: batch_update_tasks locked path — same ALL_DAY backstop as update_task
-          var _qTimeWasSet = qFields.time !== undefined || qFields.scheduledAt !== undefined;
-          if (!_qTimeWasSet && qFields.date !== undefined && qRow.placement_mode === undefined) {
-            qRow.placement_mode = PLACEMENT_MODES.ALL_DAY;
-          }
-          var split = splitFields(qRow);
-          if (Object.keys(split.nonSchedulingFields).length > 0) {
-            split.nonSchedulingFields.updated_at = db.fn.now();
-            await tasksWrite.updateTaskById(db, qId, split.nonSchedulingFields, userId);
-            updatedCount++;
-          }
-          if (Object.keys(split.schedulingFields).length > 0) {
-            await enqueueWrite(userId, qId, 'update', split.schedulingFields, 'mcp:batch_update_tasks');
-            queuedCount++;
-          }
-        }
-
-        enqueueScheduleRun(userId, 'mcp:batch_update_tasks', idsToCheck);
-        return { content: [{ type: 'text', text: safeStringify({ updated: updatedCount, queued: queuedCount }) }] };
-      }
-
+      // Legacy per-item fixed-mode-requires-schedule guard (ernie BLOCK-2,
+      // jug-mcp-facade WI-2), reproduced BEFORE calling the facade: neither
+      // facade batch path (lockedBatchUpdate / batchUpdateTxn) replicates this
+      // guard (they only run checkCalSyncEditGuard / guardFixedCalendarWhen — a
+      // different check), so a fixed item with no schedulable time would
+      // otherwise be persisted with an unplaceable placement_mode=FIXED and no
+      // error returned. Pre-check the WHOLE batch and abort BEFORE any facade
+      // write — matching the old per-item-collect-then-transaction-rollback
+      // outcome (txErrors -> throw -> nothing committed).
+      var idsToCheck = updates.map(function(u) { return u.id; }).filter(Boolean);
+      var existingRows = idsToCheck.length > 0
+        ? await db('tasks_with_sync_v').where('user_id', userId).whereIn('id', idsToCheck).select('id', 'scheduled_at')
+        : [];
+      var existingById = {};
+      existingRows.forEach(function(r) { existingById[r.id] = r; });
       var txErrors = [];
-      try {
-        await db.transaction(async function(trx) {
-          var idsToUpdate = updates.map(function(u) { return u.id; });
-          var existingRows = await trx('tasks_with_sync_v')
-            .where('user_id', userId)
-            .whereIn('id', idsToUpdate)
-            .select('id', 'task_type', 'source_id', 'scheduled_at', 'gcal_event_id', 'msft_event_id', 'apple_event_id');
-          var existingById = {};
-          existingRows.forEach(function(r) { existingById[r.id] = r; });
-
-          // Pre-load source templates for recurring instances so the fixed-calendar
-          // guard can inspect the template's calendar linkage (same as API batch update).
-          var srcIds = [];
-          existingRows.forEach(function(r) {
-            if (r.task_type === 'recurring_instance' && r.source_id && srcIds.indexOf(r.source_id) < 0) {
-              srcIds.push(r.source_id);
-            }
-          });
-          var templateById = {};
-          if (srcIds.length > 0) {
-            var tmplRows = await trx('tasks_with_sync_v')
-              .where('user_id', userId)
-              .whereIn('id', srcIds)
-              .select('id', 'gcal_event_id', 'msft_event_id', 'apple_event_id');
-            tmplRows.forEach(function(r) { templateById[r.id] = r; });
+      updates.forEach(function(u) {
+        if (u.placementMode === PLACEMENT_MODES.FIXED) {
+          var _bHasDate = u.date !== undefined && u.date !== null && u.date !== '';
+          var _bHasTime = u.time !== undefined && u.time !== null && u.time !== '';
+          var _bHasScheduledAt = u.scheduledAt !== undefined && u.scheduledAt !== null && u.scheduledAt !== '';
+          var _bExisting = existingById[u.id];
+          if (!_bHasDate && !_bHasTime && !_bHasScheduledAt && !(_bExisting && _bExisting.scheduled_at)) {
+            txErrors.push({ id: u.id, error: 'Validation error: placementMode "fixed" requires a date, time, or scheduledAt' });
           }
-
-          for (var i = 0; i < updates.length; i++) {
-            var update = updates[i];
-            var id = update.id;
-            if (!id || !existingById[id]) continue;
-
-            var fields = {};
-            Object.keys(update).forEach(function(k) { if (k !== 'id') fields[k] = update[k]; });
-            var existing = existingById[id];
-            if (fields.placementMode === 'fixed') {
-              var _txHasDate = fields.date !== undefined && fields.date !== null && fields.date !== '';
-              var _txHasTime = fields.time !== undefined && fields.time !== null && fields.time !== '';
-              var _txHasScheduledAt = fields.scheduledAt !== undefined && fields.scheduledAt !== null && fields.scheduledAt !== '';
-              if (!_txHasDate && !_txHasTime && !_txHasScheduledAt && !existing.scheduled_at) {
-                txErrors.push({ id: id, error: 'Validation error: placementMode "fixed" requires a date, time, or scheduledAt' });
-                continue;
-              }
-            }
-            var row = taskToRow(fields, userId, tz, existing);
-            delete row.user_id;
-            delete row.created_at;
-            delete row._pendingTimeOnly;
-            // PHASE 19 D-04: batch_update_tasks transaction path — same ALL_DAY backstop as update_task
-            var _txTimeWasSet = fields.time !== undefined || fields.scheduledAt !== undefined;
-            if (!_txTimeWasSet && fields.date !== undefined && row.placement_mode === undefined) {
-              row.placement_mode = PLACEMENT_MODES.ALL_DAY;
-            }
-
-            // Guard: don't let calendar-linked fixed tasks lose their 'fixed' tag.
-            var _guardOpts = { allowUnfix: !!fields._allowUnfix };
-            if (existing.task_type === 'recurring_instance' && existing.source_id && templateById[existing.source_id]) {
-              guardFixedCalendarWhen(row, templateById[existing.source_id], _guardOpts);
-            }
-            guardFixedCalendarWhen(row, existing, _guardOpts);
-
-            var taskType = existing.task_type || 'task';
-
-            if (taskType === 'recurring_instance' && existing.source_id) {
-              var templateUpdate = {};
-              var instanceUpdate = {};
-              Object.keys(row).forEach(function(k) {
-                if (k === 'updated_at') return;
-                if (TEMPLATE_FIELDS.indexOf(k) >= 0) {
-                  templateUpdate[k] = row[k];
-                } else {
-                  instanceUpdate[k] = row[k];
-                }
-              });
-              if (Object.keys(templateUpdate).length > 0) {
-                templateUpdate.updated_at = db.fn.now();
-                await tasksWrite.updateTaskById(trx, existing.source_id, templateUpdate, userId);
-              }
-              if (Object.keys(instanceUpdate).length > 0) {
-                instanceUpdate.updated_at = db.fn.now();
-                await tasksWrite.updateTaskById(trx, id, instanceUpdate, userId);
-              } else {
-                await tasksWrite.updateTaskById(trx, id, { updated_at: db.fn.now() }, userId);
-              }
-            } else {
-              await tasksWrite.updateTaskById(trx, id, row, userId);
-            }
-            updatedCount++;
-          }
-          if (txErrors.length > 0) {
-            throw new Error(txErrors.map(function(e) { return e.id + ': ' + e.error; }).join('; '));
-          }
-        });
-      } catch (err) {
-        if (txErrors.length > 0) {
-          return { content: [{ type: 'text', text: err.message }], isError: true };
         }
-        throw err;
+      });
+      if (txErrors.length > 0) {
+        return { content: [{ type: 'text', text: txErrors.map(function(e) { return e.id + ': ' + e.error; }).join('; ') }], isError: true };
       }
 
-      enqueueScheduleRun(userId, 'mcp:batch_update_tasks', updates.map(function(u) { return u.id; }).filter(Boolean));
-      return { content: [{ type: 'text', text: safeStringify({ updated: updatedCount }) }] };
+      var preparedUpdates = updates.map(function(u) {
+        var upd = Object.assign({}, u);
+        applyAllDayBackstop(upd);
+        return upd;
+      });
+
+      // RULED (batch_update_tasks anchor gap): routing through
+      // facade.batchUpdateTasks (lockedBatchUpdate / batchUpdateTxn) means the
+      // rolling/next-occurrence anchor projection now fires on a done/skip
+      // transition inside a batch — a silent MCP-only gap tasks.js's own
+      // batch_update_tasks never had (999.1100/BUG1 pattern).
+      var result = await facade.batchUpdateTasks({
+        userId: userId,
+        body: { updates: preparedUpdates },
+        timezoneHeader: tz
+      });
+      if (result.status >= 400) {
+        return { content: [{ type: 'text', text: mapFacadeErrorText(result) }], isError: true };
+      }
+      var payload = { updated: result.body.updated };
+      if (result.body.queued !== undefined) payload.queued = result.body.queued;
+      return { content: [{ type: 'text', text: safeStringify(payload) }] };
     }
   );
 }
