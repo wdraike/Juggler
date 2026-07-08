@@ -280,7 +280,6 @@ export default function CalendarView({
         var pl = plMap[t.id];
         var item = { task: t, start: pl ? pl.start : null, end: pl ? pl.end : null };
         if (pl && pl._whenRelaxed) item._whenRelaxed = true;
-        if (pl && pl._overdue) item._overdue = true;
         return item;
       }).sort(function (a, b) {
         var aAllDay = !!(a.task.isAllDay || a.task.placementMode === 'all_day' || a.task.placement_mode === 'all_day');
