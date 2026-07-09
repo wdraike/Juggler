@@ -233,6 +233,20 @@ KnexScheduleRepository.prototype.backfillRollingAnchorIfNull = function backfill
 };
 
 /**
+ * FR-1(b)/AC2 (juggler-recur-lifecycle-redesign, W2): scheduler-run sweep —
+ * unconditionally sets `next_start` to the caller-computed value. The caller
+ * (runSchedule.js) already restricts calls to non-rolling masters whose
+ * next_start is stale (< today), so no additional guard is needed here (unlike
+ * backfillRollingAnchorIfNull's `whereNull`, this write intentionally
+ * OVERWRITES a stale value, not just fills a null one).
+ */
+KnexScheduleRepository.prototype.setNextStart = function setNextStart(masterId, userId, nextStart) {
+  return this.db('task_masters')
+    .where({ id: masterId, user_id: userId })
+    .update({ next_start: nextStart, updated_at: this.clock.now() });
+};
+
+/**
  * DB clock read (legacy `SELECT NOW(3)`, runSchedule.js ~1682) → JS Date. Used
  * for the placement-cache generatedAt so it matches MySQL updated_at.
  */

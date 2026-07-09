@@ -2,7 +2,7 @@
 type: design
 service: juggler
 status: active
-last_updated: 2026-07-02
+last_updated: 2026-07-09
 tags:
   - type/design
   - service/juggler
@@ -13,7 +13,15 @@ tags:
 
 # Task & Habit State Matrix
 
-**Last Updated:** 2026-07-02
+**Last Updated:** 2026-07-09
+
+> **Update (juggler-recur-lifecycle-redesign, W7, 2026-07-09, SPEC AC9).** FR-1 through FR-7
+> shipped this leg touch four areas of this doc: the reopen transition now has a date-gate
+> (FR-2, § Status Transitions / § Modal button disabling), the future-day completion block now
+> carves out rolling masters (FR-3, § Completion date rules), the template-delete cascade text
+> was corrected — it was never accurate, see § Habit Template — and material schedule-edit
+> reconciliation (FR-4/FR-5) plus the shared confirm-modal primitive (FR-7) are newly documented
+> under § Habit Template. See each section below for detail.
 
 > **Correction (sched-audit L1, REG-04, 2026-07-02).** The `pause` transition below previously said
 > pause "deletes future instances". Verified live: `facade.js` `handleTemplatePause` (999.590 ruling)
@@ -49,6 +57,10 @@ wip ────────┬──→ done
             ├──→ "" (reopen)
             └──→ skip / cancel
 
+done/skip/cancel/pause ──→ "" (reopen — explicit reactivation of an already-settled instance,
+                            999.1181 "terminal != irreversible")
+                            see "Reopen date-gate (FR-2)" below
+
 disabled ───┬──→ "" (via re-enable endpoint, checks plan limits)
             └──→ (no other transitions — frozen)
 
@@ -56,6 +68,15 @@ overdue ──── (not a status — computed-on-read flag, R50.6)
               past-due + incomplete → pinned at due date, flagged overdue
               scheduler excludes from placement, calendar shows overdue badge
 ```
+
+**Reopen date-gate (FR-2, 2026-07-09).** Reactivation is REJECTED (backend, HTTP 400
+`REOPEN_DATE_GATE`, `UpdateTaskStatus.js`) and the "" (reopen) control is disabled (frontend,
+`StatusToggle.jsx`/`TaskDetailHeader.jsx`, gated on an `instanceDate` prop vs. today) when the
+instance's `date < today`. Same-day reactivation (`date == today`) still works, and instances
+with no `date` are unaffected. This gate is ADDITIVE to the VALID_TRANSITIONS rule above — it
+does not change which statuses may transition to "", only whether a past-dated instance may. It
+does **not** affect the separate client-snapshot **undo** mechanism (ruling #3,
+`juggler-ui-scheduler-rulings-2026-07-06`), which has no date check and is always allowed.
 
 ## Task Action Buttons (StatusToggle)
 
@@ -67,7 +88,13 @@ Status buttons are rendered by `StatusToggle` (`juggler-frontend/src/components/
 
 ### Delete
 
-Delete is a destructive data operation (hard row removal, R3), not a status change. It is NOT rendered in the StatusToggle button row on calendar cards. Delete lives in the `TaskDetailHeader` (expanded edit form, `TaskDetailHeader.jsx:30-41`) where destructive actions are visually separated from non-destructive status buttons. Cancel (status='cancel', R32) covers "I don't want this" and keeps the row — it stays in the status row.
+Delete is a destructive data operation, not a status change. It is NOT rendered in the StatusToggle button row on calendar cards. Delete lives in the `TaskDetailHeader` (expanded edit form, `TaskDetailHeader.jsx:30-41`) where destructive actions are visually separated from non-destructive status buttons. Cancel (status='cancel', R32) covers "I don't want this" and keeps the row — it stays in the status row.
+
+**Scope matters.** A single non-recurring task's delete is a hard row removal (R3). A recurring
+**series** delete is a different operation with a different postcondition — see § Habit Template
+below for the corrected soft-cancel-everything cascade and the new `cal_locked` delete gate
+(FR-6, 2026-07-09). Both single-task delete and series delete now confirm through the shared
+`ConfirmModal` primitive (FR-7, 2026-07-09) — see § Habit Template.
 
 ### Start
 
@@ -83,6 +110,7 @@ Status buttons are modal — only valid transitions are enabled. The `VALID_TRAN
 - From "" (open): done, wip, skip, cancel, pause are enabled.
 - From wip: done, "" (reopen), skip, cancel are enabled.
 - From terminal (done/cancel/skip/pause): only "" (reopen) is enabled — no terminal-to-terminal transitions.
+- **Reopen date-gate (FR-2, 2026-07-09):** when the above rule enables "" (reopen) from a terminal status, it is additionally disabled if the instance's `date < today` — same-day reactivation stays enabled. This is checked in addition to, not instead of, the VALID_TRANSITIONS rule above.
 
 Invalid buttons render at 45% opacity with `cursor: not-allowed` and a tooltip reading "Current status" (for the active one) or the button label.
 
@@ -294,23 +322,105 @@ The **illegal state** is `placement_mode === 'fixed'` AND `recurring` truthy. An
 
 **Completion date rules for recurring instances:**
 
-| Instance date | User action | Allowed? |
-|---------------|-------------|----------|
-| Today (any time) | Mark done | ✅ Yes — completing early on the same calendar day is normal |
-| Future day | Mark done | ❌ No — UI blocks with warning; use skip or cancel instead |
-| Past day | Mark done | ✅ Yes — overdue instance, CompletionTimePicker offered |
+| Instance date | Recur type | User action | Allowed? |
+|---------------|------------|-------------|----------|
+| Today (any time) | any | Mark done | ✅ Yes — completing early on the same calendar day is normal |
+| Future day | pattern (daily/weekly/monthly/interval/biweekly/etc. — anything except `rolling`) | Mark done | ❌ No — UI blocks with warning; use skip or cancel instead |
+| Future day | **`rolling`** (`recur.type === 'rolling'`) | Mark done | ✅ **Yes (FR-3, 2026-07-09).** Real use case: complete early — e.g. wash the car ahead of schedule. Rolling masters have no fixed pattern date to protect. |
+| Past day | any | Mark done | ✅ Yes — overdue instance, CompletionTimePicker offered |
 
-The guard in the frontend (`AppLayout.jsx`) enforces this using ISO date key comparison (`taskDateKey > nowDayKey`), where today's key is never greater than itself.
+**Corrected, 2026-07-09 (FR-3).** This block previously applied to ALL recur types; it is now
+lifted specifically for `recur.type === 'rolling'` masters, unchanged for every other recur type.
+The guard is `evaluateFutureCompletionGuard(task, today)`
+(`juggler-frontend/src/utils/futureCompletionGuard.js`, extracted this leg from
+`AppLayout.jsx`'s `handleStatusChange`), which uses the same ISO date key comparison as before
+(`taskDateKey > nowDayKey`, where today's key is never greater than itself) **and** blocks only
+when `isFuture && !isRolling`.
 
 ### Habit Template
 ```
 [blueprint — not visible on calendar]
     │
-    ├── user edits via form ──→ propagates to all open instances
+    ├── user edits a NON-material field (weather_precip, weather_cloud, weather_temp_*, pri,
+    │   notes, project, section, url, tools, location) ──→ propagates to all open instances,
+    │   no instance pruning/reconciliation (FR-5, 2026-07-09)
+    │
+    ├── user edits a MATERIAL field (recur.type, recur.days, recur.every, recur.intervalDays,
+    │   recur.monthDays, recur.timesPerCycle, split, split_min, dur, placement_mode) ──→
+    │   triggers material schedule-edit reconciliation (FR-4/FR-5, 2026-07-09 — see below):
+    │   `done` instances untouched; `skip`/`cancel` instances pruned; open instances
+    │   pruned/fabricated to the new cycle target, effective immediately
+    │
     ├── user pauses ──→ cascades status='pause' to open future instances (kept, not deleted; 999.590)
     ├── user unpauses ──→ restores instances to status=''; scheduler resumes generating new ones
-    └── user deletes ──→ cascade: delete open instances, orphan completed ones
+    └── user deletes (series) ──→ soft-cancels everything; see "Delete (series) — corrected" below
 ```
+
+**Delete (series) — corrected, 2026-07-09 (FR-6 / R55 / 999.844).** The diagram's previous text
+here ("cascade: delete open instances, orphan completed ones") was **never accurate** — verified
+against the actual `cascadeRecurringDelete` (`facade.js:673-741`) code, not merely re-derived.
+Ground truth, unchanged by this leg: **nothing is ever hard-deleted.** Non-terminal (open)
+instances are soft-cancelled (`status='cancelled'`); terminal instances
+(`done`/`cancel`/`skip`/`pause`) are kept verbatim; the master itself is soft-cancelled
+(`status='cancelled'`). **New this leg:** the delete is blocked (HTTP 403,
+`CAL_LOCKED_DELETE_BLOCKED`) before any mutation if any instance in the series has `cal_locked`
+set (`findCalLockedSeriesInstance` in `facade.js`, wired into `DeleteTask.js`) — the user must
+resolve the calendar lock first. Both single-task delete and series delete confirm via the
+shared `ConfirmModal` primitive (FR-7, see below).
+
+### Material Schedule-Edit Reconciliation (FR-4 / FR-5, 2026-07-09)
+
+Editing a recurring master's **material** fields — `recur.type`, `recur.days`, `recur.every`,
+`recur.intervalDays`, `recur.monthDays`, `recur.timesPerCycle`, `split`, `split_min`, `dur`, or
+`placement_mode` — triggers reconciliation of that master's existing instances, with **immediate
+effect** (including the in-progress cycle):
+
+| Instance status | Effect |
+|------------------|--------|
+| `done` | Never touched |
+| `skip` / `cancel` | Pruned (removed) |
+| open (non-terminal) | Reconciled to the new cycle target: `remaining_needed = new_timesPerCycle − done_this_cycle`. Surplus pruned furthest-date-first; deficit fabricated. |
+
+Order of operations: the reconciliation computes the in-progress cycle relative to today →
+prunes/reconciles → refabricates forward from that point (`reconcileMaterialEdit`, `facade.js`,
+reusing `getStableEpoch`/`enumerateBookedDatesInCycle` from `shared/scheduler/expandRecurring.js`
+rather than reimplementing the cycle math). This does not itself write `task_masters.next_start`
+— see § Recurring Master Anchor below; the next terminal-status write or scheduler run corrects
+the anchor per the normal FR-1 triggers.
+
+Editing a **non-material** field (`weather_precip`, `weather_cloud`, `weather_temp_*`, `pri`,
+`notes`, `project`, `section`, `url`, `tools`, `location`) applies silently — no pruning or
+reconciliation (AC6).
+
+### Recurring Master Anchor (`next_start`)
+
+**Unified, 2026-07-09 (FR-1).** `task_masters.next_start` is now the canonical **read** anchor
+(the first non-terminal instance date for that master) — `getAnchor()` reads `next_start` only.
+It supersedes the two previously-separate anchor columns, `rolling_anchor` and
+`next_occurrence_anchor`, on the read path. For this leg the **write** path dual-writes:
+`applyRollingAnchor` writes `next_start` in the same update alongside continuing to write both
+legacy columns (34 pre-existing test files depend on those legacy writes; ceasing them is a
+separate, deferred follow-on — not this leg's scope). `next_start` advances monotonically (never
+regresses) on: (a) a terminal-status write to one of the master's instances — recomputed from
+that instance's own date; (b) a scheduler run's first step, for every **non-rolling** master
+whose `next_start` is stale (`< today`) — advanced to the first pattern date `>= today`. Rolling
+masters are exempt from (b): no anchor exists until first completion.
+
+> This doc covers the anchor only as it bears on instance/status lifecycle. The
+> scheduler-facing mechanism (read/write call sites, the monotonic-guard SQL, and the dual-write
+> follow-on) belongs in `SCHEDULER-SPEC.md` — **not updated by this leg**; flagged here as a
+> separate documentation follow-up.
+
+### Shared Confirm-Modal Primitive (FR-7, 2026-07-09)
+
+All destructive/irreversible actions requiring confirmation — single-task delete, recurring
+series delete, and the material-edit removal warning above — now confirm through one shared
+`ConfirmModal` component (`juggler-frontend/src/components/common/ConfirmModal.jsx`), replacing
+several previously-inconsistent one-off dialogs (closes backlog 999.1228/999.1229). The
+series-delete dialog (`RecurringDeleteDialog.jsx`) uses `ConfirmModal`'s optional tertiary-button
+slot for "Skip this instance" alongside "Delete entire series"; both delete dialogs disable
+Confirm (`confirmDisabled`) and show a `blockedMessage` when the `cal_locked` delete gate (above)
+rejects the action.
 
 ---
 

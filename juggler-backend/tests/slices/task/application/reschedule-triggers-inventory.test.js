@@ -88,6 +88,9 @@ function deleteDeps(repo, trigger) {
     repo: repo, cache: H.makeCacheFake(), enqueueScheduleRun: trigger,
     loadCalSyncSettings: function () { return Promise.resolve({}); },
     findProviderLedgerRow: function () { return Promise.resolve(null); },
+    // findCalLockedSeriesInstance is now a REQUIRED DeleteTask dep (bert fix
+    // ernie-w2-callocked-gate-failopen-default) — supplied explicitly here.
+    findCalLockedSeriesInstance: function () { return Promise.resolve(null); },
     cascadeRecurringDelete: function () { return Promise.resolve({ deletedCount: 0, keptCount: 0, pendingIds: [], keptIds: [] }); },
     standardDelete: function (ctx) { return ctx.trxRepo.deleteTaskById(ctx.id, ctx.userId); },
     thisAndFutureDelete: function () { return Promise.resolve({ deletedCount: 0 }); }

@@ -1,61 +1,67 @@
 /**
  * RecurringDeleteDialog — skip-instance vs delete-series confirmation for recurring tasks
+ *
+ * Retrofit onto the shared ConfirmModal primitive (FR-7/AC8, SPEC.md
+ * juggler-recur-lifecycle-redesign; resolves the tri-state-vs-binary BLOCK recorded in
+ * TELLY-W6-REVIEW.md via Kermit's ruling — ConfirmModal's optional tertiary slot).
+ *
+ * Mapping (telly's judgment call, TELLY-W6-TRISTATE-REVIEW.md):
+ *   - onCancel       -> ConfirmModal's Cancel slot   (1:1, unchanged semantics/label)
+ *   - onDeleteSeries -> ConfirmModal's Confirm slot  (confirmLabel="Delete entire series")
+ *   - onSkipInstance -> ConfirmModal's tertiary slot (tertiaryLabel="Skip this instance")
+ * DOM/focus order: Cancel, Skip this instance (tertiary), Delete entire series (confirm).
+ *
+ * `blocked`/`blockedMessage` (bert bird-w6-002 BLOCK fix, moved here from ConfirmDialog):
+ * the real cal_locked 403 (DeleteTask.js `CAL_LOCKED_DELETE_BLOCKED`, FR-6/AC7) is gated
+ * on `scope==='series'`, which is exactly this dialog's "Delete entire series" action
+ * (AppLayout.jsx maps it to `deleteTask(id, { cascade: 'recurring' })` -> scope=series
+ * server-side). `confirmDisabled={!!blocked}` disables ONLY the Confirm/series-delete
+ * button (ConfirmModal.jsx:136) — the Skip-instance tertiary action is deliberately left
+ * unaffected, since skipping one occurrence never touches the cal-linked series gate.
+ * If `blocked` is set without `blockedMessage`, an approved generic fallback string is
+ * shown rather than silently disabling Confirm with no explanation (bird-w6-007 fix).
+ *
+ * Per-action icon + one-line consequence subtext (bird-w6-004 WARN fix): restores the
+ * pre-retrofit decision-support content (`git show HEAD` on this file) that the
+ * ConfirmModal retrofit had dropped, adapted to ConfirmModal's existing slots — the
+ * emoji icons move onto the button labels themselves, and the consequence subtext
+ * moves into the shared body (`children`) area above the buttons, immediately below
+ * the "What would you like to do?" prompt.
  */
 
 import React from 'react';
-import { getTheme } from '../../theme/colors';
+import ConfirmModal from '../common/ConfirmModal';
 
-export default function RecurringDeleteDialog({ taskName, onSkipInstance, onDeleteSeries, onCancel, darkMode, isMobile }) {
-  var theme = getTheme(darkMode);
-  var btnBase = {
-    border: 'none', borderRadius: 8, padding: '10px 16px',
-    fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', width: '100%',
-    textAlign: 'left', lineHeight: 1.4,
-  };
+export default function RecurringDeleteDialog({
+  taskName, onSkipInstance, onDeleteSeries, onCancel, blocked, blockedMessage, darkMode, isMobile
+}) {
   return (
-    <div style={{
-      position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-      background: 'rgba(0,0,0,0.5)', zIndex: 400, display: 'flex',
-      alignItems: 'center', justifyContent: 'center'
-    }} onClick={onCancel}>
-      <div style={{
-        background: theme.bgSecondary, borderRadius: isMobile ? 0 : 12,
-        width: isMobile ? '100%' : 360, maxWidth: isMobile ? '100%' : '90vw',
-        height: isMobile ? '100%' : undefined,
-        padding: 24, boxShadow: isMobile ? 'none' : ('0 8px 32px ' + theme.shadow),
-        display: isMobile ? 'flex' : undefined, flexDirection: isMobile ? 'column' : undefined,
-        justifyContent: isMobile ? 'center' : undefined
-      }} onClick={e => e.stopPropagation()}>
-        <div style={{ fontSize: 14, fontWeight: 600, color: theme.text, marginBottom: 4 }}>
-          Delete "{(taskName || '').slice(0, 50)}"
+    <ConfirmModal
+      open
+      title={'Delete "' + (taskName || '').slice(0, 50) + '"'}
+      tertiaryLabel={'⏭ Skip this instance'}
+      onTertiary={onSkipInstance}
+      confirmLabel={'🗑 Delete entire series'}
+      onConfirm={onDeleteSeries}
+      onCancel={onCancel}
+      confirmDisabled={!!blocked}
+      darkMode={darkMode}
+      isMobile={isMobile}
+    >
+      <div>
+        <div>This is a recurring task. What would you like to do?</div>
+        <div style={{ fontSize: 11, marginTop: 8 }}>
+          Skipping marks this occurrence done; the series continues.
         </div>
-        <div style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 16 }}>
-          This is a recurring task. What would you like to do?
+        <div style={{ fontSize: 11, marginTop: 4 }}>
+          Deleting the series removes it and all future instances; past instances stay.
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-          <button onClick={onSkipInstance} style={{
-            ...btnBase, background: theme.bgCard, border: '1px solid ' + theme.border, color: theme.text,
-          }}>
-            <span style={{ fontWeight: 600 }}>{'\u23ED'} Skip this instance</span>
-            <br />
-            <span style={{ fontSize: 11, color: theme.textSecondary }}>Mark this occurrence as skipped. The recurring task continues.</span>
-          </button>
-          <button onClick={onDeleteSeries} style={{
-            ...btnBase, background: theme.errorBg || '#fef2f2', border: '1px solid ' + (theme.errorBorder || '#fca5a5'), color: theme.error || '#991b1b',
-          }}>
-            <span style={{ fontWeight: 600 }}>{'\uD83D\uDDD1'} Delete entire series</span>
-            <br />
-            <span style={{ fontSize: 11, opacity: 0.8 }}>Remove the recurring task and all future instances. Past instances are kept.</span>
-          </button>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <button onClick={onCancel} style={{
-            border: '1px solid ' + theme.border, borderRadius: 8, padding: '8px 20px',
-            background: 'transparent', color: theme.textSecondary, fontSize: 13,
-            cursor: 'pointer', fontFamily: 'inherit'
-          }}>Cancel</button>
-        </div>
+        {blocked && (
+          <div style={{ marginTop: 8, fontSize: 12, fontWeight: 600 }}>
+            {blockedMessage || 'This action is currently unavailable.'}
+          </div>
+        )}
       </div>
-    </div>
+    </ConfirmModal>
   );
 }

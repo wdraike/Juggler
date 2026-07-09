@@ -800,6 +800,53 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // 4. Get current date/time in user's timezone
   var timeInfo = getNowInTimezone(TIMEZONE, _runScheduleCommand.clock);
 
+  // 4b. FR-1(b)/AC2 (juggler-recur-lifecycle-redesign, W2) — scheduler-run
+  // sweep: "for every non-rolling master where next_start < today, advance to
+  // the first pattern date >= today." Rolling masters are EXEMPT (no anchor
+  // exists until first completion — see rolling-anchor.js). This is the
+  // scheduler run's FIRST step that touches next_start, so it runs before this
+  // same run's own recurring expansion (below) consults getAnchor() —
+  // mirroring the pre-existing rolling_anchor backfill's in-memory-fix
+  // pattern, this also patches `t.nextStart` on the in-memory allTasks entry
+  // so THIS run's expansion sees the swept value, not just the next run's.
+  //
+  // nextMatchingDate(recur, afterDateKey, phaseAnchor) returns the first match
+  // STRICTLY AFTER afterDateKey — pass "yesterday" (today - 1) so the result
+  // can be today itself, matching FR-1(b)'s literal ">= today".
+  //
+  // NOTE (cookie ARCH-REVIEW-W2.json W2-ARCH-W2, tracked follow-on — NOT fixed
+  // in this leg): this sweep is ONE of TWO independent next_start writers. The
+  // OTHER is the terminal-status write path (facade.js applyRollingAnchor,
+  // search "W2-ARCH-W2"), which computes the SAME "first pattern date >= X"
+  // via computeRollingAnchor/computeNextOccurrenceAnchor — a DIFFERENT compute
+  // function than this sweep's expandRecurringShared.nextMatchingDate. Both
+  // MUST keep agreeing on the result for the same recur pattern + anchor, or
+  // next_start becomes non-deterministic depending on which writer fires
+  // last. See ARCH-REVIEW-W2.json for the scoped follow-on convergence work
+  // (characterization test or single shared compute function).
+  var _todayForSweep = parseDate(timeInfo.todayKey) || _runScheduleCommand.clockNow();
+  var _sweepYesterday = new Date(_todayForSweep.getTime());
+  _sweepYesterday.setDate(_sweepYesterday.getDate() - 1);
+  var _sweepYesterdayKey = formatDateKey(_sweepYesterday);
+  var _nextStartSweeps = [];
+  allTasks.forEach(function(t) {
+    if (t.taskType !== 'recurring_template') return;
+    if (!t.recur || t.recur.type === 'rolling') return; // rolling exempt (FR-1b)
+    if (!t.nextStart) return; // no anchor yet — nothing to sweep
+    if (String(t.nextStart).slice(0, 10) >= timeInfo.todayKey) return; // not stale
+    var _swept = expandRecurringShared.nextMatchingDate(t.recur, _sweepYesterdayKey, t.nextStart);
+    if (!_swept) return;
+    t.nextStart = _swept; // in-memory: this run's own getAnchor() sees it too
+    _nextStartSweeps.push({ id: t.id, nextStart: _swept });
+  });
+  if (_nextStartSweeps.length > 0) {
+    await Promise.all(_nextStartSweeps.map(function(s) {
+      return _runScheduleCommand.setNextStart(trx, userId, s.id, s.nextStart);
+    }));
+    logger.info('[SCHED] next_start sweep: ' + _nextStartSweeps.length + ' advanced: ' +
+      _nextStartSweeps.map(function(s) { return s.id + '→' + s.nextStart; }).join(', '));
+  }
+
   // 5. Config was loaded in parallel with tasks above.
   var cfg = _preloadedCfg;
   cfg.timezone = TIMEZONE;

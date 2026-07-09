@@ -320,47 +320,68 @@ export default function useTaskState() {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
 
     var cascade = opts && opts.cascade;
+    // Resolve which ids a cascade delete would touch BEFORE the await (state
+    // could change while the request is in flight), but do NOT dispatch or
+    // strip placements yet — see ernie-w6-opt-001 below.
     var idsToRemove = [id];
     if (cascade === 'recurring') {
-      // Cascade recurring delete: remove template + pending instances from state
       var state = taskStateRef.current;
       var task = state.tasks.find(function(t) { return t.id === id; });
       var templateId = (task && (task.sourceId || task.source_id)) || id;
       idsToRemove = [];
       state.tasks.forEach(function(t) {
         if (t.id === templateId || t.sourceId === templateId || t.source_id === templateId) {
-          dispatch({ type: 'DELETE_TASK', id: t.id });
           idsToRemove.push(t.id);
         }
       });
-    } else {
-      dispatch({ type: 'DELETE_TASK', id });
     }
-
-    // Optimistically remove from calendar placements so the card disappears immediately
-    var removeSet = {};
-    idsToRemove.forEach(function(rid) { removeSet[rid] = true; });
-    setPlacements(function(prev) {
-      var changed = false;
-      var newDayPlacements = {};
-      Object.keys(prev.dayPlacements).forEach(function(dk) {
-        var filtered = prev.dayPlacements[dk].filter(function(p) {
-          if (p.task && removeSet[p.task.id]) { changed = true; return false; }
-          return true;
-        });
-        newDayPlacements[dk] = filtered;
-      });
-      if (!changed) return prev;
-      return Object.assign({}, prev, { dayPlacements: newDayPlacements });
-    });
 
     try {
       var url = cascade ? `/tasks/${id}?cascade=${cascade}` : `/tasks/${id}`;
-      markSelfWrite(idsToRemove);
       await apiClient.delete(url);
+
+      // ernie-w6-opt-001 BLOCK fix: only remove the task(s) from local state
+      // (reducer dispatch + placement strip) AFTER the server confirms the
+      // delete succeeded. The previous optimistic-before-await removal was
+      // never rolled back on a blocked (e.g. CAL_LOCKED_DELETE_BLOCKED 403)
+      // series-delete, so the series silently vanished from both the task
+      // list and the calendar grid even though the server DB was untouched —
+      // no SSE fires (nothing mutated) and the version-poll is a no-op
+      // (serverVersion never bumps). See ERNIE-W6-OPTIMISTIC-REVIEW.json
+      // (ernie-w6-opt-001). Deferring also means DELETE_TASK's dependent
+      // dependsOn-stripping/dirty-marking side-effects (taskReducer.js:174)
+      // never fire on a blocked delete either (ernie-w6-opt-002 WARN) — a
+      // partial re-add on the catch path would not have undone those.
+      idsToRemove.forEach(function(rid) { dispatch({ type: 'DELETE_TASK', id: rid }); });
+
+      var removeSet = {};
+      idsToRemove.forEach(function(rid) { removeSet[rid] = true; });
+      setPlacements(function(prev) {
+        var changed = false;
+        var newDayPlacements = {};
+        Object.keys(prev.dayPlacements).forEach(function(dk) {
+          var filtered = prev.dayPlacements[dk].filter(function(p) {
+            if (p.task && removeSet[p.task.id]) { changed = true; return false; }
+            return true;
+          });
+          newDayPlacements[dk] = filtered;
+        });
+        if (!changed) return prev;
+        return Object.assign({}, prev, { dayPlacements: newDayPlacements });
+      });
+
+      // ernie-w6-opt-003 INFO fix: mint self-write suppression tokens only
+      // for ids actually deleted server-side (moved from pre-await).
+      markSelfWrite(idsToRemove);
       scheduleSave();
     } catch (error) {
       console.error('Failed to delete task:', error);
+      // bert bird-w6-002 BLOCK fix: rethrow so a caller can distinguish a specific
+      // failure (e.g. the FR-6/AC7 CAL_LOCKED_DELETE_BLOCKED 403 on series-delete)
+      // from success. Both current callers (AppLayout.jsx) now attach a .catch.
+      // No local state was touched on this path (see defer-until-success above),
+      // so nothing needs rolling back here.
+      throw error;
     }
   }, [scheduleSave]);
 

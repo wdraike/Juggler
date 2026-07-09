@@ -47,6 +47,7 @@
 'use strict';
 
 var assertDeps = require('../_assertDeps');
+var { getNowInTimezone } = require('../../../../../../shared/scheduler/getNowInTimezone');
 
 var TERMINAL_REQUIRES_SCHEDULE = ['done', 'skip', 'cancel'];
 var VALID_STATUSES = ['', 'wip', 'done', 'cancel', 'skip', 'pause', 'disabled'];
@@ -201,8 +202,31 @@ UpdateTaskStatus.prototype.execute = async function execute(input) {
     }
   }
 
-  // terminal → non-terminal reactivation: done_frozen → active (handler L1774-1778)
+  // terminal → non-terminal reactivation: FR-2/AC3 reopen date gate, then
+  // done_frozen → active (handler L1774-1778).
+  //
+  // FR-2 (SPEC juggler-recur-lifecycle-redesign): explicit reactivation of an
+  // already-settled instance is blocked when the instance's `date` is in the
+  // past (< today, in the user's own timezone). Same-day reactivation stays
+  // allowed. This gate applies ONLY to this explicit-reactivation code path —
+  // client-snapshot undo (UndoTask.js) writes via repo.updateTaskById directly
+  // and never reaches this branch (verified: UndoTask.js does not call
+  // UpdateTaskStatus.execute), so undo is structurally unaffected by design,
+  // with no special-case bypass needed here.
   if (existing && isTerminalStatus(existing.status) && !isTerminalStatus(status)) {
+    var _instanceDateKey = existing.date ? String(existing.date).slice(0, 10) : null;
+    if (_instanceDateKey) {
+      var _todayKeyForReopenGate = getNowInTimezone(tz).todayKey;
+      if (_instanceDateKey < _todayKeyForReopenGate) {
+        return {
+          status: 400,
+          body: {
+            error: 'This instance can no longer be reactivated — its date has passed. Use undo if the status change was just made.',
+            code: 'REOPEN_DATE_GATE'
+          }
+        };
+      }
+    }
     await this.reactivateDoneFrozen({ id: id, userId: userId });
   }
 

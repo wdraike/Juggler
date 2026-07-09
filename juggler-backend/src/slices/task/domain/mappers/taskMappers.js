@@ -607,6 +607,11 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
     // consumed by expandRecurring.js getAnchor. See juggler-backend/src/lib/
     // next-occurrence-anchor.js for the terminal-event update rule.
     nextOccurrenceAnchor: row.next_occurrence_anchor || null,
+    // FR-1(a)/AC1 (juggler-recur-lifecycle-redesign, W2): the unified anchor —
+    // canonical READ source for expandRecurring.js getAnchor(). rolling_anchor/
+    // next_occurrence_anchor above are kept mapped too (this leg dual-writes
+    // both; ceasing the legacy write/read is an explicit follow-on).
+    nextStart: row.next_start || null,
     disabledAt: row.disabled_at ? scheduledAtToISO(row.disabled_at) : null,
     disabledReason: row.disabled_reason || null,
     occurrenceOrdinal: row.occurrence_ordinal != null ? Number(row.occurrence_ordinal) : undefined,

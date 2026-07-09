@@ -136,6 +136,17 @@ RunScheduleCommand.prototype.backfillRollingAnchor = function backfillRollingAnc
 };
 
 /**
+ * FR-1(b)/AC2 (juggler-recur-lifecycle-redesign, W2): unconditionally set
+ * `task_masters.next_start = nextStart` (updated_at via clock.now(), P1).
+ * The caller has already computed a fresh, non-stale value for a non-rolling
+ * master — see KnexScheduleRepository.setNextStart.
+ * @returns {Promise<number>} rows updated (0 or 1).
+ */
+RunScheduleCommand.prototype.setNextStart = function setNextStart(trx, userId, masterId, nextStart) {
+  return this._repo(trx).setNextStart(masterId, userId, nextStart);
+};
+
+/**
  * DB clock (`SELECT NOW(3)`) → JS Date for the placement-cache `generatedAt`
  * (legacy runSchedule.js ~1798). Surfaced via the port so the caller stays free
  * of raw knex for this read.

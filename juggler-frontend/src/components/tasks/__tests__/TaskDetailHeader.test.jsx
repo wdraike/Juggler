@@ -2,6 +2,7 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import TaskDetailHeader from '../TaskDetailHeader';
+import { formatDateKey } from '../../../scheduler/dateHelpers';
 
 const TH = {
   badgeBg: '#f0f0f0', border: '#ccc', accent: '#4f46e5', text: '#000', textMuted: '#888',
@@ -10,6 +11,14 @@ const TH = {
 };
 
 const BASE_TASK = { id: 't1', text: 'Buy groceries', pri: 'P3', dur: 30, notes: '', url: '' };
+
+function dateKeyOffsetFromToday(days) {
+  var d = new Date();
+  d.setDate(d.getDate() + days);
+  return formatDateKey(d);
+}
+const TODAY_KEY = dateKeyOffsetFromToday(0);
+const YESTERDAY_KEY = dateKeyOffsetFromToday(-1);
 
 it('renders task title', () => {
   render(<TaskDetailHeader task={BASE_TASK} status="todo" TH={TH} darkMode={false}
@@ -236,4 +245,43 @@ it('TC-P007: project select has id=task-project-select paired with a htmlFor lab
   const label = document.querySelector('label[for="task-project-select"]');
   expect(label).not.toBeNull();
   expect(label).toHaveTextContent('Project');
+});
+
+// SPEC (juggler-recur-lifecycle-redesign) FR-2/AC3 — UI half of the reopen date
+// gate, parallel `VALID_TRANSITIONS`-style map inline in TaskDetailHeader (see
+// docs/architecture/TASK-STATE-MATRIX.md:78-87, "a parallel map in
+// TaskDetailHeader.jsx"). Currently gates ONLY on current status, not the
+// instance's own `task.date` — RED until W6 wires the date check in.
+describe('TaskDetailHeader — reopen date gate (FR-2/AC3 UI half)', () => {
+  it('disables the reopen ("—") status button when task.date is before today', () => {
+    render(<TaskDetailHeader task={{ ...BASE_TASK, date: YESTERDAY_KEY }} status="done" TH={TH} darkMode={false}
+      onSave={() => {}} onClose={() => {}} onDelete={() => {}} onStatusChange={() => {}}
+      isDirty={false} saveStatus={null} isCreate={false} isMobile={false}
+      text="Buy groceries" project="" pri="P3" dur={30} notes="" url=""
+    />);
+    const reopenBtn = screen.getByTitle('Open — not started');
+    expect(reopenBtn).toBeDisabled();
+  });
+
+  it('keeps the reopen ("—") status button enabled when task.date is today (same-day carve-out)', () => {
+    render(<TaskDetailHeader task={{ ...BASE_TASK, date: TODAY_KEY }} status="done" TH={TH} darkMode={false}
+      onSave={() => {}} onClose={() => {}} onDelete={() => {}} onStatusChange={() => {}}
+      isDirty={false} saveStatus={null} isCreate={false} isMobile={false}
+      text="Buy groceries" project="" pri="P3" dur={30} notes="" url=""
+    />);
+    const reopenBtn = screen.getByTitle('Open — not started');
+    expect(reopenBtn).not.toBeDisabled();
+  });
+
+  it('clicking a disabled past-dated reopen button never calls onStatusChange', () => {
+    const onStatusChange = jest.fn();
+    render(<TaskDetailHeader task={{ ...BASE_TASK, date: YESTERDAY_KEY }} status="done" TH={TH} darkMode={false}
+      onSave={() => {}} onClose={() => {}} onDelete={() => {}} onStatusChange={onStatusChange}
+      isDirty={false} saveStatus={null} isCreate={false} isMobile={false}
+      text="Buy groceries" project="" pri="P3" dur={30} notes="" url=""
+    />);
+    const reopenBtn = screen.getByTitle('Open — not started');
+    fireEvent.click(reopenBtn);
+    expect(onStatusChange).not.toHaveBeenCalled();
+  });
 });

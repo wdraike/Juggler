@@ -18,6 +18,7 @@ import useIsMobile from '../../hooks/useIsMobile';
 import useIsCompact from '../../hooks/useIsCompact';
 import { getTheme } from '../../theme/colors';
 import { formatDateKey, getWeekStart, parseDate, parseTimeToMinutes } from '../../scheduler/dateHelpers';
+import { evaluateFutureCompletionGuard } from '../../utils/futureCompletionGuard';
 import { DAY_NAMES, applyDefaults } from '../../state/constants';
 import { useAuth } from '../auth/AuthProvider';
 import { useTimezone } from '../../hooks/useTimezone';
@@ -203,6 +204,10 @@ export default function AppLayout() {
   var editingRef = useRef(false);
   var [schedulerReady, setSchedulerReady] = useState(false);
   var [deleteConfirmTask, setDeleteConfirmTask] = useState(null);
+  // bert bird-w6-002 BLOCK fix: holds the cal_locked CAL_LOCKED_DELETE_BLOCKED 403
+  // message when a series-delete is rejected, keeping RecurringDeleteDialog open with
+  // an explanation instead of the dialog silently closing like every other outcome.
+  var [recurringDeleteBlockedMessage, setRecurringDeleteBlockedMessage] = useState(null);
 
   var theme = getTheme(darkMode);
   var statuses = taskState.statuses;
@@ -806,14 +811,13 @@ export default function AppLayout() {
       var task = tasks.find(function(t) { return t.id === id; });
       // Block marking future recurring instances as done.
       // Today is always allowed — it's normal to complete a recurring task
-      // a bit early on the same calendar day.
-      if (task && task.recurring && task.taskType === 'recurring_instance') {
-        var taskDateKey = task.date ? formatDateKey(parseDate(task.date)) : null;
-        var nowDayKey = formatDateKey(todayRef.current);
-        if (taskDateKey && taskDateKey > nowDayKey) {
-          showToast('Can\'t mark a future recurring task as done — skip or cancel it instead', 'warning');
-          return;
-        }
+      // a bit early on the same calendar day. FR-3/AC4: rolling masters may
+      // also complete a future-dated instance early (e.g. wash the car ahead
+      // of schedule) — see evaluateFutureCompletionGuard for the full rule.
+      var guardResult = evaluateFutureCompletionGuard(task, todayRef.current);
+      if (guardResult.blocked) {
+        showToast(guardResult.warning, 'warning');
+        return;
       }
       setCompletionPickerTask(task || { id: id });
       return;
@@ -830,6 +834,7 @@ export default function AppLayout() {
     var tasks = allTasksRef.current;
     var task = tasks.find(function(t) { return t.id === id; });
     if (!task) return;
+    setRecurringDeleteBlockedMessage(null);
     setDeleteConfirmTask(task);
   }, []);
 
@@ -1602,11 +1607,30 @@ export default function AppLayout() {
             }}
             onDeleteSeries={function() {
               var id = deleteConfirmTask.id;
-              deleteTask(id, { cascade: 'recurring' });
-              setExpandedTasks(function(prev) { return prev.filter(function(x) { return x !== id; }); });
-              setDeleteConfirmTask(null);
+              // bert bird-w6-002 BLOCK fix: await the real DELETE call so a
+              // CAL_LOCKED_DELETE_BLOCKED 403 (FR-6/AC7, series-delete only) can keep
+              // this dialog open with an explanation instead of closing unconditionally.
+              deleteTask(id, { cascade: 'recurring' }).then(function() {
+                setExpandedTasks(function(prev) { return prev.filter(function(x) { return x !== id; }); });
+                setDeleteConfirmTask(null);
+              }).catch(function(error) {
+                var code = error && error.response && error.response.data && error.response.data.code;
+                if (code === 'CAL_LOCKED_DELETE_BLOCKED') {
+                  setRecurringDeleteBlockedMessage(
+                    (error.response.data && error.response.data.error) ||
+                    'This series has a calendar-linked instance. Remove the calendar link before deleting the whole series.'
+                  );
+                } else {
+                  // Non-cal_locked failure: preserve the prior fire-and-forget behavior
+                  // (dialog closes; deleteTask already logged the error).
+                  setExpandedTasks(function(prev) { return prev.filter(function(x) { return x !== id; }); });
+                  setDeleteConfirmTask(null);
+                }
+              });
             }}
-            onCancel={function() { setDeleteConfirmTask(null); }}
+            onCancel={function() { setDeleteConfirmTask(null); setRecurringDeleteBlockedMessage(null); }}
+            blocked={!!recurringDeleteBlockedMessage}
+            blockedMessage={recurringDeleteBlockedMessage}
             darkMode={darkMode}
             isMobile={isMobile}
           />
@@ -1615,7 +1639,10 @@ export default function AppLayout() {
             message={'Delete "' + (deleteConfirmTask.text || 'this task').slice(0, 60) + '"?'}
             onConfirm={function() {
               var id = deleteConfirmTask.id;
-              deleteTask(id);
+              // deleteTask now rethrows on failure (bird-w6-002 fix) so the
+              // series-delete path above can react to it; this single-task path
+              // preserves its pre-existing fire-and-forget behavior.
+              deleteTask(id).catch(function() {});
               setExpandedTasks(function(prev) { return prev.filter(function(x) { return x !== id; }); });
               setDeleteConfirmTask(null);
             }}

@@ -92,7 +92,13 @@ var { PLACEMENT_MODES } = require('../../lib/placementModes');
 var { isTerminalStatus } = require('../../lib/task-status');
 var { isRollingMaster, computeRollingAnchor } = require('../../lib/rolling-anchor');
 var { isPatternRecurMaster, computeNextOccurrenceAnchor } = require('../../lib/next-occurrence-anchor');
+var { applyCalLockedLedgerFilter } = require('./domain/calLockedPredicate');
 var { getNowInTimezone } = require('../../../../shared/scheduler/getNowInTimezone');
+// FR-4/FR-5 (juggler-recur-lifecycle-redesign, W5): the material-edit
+// reconciliation engine reuses the scheduler's own TPC cycle-boundary +
+// fulfillment-counting primitives (999.1372) rather than reimplementing
+// cycle-counting (telly TELLY-W5-REVIEW.md prior-art note #2).
+var expandRecurringShared = require('../../../../shared/scheduler/expandRecurring');
 var { createLogger } = require('@raike/lib-logger');
 var logger = createLogger('task.facade');
 
@@ -293,7 +299,11 @@ async function recurCleanup(ctx) {
     var needsCleanup = row.recur !== undefined || row.recur_start !== undefined || row.recur_end !== undefined
       || row.recurring === 0
       // R53: a split/split_min change reshapes chunk count/size — refabricate future instances.
-      || row.split !== undefined || row.split_min !== undefined;
+      || row.split !== undefined || row.split_min !== undefined
+      // FR-5 (juggler-recur-lifecycle-redesign, W5): `dur`/`placement_mode` are
+      // material fields too — must reach this branch so the classifier below
+      // can fire reconciliation for a dur-only/placement_mode-only edit.
+      || row.dur !== undefined || row.placement_mode !== undefined;
     if (needsCleanup) {
       if (row.recurring === 0) {
         // 999.967(a) (David ruling 2026-07-01: done instances keep status='done',
@@ -342,11 +352,18 @@ async function recurCleanup(ctx) {
         var newRecur = typeof updatedTmpl.recur === 'string' ? JSON.parse(updatedTmpl.recur || 'null') : updatedTmpl.recur;
         var oldRecur = typeof existing.recur === 'string' ? JSON.parse(existing.recur || 'null') : existing.recur;
 
+        // FR-5 material field list (SPEC.md): recur.type/days/every/intervalDays/
+        // monthDays/timesPerCycle are ALL material — the pre-existing classifier
+        // only compared type/days/timesPerCycle (telly TELLY-W5-REVIEW.md
+        // prior-art note #1); every/intervalDays/monthDays are added here.
         var recurChanged = row.recur !== undefined && (
           (oldRecur && newRecur && (
             oldRecur.type !== newRecur.type ||
             JSON.stringify(oldRecur.days) !== JSON.stringify(newRecur.days) ||
-            (oldRecur.timesPerCycle || 0) !== (newRecur.timesPerCycle || 0)
+            (oldRecur.timesPerCycle || 0) !== (newRecur.timesPerCycle || 0) ||
+            (oldRecur.every || 0) !== (newRecur.every || 0) ||
+            (oldRecur.intervalDays || 0) !== (newRecur.intervalDays || 0) ||
+            JSON.stringify(oldRecur.monthDays || null) !== JSON.stringify(newRecur.monthDays || null)
           )) ||
           (!oldRecur && newRecur) ||
           (oldRecur && !newRecur)
@@ -356,10 +373,52 @@ async function recurCleanup(ctx) {
         var splitChanged = (row.split !== undefined && Number(row.split) !== Number(existing.split))
           || (row.split_min !== undefined && Number(row.split_min) !== Number(existing.split_min));
 
-        if (recurChanged || splitChanged) {
-          await twrite.resetRecurringInstances(trx, userId, id, '[RECUR] cycle reset (recur/split change)');
+        // FR-5: `dur` and `placement_mode` are material fields too.
+        var durChanged = row.dur !== undefined && Number(row.dur) !== Number(existing.dur);
+        var placementModeChanged = row.placement_mode !== undefined && row.placement_mode !== existing.placement_mode;
+
+        // FR-4: any material field change reconciles the instance set — done
+        // untouched, skip/cancel removed, open pruned/fabricated to the new
+        // cycle target, immediate effect (see reconcileMaterialEdit below).
+        // When the recurrence has no active timesPerCycle target, the
+        // remaining_needed math has nothing to reconcile against — fall back
+        // to the pre-existing blunt resetRecurringInstances (unchanged
+        // behavior for non-TPC recurrence, protected by
+        // facade.collaborators.db.test.js's "recurChanged=true" regression).
+        var materialChanged = recurChanged || splitChanged || durChanged || placementModeChanged;
+
+        if (materialChanged) {
+          var _tpc = newRecur && newRecur.timesPerCycle ? Number(newRecur.timesPerCycle) : 0;
+          if (_tpc > 0 && newRecur && newRecur.type !== 'rolling') {
+            await reconcileMaterialEdit({
+              trx: trx, twrite: twrite, userId: userId, masterId: id,
+              updatedTmpl: updatedTmpl, newRecur: newRecur, tz: tz
+            });
+          } else {
+            // FR-4 (cookie W5-ARCH-2 / ernie ernie-w5-skipcancel-breadth): the
+            // non-TPC/rolling fallback must ALSO honor FR-4's unconditional
+            // "skip/cancel instances are pruned" rule, scoped to the
+            // in-progress cycle only (consistent with the TPC path's
+            // now-fixed cycle-scoped prune below). resetRecurringInstances
+            // itself is UNCHANGED — still only touches status='' open
+            // instances — so its other call sites (toggle-off at line ~331,
+            // the two [BATCH] resets, the instance-edit cascade at line
+            // ~288) are byte-identical; this is a sibling step local to only
+            // this call site. Guarded on `newRecur` truthiness: a null
+            // newRecur here (recur cleared while recurring stays truthy) has
+            // no cycle to scope against, so it falls back to the pre-existing
+            // no-skip/cancel-touch behavior for that edge case.
+            if (newRecur) {
+              var _cycleWin = computeCycleWindow(updatedTmpl, newRecur, tz);
+              await pruneCycleSkipCancel({
+                trx: trx, twrite: twrite, userId: userId, masterId: id,
+                cycleStart: _cycleWin.cycleStart, cycleEnd: _cycleWin.cycleEnd, tz: tz
+              });
+            }
+            await twrite.resetRecurringInstances(trx, userId, id, '[RECUR] cycle reset (recur/split/dur/placement change)');
+          }
         } else {
-          var _dateMatch = require('../../../shared/scheduler/dateMatchesRecurrence');
+          var _dateMatch = require('../../../../shared/scheduler/dateMatchesRecurrence');
           var srcDateStr = updatedTmpl.recur_start
             ? (updatedTmpl.recur_start instanceof Date
                 ? dateHelpers.formatDateKey(updatedTmpl.recur_start)
@@ -407,6 +466,218 @@ async function recurCleanup(ctx) {
     }
   } else {
     await twrite.updateTaskById(trx, id, row, userId);
+  }
+}
+
+// FR-4/FR-5 (juggler-recur-lifecycle-redesign, W5): material-edit
+// reconciliation engine. Called from recurCleanup's recurring_template branch
+// (above) instead of the blunt resetRecurringInstances(...) whenever the
+// edited master has an active timesPerCycle target — the remaining_needed
+// math this function implements is only meaningful when there IS a per-cycle
+// target to reconcile against; recurrence with no timesPerCycle (or rolling)
+// keeps the pre-existing resetRecurringInstances fallback (see call site).
+//
+// Reuses the SAME cycle-boundary + fulfillment primitives the scheduler's TPC
+// picker uses (999.1372, expandRecurring.js getStableEpoch/
+// enumerateBookedDatesInCycle/matchesRecurrenceDay) so this immediate
+// reconciliation and the next scheduler run's own TPC accounting can never
+// structurally disagree about where a cycle starts/ends.
+//
+// Per FR-4/AC5: `done` instances are NEVER touched. `skip`/`cancel` instances
+// are unconditionally removed (AC5's literal wording — a hard delete, not
+// scoped to the in-progress cycle). Open (status='') instances ARE scoped to
+// the in-progress cycle: remaining_needed = new_timesPerCycle - done_this_cycle;
+// surplus is pruned furthest-date-first; a deficit is fabricated immediately
+// on the earliest non-colliding in-cycle pattern day, searched forward from
+// "today" (never a past date) — the locally-applied form of FR-4's "advance
+// anchor to today" ordering for this reconciliation's own placement search.
+//
+// NOTE (scope): this function does not itself write task_masters.next_start.
+// FR-1's anchor-advance triggers (AC2) are the terminal-status write and the
+// scheduler-run sweep; telly's W5 test suite does not assert a next_start
+// write from a material edit, and no other FR-4 acceptance criterion requires
+// one. Flagged as an open question in BUILD-LOG.md rather than guessed.
+// Effective date key for an instance row (ernie-w5-datecol-exclusive
+// WARN-2): prefer the `date` column; fall back to a tz-local key derived
+// from `scheduled_at` when `date` is NULL, so a status='' (or skip/cancel)
+// row that only carries scheduled_at is not invisible to cycle accounting —
+// the sibling non-material branch (facade.js:409/417) already keys off
+// scheduled_at this same way. Returns null when neither field carries a
+// usable date signal.
+function effectiveDateKey(r, tz) {
+  if (r.date) return String(r.date).slice(0, 10);
+  if (r.scheduled_at) return utcToLocal(r.scheduled_at, tz).date;
+  return null;
+}
+
+// Shared cal_sync_ledger soft-clear for an array of instance ids — used by
+// both the cycle-scoped skip/cancel prune and reconcileMaterialEdit's own
+// open-instance surplus prune, so calendar-sync history clears identically
+// in both call paths.
+async function softClearLedgerFor(trx, userId, ids) {
+  if (!ids || ids.length === 0) return;
+  await trx('cal_sync_ledger')
+    .where('user_id', userId)
+    .whereIn('task_id', ids)
+    .where('status', 'active')
+    .update({ status: 'deleted_local', task_id: null, synced_at: trx.fn.now() })
+    .catch(function (err) { logger.error('[silent-catch]', err.message); });
+}
+
+// Cycle-boundary math (999.1372 primitives) — the cycle containing TODAY,
+// computed tz-aware (ernie-w5-tznaive-today WARN-1): "today" comes from
+// ctx.tz via getNowInTimezone, matching the sibling non-material branch's
+// utcToLocal(...,tz) convention, not server-local `new Date()`. Shared by
+// reconcileMaterialEdit (TPC path) and the non-TPC/rolling fallback's
+// sibling skip/cancel-prune step so both compute the identical window.
+function computeCycleWindow(updatedTmpl, newRecur, tz) {
+  var timeInfo = getNowInTimezone(tz);
+  var today = timeInfo.todayDate;
+  var cycleDays = newRecur.type === 'biweekly' ? 14 : (newRecur.type === 'monthly' ? 30 : 7);
+  var stableEpoch = expandRecurringShared.getStableEpoch(
+    { recurStart: updatedTmpl.recur_start, date: updatedTmpl.date },
+    today
+  );
+  var daysFromEpoch = Math.floor((today.getTime() - stableEpoch.getTime()) / 86400000);
+  var cycleIndex = Math.floor(daysFromEpoch / cycleDays);
+  var cycleStart = new Date(stableEpoch);
+  cycleStart.setDate(cycleStart.getDate() + cycleIndex * cycleDays);
+  var cycleEnd = new Date(cycleStart);
+  cycleEnd.setDate(cycleEnd.getDate() + cycleDays);
+  return { today: today, stableEpoch: stableEpoch, cycleDays: cycleDays, cycleStart: cycleStart, cycleEnd: cycleEnd };
+}
+
+// FR-4 (SPEC.md): "skip/cancel instances are pruned" — scoped to the
+// IN-PROGRESS cycle [cycleStart, cycleEnd) ONLY, NOT master-wide across all
+// history (cookie W5-ARCH-1/W5-ARCH-2, ernie ernie-w5-skipcancel-breadth:
+// the prior unscoped delete purged acted-on skip/cancel rows from PRIOR
+// cycles on every routine material edit, incl. count-neutral dur-only
+// edits). Shared by BOTH the TPC engine (reconcileMaterialEdit) and the
+// non-TPC/rolling fallback's sibling step so both paths honor the identical
+// rule. A skip/cancel row with no determinable date signal (neither `date`
+// nor `scheduled_at`) is left untouched — cannot confirm in-cycle
+// membership, and preserving un-scopable history is the safer default over
+// risking an out-of-cycle hard-delete.
+async function pruneCycleSkipCancel(ctx2) {
+  var trx = ctx2.trx;
+  var twrite = ctx2.twrite;
+  var userId = ctx2.userId;
+  var masterId = ctx2.masterId;
+  var cycleStart = ctx2.cycleStart;
+  var cycleEnd = ctx2.cycleEnd;
+  var tz = ctx2.tz;
+  var allInstances = await trx('task_instances').where({ master_id: masterId, user_id: userId });
+  var skipCancelIds = allInstances
+    .filter(function (r) {
+      if (r.status !== 'skip' && r.status !== 'cancel') return false;
+      var key = effectiveDateKey(r, tz);
+      if (!key) return false;
+      var d = dateHelpers.parseDate(key);
+      return !!(d && d >= cycleStart && d < cycleEnd);
+    })
+    .map(function (r) { return r.id; });
+  if (skipCancelIds.length === 0) return;
+  await softClearLedgerFor(trx, userId, skipCancelIds);
+  await twrite.deleteInstancesWhere(trx, userId, function (q) { return q.whereIn('id', skipCancelIds); });
+}
+
+async function reconcileMaterialEdit(ctx) {
+  var trx = ctx.trx;
+  var twrite = ctx.twrite;
+  var userId = ctx.userId;
+  var masterId = ctx.masterId;
+  var updatedTmpl = ctx.updatedTmpl;
+  var newRecur = ctx.newRecur;
+  var tz = ctx.tz;
+
+  var cycleWin = computeCycleWindow(updatedTmpl, newRecur, tz);
+  var today = cycleWin.today;
+  var stableEpoch = cycleWin.stableEpoch;
+  var cycleStart = cycleWin.cycleStart;
+  var cycleEnd = cycleWin.cycleEnd;
+
+  // AC5: skip/cancel instances are removed — cycle-scoped (see
+  // pruneCycleSkipCancel doc above for the scope-fix rationale).
+  await pruneCycleSkipCancel({
+    trx: trx, twrite: twrite, userId: userId, masterId: masterId,
+    cycleStart: cycleStart, cycleEnd: cycleEnd, tz: tz
+  });
+
+  // Re-query post skip/cancel-removal; build the ACTUAL-date map
+  // enumerateBookedDatesInCycle needs (999.1372 — widened, real-date
+  // fulfillment lookup, not a pattern-day walk). Keyed off effectiveDateKey
+  // (ernie-w5-datecol-exclusive WARN-2) so a NULL-date/scheduled_at-only
+  // status='' row is counted rather than silently excluded.
+  var remaining = await trx('task_instances').where({ master_id: masterId, user_id: userId });
+  var byDate = {};
+  remaining.forEach(function (r) {
+    var k = effectiveDateKey(r, tz);
+    if (k) byDate[k] = r;
+  });
+  var datesBySourceAll = {};
+  datesBySourceAll[masterId] = remaining
+    .map(function (r) { return effectiveDateKey(r, tz); })
+    .filter(function (k) { return k; });
+  var widened = expandRecurringShared.enumerateBookedDatesInCycle(masterId, cycleStart, cycleEnd, datesBySourceAll);
+
+  var doneInCycle = widened.filter(function (w) { var r = byDate[w.key]; return r && r.status === 'done'; });
+  var openInCycle = widened
+    .filter(function (w) { var r = byDate[w.key]; return r && r.status === ''; })
+    .sort(function (a, b) { return a.date.getTime() - b.date.getTime(); })
+    .map(function (w) { return byDate[w.key]; });
+
+  var tpc = Number(newRecur.timesPerCycle) || 0;
+  var remainingNeeded = Math.max(0, tpc - doneInCycle.length);
+
+  if (openInCycle.length > remainingNeeded) {
+    // Surplus — prune furthest-date-first (openInCycle is date-ascending, so
+    // the LAST `surplus` entries are the furthest dates).
+    var surplus = openInCycle.length - remainingNeeded;
+    var toPrune = openInCycle.slice(openInCycle.length - surplus);
+    var pruneIds = toPrune.map(function (r) { return r.id; });
+    await softClearLedgerFor(trx, userId, pruneIds);
+    await twrite.deleteInstancesWhere(trx, userId, function (q) { return q.whereIn('id', pruneIds); });
+  } else if (openInCycle.length < remainingNeeded) {
+    // Deficit — fabricate immediately, in-cycle, on a non-colliding pattern day.
+    var deficit = remainingNeeded - openInCycle.length;
+    var bookedDates = {};
+    remaining.forEach(function (r) {
+      var k = effectiveDateKey(r, tz);
+      if (k) bookedDates[k] = true;
+    });
+    var maxOrdRow = await trx('task_instances').where({ master_id: masterId, user_id: userId }).max('occurrence_ordinal as m').first();
+    var nextOrd = (maxOrdRow && maxOrdRow.m) ? Number(maxOrdRow.m) : 0;
+    var dayMap = { U: 0, M: 1, T: 2, W: 3, R: 4, F: 5, S: 6 };
+    var cursor = new Date(Math.max(cycleStart.getTime(), today.getTime()));
+    var fabricated = 0;
+    var toInsert = [];
+    while (fabricated < deficit && cursor < cycleEnd) {
+      var key = dateHelpers.formatDateKey(cursor);
+      if (!bookedDates[key] && expandRecurringShared.matchesRecurrenceDay(cursor, newRecur, stableEpoch, dayMap)) {
+        nextOrd += 1;
+        toInsert.push({
+          id: uuidv7(),
+          master_id: masterId,
+          user_id: userId,
+          occurrence_ordinal: nextOrd,
+          split_ordinal: 1,
+          split_total: 1,
+          scheduled_at: null,
+          dur: updatedTmpl.dur != null ? updatedTmpl.dur : 30,
+          date: key,
+          status: '',
+          generated: 0,
+          created_at: new Date(),
+          updated_at: new Date()
+        });
+        bookedDates[key] = true;
+        fabricated++;
+      }
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    if (toInsert.length > 0) {
+      await trx('task_instances').insert(toInsert);
+    }
   }
 }
 
@@ -573,6 +844,36 @@ async function applyRollingAnchor(ctx) {
     var _completionDate = getNowInTimezone(ctx.tz || _masterForAnchor.tz).todayKey;
     var _newAnchor = computeRollingAnchor(status, _instanceDate, _currentAnchor, _completionDate);
     if (_newAnchor) {
+      // FR-1(a) dual-write (SPEC.md AC1, revised 2026-07-09): `next_start` is
+      // the new unified anchor and becomes the canonical READ path
+      // (expandRecurring.getAnchor / rowToTask), but this leg's write path
+      // DUAL-WRITES — it keeps writing `rolling_anchor` too (ceasing that
+      // legacy write is an explicit follow-on, out of scope here; 34
+      // pre-existing test files still pin it).
+      //
+      // NOTE (cookie ARCH-REVIEW-W2.json W2-ARCH-W2, tracked follow-on — NOT
+      // fixed in this leg): this is ONE of TWO independent next_start writers.
+      // The scheduler-run sweep (runSchedule.js, search "W2-ARCH-W2") advances
+      // the SAME column via a DIFFERENT compute function
+      // (expandRecurring.nextMatchingDate) for the same "first pattern date >=
+      // X" semantics. Both writers MUST keep computing equivalent results for
+      // next_start to stay deterministic regardless of which fires last — see
+      // the ARCH-REVIEW-W2.json finding for the follow-on convergence work.
+      //
+      // Monotonic guard (FIX bert ernie-w2-nextstart-monotonic-race,
+      // 2026-07-09): previously computed in JS from a PRELOADED read of
+      // next_start, then written via a separate .update() — a non-atomic
+      // read-modify-write two concurrent terminal writes to the SAME master
+      // could race (lost update, next_start regresses). GREATEST(COALESCE(...))
+      // computes the max SERVER-SIDE, under the row's write lock, in the SAME
+      // statement that reads next_start's CURRENT value — no window for a
+      // concurrent writer to interleave between read and write.
+      // COALESCE(next_start, ?) makes a NULL current value lose outright (the
+      // new value just wins — nothing yet to be "greater than").
+      // This is belt-and-suspenders alongside computeRollingAnchor's own guard
+      // on rolling_anchor (which already blocks this whole branch from running
+      // when the candidate is stale, see above).
+      //
       // updated_at: getDb().fn.now() kept literal (not _db.fn.now()) — fn.now()
       // is a connection-agnostic raw-SQL fragment builder (FIX-4.2 PIN,
       // facade-fnnow-pin.test.js), unrelated to which knex instance drives the
@@ -580,7 +881,11 @@ async function applyRollingAnchor(ctx) {
       // _db (trx when threaded), not from which object built the raw literal.
       await _db('task_masters')
         .where({ id: masterId, user_id: userId })
-        .update({ rolling_anchor: _newAnchor, updated_at: getDb().fn.now() });
+        .update({
+          rolling_anchor: _newAnchor,
+          next_start: getDb().raw('GREATEST(COALESCE(next_start, ?), ?)', [_newAnchor, _newAnchor]),
+          updated_at: getDb().fn.now()
+        });
     }
   } else if (_masterForAnchor && isPatternRecurMaster(_masterForAnchor)) {
     var _pInstanceDate = existing.date ? String(existing.date).slice(0, 10) : null;
@@ -589,9 +894,24 @@ async function applyRollingAnchor(ctx) {
       : null;
     var _pNewAnchor = computeNextOccurrenceAnchor(status, _pInstanceDate, _pCurrentAnchor, _masterForAnchor.recur);
     if (_pNewAnchor) {
+      // FR-1(a) dual-write — same rationale as the rolling branch above, for
+      // the generalized (non-rolling) next_occurrence_anchor column.
+      //
+      // NOTE (cookie ARCH-REVIEW-W2.json W2-ARCH-W2, tracked follow-on): same
+      // two-writer next_start caveat as the rolling branch above — see that
+      // comment. Both this terminal-write path and the runSchedule.js sweep
+      // must keep computing equivalent "first pattern date >= X" results.
+      //
+      // Monotonic guard: SQL GREATEST(COALESCE(...)) — see the rolling branch
+      // above (FIX bert ernie-w2-nextstart-monotonic-race, 2026-07-09) for the
+      // full rationale; identical fix applied here for the pattern branch.
       await _db('task_masters')
         .where({ id: masterId, user_id: userId })
-        .update({ next_occurrence_anchor: _pNewAnchor, updated_at: getDb().fn.now() });
+        .update({
+          next_occurrence_anchor: _pNewAnchor,
+          next_start: getDb().raw('GREATEST(COALESCE(next_start, ?), ?)', [_pNewAnchor, _pNewAnchor]),
+          updated_at: getDb().fn.now()
+        });
     }
   }
 }
@@ -643,6 +963,35 @@ function findProviderLedgerRow(userId, id) {
     .where({ user_id: userId, task_id: id, status: 'active' })
     .where('origin', '!=', 'juggler')
     .first();
+}
+
+// FR-6 (juggler-recur-lifecycle-redesign): series-delete cal_locked gate. The
+// existing provider-origin block (findProviderLedgerRow, above) is explicitly
+// SKIPPED for scope=series (DeleteTask.js `isSeriesDelete` guard) — so a
+// series-delete today runs with ZERO cal_locked/provider-origin checking on
+// ANY instance in the series. This is a genuinely new check: does ANY
+// instance (or the template itself) under `templateId` have an ACTIVE
+// cal_sync_ledger row whose origin is a real calendar provider (not
+// 'juggler')? Mirrors KnexTaskRepository.fetchTaskWithEventIds's own
+// cal_locked derivation (adapters/KnexTaskRepository.js:176-194), just scoped
+// to an entire series instead of a single task.
+//
+// FIX bert (cookie ARCH-REVIEW-W2.json W2-ARCH-W3, 2026-07-09): the
+// status/origin predicate below previously re-implemented (as raw `.where()`
+// calls) the same "active, non-juggler-origin" rule KnexTaskRepository
+// already derives inline for a single task — two copies of the same rule with
+// no shared home, a divergence risk on a security-adjacent guard. Now both
+// call `domain/calLockedPredicate` — see that module's header.
+function findCalLockedSeriesInstance(userId, templateId) {
+  var qb = getDb()('cal_sync_ledger as l')
+    .join('tasks_with_sync_v as t', 't.id', 'l.task_id')
+    .where('l.user_id', userId)
+    .where('t.user_id', userId)
+    .where(function () {
+      this.where('t.source_id', templateId).orWhere('t.id', templateId);
+    })
+    .select('l.provider', 'l.task_id');
+  return applyCalLockedLedgerFilter(qb, 'l').first();
 }
 
 // deleteTask cascade-recurring delete block (verbatim — controller L1434-1498, the
@@ -1197,6 +1546,7 @@ var _splitTask = new app.SplitTask({ createTask: _createTask, updateTask: _updat
 var _deleteTask = new app.DeleteTask({
   repo: _repo, cache: _cache, enqueueScheduleRun: enqueueScheduleRun,
   loadCalSyncSettings: loadCalSyncSettings, findProviderLedgerRow: findProviderLedgerRow,
+  findCalLockedSeriesInstance: findCalLockedSeriesInstance,
   cascadeRecurringDelete: cascadeRecurringDelete, standardDelete: standardDelete,
   thisAndFutureDelete: thisAndFutureDelete
 });

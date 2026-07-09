@@ -184,6 +184,19 @@ UpdateTask.prototype.execute = async function execute(input) {
     splitNeedsComplex = isRecurringRow(await fetchRecRowOnce());
   }
 
+  // FR-5 (juggler-recur-lifecycle-redesign, W5): `dur` and `placementMode` are
+  // material fields on a recurring master (trigger reconciliation, facade.js
+  // recurCleanup) but previously took the FAST PATH unconditionally (telly
+  // TELLY-W5-REVIEW.md Finding #2) — recurCleanup was never reached for a
+  // dur-only/placementMode-only edit. Same pattern as splitNeedsComplex above:
+  // only forces the complex path for a RECURRING row (a non-recurring task has
+  // no occurrences to reconcile, so its dur/placementMode edits stay fast-path).
+  var durOrPlacementChanged = body.dur !== undefined || body.placementMode !== undefined;
+  var durPlacementNeedsComplex = false;
+  if (durOrPlacementChanged) {
+    durPlacementNeedsComplex = isRecurringRow(await fetchRecRowOnce());
+  }
+
   // needsComplexPath (handler L962-973)
   var needsComplexPath = body.recur !== undefined
     || body.recurStart !== undefined
@@ -194,6 +207,7 @@ UpdateTask.prototype.execute = async function execute(input) {
     || body.allDay !== undefined
     || (body.recurring !== undefined && !body.recurring)
     || splitNeedsComplex
+    || durPlacementNeedsComplex
     || (body.time !== undefined && body.date === undefined && body.scheduledAt === undefined);
 
   if (!needsComplexPath) {

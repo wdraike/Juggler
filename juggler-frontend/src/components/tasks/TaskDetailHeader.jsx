@@ -1,6 +1,8 @@
 import React from 'react';
 import { STATUS_OPTIONS } from '../../state/constants';
 import { BRAND } from '../../theme/colors';
+import { TERMINAL_STATUSES } from '../../shared/task-status';
+import { formatDateKey } from '../../scheduler/dateHelpers';
 
 var URL_PATTERN = /^https?:\/\//i;
 
@@ -116,7 +118,19 @@ export default function TaskDetailHeader({
                   'pause': { '': 1 },
                 };
                 var canTransit = !!(transitions[currentStatus] && transitions[currentStatus][s.value]);
-                var isDisabled = isActive || !canTransit;
+                // FR-2/AC3 (juggler-recur-lifecycle-redesign): explicit reactivation
+                // ("reopen", target "") of an already-settled (terminal) instance is
+                // blocked when the instance's own date (task.date) is before today.
+                // Same-day reactivation stays allowed; the client-snapshot undo
+                // mechanism is a separate code path and unaffected by this gate.
+                var todayKey = formatDateKey(new Date());
+                var reopenDateBlocked = !!(
+                  task.date &&
+                  TERMINAL_STATUSES.indexOf(currentStatus) !== -1 &&
+                  task.date < todayKey
+                );
+                var isReopenDateBlocked = s.value === '' && reopenDateBlocked;
+                var isDisabled = isActive || !canTransit || isReopenDateBlocked;
                 var sBg = darkMode ? s.bgDark : s.bg;
                 var sColor = darkMode ? s.colorDark : s.color;
                 return (

@@ -65,6 +65,8 @@ var tasksWrite = require('../../../lib/tasks-write');
 var TASK_REPOSITORY_PORT_METHODS =
   require('../domain/ports/TaskRepositoryPort').TASK_REPOSITORY_PORT_METHODS;
 
+var isCalLockedLedgerRow = require('../domain/calLockedPredicate').isCalLockedLedgerRow;
+
 /**
  * @param {Object} [deps]
  * @param {Function} [deps.db] Knex instance or trx handle (default: lib/db's
@@ -161,7 +163,7 @@ KnexTaskRepository.prototype.fetchTaskWithEventIds = function fetchTaskWithEvent
     dbOrTrx('tasks_v').where({ id: id, user_id: userId }).first(),
     dbOrTrx('cal_sync_ledger')
       .where({ task_id: id, status: 'active' })
-      .select('provider', 'provider_event_id', 'origin', 'event_url')
+      .select('provider', 'provider_event_id', 'origin', 'event_url', 'status')
   ]).then(function (res) {
     var row = res[0];
     var ledgerRows = res[1];
@@ -188,8 +190,11 @@ KnexTaskRepository.prototype.fetchTaskWithEventIds = function fetchTaskWithEvent
         row.cal_sync_origin = ledgerRows[i].origin || null;
         row.cal_event_url = ledgerRows[i].event_url || null;
       }
-      // cal_locked: task is calendar-born if any active ledger row has a provider origin
-      if (ledgerRows[i].origin && ledgerRows[i].origin !== 'juggler') {
+      // cal_locked: task is calendar-born if any active ledger row has a provider
+      // origin. Shared predicate (bert fix, cookie ARCH-REVIEW-W2.json
+      // W2-ARCH-W3) — see domain/calLockedPredicate.js; same rule as
+      // facade.findCalLockedSeriesInstance's SQL-level filter.
+      if (isCalLockedLedgerRow(ledgerRows[i])) {
         row.cal_locked = 1;
       }
     }

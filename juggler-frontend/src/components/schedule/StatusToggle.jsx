@@ -5,6 +5,7 @@
 
 import React from 'react';
 import { TERMINAL_STATUSES } from '../../shared/task-status';
+import { formatDateKey } from '../../scheduler/dateHelpers';
 
 // Labels are imperative verbs — they describe the ACTION clicking the button
 // performs, not the state the task ends up in. Keeps the UI consistent
@@ -50,7 +51,7 @@ function canTransitionTo(current, target) {
 // (e.g. ScheduleCard/TaskCard's own scheduled_at gating is unaffected by this ruling).
 var TERMINAL_REQUIRES_SCHEDULE = TERMINAL_STATUSES;
 
-export default React.memo(function StatusToggle({ value, onChange, onDelete, darkMode, compact, isMobile, taskType, disableTerminal, hitSlop }) {
+export default React.memo(function StatusToggle({ value, onChange, onDelete, darkMode, compact, isMobile, taskType, disableTerminal, hitSlop, instanceDate }) {
   var size = compact ? 16 : (isMobile ? 28 : 22);
   var fontSize = compact ? 8 : (isMobile ? 14 : 12);
   // sched-audit L3 bird WARN-4 — the compact (16px) button is below WCAG 2.2
@@ -81,6 +82,20 @@ export default React.memo(function StatusToggle({ value, onChange, onDelete, dar
 
   var currentStatus = value || '';
 
+  // FR-2/AC3 (juggler-recur-lifecycle-redesign): explicit reactivation ("reopen") of an
+  // already-settled (terminal) instance is blocked when the instance's own date is before
+  // today. Same-day reactivation stays allowed. The client-snapshot undo mechanism (ruling
+  // #3, juggler-ui-scheduler-rulings-2026-07-06) is a separate code path and unaffected by
+  // this gate. `instanceDate` (YYYY-MM-DD, same convention as
+  // evaluateFutureCompletionGuard's formatDateKey pairing) is optional for back-compat —
+  // existing callers that don't pass it see unchanged (never-gated) behavior.
+  var todayKey = formatDateKey(new Date());
+  var reopenDateBlocked = !!(
+    instanceDate &&
+    TERMINAL_STATUSES.indexOf(currentStatus) !== -1 &&
+    instanceDate < todayKey
+  );
+
   return (
     <div style={{ display: 'flex', gap: compact ? 1 : 3, alignItems: 'center' }}>
       {statuses.map(function(s) {
@@ -91,7 +106,8 @@ export default React.memo(function StatusToggle({ value, onChange, onDelete, dar
         var isCurrent = active;
         var noTransition = !canTransitionTo(currentStatus, s.value);
         var needsSchedule = !!disableTerminal && TERMINAL_REQUIRES_SCHEDULE.indexOf(s.value) !== -1;
-        var isDisabled = isCurrent || noTransition || needsSchedule;
+        var isReopenDateBlocked = s.value === '' && reopenDateBlocked;
+        var isDisabled = isCurrent || noTransition || needsSchedule || isReopenDateBlocked;
         var button = (
           <button
             onClick={function(e) { e.stopPropagation(); if (!isDisabled) onChange(s.value); }}

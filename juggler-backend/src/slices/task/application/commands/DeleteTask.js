@@ -41,14 +41,24 @@ var assertDeps = require('../_assertDeps');
 /** @param {DeleteTaskDeps} deps */
 function DeleteTask(deps) {
   var required = ['repo', 'cache', 'enqueueScheduleRun', 'loadCalSyncSettings',
-    'findProviderLedgerRow', 'cascadeRecurringDelete', 'standardDelete',
-    'thisAndFutureDelete'];
+    'findProviderLedgerRow', 'findCalLockedSeriesInstance', 'cascadeRecurringDelete',
+    'standardDelete', 'thisAndFutureDelete'];
   assertDeps('DeleteTask', deps, required);
   this.repo = deps.repo;
   this.cache = deps.cache;
   this.enqueueScheduleRun = deps.enqueueScheduleRun;
   this.loadCalSyncSettings = deps.loadCalSyncSettings;
   this.findProviderLedgerRow = deps.findProviderLedgerRow;
+  // FR-6 (juggler-recur-lifecycle-redesign, series cal_locked delete gate):
+  // REQUIRED (FIX bert ernie-w2-callocked-gate-failopen-default, 2026-07-09) —
+  // this is a safety gate; a fail-OPEN `|| noop` default here would silently
+  // disable the FR-6/AC7 cal_locked delete gate for any future construction
+  // that omits the collaborator. No unapproved fallback on a maybe-missing
+  // safety-gate dependency (project invariant) — callers MUST supply it
+  // explicitly. Production wiring (facade.js) already does; test fixtures
+  // updated to pass it explicitly (commands-status-delete-misc.test.js,
+  // reschedule-triggers-inventory.test.js).
+  this.findCalLockedSeriesInstance = deps.findCalLockedSeriesInstance;
   this.cascadeRecurringDelete = deps.cascadeRecurringDelete;
   this.standardDelete = deps.standardDelete;
   this.thisAndFutureDelete = deps.thisAndFutureDelete;
@@ -129,6 +139,23 @@ DeleteTask.prototype.execute = async function execute(input) {
     if (isRecurringInstance) {
       templateId = task.source_id || id;
     }
+
+    // FR-6 (juggler-recur-lifecycle-redesign): cal_locked delete gate. The
+    // provider-origin block above is explicitly skipped for series-delete
+    // (isSeriesDelete), so this is the ONLY cal_locked/provider-origin check
+    // a series-delete goes through. Blocks the delete BEFORE any mutation if
+    // any instance in the series (or the template itself) is calendar-born.
+    var lockedInstance = await this.findCalLockedSeriesInstance(userId, templateId);
+    if (lockedInstance) {
+      return {
+        status: 403,
+        body: {
+          error: 'This series has a calendar-linked instance. Remove the calendar link before deleting the whole series.',
+          code: 'CAL_LOCKED_DELETE_BLOCKED'
+        }
+      };
+    }
+
     var result = await this.repo.runInTransaction(async function (trxRepo) {
       return this.cascadeRecurringDelete({ trxRepo: trxRepo, userId: userId, templateId: templateId });
     }.bind(this));

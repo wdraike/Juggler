@@ -205,6 +205,11 @@ describe('FIX-4.2 PIN — synced_at / rolling_anchor write fn.now() (legacy, out
     });
 
     // The rolling_anchor site stamps updated_at via fn.now() (legacy, out of P1 scope).
-    expect(codeOnly).toMatch(/rolling_anchor:[\s\S]{0,80}?updated_at:\s*getDb\(\)\.fn\.now\(\)/);
+    // Bound widened from a fixed {0,80} char window to `[^}]*` (matching the
+    // sibling assertion above, ~line 182) — bert fix, ernie-w2-nextstart-monotonic-race:
+    // the .update({...}) object gained a `next_start: GREATEST(...)` field between
+    // rolling_anchor and updated_at, exceeding the old fixed-width window. The
+    // assertion's INTENT (fn.now(), never new Date(), on this site) is unchanged.
+    expect(codeOnly).toMatch(/rolling_anchor:[^}]*updated_at:\s*getDb\(\)\.fn\.now\(\)/);
   });
 });

@@ -31,6 +31,24 @@ function parseAnchor(val) {
 // anchor; src.date (scheduled_at-derived) is a legacy fallback; startDate is
 // the final safety net so expansion still produces output for null anchors.
 function getAnchor(src, startDate) {
+  // FR-1(a)/AC1 (juggler-recur-lifecycle-redesign, W2, revised 2026-07-09):
+  // `next_start` is the unified anchor and the CANONICAL read source — checked
+  // first, ahead of the legacy per-type columns below. The write path
+  // (facade.js applyRollingAnchor) DUAL-WRITES next_start alongside the legacy
+  // columns, so any master that has gone through a terminal-status write (or
+  // the scheduler-run sweep, FR-1(b)) has next_start populated and this branch
+  // wins.
+  if (src.nextStart) {
+    var ns = parseAnchor(src.nextStart);
+    if (ns) return ns;
+  }
+  // Legacy fallback (retained — NOT cut over, per AC1's revision: ceasing the
+  // legacy read/write is an explicit follow-on, out of scope for this leg).
+  // Covers masters/fixtures whose next_start hasn't been populated yet — e.g.
+  // rows predating the W1 migration's one-time backfill, or DB-fixture tests
+  // that seed only rolling_anchor/next_occurrence_anchor directly without also
+  // seeding next_start (the 34 pre-existing test files SPEC.md AC1 names).
+  //
   // Rolling tasks use the mutable rolling_anchor (updated on each terminal event)
   // before falling back to the static recur_start.
   if (src.recur && src.recur.type === 'rolling' && src.rollingAnchor) {
@@ -895,5 +913,12 @@ module.exports = {
   isAnchorDependentRecur: isAnchorDependentRecur,
   matchesRecurrenceDay: matchesRecurrenceDay,
   nextMatchingDate: nextMatchingDate,
-  getAnchor: getAnchor
+  getAnchor: getAnchor,
+  // FR-4 (juggler-recur-lifecycle-redesign, W5): exported so facade.js's
+  // material-edit reconciliation engine can reuse the SAME cycle-boundary +
+  // fulfillment-counting primitives the scheduler's own TPC picker uses
+  // (999.1372) rather than reimplementing cycle-counting (telly
+  // TELLY-W5-REVIEW.md prior-art note #2). Previously internal-only.
+  getStableEpoch: getStableEpoch,
+  enumerateBookedDatesInCycle: enumerateBookedDatesInCycle
 };

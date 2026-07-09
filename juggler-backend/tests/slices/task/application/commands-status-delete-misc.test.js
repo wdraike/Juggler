@@ -230,6 +230,11 @@ describe('DeleteTask (deleteTask)', function () {
       enqueueScheduleRun: trigger,
       loadCalSyncSettings: function () { return Promise.resolve({}); },
       findProviderLedgerRow: function () { return Promise.resolve(null); },
+      // findCalLockedSeriesInstance is now a REQUIRED DeleteTask dep (bert fix
+      // ernie-w2-callocked-gate-failopen-default) — no gate collaborator here
+      // means "nothing locked" for these pre-existing fixtures, matching prior
+      // fail-open default behavior, but now supplied explicitly.
+      findCalLockedSeriesInstance: function () { return Promise.resolve(null); },
       cascadeRecurringDelete: function () { return Promise.resolve({ deletedCount: 0, keptCount: 0, pendingIds: [], keptIds: [] }); },
       standardDelete: function (ctx) { return ctx.trxRepo.deleteTaskById(ctx.id, ctx.userId); },
       thisAndFutureDelete: function () { return Promise.resolve({ deletedCount: 0, keptCount: 0, pendingIds: [], keptIds: [] }); }
