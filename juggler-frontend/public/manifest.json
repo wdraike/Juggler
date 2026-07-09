@@ -4,10 +4,30 @@
   "description": "AI-powered task and calendar management.",
   "icons": [
     {
-      "src": "favicon.svg",
-      "type": "image/svg+xml",
+      "src": "favicon-simple.svg",
       "sizes": "any",
-      "purpose": "any"
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    },
+    {
+      "src": "logo192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "logo512.png",
+      "type": "image/png",
+      "sizes": "512x512"
     }
   ],
   "start_url": ".",
@@ -15,5 +35,6 @@
   "display": "standalone",
   "orientation": "any",
   "theme_color": "#1A2B4A",
-  "background_color": "#1A2B4A"
+  "background_color": "#F5F0E8",
+  "categories": ["productivity", "business", "utilities"]
 }

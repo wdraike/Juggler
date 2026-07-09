@@ -9,6 +9,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Stage, Layer, Image as KonvaImage, Line, Arrow, Text, Rect } from 'react-konva';
 import ConfirmDialog from '../features/ConfirmDialog';
+import Loading from '../common/Loading';
 
 var TOOLS = [
   { value: 'pen', label: 'Draw', icon: '\u270F\uFE0F' },
@@ -133,7 +134,7 @@ export default function AnnotationCanvas({ screenshot, onComplete, onCancel, the
   }
 
   if (!image) {
-    return <div style={{ textAlign: 'center', padding: '24px 0', color: theme.textMuted }}>Loading image...</div>;
+    return <Loading label="Loading image…" style={{ padding: '24px 0', color: theme.textMuted }} />;
   }
 
   var toolBtnStyle = function(isActive) {
@@ -246,6 +247,7 @@ export default function AnnotationCanvas({ screenshot, onComplete, onCancel, the
         <ConfirmDialog
           title="Clear annotations?"
           message="Clear all annotations? This cannot be undone."
+          confirmLabel="Clear"
           onConfirm={doClear}
           onCancel={function() { setConfirmClear(false); }}
           darkMode={darkMode}

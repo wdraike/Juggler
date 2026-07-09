@@ -5,6 +5,7 @@ import {
   startImpersonation,
   isImpersonating
 } from '../../services/impersonationService';
+import Loading from '../common/Loading';
 
 export default function ImpersonationPage({ darkMode }) {
   const [search, setSearch] = useState('');
@@ -129,7 +130,7 @@ export default function ImpersonationPage({ darkMode }) {
           }}
         />
 
-        {usersLoading && <div style={{ color: darkMode ? '#8899BB' : '#888' }}>Loading users...</div>}
+        {usersLoading && <Loading label="Loading users…" style={{ justifyContent: 'flex-start', color: darkMode ? '#8899BB' : '#888' }} />}
         {usersError && <div style={{ color: '#FF8080' }}>Error: {usersError}</div>}
         {!usersLoading && users.length === 0 && !usersError && (
           <div style={{ color: darkMode ? '#8899BB' : '#888' }}>No users found.</div>

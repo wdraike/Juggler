@@ -6,6 +6,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import apiClient from '../../services/apiClient';
 import ConfirmDialog from '../features/ConfirmDialog';
+import Loading from '../common/Loading';
 
 // Human copy for plan-limit keys (999.1233 — never show raw config keys to
 // users). Unknown keys fall back to the old derived form so the message still
@@ -22,11 +23,18 @@ function limitLabel(limitKey) {
   return LIMIT_LABELS[limitKey] || (limitKey || '').replace('limits.', '').replace(/_/g, ' ');
 }
 
-export default function DisabledItemsPanel({ theme, onClose, onRefreshTasks }) {
+export default function DisabledItemsPanel({ theme, onClose, onRefreshTasks, showToast }) {
   var [items, setItems] = useState([]);
   var [loading, setLoading] = useState(true);
   var [actionPending, setActionPending] = useState(null);
   var [pendingDelete, setPendingDelete] = useState(null);
+
+  // 999.1226: failed user mutations report through the shared toast, never
+  // alert(). Guarded like AppLayout.jsx's useConfig error routing so a caller
+  // that omits the prop degrades to no-op rather than crashing.
+  function notifyError(msg) {
+    if (typeof showToast === 'function') showToast(msg, 'error');
+  }
 
   var load = useCallback(function() {
     setLoading(true);
@@ -50,9 +58,9 @@ export default function DisabledItemsPanel({ theme, onClose, onRefreshTasks }) {
       setActionPending(null);
       var data = err.response?.data;
       if (data?.code === 'ENTITY_LIMIT_REACHED') {
-        alert('Cannot re-enable: you have reached the ' + limitLabel(data.limit_key) + ' limit for your plan (' + data.current_count + '/' + data.limit + ').');
+        notifyError('Cannot re-enable: you have reached the ' + limitLabel(data.limit_key) + ' limit for your plan (' + data.current_count + '/' + data.limit + ').');
       } else {
-        alert(data?.error || 'Failed to re-enable');
+        notifyError(data?.error || 'Failed to re-enable');
       }
     });
   }
@@ -74,9 +82,9 @@ export default function DisabledItemsPanel({ theme, onClose, onRefreshTasks }) {
       setItems(function(prev) { return prev.filter(function(t) { return t.id !== id && t.sourceId !== id; }); });
       setActionPending(null);
       if (onRefreshTasks) onRefreshTasks();
-    }).catch(function() {
+    }).catch(function(err) {
       setActionPending(null);
-      alert('Failed to delete');
+      notifyError(err.response?.data?.error || 'Failed to delete');
     });
   }
 
@@ -110,13 +118,13 @@ export default function DisabledItemsPanel({ theme, onClose, onRefreshTasks }) {
               Items frozen due to plan limits. Re-enable or delete to manage.
             </div>
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: theme.textMuted, cursor: 'pointer', fontSize: 18, padding: 4 }}>&times;</button>
+          <button onClick={onClose} aria-label="Close disabled items" title="Close" style={{ background: 'none', border: 'none', color: theme.textMuted, cursor: 'pointer', fontSize: 18, padding: 4 }}>&times;</button>
         </div>
 
         {/* Content */}
         <div style={{ padding: '12px 20px', overflowY: 'auto', flex: 1 }}>
           {loading ? (
-            <div style={{ textAlign: 'center', color: theme.textMuted, padding: 20, fontSize: 13 }}>Loading...</div>
+            <Loading label="Loading disabled items…" style={{ color: theme.textMuted, padding: 20 }} />
           ) : items.length === 0 ? (
             <div style={{ textAlign: 'center', color: theme.textMuted, padding: 20, fontSize: 13 }}>No disabled items</div>
           ) : (

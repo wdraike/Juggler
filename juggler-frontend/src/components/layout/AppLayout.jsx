@@ -9,6 +9,7 @@ import HeaderBar from './HeaderBar';
 import WeekStrip from './WeekStrip';
 import NavigationBar from './NavigationBar';
 import ToastNotification, { useToast } from './ToastNotification';
+import Loading from '../common/Loading';
 import useTaskState from '../../hooks/useTaskState';
 import useConfig from '../../hooks/useConfig';
 import useUndo from '../../hooks/useUndo';
@@ -135,6 +136,12 @@ export default function AppLayout() {
     var saved = localStorage.getItem('juggler-darkMode');
     return saved !== null ? saved === 'true' : true;
   });
+  // 999.1243: keep mobile browser chrome / PWA title bar in sync with the active
+  // theme (brand guide "Theme Color Meta": light = Brand Navy, dark = Deep Navy).
+  useEffect(function() {
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', darkMode ? '#0F1520' : '#1A2B4A');
+  }, [darkMode]);
   var [viewMode, setViewModeRaw] = useState(_savedUI.viewMode || 'daily');
   // 999.103: keep the browser tab title in sync with the active view.
   useDocumentTitle(VIEW_TITLES[viewMode] || 'StriveRS');
@@ -1172,7 +1179,7 @@ export default function AppLayout() {
   if (loading) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: theme.bg, color: theme.textMuted, fontFamily: "'Inter', system-ui", fontSize: 14 }}>
-        Loading tasks...
+        <Loading label="Loading tasks…" />
       </div>
     );
   }
@@ -1593,6 +1600,7 @@ export default function AppLayout() {
           theme={theme}
           onClose={function() { setShowDisabledItems(false); }}
           onRefreshTasks={loadTasks}
+          showToast={showToast}
         />
       )}
 

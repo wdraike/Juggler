@@ -181,8 +181,6 @@ export default function useTaskState() {
       ]);
 
       const tasks = tasksRes.data.tasks || [];
-      var _ex = tasks.find(function(t) { return t.text === 'Exercise' && t.taskType === 'recurring_instance' && t.status === ''; });
-      console.log('[LOAD-RAW] Exercise anchorDate:', _ex ? _ex.anchorDate : 'NOT FOUND', 'total tasks:', tasks.length);
       hydrateTaskTimezones(tasks, getHydrationTimezone());
       const statuses = {};
       tasks.forEach(t => {

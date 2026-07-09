@@ -25,11 +25,16 @@
 import React from 'react';
 import ConfirmModal from '../common/ConfirmModal';
 
-export default function ConfirmDialog({ title, message, onConfirm, onCancel, blocked, blockedMessage, darkMode, isMobile, zIndex }) {
+export default function ConfirmDialog({ title, message, confirmLabel, onConfirm, onCancel, blocked, blockedMessage, darkMode, isMobile, zIndex }) {
   return (
     <ConfirmModal
       open
       title={title || 'Delete task?'}
+      // 999.1229: name the destructive verb on the affirmative button — a generic
+      // "Confirm" next to Cancel is a classic mis-click. Every live caller is a
+      // delete confirmation, so 'Delete' is the correct default; non-delete
+      // callers (e.g. AnnotationCanvas's clear) pass their own verb.
+      confirmLabel={confirmLabel || 'Delete'}
       onConfirm={onConfirm}
       onCancel={onCancel}
       confirmDisabled={!!blocked}

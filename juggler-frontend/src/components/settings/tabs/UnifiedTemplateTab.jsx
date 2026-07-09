@@ -4,6 +4,10 @@
  */
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import HelpIcon from '../HelpIcon';
+// 999.1245: use the canonical location→tint map. This file previously kept a
+// private LOC_TINT copy that had drifted (errand was pink #EC4899 here while
+// the grid fell back to purple — users learn location=color, forks break it).
+import { LOC_TINT } from '../../../state/constants';
 
 var PRESET_BLOCKS = (function() {
   var { DEFAULT_WEEKDAY_BLOCKS, DEFAULT_WEEKEND_BLOCKS } = require('../../../state/constants');
@@ -17,7 +21,6 @@ var PRESET_BLOCKS = (function() {
   return result;
 })();
 
-var LOC_TINT = { home: '#2E4A7A', work: '#C8942A', transit: '#5C5A55', downtown: '#2D6A4F', gym: '#8B2635', errand: '#EC4899' };
 var DEFAULT_START = 360;
 var DEFAULT_END = 1380;
 

@@ -11,7 +11,7 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import { getTheme } from '../../theme/colors';
-import { GRID_START, GRID_END, MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES, locIcon, LOC_TINT, locBgTint } from '../../state/constants';
+import { GRID_START, GRID_END, MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES, locIcon, LOC_TINT, LOC_TINT_FALLBACK, locBgTint } from '../../state/constants';
 import { isTerminalStatus } from '../../shared/task-status';
 import { formatHour, formatDateKey, parseDate } from '../../scheduler/dateHelpers';
 import { getBlocksForDate } from '../../scheduler/timeBlockHelpers';
@@ -507,7 +507,7 @@ export default function DailyView({
             var hour = GRID_START + i;
             var y = i * hourHeight;
             var locId = hourLocations[hour];
-            var locColor = LOC_TINT[locId] || '#4338CA';
+            var locColor = LOC_TINT[locId] || LOC_TINT_FALLBACK;
             var locIconStr = locIcon(locId);
             var dvHw = hourlyByHour[hour];
 
@@ -597,7 +597,7 @@ export default function DailyView({
                     }}>
                       {locations.map(function (loc) {
                         var isActive = loc.id === locId;
-                        var tint = LOC_TINT[loc.id] || '#4338CA';
+                        var tint = LOC_TINT[loc.id] || LOC_TINT_FALLBACK;
                         return (
                           <button key={loc.id}
                             onClick={function (ev) {

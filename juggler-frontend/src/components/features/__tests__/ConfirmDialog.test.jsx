@@ -53,10 +53,31 @@ describe('ConfirmDialog — retrofit onto ConfirmModal (FR-7/AC8)', () => {
     render(
       <ConfirmDialog message="Delete this task?" onConfirm={onConfirm} onCancel={onCancel} darkMode={false} />
     );
-    fireEvent.click(screen.getByText('Confirm'));
+    // 999.1229: the affirmative button names the destructive verb ('Delete'
+    // by default — every live caller is a delete confirmation), never a
+    // generic 'Confirm' next to Cancel.
+    fireEvent.click(screen.getByText('Delete'));
     expect(onConfirm).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByText('Cancel'));
     expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('999.1229: accepts a confirmLabel prop so non-delete callers can name their own verb', () => {
+    var onConfirm = jest.fn();
+    render(
+      <ConfirmDialog
+        title="Clear annotations?"
+        message="Clear all annotations?"
+        confirmLabel="Clear"
+        onConfirm={onConfirm}
+        onCancel={() => {}}
+        darkMode={false}
+      />
+    );
+    expect(screen.queryByText('Confirm')).not.toBeInTheDocument();
+    expect(screen.queryByText('Delete')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Clear'));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 
   it('gains Escape-to-close for free from the retrofit (ConfirmModal a11y precedent, ImportExportPanel.jsx:485-492)', () => {
@@ -86,7 +107,7 @@ describe('ConfirmDialog — retrofit onto ConfirmModal (FR-7/AC8)', () => {
         'This series has a calendar-linked instance. Remove the calendar link before deleting the whole series.'
       )
     ).toBeInTheDocument();
-    var confirmBtn = screen.queryByText('Confirm');
+    var confirmBtn = screen.queryByText('Delete');
     // Either the Confirm control is disabled, or it is not rendered at all in the
     // blocked state — either satisfies "cannot proceed"; assert whichever the
     // implementation chooses actually prevents the destructive action.

@@ -12,7 +12,7 @@
 
 import React, { useRef, useEffect, useMemo, useState, useCallback } from 'react';
 import ReactDOM from 'react-dom';
-import { GRID_START, GRID_END, GRID_HOURS_COUNT, PRI_COLORS, LOC_TINT, locBgTint, locIcon, isTerminalStatus, PAST_OPACITY } from '../../state/constants';
+import { GRID_START, GRID_END, GRID_HOURS_COUNT, PRI_COLORS, LOC_TINT, LOC_TINT_FALLBACK, locBgTint, locIcon, isTerminalStatus, PAST_OPACITY } from '../../state/constants';
 import { formatDateKey as cgFormatDateKey } from '../../scheduler/dateHelpers';
 import { formatHour } from '../../scheduler/dateHelpers';
 import { weatherIconUrl } from '../../utils/weatherIcons';
@@ -491,7 +491,7 @@ export default function CalendarGrid({
                   }}>
                     {locations.map(function(loc) {
                       var isActive = loc.id === locId;
-                      var tint = LOC_TINT[loc.id] || '#8B5CF6';
+                      var tint = LOC_TINT[loc.id] || LOC_TINT_FALLBACK;
                       return (
                         <button key={loc.id}
                           onClick={function(ev) {

@@ -14,11 +14,30 @@
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import apiClient from '../../services/apiClient';
+import { getTheme } from '../../theme/colors';
 
 var POLL_INTERVAL_MS = 60 * 1000; // 60s — matches climbrs default cadence
 var NETWORK_TIMEOUT_MS = 5000;
 
+// 999.1226: plain-language status copy — the popover never shows the raw
+// ALL-CAPS machine states to the user.
+var STATUS_LABELS = {
+  OK: 'All systems operational',
+  DEGRADED: 'Some services need attention',
+  ERROR: 'Connection problem',
+  UNKNOWN: 'Status unknown',
+  checking: 'Checking…'
+};
+function statusLabel(status) {
+  return STATUS_LABELS[status] || status;
+}
+
 export default function HealthDot({ darkMode, theme }) {
+  // 999.1245: status colors come from the theme's dark-legible brand pairs
+  // (greenText/amberText/redText), never hardcoded Material greens/ambers/reds.
+  // The theme prop is authoritative; getTheme(darkMode) covers callers that
+  // pass only darkMode (matches the component's existing `theme ?` guards).
+  var t = theme || getTheme(darkMode);
   var [state, setState] = useState({ status: 'checking', data: null, error: null, lastChecked: null });
   var [expanded, setExpanded] = useState(false);
   var [anchorRect, setAnchorRect] = useState(null);
@@ -77,10 +96,10 @@ export default function HealthDot({ darkMode, theme }) {
   }, [expanded]);
 
   var color = (function() {
-    if (state.status === 'OK') return '#43A047';       // green
-    if (state.status === 'DEGRADED') return '#F9A825'; // amber
-    if (state.status === 'ERROR') return '#E53935';    // red
-    return theme ? theme.textMuted : '#888';           // checking
+    if (state.status === 'OK') return t.greenText;      // green
+    if (state.status === 'DEGRADED') return t.amberText; // amber
+    if (state.status === 'ERROR') return t.redText;      // red
+    return t.textMuted;                                   // checking
   })();
 
   var tooltip = (function() {
@@ -88,7 +107,7 @@ export default function HealthDot({ darkMode, theme }) {
     if (state.error) return 'Backend: ' + state.error;
     if (!state.data) return 'Backend status unknown';
     var svc = state.data.services || {};
-    var lines = ['Status: ' + state.status];
+    var lines = ['Status: ' + statusLabel(state.status)];
     Object.keys(svc).forEach(function(k) { lines.push(k + ': ' + svc[k]); });
     // Surface pending sync retries in the tooltip (first amber-triggering
     // condition the user actually encounters). Saves a click to see why
@@ -171,10 +190,10 @@ export default function HealthDot({ darkMode, theme }) {
           </div>
           <div style={{ marginBottom: 6 }}>
             <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: color, marginRight: 6 }} />
-            <strong>{state.status}</strong>
+            <strong>{statusLabel(state.status)}</strong>
           </div>
           {state.error && (
-            <div style={{ color: '#E53935', marginBottom: 6 }}>{state.error}</div>
+            <div style={{ color: t.redText, marginBottom: 6 }}>{state.error}</div>
           )}
           {state.data && state.data.services && (
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
@@ -182,10 +201,10 @@ export default function HealthDot({ darkMode, theme }) {
                 {Object.keys(state.data.services).map(function(name) {
                   var status = state.data.services[name];
                   var detail = state.data.detail && state.data.detail[name];
-                  var cellColor = status === 'operational' ? '#43A047'
-                    : status === 'error' ? '#E53935'
-                    : status === 'degraded' ? '#F9A825'
-                    : theme ? theme.textMuted : '#888';
+                  var cellColor = status === 'operational' ? t.greenText
+                    : status === 'error' ? t.redText
+                    : status === 'degraded' ? t.amberText
+                    : t.textMuted;
                   return (
                     <tr key={name}>
                       <td style={{ padding: '2px 4px', textTransform: 'capitalize' }}>{name}</td>
@@ -199,7 +218,7 @@ export default function HealthDot({ darkMode, theme }) {
           )}
 
           {state.data && state.data.sync && (
-            <SyncTable sync={state.data.sync} theme={theme} />
+            <SyncTable sync={state.data.sync} theme={t} />
           )}
 
           {state.data && (
@@ -255,8 +274,8 @@ function SyncTable({ sync, theme }) {
           {order.map(function(p) {
             var s = sync[p] || {};
             var dim = !s.connected;
-            var retryColor = s.pendingRetry > 0 ? '#F9A825' : (theme ? theme.textMuted : '#888');
-            var errColor = s.permanentError > 0 ? '#E53935' : (theme ? theme.textMuted : '#888');
+            var retryColor = s.pendingRetry > 0 ? theme.amberText : theme.textMuted;
+            var errColor = s.permanentError > 0 ? theme.redText : theme.textMuted;
             return (
               <tr key={p} style={{ opacity: dim ? 0.5 : 1 }}>
                 <td style={{ padding: '2px 4px' }}>

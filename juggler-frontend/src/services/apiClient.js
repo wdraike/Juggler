@@ -146,6 +146,26 @@ apiClient.interceptors.response.use(
       }));
     }
 
+    // 999.1226 — one place that turns axios failures into human copy. Many
+    // call sites render `error.message` directly ("Failed to sync: " + e.message);
+    // without this they surface axios internals like "Request failed with status
+    // code 500" / "Network Error". Server-provided copy (data.error/data.message)
+    // wins when present; the original axios message is kept on error.rawMessage
+    // for logs/debugging.
+    error.rawMessage = error.message;
+    const serverCopy = error.response?.data?.error || error.response?.data?.message;
+    if (typeof serverCopy === 'string' && serverCopy) {
+      error.message = serverCopy;
+    } else if (error.code === 'ECONNABORTED' || error.code === 'ERR_CANCELED') {
+      error.message = 'The request timed out — please try again.';
+    } else if (!error.response) {
+      error.message = 'Cannot reach the server — check your connection and try again.';
+    } else if (error.response.status >= 500) {
+      error.message = 'The server hit an unexpected error — please try again.';
+    } else {
+      error.message = 'The request could not be completed (' + error.response.status + ').';
+    }
+
     return Promise.reject(error);
   }
 );

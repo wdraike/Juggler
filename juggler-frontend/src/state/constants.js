@@ -52,7 +52,16 @@ export const GRID_START = 6;  // 6 AM
 export const GRID_END = 23;   // 11 PM
 export const GRID_HOURS_COUNT = GRID_END - GRID_START + 1;
 
-export const LOC_TINT = { home: "#2E4A7A", work: "#C8942A", transit: "#5C5A55", downtown: "#2D6A4F", gym: "#8B2635" };
+// Canonical location→tint map (999.1245). Brand tokens only (theme/colors.js
+// BRAND + brand guide palette) — every shipped location gets exactly one color,
+// used identically in the grid, daily view, and settings so users can rely on
+// location=color. Do NOT fork this map locally in a component.
+export const LOC_TINT = { home: "#2E4A7A", work: "#C8942A", transit: "#5C5A55", downtown: "#2D6A4F", gym: "#8B2635", errand: "#0D9488" /* BRAND.teal */ };
+
+// Fallback tint for custom/unknown location ids (BRAND.indigo — the extended
+// functional-accent token DailyView already used). Use this everywhere a
+// location id may not be in LOC_TINT; never invent an ad-hoc purple (999.1245).
+export const LOC_TINT_FALLBACK = "#4338CA";
 
 export const DEFAULT_LOCATIONS = [
   { id: "home", name: "Home", icon: "\uD83C\uDFE0" },
