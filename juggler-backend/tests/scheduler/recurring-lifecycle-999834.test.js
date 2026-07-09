@@ -144,7 +144,7 @@ describe('999.834-A — TPC cap: flexible-TPC weekly emits <=timesPerCycle per I
 // B — 999.835: Cancelled recurring_template must NOT fabricate instances
 // DB test on juggler_834_test @ 3407.
 // EXPECT RED: tasks_v hardcodes status=NULL for all recurring_template header rows
-// (confirmed in canonical-views-restore.sql: `(convert(NULL using utf8mb4) ... ) AS status`).
+// (confirmed in src/db/views/canonical-views.sql: `(convert(NULL using utf8mb4) ... ) AS status`).
 // Even when task_masters.status='cancelled', the orWhereNull branch at runSchedule.js:526
 // loads the template, and expandRecurring's cancelled-filter never fires (st = '' not 'cancelled').
 // =============================================================================

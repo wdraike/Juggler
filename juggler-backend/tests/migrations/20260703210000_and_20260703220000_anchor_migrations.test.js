@@ -42,7 +42,7 @@
  *      through both views.
  *
  * afterEachFile.js (setupFilesAfterEnv) restores tasks_v/tasks_with_sync_v from
- * tests/helpers/canonical-views-restore.sql after this file completes regardless
+ * the src/db/views SSOT (canonical-views.sql) after this file completes regardless
  * of the state left here — this file leaves both migrations fully re-applied
  * (final state matches canonical), so that restore is a no-op safety net, not a
  * dependency of this test's own assertions.

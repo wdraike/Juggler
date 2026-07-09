@@ -37,6 +37,14 @@ in the CLI wrapper, not `knexfile.js` (which the running app imports and must ne
   leaves environments that already ran the old version silently inconsistent (knex records it as
   applied and will not re-run it). Beware idempotent rename/`hasColumn` guards: they silently no-op
   if the table/column name is wrong, so verify the target exists rather than assuming the guard ran.
+- **View migrations (999.1189/999.1096):** migrations that reshape `tasks_v`/`tasks_with_sync_v`
+  must `require('../migration-helpers')` for `portableViewSql`/`replaceAll`/`countOccurrences`
+  (do NOT paste another copy; the shared helper also preserves the view's `SQL SECURITY` clause),
+  string-patch the LIVE definition (never restate the full SELECT — the five-times-recurred
+  silent-column-drop trap), and then regenerate the canonical view SSOT
+  (`juggler-backend/src/db/views/`, via `node scripts/regenerate-canonical-views.js` against a
+  freshly migrated `*_test` DB). `tests/migrations/view-column-contract.test.js` FAILS until the
+  migrated schema and the SSOT agree, and the per-test-file view restore reads the same SSOT.
 
 ## Scheduler — Critical Architecture
 

@@ -117,40 +117,26 @@ function isTruncTarget() {
   return /_test$/.test(name) && port === 3407;
 }
 
-// Canonical HEAD view DDL, captured once from a pristine `make init-juggler` into
-// tests/helpers/canonical-views-restore.sql (one `CREATE OR REPLACE VIEW ...;` per
-// line, tasks_v before its dependent tasks_with_sync_v). Loaded lazily + cached.
+// Canonical HEAD view DDL — single-sourced from src/db/views/ (999.1189):
+// canonical-views.sql there holds one `CREATE OR REPLACE ... VIEW ...;` per
+// line, tasks_v before its dependent tasks_with_sync_v. Loaded lazily + cached.
 //
-// ⚠ MUST BE REGENERATED whenever a migration changes tasks_v/tasks_with_sync_v's
-// shape (add/remove/rename a projected column) — otherwise THIS restore silently
-// reverts the new shape after every test file, for the rest of the suite's
-// lifetime, masking the change everywhere except a test that runs completely
-// alone. This is exactly how `rolling_anchor` went undetected-missing from both
-// views for weeks (999.1094) — this snapshot never had it either, until the
-// 999.1091/999.1094 regeneration. Regenerate via (run against a freshly
-// migrate:latest'd *_test DB):
-//   node -e "const mysql=require('mysql2/promise');(async()=>{const c=await
-//     mysql.createConnection({host:'127.0.0.1',port:3407,user:'root',
-//     password:'rootpass',database:'<your _test db>'});const v=(await
-//     c.query('SHOW CREATE VIEW tasks_v'))[0];const s=(await c.query(
-//     'SHOW CREATE VIEW tasks_with_sync_v'))[0];const p=x=>String(x).replace(
-//     /^CREATE\s+ALGORITHM=\S+\s+DEFINER=`[^`]+`@`[^`]+`\s+SQL SECURITY
-//     (\w+)\s+VIEW/i,'CREATE OR REPLACE SQL SECURITY $1 VIEW');require('fs')
-//     .writeFileSync('tests/helpers/canonical-views-restore.sql',
-//     p(v[0]['Create View'])+';\n'+p(s[0]['Create View'])+';\n');await
-//     c.end();})();"
+// ⚠ The SSOT MUST BE REGENERATED (scripts/regenerate-canonical-views.js,
+// against a freshly migrate:latest'd *_test DB) whenever a migration changes
+// tasks_v/tasks_with_sync_v's shape — otherwise THIS restore silently reverts
+// the new shape after every test file, for the rest of the suite's lifetime,
+// masking the change everywhere except a test that runs completely alone.
+// This is exactly how `rolling_anchor` went undetected-missing from both
+// views for weeks (999.1094), and how the pre-SSOT snapshot drifted again by
+// 2026-07-09 (still projected the dropped `overdue`, lacked `next_start`).
+// tests/migrations/view-column-contract.test.js now FAILS when the SSOT and
+// the migrated schema disagree, so the drift can no longer go unnoticed.
 var _canonicalViewStmts = null;
 function loadCanonicalViewStmts() {
   if (_canonicalViewStmts !== null) return _canonicalViewStmts;
   _canonicalViewStmts = [];
   try {
-    var fs = require('fs');
-    var path = require('path');
-    var sql = fs.readFileSync(path.join(__dirname, 'canonical-views-restore.sql'), 'utf8');
-    _canonicalViewStmts = sql
-      .split(/;\s*\n/)
-      .map(function (s) { return s.trim(); })
-      .filter(function (s) { return /CREATE\s+OR\s+REPLACE/i.test(s); });
+    _canonicalViewStmts = require('../../src/db/views').canonicalViewStatements();
   } catch (e) {
     _canonicalViewStmts = [];
   }
