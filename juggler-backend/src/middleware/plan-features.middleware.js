@@ -57,8 +57,9 @@ let _fetchPromise = null;
 async function fetchPlanFeatures() {
   const productId = await getProductId();
   const filter = productId ? `?product=${productId}` : `?product=${PRODUCT_LABEL}`;
+  const internalKey = process.env.INTERNAL_SERVICE_KEY || '';
   const response = await paymentFetch(`/api/plans${filter}&include_all=true`, {
-    headers: { 'Content-Type': 'application/json' }
+    headers: { 'X-Internal-Key': internalKey, 'Content-Type': 'application/json' }
   });
 
   if (!response.ok) throw new Error(`Payment service returned ${response.status}`);
