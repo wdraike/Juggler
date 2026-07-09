@@ -141,3 +141,54 @@ describe('computeRecurringDeadline — period boundary', function() {
     });
   });
 });
+
+/**
+ * 999.1191 — computeRecurringDeadlineKey is the single period-boundary date
+ * math (SSOT). runSchedule.js recurringPeriodEndKey routes through it
+ * (converting the inclusive last day to its exclusive first-day-past form).
+ * These tests pin the key-level contract, including the rolling branch and
+ * the occurrence-anchored degeneracy the scheduler relies on.
+ */
+describe('computeRecurringDeadlineKey — SSOT date math (999.1191)', function() {
+  var { computeRecurringDeadlineKey } = require('../../../shared/scheduler/missedHelpers');
+
+  test('day-locked → the occurrence day itself', function() {
+    expect(computeRecurringDeadlineKey({ occurrenceDate: '2026-06-24', isDayLocked: true, cycleDays: 7 }))
+      .toBe('2026-06-24');
+  });
+
+  test('flexible with recurStart → last day of the anchor-bucketed cycle', function() {
+    // Anchor Apr26 (Sun), occ Jun24 → weekly bucket [Jun21..Jun27].
+    expect(computeRecurringDeadlineKey({ occurrenceDate: '2026-06-24', recurStart: '2026-04-26', isDayLocked: false, cycleDays: 7 }))
+      .toBe('2026-06-27');
+  });
+
+  test('flexible WITHOUT recurStart degenerates to occurrence-anchored (k=0): occ + cycleDays - 1', function() {
+    // This is exactly runSchedule's recurringPeriodEndKey behavior (which adds
+    // +1 for its exclusive boundary → occ + cycleDays, unchanged pre-refactor).
+    expect(computeRecurringDeadlineKey({ occurrenceDate: '2026-06-24', isDayLocked: false, cycleDays: 7 }))
+      .toBe('2026-06-30');
+  });
+
+  test('rolling → occurrence-anchored interval window, recurStart bucketing does NOT apply', function() {
+    expect(computeRecurringDeadlineKey({ occurrenceDate: '2026-06-24', recurStart: '2026-04-26', isRolling: true, cycleDays: 7 }))
+      .toBe('2026-06-30');
+    expect(computeRecurringDeadlineKey({ occurrenceDate: '2026-06-24', isRolling: true, cycleDays: 1 }))
+      .toBe('2026-06-24');
+  });
+
+  test('accepts a Date occurrence (scheduler call sites)', function() {
+    expect(computeRecurringDeadlineKey({ occurrenceDate: new Date(2026, 5, 24), isDayLocked: true, cycleDays: 1 }))
+      .toBe('2026-06-24');
+  });
+
+  test('guards: missing/unparseable occurrence → null; unparseable recurStart → occurrence day', function() {
+    expect(computeRecurringDeadlineKey({ isDayLocked: false, cycleDays: 7 })).toBeNull();
+    expect(computeRecurringDeadlineKey(null)).toBeNull();
+    expect(computeRecurringDeadlineKey({ occurrenceDate: 'TBD', isDayLocked: false, cycleDays: 7 })).toBeNull();
+    // recurStart supplied but unparseable → bucket skipped, occurrence day kept
+    // (unchanged from the pre-refactor inline math).
+    expect(computeRecurringDeadlineKey({ occurrenceDate: '2026-06-24', recurStart: 'garbage', isDayLocked: false, cycleDays: 7 }))
+      .toBe('2026-06-24');
+  });
+});

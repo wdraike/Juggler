@@ -26,8 +26,19 @@ var MIN_CHUNK_DEFAULT = 15;
 /**
  * Compute the desired chunk plan for a master + occurrence.
  * Returns an array of { splitOrdinal, dur } of length N.
- * Mirrors unifiedSchedule.js:314-338 (includes the "merge tiny last
- * chunk into previous" rule so chunk counts match scheduler expectations).
+ * Includes the "merge tiny last chunk into previous" rule.
+ *
+ * 999.1190: this is the SINGLE plan function for PERSISTED chunk rows — both
+ * persistence sites consume it (this file's reconcileOccurrence and
+ * runSchedule.js's 5b recurring chunk fanout, which imports computeChunks).
+ * A prior comment here claimed it "mirrors unifiedSchedule.js:314-338" — that
+ * file no longer exists. The live placement engine
+ * (unifiedScheduleV2.js placeSplitInline) deliberately does NOT use a
+ * precomputed plan: it chunks by free-slot availability (free-run driven,
+ * STEP flooring, splitMin re-check), so placed chunk durations may differ
+ * from the persisted row plan; the post-placement merge step recombines
+ * contiguous chunks. Unifying plan + placement chunking into one function is
+ * gated on the runSchedule/unifiedScheduleV2 consolidation spike (999.1108).
  */
 function computeChunks(totalDur, splitMin) {
   var chunk = splitMin || MIN_CHUNK_DEFAULT;

@@ -51,7 +51,6 @@ if (sweepTimer.unref) sweepTimer.unref();
 async function startSession(userId, options) {
   var opts = options || {};
   var unifiedSchedule = require('../slices/scheduler/facade').unifiedScheduleV2;
-  var constants = require('./constants');
   var rowToTask = require('../controllers/task.controller').rowToTask;
 
   var TIMEZONE = safeTimezone(opts.timezone, 'America/New_York');
@@ -77,27 +76,15 @@ async function startSession(userId, options) {
         .orWhere('task_type', 'recurring_template');
     })
     .select();
-  var configRows = await db('user_config').where({ user_id: userId });
-  var cfg = {};
-  configRows.forEach(function(r) {
-    try { cfg[r.config_key] = JSON.parse(r.config_value); }
-    catch (_e) { cfg[r.config_key] = r.config_value; }
-  });
-
+  // 999.1187: single scheduler-config loader (reads the real snake_case
+  // user_config keys) shared with runSchedule.js and schedule.routes.js.
+  // The previous inline copy read camelCase keys (cfg.timeBlocks, …) that
+  // never exist in user_config, so the stepper always ran on
+  // DEFAULT_TIME_BLOCKS / DEFAULT_TOOL_MATRIX regardless of user settings.
   var stepRecorder = [];
-  var schedCfg = {
-    timeBlocks: cfg.timeBlocks || constants.DEFAULT_TIME_BLOCKS,
-    toolMatrix: cfg.toolMatrix || constants.DEFAULT_TOOL_MATRIX,
-    locSchedules: cfg.locSchedules || {},
-    locScheduleDefaults: cfg.locScheduleDefaults || {},
-    locScheduleOverrides: cfg.locScheduleOverrides || {},
-    hourLocationOverrides: cfg.hourLocationOverrides || {},
-    scheduleTemplates: cfg.scheduleTemplates || null,
-    splitMinDefault: cfg.splitMinDefault || 15,
-    preferences: cfg.preferences || {},
-    timezone: TIMEZONE,
-    _stepRecorder: stepRecorder
-  };
+  var schedCfg = await require('./loadSchedulerConfig').loadSchedulerConfig(userId);
+  schedCfg.timezone = TIMEZONE;
+  schedCfg._stepRecorder = stepRecorder;
 
   var statuses = {};
   tasks.forEach(function(t) { statuses[t.id] = t.status || ''; });

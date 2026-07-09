@@ -91,27 +91,14 @@ router.post('/debug', authenticateJWT, authenticateAdmin, debugLimiter, async fu
     // Load tasks
     var tasks = await db('tasks_v').where({ user_id: userId }).whereNot('status', 'disabled');
 
-    // Load config
-    var configRows = await db('user_config').where({ user_id: userId });
-    var cfg = {};
-    configRows.forEach(function(r) {
-      try { cfg[r.config_key] = JSON.parse(r.config_value); } catch { cfg[r.config_key] = r.config_value; }
-    });
-
-    // Build scheduler config with debug flag
-    var schedCfg = {
-      timeBlocks: cfg.timeBlocks || require('../scheduler/constants').DEFAULT_TIME_BLOCKS,
-      toolMatrix: cfg.toolMatrix || require('../scheduler/constants').DEFAULT_TOOL_MATRIX,
-      locSchedules: cfg.locSchedules || {},
-      locScheduleDefaults: cfg.locScheduleDefaults || {},
-      locScheduleOverrides: cfg.locScheduleOverrides || {},
-      hourLocationOverrides: cfg.hourLocationOverrides || {},
-      scheduleTemplates: cfg.scheduleTemplates || null,
-      splitMinDefault: cfg.splitMinDefault || 15,
-      preferences: cfg.preferences || {},
-      timezone: TIMEZONE,
-      _debug: true // Enable phase snapshots
-    };
+    // Load config — 999.1187: single scheduler-config loader (reads the real
+    // snake_case user_config keys) shared with runSchedule.js and
+    // schedulerSession.js. The previous inline copy read camelCase keys that
+    // never exist in user_config, so the debug run always used
+    // DEFAULT_TIME_BLOCKS / DEFAULT_TOOL_MATRIX regardless of user settings.
+    var schedCfg = await require('../scheduler/loadSchedulerConfig').loadSchedulerConfig(userId);
+    schedCfg.timezone = TIMEZONE;
+    schedCfg._debug = true; // Enable phase snapshots
 
     var statuses = {};
     tasks.forEach(function(t) { statuses[t.id] = t.status || ''; });

@@ -32,21 +32,43 @@ var dateHelpers = require('./dateHelpers');
  * @returns {Date|null} UTC instant of the period deadline (23:59 local of the
  *          last in-period day), or null when occurrenceDate is missing/invalid.
  */
-function computeRecurringDeadline(params, timezone) {
+/**
+ * Date-key half of computeRecurringDeadline — the single implementation of the
+ * period-boundary date math (999.1191). Returns the LAST in-period local day
+ * ('YYYY-MM-DD'), inclusive, or null when occurrenceDate is missing/invalid.
+ *
+ * This is the SSOT the scheduler's `recurringPeriodEndKey` (runSchedule.js)
+ * also routes through — it converts the inclusive last day to its exclusive
+ * "first day PAST the period" form. Do not fork this math again.
+ *
+ * Extra params over computeRecurringDeadline:
+ * @param {boolean} [params.isRolling]  rolling recurrence — the window IS the
+ *        interval, anchored at the OCCURRENCE (the rolling anchor advances on
+ *        each terminal event, so recurStart cycle-bucketing does not apply):
+ *        last in-period day = occurrence + cycleDays - 1.
+ *        `occurrenceDate` may also be a Date here (scheduler call sites).
+ */
+function computeRecurringDeadlineKey(params) {
   var p = params || {};
-  var occ = p.occurrenceDate;
-  if (!occ || typeof occ !== 'string') return null;
-
-  var deadlineDateKey = occ;
+  if (!p.occurrenceDate) return null;
+  var occDate = dateHelpers.parseDate(p.occurrenceDate);
+  if (!occDate) return null;
 
   var cycleDays = Number(p.cycleDays) || 0;
+
+  // Rolling: occurrence-anchored interval window (see jsdoc above).
+  if (p.isRolling && cycleDays >= 1) {
+    var lastRoll = new Date(occDate.getTime());
+    lastRoll.setDate(lastRoll.getDate() + (cycleDays - 1));
+    return dateHelpers.formatDateKey(lastRoll);
+  }
+
   // Flexible/TPC: extend the deadline to the end of the cycle the occurrence
   // falls in. Day-locked (or no natural cycle) keeps the occurrence day.
   if (!p.isDayLocked && cycleDays > 1) {
-    var anchorKey = (p.recurStart && typeof p.recurStart === 'string') ? p.recurStart : occ;
+    var anchorKey = (p.recurStart && typeof p.recurStart === 'string') ? p.recurStart : p.occurrenceDate;
     var anchor = dateHelpers.parseDate(anchorKey);
-    var occDate = dateHelpers.parseDate(occ);
-    if (anchor && occDate) {
+    if (anchor) {
       var msPerDay = 24 * 60 * 60 * 1000;
       var daysFromAnchor = Math.floor((occDate.getTime() - anchor.getTime()) / msPerDay);
       // k = which cycle bucket the occurrence is in (floor toward the anchor,
@@ -55,9 +77,22 @@ function computeRecurringDeadline(params, timezone) {
       if (k < 0) k = 0; // occurrence before anchor (shouldn't happen) → first cycle
       var lastDay = new Date(anchor.getTime());
       lastDay.setDate(lastDay.getDate() + k * cycleDays + (cycleDays - 1));
-      deadlineDateKey = dateHelpers.formatDateKey(lastDay);
+      return dateHelpers.formatDateKey(lastDay);
     }
+    // recurStart supplied but unparseable → keep the occurrence day (unchanged
+    // from the original inline math: bucket only when the anchor parses).
   }
+
+  return dateHelpers.formatDateKey(occDate);
+}
+
+function computeRecurringDeadline(params, timezone) {
+  var p = params || {};
+  var occ = p.occurrenceDate;
+  if (!occ || typeof occ !== 'string') return null;
+
+  var deadlineDateKey = computeRecurringDeadlineKey(p);
+  if (!deadlineDateKey) return null;
 
   // End-of-day of the deadline date, in the user's timezone, as a UTC instant.
   return dateHelpers.localToUtc(deadlineDateKey, '11:59 PM', timezone);
@@ -72,15 +107,12 @@ function computeRecurringDeadline(params, timezone) {
 // no other live caller remained (only a dead root-level `test-implementation.js`
 // scratch script — removed alongside — and a fully describe.skip'd test file
 // that referenced the names in a comment only, not a live import).
-
-function getMissedResolutionWindow(task) {
-  if (!task.scheduled_at) return null;
-  
-  const scheduledTime = new Date(task.scheduled_at);
-  return new Date(scheduledTime.getTime() + (24 * 60 * 60 * 1000)); // 24 hours after scheduled time
-}
+//
+// getMissedResolutionWindow DELETED — 999.1191. Confirmed dead: only referenced
+// by the fully describe.skip'd tests/shared/missedHelpers.test.js (removed
+// alongside) and docs. Verified via repo-wide grep 2026-07-09.
 
 module.exports = {
   computeRecurringDeadline,
-  getMissedResolutionWindow
+  computeRecurringDeadlineKey
 };

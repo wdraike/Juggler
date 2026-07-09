@@ -75,7 +75,6 @@ function runSchedulerWithShadow(allTasks, statuses, todayKey, nowMins, cfg, cloc
   return unifiedScheduleV2(allTasks, statuses, todayKey, nowMins, cfg, clock);
 }
 var DEFAULT_TIME_BLOCKS = constants.DEFAULT_TIME_BLOCKS;
-var DEFAULT_TOOL_MATRIX = constants.DEFAULT_TOOL_MATRIX;
 var DAY_NAMES = constants.DAY_NAMES;
 var SCHEDULER_VERSION = constants.SCHEDULER_VERSION;
 var RECUR_EXPAND_DAYS = constants.RECUR_EXPAND_DAYS;
@@ -345,20 +344,35 @@ function rollingIntervalDays(recur) {
   return 7;
 }
 
+// 999.1191: the period-boundary DATE MATH lives in ONE place —
+// shared/scheduler/missedHelpers.js computeRecurringDeadlineKey (the ruled SSOT,
+// cycle buckets). This function only classifies (rolling / flexible-TPC /
+// day-locked → cycleDays) and converts the SSOT's inclusive last-in-period day
+// to the exclusive "first day PAST the period" form used throughout runSchedule.
+// No recurStart is passed, so the bucket math is anchored at the occurrence
+// (k=0) — byte-identical to the previous inline `occ + cycleDays` computation.
+var missedHelpers = require('../../../shared/scheduler/missedHelpers');
 function recurringPeriodEndKey(recur, occurrenceDateKey) {
-  var occ = parseDate(occurrenceDateKey);
-  if (!occ) return null;
-  var cycleDays = 1; // day-locked default: deadline = end of the occurrence day
   var r = recur;
   if (typeof r === 'string') { try { r = JSON.parse(r); } catch (_e) { r = null; } }
-  if (r && r.type === 'rolling') {
+  var isRolling = !!(r && r.type === 'rolling');
+  var isFlexible = !isRolling && isFlexibleTpcRecur(recur);
+  var cycleDays = 1; // day-locked default: deadline = end of the occurrence day
+  if (isRolling) {
     // Rolling: window = the recurrence interval (R5). Not day-locked.
     cycleDays = rollingIntervalDays(r);
-  } else if (isFlexibleTpcRecur(recur)) { // flexible-TPC → roams within the cycle
+  } else if (isFlexible) { // flexible-TPC → roams within the cycle
     cycleDays = recurringCycleDays(recur) || 1;
   }
-  var end = new Date(occ.getTime());
-  end.setDate(end.getDate() + cycleDays);
+  var lastDayKey = missedHelpers.computeRecurringDeadlineKey({
+    occurrenceDate: occurrenceDateKey,
+    isDayLocked: !isRolling && !isFlexible,
+    isRolling: isRolling,
+    cycleDays: cycleDays
+  });
+  if (!lastDayKey) return null;
+  var end = parseDate(lastDayKey);
+  end.setDate(end.getDate() + 1); // exclusive boundary: first day PAST the period
   return formatDateKey(end);
 }
 
@@ -371,52 +385,12 @@ function recurringPeriodEndKey(recur, occurrenceDateKey) {
 var getNowInTimezone = require('../../../shared/scheduler/getNowInTimezone').getNowInTimezone;
 
 /**
- * Load user config values from DB and assemble into scheduler cfg object
+ * Load user config values from DB and assemble into scheduler cfg object.
+ * 999.1187: moved VERBATIM to ./loadSchedulerConfig.js — the single loader
+ * shared with schedulerSession.js and schedule.routes.js (which previously
+ * carried drifted camelCase-key copies).
  */
-async function loadConfig(userId) {
-  // user_config holds JSON-blob settings (time_blocks, preferences, etc).
-  // The `locations` user setting lives in its own table (matching the
-  // shape exposed by getAllConfig in config.controller.js); the scheduler
-  // needs lat/lon from there to load weather forecasts for weather-constrained
-  // tasks. Reading `config.locations` from user_config silently produced an
-  // empty array, which made `loadWeatherForHorizon` skip and weatherOk
-  // fail-open for every weather-constrained task.
-  var [rows, locRows] = await Promise.all([
-    db('user_config').where('user_id', userId).select(),
-    db('locations').where('user_id', userId).orderBy('sort_order')
-  ]);
-  var config = {};
-  rows.forEach(function(row) {
-    var val = typeof row.config_value === 'string'
-      ? JSON.parse(row.config_value) : row.config_value;
-    config[row.config_key] = val;
-  });
-
-  var locations = locRows.map(function(l) {
-    return {
-      id: l.location_id,
-      name: l.name,
-      icon: l.icon,
-      lat: l.lat != null ? parseFloat(l.lat) : undefined,
-      lon: l.lon != null ? parseFloat(l.lon) : undefined,
-      displayName: l.display_name || undefined
-    };
-  });
-
-  return {
-    timeBlocks: config.time_blocks || DEFAULT_TIME_BLOCKS,
-    toolMatrix: config.tool_matrix || DEFAULT_TOOL_MATRIX,
-    locSchedules: config.loc_schedules || {},
-    locScheduleDefaults: config.loc_schedule_defaults || {},
-    locScheduleOverrides: config.loc_schedule_overrides || {},
-    hourLocationOverrides: config.hour_location_overrides || {},
-    scheduleTemplates: config.schedule_templates || null,
-    preferences: config.preferences || {},
-    splitDefault: config.preferences ? config.preferences.splitDefault : undefined,
-    splitMinDefault: config.preferences ? config.preferences.splitMinDefault : undefined,
-    locations: locations
-  };
-}
+var loadConfig = require('./loadSchedulerConfig').loadSchedulerConfig;
 
 /**
  * Run the scheduler and persist date moves to the DB.
