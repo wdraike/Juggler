@@ -5,6 +5,7 @@ const { authenticateJWT } = require('../middleware/jwt-auth');
 const { getLastError } = require('../scheduler/scheduleQueue');
 const { roundCoord } = require('../controllers/weather.controller');
 const { createLogger } = require('@raike/lib-logger');
+const { getNowInTimezone, DEFAULT_TIMEZONE } = require('juggler-shared/scheduler/getNowInTimezone');
 const logger = createLogger('health.routes');
 
 // 999.683 / leg fixy-health-copy: the health popup is user-facing — it shows
@@ -41,21 +42,14 @@ router.get('/', async (req, res) => {
   try {
     await db.raw('SELECT 1');
     var now = new Date();
-    var parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: 'America/New_York',
-      year: 'numeric', month: 'numeric', day: 'numeric',
-      hour: 'numeric', minute: 'numeric', hourCycle: 'h23'
-    }).formatToParts(now);
-    var vals = {};
-    parts.forEach(function(p) { vals[p.type] = parseInt(p.value, 10); });
-    var hour = vals.hour % 24;
-    var _m = vals.month, _d = vals.day;
-    var todayKey = vals.year + '-' + (_m < 10 ? '0' : '') + _m + '-' + (_d < 10 ? '0' : '') + _d;
+    // 999.1185: shared R50.8 contract (was an inline formatToParts copy).
+    // The clock pins todayKey/nowMins to the same instant as serverUtc.
+    var nowInfo = getNowInTimezone(DEFAULT_TIMEZONE, { now: function() { return now; } });
     res.json({
       status: 'ok', db: 'connected', service: 'juggler-backend',
       serverUtc: now.toISOString(),
-      schedulerTodayKey: todayKey,
-      schedulerNowMins: hour * 60 + vals.minute
+      schedulerTodayKey: nowInfo.todayKey,
+      schedulerNowMins: nowInfo.nowMins
     });
   } catch (error) {
     res.status(503).json({ status: 'error', db: 'disconnected', error: error.message });

@@ -23,16 +23,19 @@ outside the slice are forbidden by the active ESLint boundary rule
 
 ```
 slices/ai-enrichment/
-├── domain/
-│   └── ports/
-│       ├── AIPort.js           # Driven-port: LLM provider contract (generate)
-│       └── AIUsagePort.js      # Driven-port: per-user daily quota gate (checkQuota/commitQuota)
 ├── adapters/
 │   ├── GeminiAIAdapter.js      # AIPort backed by @google/genai (Gemini/Vertex)
 │   ├── KnexAIUsageRepository.js # AIUsagePort backed by ai_usage_outbox table (lib/db)
-│   └── MockAIAdapter.js        # Test double for AIPort
+│   ├── MockAIAdapter.js        # Test double for AIPort
+│   ├── gemini-tracked-call.js  # Timeout + usage-telemetry wrapper around the SDK call (999.1204)
+│   ├── ai-usage-queue.service.js   # ai_usage_outbox enqueue (usage telemetry rows) (999.1204)
+│   └── ai-usage-flusher.service.js # Outbox flusher → payment-service ingest (999.1204)
 └── facade.js                   # Public API — lazy singleton wiring + boot-init hook
 ```
+
+The `domain/ports/` JSDoc contract files (`AIPort.js`, `AIUsagePort.js`) were
+deleted as dead code (999.1179 — never required at runtime); the port
+contracts live as the facade's documented method signatures below.
 
 No `application/` layer and no `value-objects/` layer. The scope of H5 was a
 light extraction: the SDK seam and the quota gate. No `Enrichment` or
@@ -162,8 +165,8 @@ aiFacade._reset();
 The ESLint boundary rule (`eslint.boundaries.config.js`, run via
 `npm run lint:boundaries`, ref `JUG-HEX-H5 (W4)`) enforces that external code
 imports only the facade, never slice internals. Direct imports of
-`slices/ai-enrichment/adapters/*` or `slices/ai-enrichment/domain/ports/*`
-from outside the slice are a lint error.
+`slices/ai-enrichment/adapters/*` from outside the slice are a lint error.
+(server.js gets the usage flusher via `facade.createUsageFlusher`.)
 
 The ai-enrichment slice has no `index.js`. The facade is the single import
 point; there is no `{ aiEnrichment: facade }` namespace wrapper.

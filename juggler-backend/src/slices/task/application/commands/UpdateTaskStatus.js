@@ -47,7 +47,7 @@
 'use strict';
 
 var assertDeps = require('../_assertDeps');
-var { getNowInTimezone } = require('../../../../../../shared/scheduler/getNowInTimezone');
+var { getNowInTimezone } = require('juggler-shared/scheduler/getNowInTimezone');
 
 var TERMINAL_REQUIRES_SCHEDULE = ['done', 'skip', 'cancel'];
 var VALID_STATUSES = ['', 'wip', 'done', 'cancel', 'skip', 'pause', 'disabled'];

@@ -11,6 +11,7 @@
     "./scheduler/dateHelpers": "./scheduler/dateHelpers.js",
     "./scheduler/dependencyHelpers": "./scheduler/dependencyHelpers.js",
     "./scheduler/expandRecurring": "./scheduler/expandRecurring.js",
+    "./scheduler/getNowInTimezone": "./scheduler/getNowInTimezone.js",
     "./scheduler/locationHelpers": "./scheduler/locationHelpers.js",
     "./scheduler/timeBlockHelpers": "./scheduler/timeBlockHelpers.js",
     "./scheduler/dateMatchesRecurrence": "./scheduler/dateMatchesRecurrence.js",

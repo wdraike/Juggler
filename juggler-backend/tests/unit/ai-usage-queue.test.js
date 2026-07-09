@@ -5,7 +5,7 @@ jest.mock('../../src/lib/logger', () => ({
   aiUsageQueueLogger: { warn: jest.fn(), error: jest.fn(), info: jest.fn(), debug: jest.fn() },
 }));
 
-const { enqueue } = require('../../src/services/ai-usage-queue.service');
+const { enqueue } = require('../../src/slices/ai-enrichment/adapters/ai-usage-queue.service');
 
 const mockInsert = jest.fn().mockResolvedValue([1]);
 const mockDb = jest.fn(() => ({ insert: mockInsert }));

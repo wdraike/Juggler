@@ -26,7 +26,7 @@
 'use strict';
 
 var { isTerminalStatus } = require('./task-status');
-var { nextMatchingDate } = require('../../../shared/scheduler/expandRecurring');
+var { nextMatchingDate } = require('juggler-shared/scheduler/expandRecurring');
 
 /**
  * Returns true if the given task_masters row is a recurring master whose recur.type

@@ -74,7 +74,7 @@ jest.mock('@google/genai', () => ({
 
 // 2. Mock ai-usage-queue.service — captures enqueue calls without hitting DB.
 const mockEnqueue = jest.fn().mockResolvedValue(undefined);
-jest.mock('../../../src/services/ai-usage-queue.service', () => ({
+jest.mock('../../../src/slices/ai-enrichment/adapters/ai-usage-queue.service', () => ({
   enqueue: mockEnqueue,
 }));
 
@@ -744,7 +744,7 @@ describe('B2 — GET /api/tasks/suggest-icon', () => {
 // ── B3: trackedGeminiCall usage tracking ─────────────────────────────────────
 // Unit-test trackedGeminiCall directly (not via HTTP) for precise control.
 describe('B3 — trackedGeminiCall (gemini-tracked-call.js) usage tracking', () => {
-  const { trackedGeminiCall } = require('../../../src/services/gemini-tracked-call');
+  const { trackedGeminiCall } = require('../../../src/slices/ai-enrichment/adapters/gemini-tracked-call');
   const AI_USE_CASES = require('../../../src/constants/ai-use-cases');
 
   function makeDirectClient(resolveTo) {
@@ -880,7 +880,7 @@ describe('B4 — Gemini client instantiation (getGenAIClient)', () => {
         jest.mock('@google/genai', () => ({
           GoogleGenAI: MockGoogleGenAI,
         }));
-        jest.mock('../../../src/services/ai-usage-queue.service', () => ({
+        jest.mock('../../../src/slices/ai-enrichment/adapters/ai-usage-queue.service', () => ({
           enqueue: mockEnqueue,
         }));
         jest.mock('../../../src/db', () => mockDb);
@@ -919,7 +919,7 @@ describe('B4 — Gemini client instantiation (getGenAIClient)', () => {
         jest.mock('@google/genai', () => ({
           GoogleGenAI: jest.fn().mockImplementation(() => ({ models: { generateContent: jest.fn() } })),
         }));
-        jest.mock('../../../src/services/ai-usage-queue.service', () => ({ enqueue: jest.fn() }));
+        jest.mock('../../../src/slices/ai-enrichment/adapters/ai-usage-queue.service', () => ({ enqueue: jest.fn() }));
         jest.mock('../../../src/db', () => mockDb);
         jest.mock('../../../src/lib/db', () => {
           const actual = jest.requireActual('../../../src/lib/db');
@@ -1050,7 +1050,7 @@ describe('B3 :db — ai_command_log + ai_usage_outbox integration (test-bed 3407
     if (!await testDb.isAvailable()) return;
 
     // Temporarily override the mock with the real service for this integration test.
-    const { enqueue } = jest.requireActual('../../../src/services/ai-usage-queue.service');
+    const { enqueue } = jest.requireActual('../../../src/slices/ai-enrichment/adapters/ai-usage-queue.service');
 
     await enqueue(testDb, {
       userId: TEST_USER_ID,
@@ -1086,7 +1086,7 @@ describe('B3 :db — ai_command_log + ai_usage_outbox integration (test-bed 3407
   it('enqueue silently swallows DB errors (never throws)', async () => {
     if (!await testDb.isAvailable()) return;
 
-    const { enqueue } = jest.requireActual('../../../src/services/ai-usage-queue.service');
+    const { enqueue } = jest.requireActual('../../../src/slices/ai-enrichment/adapters/ai-usage-queue.service');
     // Pass a null db — enqueue must catch the error and not re-throw.
     await expect(
       enqueue(null, {

@@ -123,12 +123,9 @@ import { isTerminalStatus } from '../../shared/task-status';
 
 ## Testing
 
-Run the test script:
-
-```bash
-cd shared
-node test-task-status.js
-```
+task-status behavior is covered by the backend jest suite
+(`juggler-backend/tests/unit/status-columns-validation.test.js`); the old
+standalone `test-task-status.js` script was removed as dead code (999.1178).
 
 ## TypeScript Support
 

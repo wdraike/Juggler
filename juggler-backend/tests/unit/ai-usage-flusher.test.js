@@ -1,4 +1,4 @@
-const { AiUsageFlusher } = require('../../src/services/ai-usage-flusher.service');
+const { AiUsageFlusher } = require('../../src/slices/ai-enrichment/adapters/ai-usage-flusher.service');
 
 global.fetch = jest.fn();
 

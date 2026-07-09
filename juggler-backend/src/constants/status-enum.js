@@ -7,7 +7,7 @@
  * is kept as the local name (canonical calls it `isCalHistoryTerminalStatus`)
  * for backward compatibility with existing callers/tests.
  */
-var shared = require('../../../shared/task-status');
+var shared = require('juggler-shared/task-status');
 
 module.exports = {
   CalHistoryStatus: shared.CalHistoryStatus,

@@ -24,7 +24,7 @@ process.env.NODE_ENV = 'test';
 // The variable name starts with 'mock' (case-insensitive) so Jest's babel
 // transform allows it to be referenced inside the jest.mock factory.
 const mockEnqueueFn = jest.fn().mockResolvedValue(undefined);
-jest.mock('../../../src/services/ai-usage-queue.service', () => ({
+jest.mock('../../../src/slices/ai-enrichment/adapters/ai-usage-queue.service', () => ({
   enqueue: mockEnqueueFn,
 }));
 
@@ -194,7 +194,7 @@ describe('B3 — timeout altitude: trackedGeminiCall enforces deadline', () => {
 
       const { trackedGeminiCall } = await new Promise((resolve) => {
         jest.isolateModules(() => {
-          const mod = require('../../../src/services/gemini-tracked-call');
+          const mod = require('../../../src/slices/ai-enrichment/adapters/gemini-tracked-call');
           resolve(mod);
         });
       });
@@ -228,7 +228,7 @@ describe('B3 — timeout altitude: trackedGeminiCall enforces deadline', () => {
 
       const { trackedGeminiCall } = await new Promise((resolve) => {
         jest.isolateModules(() => {
-          const mod = require('../../../src/services/gemini-tracked-call');
+          const mod = require('../../../src/slices/ai-enrichment/adapters/gemini-tracked-call');
           resolve(mod);
         });
       });
@@ -314,7 +314,7 @@ describe('B2 — config/telemetry separation invariant', () => {
 
       const { trackedGeminiCall } = await new Promise((resolve) => {
         jest.isolateModules(() => {
-          const mod = require('../../../src/services/gemini-tracked-call');
+          const mod = require('../../../src/slices/ai-enrichment/adapters/gemini-tracked-call');
           resolve(mod);
         });
       });
@@ -361,7 +361,7 @@ describe('B2 — config/telemetry separation invariant', () => {
 
       const { trackedGeminiCall } = await new Promise((resolve) => {
         jest.isolateModules(() => {
-          const mod = require('../../../src/services/gemini-tracked-call');
+          const mod = require('../../../src/slices/ai-enrichment/adapters/gemini-tracked-call');
           resolve(mod);
         });
       });

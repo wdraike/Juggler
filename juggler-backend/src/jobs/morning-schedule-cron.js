@@ -17,7 +17,7 @@
 
 const db = require('../db');
 const { createLogger } = require('../lib/logger');
-const { getNowInTimezone } = require('../../../shared/scheduler/getNowInTimezone');
+const { getNowInTimezone } = require('juggler-shared/scheduler/getNowInTimezone');
 const { acquireLock, releaseLock } = require('../cron/cal-history-cron');
 
 const logger = createLogger('cron.morning-schedule');

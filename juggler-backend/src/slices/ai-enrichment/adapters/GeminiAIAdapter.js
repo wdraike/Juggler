@@ -23,7 +23,7 @@
 
 'use strict';
 
-const { trackedGeminiCall } = require('../../../services/gemini-tracked-call');
+const { trackedGeminiCall } = require('./gemini-tracked-call');
 const { createLogger } = require('@raike/lib-logger');
 
 // Default AI call budget. Read process.env at construction time (not module load)

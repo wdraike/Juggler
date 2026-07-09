@@ -5,7 +5,7 @@
 
 var crypto = require('crypto');
 var { libCalAdapterLogger } = require('../lib/logger');
-var { safeTimezone } = require('../../../shared/scheduler/dateHelpers');
+var { safeTimezone, parseDbUtc } = require('juggler-shared/scheduler/dateHelpers');
 
 var DEFAULT_TIMEZONE = require('../scheduler/constants').DEFAULT_TIMEZONE;
 
@@ -91,7 +91,12 @@ function isoToJugglerDate(isoString, timezone) {
     return { date: isoString, time: null };
   }
 
-  var d = new Date(isoString);
+  // 999.1186: parse via the shared DB-timestamp normalizer. A MySQL
+  // dateStrings 'YYYY-MM-DD HH:MM:SS' input is pinned to UTC instead of
+  // misparsing as server-local (+4h class of bug); calendar-provider ISO
+  // strings (T-separated, offset, Z) keep native parsing unchanged.
+  var d = parseDbUtc(isoString);
+  if (!d) return { date: null, time: null };
   try {
     var dateParts = new Intl.DateTimeFormat('en-US', {
       timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric'

@@ -53,7 +53,7 @@ var getWhenWindows = timeBlockHelpers.getWhenWindows;
 var parseWhen = timeBlockHelpers.parseWhen;
 // var hasWhen = timeBlockHelpers.hasWhen; // unused
 
-// var expandRecurringMod = require('../../../shared/scheduler/expandRecurring');
+// var expandRecurringMod = require('juggler-shared/scheduler/expandRecurring');
 // var expandRecurring = expandRecurringMod.expandRecurring; // unused
 
 var locationHelpers = require('./locationHelpers');
@@ -67,7 +67,7 @@ var { PLACEMENT_MODES } = require('../lib/placementModes');
 // Canonical reason-code enum — eliminates magic strings at every _unplacedReason
 // assignment site. String VALUES are byte-identical to what tests pin; only the
 // call sites are updated. See shared/scheduler/reasonCodes.js for the full taxonomy.
-var { REASON_CODES } = require('../../../shared/scheduler/reasonCodes');
+var { REASON_CODES } = require('juggler-shared/scheduler/reasonCodes');
 
 // H6 W1: the pure ordering/occupancy primitives now live in the scheduler domain
 // core. unifiedScheduleV2 DELEGATES to them so the algorithm has a single source

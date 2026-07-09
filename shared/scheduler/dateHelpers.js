@@ -212,21 +212,39 @@ function localToUtc(dateStr, timeStr, timezone) {
 }
 
 /**
+ * parseDbUtc — the SINGLE normalizer for DB-origin timestamps (999.1186;
+ * payment-service parseDbUtc/999.807 precedent). mysql2 with dateStrings:true
+ * returns 'YYYY-MM-DD HH:MM:SS[.fff]' with NO timezone marker; a bare
+ * new Date() parses that as SERVER-LOCAL time (the documented misparse trap).
+ * DB timestamps are stored UTC, so that space-separated MySQL shape is pinned
+ * to UTC here. Date instances pass through unchanged; every other string
+ * (ISO with T/offset/Z, date-only) keeps native new Date() parsing so
+ * calendar-provider inputs are untouched.
+ * Returns a Date, or null for null/empty/invalid input.
+ */
+var DB_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?(\.\d+)?$/;
+function parseDbUtc(val) {
+  if (val == null || val === '') return null;
+  var d;
+  if (val instanceof Date) {
+    d = val;
+  } else if (typeof val === 'string' && DB_TIMESTAMP_RE.test(val)) {
+    d = new Date(val.replace(' ', 'T') + 'Z');
+  } else {
+    d = new Date(val);
+  }
+  return isNaN(d.getTime()) ? null : d;
+}
+
+/**
  * Convert a UTC Date to local date/time/day strings.
  * Returns { date: "M/D", time: "H:MM AM/PM", day: "Mon" } or null fields if utcDate is null.
+ * Input parsing delegates to parseDbUtc (999.1186) — MySQL dateStrings input
+ * is pinned to UTC; Date instances and explicit-zone ISO strings pass through.
  */
 function utcToLocal(utcDate, timezone) {
-  if (!utcDate) return { date: null, time: null, day: null };
-  var d;
-  if (utcDate instanceof Date) {
-    d = utcDate;
-  } else if (typeof utcDate === 'string') {
-    // MySQL returns "YYYY-MM-DD HH:MM:SS" — ensure UTC interpretation
-    d = new Date(utcDate.replace(' ', 'T') + 'Z');
-  } else {
-    d = new Date(utcDate);
-  }
-  if (isNaN(d.getTime())) return { date: null, time: null, day: null };
+  var d = parseDbUtc(utcDate);
+  if (!d) return { date: null, time: null, day: null };
   var tz = safeTimezone(timezone, 'America/New_York');
   var parts = {};
   new Intl.DateTimeFormat('en-US', {
@@ -289,6 +307,7 @@ module.exports = {
   formatHour,
   getDayName,
   localToUtc,
+  parseDbUtc,
   utcToLocal,
   isValidTimezone,
   safeTimezone,

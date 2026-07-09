@@ -91,7 +91,7 @@ jest.mock('@google/genai', () => ({
 
 // Mock the tracked Gemini call so unit tests never hit the real SDK.
 const mockTrackedGeminiCall = jest.fn();
-jest.mock('../../../src/services/gemini-tracked-call', () => ({
+jest.mock('../../../src/slices/ai-enrichment/adapters/gemini-tracked-call', () => ({
   trackedGeminiCall: mockTrackedGeminiCall,
 }));
 
@@ -228,7 +228,7 @@ jest.mock('../../../src/lib/rate-limit-store', () => ({
   }),
 }));
 
-jest.mock('../../../src/services/ai-usage-queue.service', () => ({
+jest.mock('../../../src/slices/ai-enrichment/adapters/ai-usage-queue.service', () => ({
   enqueue: jest.fn(),
 }));
 

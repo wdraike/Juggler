@@ -3,8 +3,8 @@
 var db = require('../src/db');
 var rowToTask = require('../src/controllers/task.controller').rowToTask;
 var buildSourceMap = require('../src/controllers/task.controller').buildSourceMap;
-var expandRecurring = require('../../shared/scheduler/expandRecurring').expandRecurring;
-var dateHelpers = require('../../shared/scheduler/dateHelpers');
+var expandRecurring = require('juggler-shared/scheduler/expandRecurring').expandRecurring;
+var dateHelpers = require('juggler-shared/scheduler/dateHelpers');
 var RECUR_EXPAND_DAYS = require('../src/scheduler/constants').RECUR_EXPAND_DAYS;
 
 (async function() {

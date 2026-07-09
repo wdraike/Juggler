@@ -1,7 +1,7 @@
 /**
  * task-write-queue.js — Durable queue for scheduling-relevant task writes.
  *
- * Implements WriteQueuePort (lib/ports/WriteQueuePort.js).
+ * Implements WriteQueuePort (contract doc removed as dead code, 999.1179).
  *
  * When the per-user lock is held (scheduler or cal-sync running), mutation
  * endpoints queue scheduling-relevant field changes here instead of writing

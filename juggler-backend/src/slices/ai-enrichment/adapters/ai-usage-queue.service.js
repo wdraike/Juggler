@@ -3,7 +3,7 @@
  */
 
 const { v7: uuidv7 } = require('uuid');
-const { aiUsageQueueLogger } = require('../lib/logger');
+const { aiUsageQueueLogger } = require('../../../lib/logger');
 
 async function enqueue(db, event) {
   try {

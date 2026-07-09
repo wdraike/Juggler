@@ -55,7 +55,7 @@ var TaskStatus = require('../value-objects/TaskStatus');
 // 5th arg; default computes from this shared contract using the row's timezone).
 // Path: mappers/ → domain/ → task/ → slices/ → src/ → juggler-backend/ → juggler/ → shared/
 // (6 parent dirs up from mappers/ to reach juggler/, then into shared/)
-var _getNowInTimezoneModule = require('../../../../../../shared/scheduler/getNowInTimezone');
+var _getNowInTimezoneModule = require('juggler-shared/scheduler/getNowInTimezone');
 var _getNowInTimezone = _getNowInTimezoneModule.getNowInTimezone;
 // R50.8 canonical default — approved fallback for null-tz rows (WBS-fixy-crud-rot RC2).
 // Any row with no stored timezone falls back to America/New_York, matching the shared

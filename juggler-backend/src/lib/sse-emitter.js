@@ -1,7 +1,7 @@
 /**
  * SSE Event Emitter — multi-instance safe via Redis pub/sub.
  *
- * Implements SSEPort (lib/ports/SSEPort.js).
+ * Implements SSEPort (contract doc removed as dead code, 999.1179).
  *
  * Each instance holds its own in-memory client map (for response writing).
  * Events are published to Redis channel `sse:{userId}` so all instances

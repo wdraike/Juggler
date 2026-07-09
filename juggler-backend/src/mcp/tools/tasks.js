@@ -66,8 +66,8 @@ const { rowToTask, buildSourceMap, validateTaskInput } = require('../../controll
 const { PLACEMENT_MODES } = require('../../lib/placementModes');
 const facade = require('../../slices/task/facade');
 const getUserTimezone = require('../getUserTimezone');
-const { isAnchorDependentRecur } = require('../../../../shared/scheduler/expandRecurring');
-const dateHelpers = require('../../../../shared/scheduler/dateHelpers');
+const { isAnchorDependentRecur } = require('juggler-shared/scheduler/expandRecurring');
+const dateHelpers = require('juggler-shared/scheduler/dateHelpers');
 
 // Shared Zod fields for task input (used by create_task, create_tasks, update_task)
 var taskInputFields = {
@@ -220,7 +220,7 @@ function registerTaskTools(server, userId) {
       var tasks = rows.map(function(r) { return rowToTask(r, tz, srcMap); });
       if (date) {
         // Normalize date to canonical ISO format (YYYY-MM-DD) to match t.date format
-        var dateHelpers = require('../../../../shared/scheduler/dateHelpers');
+        var dateHelpers = require('juggler-shared/scheduler/dateHelpers');
         var normalizedDate = dateHelpers.isoToDateKey(date);
         if (normalizedDate) {
           tasks = tasks.filter(function(t) { return t.date === normalizedDate; });

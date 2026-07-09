@@ -110,7 +110,8 @@ module.exports = {
   DEFAULT_WEEKDAY_BLOCKS,
   DEFAULT_WEEKEND_BLOCKS,
   DEFAULT_TIME_BLOCKS,
-  DEFAULT_TIMEZONE: 'America/New_York',
+  // 999.1185: single source — the literal lives in shared getNowInTimezone.js
+  DEFAULT_TIMEZONE: require('juggler-shared/scheduler/getNowInTimezone').DEFAULT_TIMEZONE,
   SCHEDULER_VERSION,
   RECUR_EXPAND_DAYS
 };

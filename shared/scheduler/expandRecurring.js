@@ -706,17 +706,9 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
     // non-terminal instance, do NOT project the next — it is generated only when the
     // active one completes (which advances rolling_anchor → this guard clears).
     if (existingActiveBySource[src.id]) return;
-    var rollingInterval;
-    if (r.intervalDays != null && Number(r.intervalDays) >= 1) {
-      rollingInterval = Math.max(1, Number(r.intervalDays));
-    } else if (r.every != null && r.unit) {
-      var everyN = Math.max(1, parseInt(r.every) || 1);
-      if (r.unit === 'weeks') rollingInterval = everyN * 7;
-      else if (r.unit === 'months') rollingInterval = everyN * 30;
-      else rollingInterval = everyN; // 'days'
-    } else {
-      rollingInterval = 7;
-    }
+    // 999.1185: SINGLE derivation — module-level rollingIntervalDays (also
+    // used by runSchedule.js's period-boundary classifier).
+    var rollingInterval = rollingIntervalDays(r);
     var rollingAnchor = getAnchor(src, startDate);
     for (var n = 1; n <= 1000; n++) {
       var offsetDays = Math.round(n * rollingInterval);
@@ -908,8 +900,30 @@ function isAnchorDependentRecur(recur) {
   return false;
 }
 
+// Rolling interval in days (999.1185): intervalDays, else every×unit
+// (weeks=7d, months=30d, else days), else 7. A rolling instance is NOT
+// day-locked (dayReq='any'); its window IS the interval, so its period
+// boundary = occurrence + interval. Accepts a parsed recur object or its
+// JSON-string form (runSchedule passes raw DB values). SINGLE derivation
+// shared by the rolling expansion pass above and runSchedule.js's
+// period-boundary classifier (was a mirrored local copy there).
+function rollingIntervalDays(recur) {
+  var r = recur;
+  if (typeof r === 'string') { try { r = JSON.parse(r); } catch (_e) { return 7; } }
+  if (!r) return 7;
+  if (r.intervalDays != null && Number(r.intervalDays) >= 1) return Math.max(1, Number(r.intervalDays));
+  if (r.every != null && r.unit) {
+    var everyN = Math.max(1, parseInt(r.every, 10) || 1);
+    if (r.unit === 'weeks') return everyN * 7;
+    if (r.unit === 'months') return everyN * 30;
+    return everyN; // 'days'
+  }
+  return 7;
+}
+
 module.exports = {
   expandRecurring: expandRecurring,
+  rollingIntervalDays: rollingIntervalDays,
   isAnchorDependentRecur: isAnchorDependentRecur,
   matchesRecurrenceDay: matchesRecurrenceDay,
   nextMatchingDate: nextMatchingDate,

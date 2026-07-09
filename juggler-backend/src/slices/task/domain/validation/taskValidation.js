@@ -34,8 +34,8 @@
 'use strict';
 
 var PlacementMode = require('../value-objects/PlacementMode');
-var { isAnchorDependentRecur } = require('../../../../../../shared/scheduler/expandRecurring');
-var { getNowInTimezone, DEFAULT_TIMEZONE } = require('../../../../../../shared/scheduler/getNowInTimezone');
+var { isAnchorDependentRecur } = require('juggler-shared/scheduler/expandRecurring');
+var { getNowInTimezone, DEFAULT_TIMEZONE } = require('juggler-shared/scheduler/getNowInTimezone');
 var { isoToDateKey } = require('../../../../scheduler/dateHelpers');
 
 // Verbatim from task.controller.js ~745.

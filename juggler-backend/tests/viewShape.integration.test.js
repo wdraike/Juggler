@@ -11,7 +11,6 @@
 var db = require('../src/db');
 var { v7: uuidv7 } = require('uuid');
 var { insertTask, deleteTaskById } = require('../src/lib/tasks-write');
-var { reconcileSplitsForMaster } = require('../src/lib/reconcile-splits');
 var { assertDbAvailable } = require('./helpers/requireDB');
 
 var available = false;
@@ -158,7 +157,32 @@ describe('tasks_v shape — by row class', () => {
       dur: 90, split: 1, split_min: 30, pri: 'P3', status: '',
       created_at: db.fn.now(), updated_at: db.fn.now()
     });
-    await db.transaction(function(trx) { return reconcileSplitsForMaster(trx, id); });
+    // Materialize the 3 persistent chunk rows directly (the reconcile-splits
+    // reconciler was deleted as dead code — 999.1179; the live split path is
+    // slices/task SplitTask). Chunk 1 reuses the existing instance row; chunks
+    // 2..3 mirror the row shape the old reconciler inserted.
+    var baseInst = await db('task_instances').where('master_id', id).first();
+    await db('task_instances').where('id', baseInst.id).update({
+      split_ordinal: 1, split_total: 3, split_group: id, dur: 30,
+      updated_at: db.fn.now()
+    });
+    for (var ord = 2; ord <= 3; ord++) {
+      await db('task_instances').insert({
+        id: id + '-occ' + baseInst.occurrence_ordinal + '-' + ord,
+        master_id: id,
+        user_id: USER_ID,
+        occurrence_ordinal: baseInst.occurrence_ordinal,
+        split_ordinal: ord,
+        split_total: 3,
+        split_group: id,
+        dur: 30,
+        scheduled_at: null,
+        status: '',
+        generated: 0,
+        created_at: db.fn.now(),
+        updated_at: db.fn.now()
+      });
+    }
     var rows = await db('tasks_v')
       .where('user_id', USER_ID)
       .whereNotNull('split_ordinal')

@@ -148,7 +148,7 @@ jest.mock('../../src/lib/rate-limit-store', () => ({
 }));
 
 // Mock the Gemini tracked-call — keeps tests hermetic and fast
-jest.mock('../../src/services/gemini-tracked-call', () => ({
+jest.mock('../../src/slices/ai-enrichment/adapters/gemini-tracked-call', () => ({
   trackedGeminiCall: jest.fn()
 }));
 
@@ -208,7 +208,7 @@ jest.mock('../../src/lib/logger', () => {
 });
 
 // Mock the AI usage queue so it doesn't try to flush to DB
-jest.mock('../../src/services/ai-usage-queue.service', () => ({
+jest.mock('../../src/slices/ai-enrichment/adapters/ai-usage-queue.service', () => ({
   enqueue: jest.fn()
 }));
 
@@ -226,7 +226,7 @@ beforeEach(() => {
 
   // Daily quota check: db('ai_command_log').where(...).count().first()
   // Returns count=0 so quota is always available, then insert succeeds
-  const { trackedGeminiCall } = require('../../src/services/gemini-tracked-call');
+  const { trackedGeminiCall } = require('../../src/slices/ai-enrichment/adapters/gemini-tracked-call');
   trackedGeminiCall.mockReset();
 
   const writeQueue = require('../../src/lib/task-write-queue');
@@ -292,7 +292,7 @@ describe('AP-72b: POST /api/ai/command — missing command field', () => {
 // ---------------------------------------------------------------------------
 describe('AP-72c: POST /api/ai/command — success with mocked AI', () => {
   test('returns 200 with ops and msg when AI responds with valid JSON', async () => {
-    const { trackedGeminiCall } = require('../../src/services/gemini-tracked-call');
+    const { trackedGeminiCall } = require('../../src/slices/ai-enrichment/adapters/gemini-tracked-call');
 
     // Seed the daily quota check (count query)
     resolveQueue.push({ cnt: 0 });
@@ -316,7 +316,7 @@ describe('AP-72c: POST /api/ai/command — success with mocked AI', () => {
   });
 
   test('returns 200 with ops array even when AI returns empty ops', async () => {
-    const { trackedGeminiCall } = require('../../src/services/gemini-tracked-call');
+    const { trackedGeminiCall } = require('../../src/slices/ai-enrichment/adapters/gemini-tracked-call');
 
     resolveQueue.push({ cnt: 0 });
 
@@ -340,7 +340,7 @@ describe('AP-72c: POST /api/ai/command — success with mocked AI', () => {
 // ---------------------------------------------------------------------------
 describe('AP-72d: POST /api/ai/command — unsupported command type', () => {
   test('returns 200 with unsupported:true when AI flags out-of-scope request', async () => {
-    const { trackedGeminiCall } = require('../../src/services/gemini-tracked-call');
+    const { trackedGeminiCall } = require('../../src/slices/ai-enrichment/adapters/gemini-tracked-call');
 
     resolveQueue.push({ cnt: 0 });
 
@@ -384,7 +384,7 @@ describe('AP-72d: POST /api/ai/command — unsupported command type', () => {
   });
 
   test('returns 200 with msg fallback when AI unsupported response omits msg field', async () => {
-    const { trackedGeminiCall } = require('../../src/services/gemini-tracked-call');
+    const { trackedGeminiCall } = require('../../src/slices/ai-enrichment/adapters/gemini-tracked-call');
 
     resolveQueue.push({ cnt: 0 });
 
@@ -410,7 +410,7 @@ describe('AP-72d: POST /api/ai/command — unsupported command type', () => {
 describe('AP-72e: POST /api/ai/command — supported op shapes', () => {
   // Helper: seed quota and mock Gemini, fire the request, return the response
   async function sendCommand(ops, msg = 'Done.') {
-    const { trackedGeminiCall } = require('../../src/services/gemini-tracked-call');
+    const { trackedGeminiCall } = require('../../src/slices/ai-enrichment/adapters/gemini-tracked-call');
     resolveQueue.push({ cnt: 0 });
     trackedGeminiCall.mockResolvedValueOnce({
       text: JSON.stringify({ ops, msg })
@@ -540,7 +540,7 @@ describe('AP-72g: POST /api/ai/command — B5 controller quota-commit ordering (
       resolveQueue.push({ cnt: 0 });
 
       // Make Gemini throw ETIMEDOUT (the timeout-abort error code from trackedGeminiCall).
-      const { trackedGeminiCall } = require('../../src/services/gemini-tracked-call');
+      const { trackedGeminiCall } = require('../../src/slices/ai-enrichment/adapters/gemini-tracked-call');
       const etimedOutError = Object.assign(new Error('Gemini call timed out'), { code: 'ETIMEDOUT' });
       trackedGeminiCall.mockRejectedValueOnce(etimedOutError);
 
@@ -572,7 +572,7 @@ describe('AP-72g: POST /api/ai/command — B5 controller quota-commit ordering (
       resolveQueue.push({ cnt: 0 });
 
       // Gemini call succeeds with a valid AI result.
-      const { trackedGeminiCall } = require('../../src/services/gemini-tracked-call');
+      const { trackedGeminiCall } = require('../../src/slices/ai-enrichment/adapters/gemini-tracked-call');
       trackedGeminiCall.mockResolvedValueOnce({
         text: JSON.stringify({ ops: [], msg: 'Done from AI.' })
       });
@@ -607,7 +607,7 @@ describe('AP-72g: POST /api/ai/command — B5 controller quota-commit ordering (
 // ---------------------------------------------------------------------------
 describe('AP-72f: POST /api/ai/command — error paths', () => {
   test('returns 422 when AI returns completely unparseable text', async () => {
-    const { trackedGeminiCall } = require('../../src/services/gemini-tracked-call');
+    const { trackedGeminiCall } = require('../../src/slices/ai-enrichment/adapters/gemini-tracked-call');
     resolveQueue.push({ cnt: 0 });
 
     trackedGeminiCall.mockResolvedValueOnce({ text: 'Sorry, I cannot help with that.' });
@@ -622,7 +622,7 @@ describe('AP-72f: POST /api/ai/command — error paths', () => {
   });
 
   test('recovers valid JSON from markdown-fenced AI response', async () => {
-    const { trackedGeminiCall } = require('../../src/services/gemini-tracked-call');
+    const { trackedGeminiCall } = require('../../src/slices/ai-enrichment/adapters/gemini-tracked-call');
     resolveQueue.push({ cnt: 0 });
 
     // Gemini wraps response in ```json ... ``` fences — controller must strip and parse
@@ -639,7 +639,7 @@ describe('AP-72f: POST /api/ai/command — error paths', () => {
   });
 
   test('returns 500 when Gemini call throws', async () => {
-    const { trackedGeminiCall } = require('../../src/services/gemini-tracked-call');
+    const { trackedGeminiCall } = require('../../src/slices/ai-enrichment/adapters/gemini-tracked-call');
     resolveQueue.push({ cnt: 0 });
 
     trackedGeminiCall.mockRejectedValueOnce(new Error('Gemini API quota exceeded'));

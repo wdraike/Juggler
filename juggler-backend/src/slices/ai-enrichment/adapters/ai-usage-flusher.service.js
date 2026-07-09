@@ -4,7 +4,7 @@ const MAX_ATTEMPTS   = 10;
 const HEALTH_TIMEOUT = 5_000;
 const POST_TIMEOUT   = 30_000;
 
-const { aiUsageFlusherLogger } = require('../lib/logger');
+const { aiUsageFlusherLogger } = require('../../../lib/logger');
 
 class AiUsageFlusher {
   constructor({ db, billingUrl, serviceKey, sourceApp }) {

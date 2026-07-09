@@ -2,7 +2,7 @@
  * Write-path for the master/instance task model. All application code
  * mutating tasks goes through this module.
  *
- * Implements TaskWritePort (lib/ports/TaskWritePort.js).
+ * Implements TaskWritePort (contract doc removed as dead code, 999.1179).
  *
  * Row-shape contract:
  *   The `row` / `changes` object uses the same column names the former
@@ -445,12 +445,17 @@ async function resetRecurringInstances(dbOrTrx, userId, masterId, logTag) {
     })
     .pluck('id');
   if (futureIds.length === 0) return 0;
+  // 999.1218: NO catch here — a cal_sync_ledger cleanup failure must abort
+  // the hard-delete below. Cal-lock is ledger-only (an active ledger row is
+  // the task's edit-lock), so swallowing this error and deleting anyway left
+  // ACTIVE ledger rows pointing at deleted task_ids: orphaned edit-locks and
+  // remote calendar events that were never cleaned. Callers invoke this
+  // inside their write transaction, so the rejection rolls the edit back.
   await dbOrTrx('cal_sync_ledger')
     .where('user_id', userId)
     .whereIn('task_id', futureIds)
     .where('status', 'active')
-    .update({ status: 'deleted_local', task_id: null, synced_at: dbOrTrx.fn.now() })
-    .catch(function(err) { logger.error('[silent-catch]', err.message); });
+    .update({ status: 'deleted_local', task_id: null, synced_at: dbOrTrx.fn.now() });
   await deleteInstancesWhere(dbOrTrx, userId, function(q) {
     return q.whereIn('id', futureIds);
   });

@@ -5,4 +5,4 @@
  * This file is a back-compat re-export shim so existing importers
  * (require('../lib/task-status')) continue to work without changes.
  */
-module.exports = require('../../../shared/task-status');
+module.exports = require('juggler-shared/task-status');

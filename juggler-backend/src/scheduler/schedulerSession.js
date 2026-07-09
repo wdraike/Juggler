@@ -20,7 +20,8 @@
 var crypto = require('crypto');
 var db = require('../db');
 var { createLogger } = require('@raike/lib-logger');
-var { safeTimezone } = require('../../../shared/scheduler/dateHelpers');
+var { safeTimezone } = require('juggler-shared/scheduler/dateHelpers');
+var { getNowInTimezone, DEFAULT_TIMEZONE } = require('juggler-shared/scheduler/getNowInTimezone');
 var logger = createLogger('schedulerSession');
 
 var SESSION_TTL_MS = 60 * 60 * 1000; // 1h
@@ -53,17 +54,11 @@ async function startSession(userId, options) {
   var unifiedSchedule = require('../slices/scheduler/facade').unifiedScheduleV2;
   var rowToTask = require('../controllers/task.controller').rowToTask;
 
-  var TIMEZONE = safeTimezone(opts.timezone, 'America/New_York');
-  var nowDt = new Date();
-  var parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: TIMEZONE, year: 'numeric', month: 'numeric', day: 'numeric',
-    hour: 'numeric', minute: 'numeric', hourCycle: 'h23'
-  }).formatToParts(nowDt);
-  var vals = {};
-  parts.forEach(function(p) { vals[p.type] = parseInt(p.value, 10); });
-  var _m = vals.month, _d = vals.day;
-  var todayKey = vals.year + '-' + (_m < 10 ? '0' : '') + _m + '-' + (_d < 10 ? '0' : '') + _d;
-  var nowMins = (vals.hour % 24) * 60 + vals.minute;
+  var TIMEZONE = safeTimezone(opts.timezone, DEFAULT_TIMEZONE);
+  // 999.1185: shared R50.8 contract (was an inline formatToParts copy).
+  var nowInfo = getNowInTimezone(TIMEZONE);
+  var todayKey = nowInfo.todayKey;
+  var nowMins = nowInfo.nowMins;
 
   // Match runSchedule.js's schedulable-row filter: open/wip instances,
   // NULL-status rows, and ALL recurring templates (templates have

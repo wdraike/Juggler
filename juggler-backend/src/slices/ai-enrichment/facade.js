@@ -72,6 +72,15 @@ module.exports = {
   commitQuota(userId) {
     return usage().commitQuota(userId);
   },
+  /**
+   * createUsageFlusher(deps) — build the singleton AI-usage outbox flusher
+   * (ai_usage_outbox → payment-service ingest). Moved into the slice from
+   * src/services/ai-usage-flusher.service.js (999.1204); behavior unchanged.
+   * server.js calls this at boot and starts/stops the returned flusher.
+   */
+  createUsageFlusher(deps) {
+    return require('./adapters/ai-usage-flusher.service').createFlusher(deps);
+  },
   AI_DAILY_LIMIT: KnexAIUsageRepository.AI_DAILY_LIMIT,
   // exposed for tests / explicit DI
   GeminiAIAdapter,

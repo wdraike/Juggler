@@ -147,8 +147,8 @@ async function start() {
 
   // Start AI usage flusher
   try {
-    const { createFlusher } = require('./services/ai-usage-flusher.service');
-    const flusher = createFlusher({
+    const { createUsageFlusher } = require('./slices/ai-enrichment/facade');
+    const flusher = createUsageFlusher({
       db,
       billingUrl: process.env.BILLING_SERVICE_URL || 'http://localhost:5020',
       serviceKey: process.env.INTERNAL_SERVICE_KEY || '',

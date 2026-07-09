@@ -140,9 +140,9 @@ var _computeOverdueForRow = require('../slices/task/facade').computeOverdueForRo
 // deadlock-retry + sync-lock stay here in runScheduleAndPersist / its caller.
 var RunScheduleCommand = require('../slices/scheduler/application/RunScheduleCommand');
 var _runScheduleCommand = new RunScheduleCommand();
-var expandRecurringShared = require('../../../shared/scheduler/expandRecurring');
+var expandRecurringShared = require('juggler-shared/scheduler/expandRecurring');
 var expandRecurring = expandRecurringShared.expandRecurring;
-var { REASON_CODES } = require('../../../shared/scheduler/reasonCodes');
+var { REASON_CODES } = require('juggler-shared/scheduler/reasonCodes');
 
 // 999.013: compute dayMinutes from cfg.timeBlocks — maps dateKey strings to total
 // available minutes on that day (sum of all time block durations). Returns null
@@ -327,22 +327,12 @@ function isFlexibleTpcRecur(recur) {
   return r.timesPerCycle < selectedDays;
 }
 
-// Rolling interval in days — mirrors expandRecurring's rolling section
-// (intervalDays, else every×unit, else 7). A rolling instance is NOT day-locked
-// (dayReq='any'); its window IS the interval, so its period boundary = occ + interval.
-function rollingIntervalDays(recur) {
-  var r = recur;
-  if (typeof r === 'string') { try { r = JSON.parse(r); } catch (_e) { return 7; } }
-  if (!r) return 7;
-  if (r.intervalDays != null && Number(r.intervalDays) >= 1) return Math.max(1, Number(r.intervalDays));
-  if (r.every != null && r.unit) {
-    var everyN = Math.max(1, parseInt(r.every, 10) || 1);
-    if (r.unit === 'weeks') return everyN * 7;
-    if (r.unit === 'months') return everyN * 30;
-    return everyN; // 'days'
-  }
-  return 7;
-}
+// Rolling interval in days — 999.1185: delegated to the shared SSOT in
+// shared/scheduler/expandRecurring.js (was a mirrored local copy; the
+// 'mirrors' drift risk is gone). A rolling instance is NOT day-locked
+// (dayReq='any'); its window IS the interval, so its period boundary =
+// occ + interval.
+var rollingIntervalDays = expandRecurringShared.rollingIntervalDays;
 
 // 999.1191: the period-boundary DATE MATH lives in ONE place —
 // shared/scheduler/missedHelpers.js computeRecurringDeadlineKey (the ruled SSOT,
@@ -351,7 +341,7 @@ function rollingIntervalDays(recur) {
 // to the exclusive "first day PAST the period" form used throughout runSchedule.
 // No recurStart is passed, so the bucket math is anchored at the occurrence
 // (k=0) — byte-identical to the previous inline `occ + cycleDays` computation.
-var missedHelpers = require('../../../shared/scheduler/missedHelpers');
+var missedHelpers = require('juggler-shared/scheduler/missedHelpers');
 function recurringPeriodEndKey(recur, occurrenceDateKey) {
   var r = recur;
   if (typeof r === 'string') { try { r = JSON.parse(r); } catch (_e) { r = null; } }
@@ -382,7 +372,7 @@ function recurringPeriodEndKey(recur, occurrenceDateKey) {
  * removed; all callers continue to receive {todayKey, nowMins} unchanged.
  * (todayDate is also available but unused by the scheduler path.)
  */
-var getNowInTimezone = require('../../../shared/scheduler/getNowInTimezone').getNowInTimezone;
+var getNowInTimezone = require('juggler-shared/scheduler/getNowInTimezone').getNowInTimezone;
 
 /**
  * Load user config values from DB and assemble into scheduler cfg object.
@@ -590,7 +580,9 @@ async function runScheduleAndPersist(userId, _retries, options) {
 
   // Note: Non-recurring split tasks are now handled by inline expansion in
   // unifiedScheduleV2 (placeSplitInline) — split on demand as needed. The
-  // reconcileSplitsForUser() call has been removed per ROADMAP 999.097.
+  // reconcileSplitsForUser() call has been removed per ROADMAP 999.097 (and
+  // the dead reconcilers themselves deleted from lib/reconcile-splits per
+  // 999.1179 — only computeChunks remains).
   // Recurring split tasks continue to be handled by the Phase 1 upfront
   // INSERT path in step 5b below (pre-insert before scheduling).
 

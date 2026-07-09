@@ -12,7 +12,8 @@ var { withSyncLock } = require('../lib/sync-lock');
 var schedulerSession = require('../scheduler/schedulerSession');
 var { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
 const { createLogger } = require('@raike/lib-logger');
-const { safeTimezone } = require('../../../shared/scheduler/dateHelpers');
+const { safeTimezone } = require('juggler-shared/scheduler/dateHelpers');
+const { getNowInTimezone, DEFAULT_TIMEZONE } = require('juggler-shared/scheduler/getNowInTimezone');
 const logger = createLogger('schedule.routes');
 
 // Rate limit scheduler endpoints — expensive operations
@@ -36,7 +37,7 @@ var debugLimiter = rateLimit({
  */
 router.post('/run', authenticateJWT, schedulerLimiter, withSyncLock(async function(req, res) {
   try {
-    var opts = { timezone: safeTimezone(req.headers['x-timezone'], 'America/New_York') };
+    var opts = { timezone: safeTimezone(req.headers['x-timezone'], DEFAULT_TIMEZONE) };
     var result = await runScheduleAndPersist(req.user.id, undefined, opts);
     // result now includes dayPlacements and unplaced from the same run (cached)
     res.json(result);
@@ -71,22 +72,13 @@ router.post('/debug', authenticateJWT, authenticateAdmin, debugLimiter, async fu
   try {
     var unifiedSchedule = require('../slices/scheduler/facade').unifiedScheduleV2;
     var db = require('../db');
-    var TIMEZONE = safeTimezone(req.headers['x-timezone'], 'America/New_York');
+    var TIMEZONE = safeTimezone(req.headers['x-timezone'], DEFAULT_TIMEZONE);
     var userId = req.user.id;
 
-    // Resolve date context in user's timezone
-    var now = new Date();
-    var parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: TIMEZONE, year: 'numeric', month: 'numeric', day: 'numeric',
-      hour: 'numeric', minute: 'numeric', hourCycle: 'h23'
-    }).formatToParts(now);
-    var vals = {};
-    parts.forEach(function(p) { vals[p.type] = parseInt(p.value, 10); });
-    var _m = vals.month, _d = vals.day;
-    var dateCtx = {
-      todayKey: vals.year + '-' + (_m < 10 ? '0' : '') + _m + '-' + (_d < 10 ? '0' : '') + _d,
-      nowMins: (vals.hour % 24) * 60 + vals.minute
-    };
+    // Resolve date context in user's timezone — 999.1185: shared R50.8
+    // contract (was an inline formatToParts copy).
+    var nowInfo = getNowInTimezone(TIMEZONE);
+    var dateCtx = { todayKey: nowInfo.todayKey, nowMins: nowInfo.nowMins };
 
     // Load tasks
     var tasks = await db('tasks_v').where({ user_id: userId }).whereNot('status', 'disabled');
@@ -151,7 +143,7 @@ var stepperLimiter = rateLimit({
 
 router.post('/step/start', authenticateJWT, authenticateAdmin, stepperLimiter, async function(req, res) {
   try {
-    var tz = safeTimezone(req.headers['x-timezone'], 'America/New_York');
+    var tz = safeTimezone(req.headers['x-timezone'], DEFAULT_TIMEZONE);
     var info = await schedulerSession.startSession(req.user.id, { timezone: tz });
     res.json(info);
   } catch (err) {

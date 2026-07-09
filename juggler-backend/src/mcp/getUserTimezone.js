@@ -7,11 +7,12 @@
  * across tasks.js, data.js, and schedule.js (jug-mcp-facade WI-1 dedup).
  */
 const db = require('../db');
-const { safeTimezone } = require('../../../shared/scheduler/dateHelpers');
+const { safeTimezone } = require('juggler-shared/scheduler/dateHelpers');
+const { DEFAULT_TIMEZONE } = require('juggler-shared/scheduler/getNowInTimezone');
 
 async function getUserTimezone(userId) {
   var user = await db('users').where('id', userId).select('timezone').first();
-  return safeTimezone(user ? user.timezone : null, 'America/New_York');
+  return safeTimezone(user ? user.timezone : null, DEFAULT_TIMEZONE);
 }
 
 module.exports = getUserTimezone;

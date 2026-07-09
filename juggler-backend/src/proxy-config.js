@@ -5,4 +5,4 @@
  * to be a full hand-copied fork that drifted from the frontend's copy
  * (999.1201) — it is now a thin re-export shim.
  */
-module.exports = require('../../shared/proxy-config');
+module.exports = require('juggler-shared/proxy-config');

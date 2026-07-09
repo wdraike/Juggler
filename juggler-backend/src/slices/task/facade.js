@@ -93,12 +93,12 @@ var { isTerminalStatus } = require('../../lib/task-status');
 var { isRollingMaster, computeRollingAnchor } = require('../../lib/rolling-anchor');
 var { isPatternRecurMaster, computeNextOccurrenceAnchor } = require('../../lib/next-occurrence-anchor');
 var { applyCalLockedLedgerFilter } = require('./domain/calLockedPredicate');
-var { getNowInTimezone } = require('../../../../shared/scheduler/getNowInTimezone');
+var { getNowInTimezone } = require('juggler-shared/scheduler/getNowInTimezone');
 // FR-4/FR-5 (juggler-recur-lifecycle-redesign, W5): the material-edit
 // reconciliation engine reuses the scheduler's own TPC cycle-boundary +
 // fulfillment-counting primitives (999.1372) rather than reimplementing
 // cycle-counting (telly TELLY-W5-REVIEW.md prior-art note #2).
-var expandRecurringShared = require('../../../../shared/scheduler/expandRecurring');
+var expandRecurringShared = require('juggler-shared/scheduler/expandRecurring');
 var { createLogger } = require('@raike/lib-logger');
 var logger = createLogger('task.facade');
 
@@ -418,7 +418,7 @@ async function recurCleanup(ctx) {
             await twrite.resetRecurringInstances(trx, userId, id, '[RECUR] cycle reset (recur/split/dur/placement change)');
           }
         } else {
-          var _dateMatch = require('../../../../shared/scheduler/dateMatchesRecurrence');
+          var _dateMatch = require('juggler-shared/scheduler/dateMatchesRecurrence');
           var srcDateStr = updatedTmpl.recur_start
             ? (updatedTmpl.recur_start instanceof Date
                 ? dateHelpers.formatDateKey(updatedTmpl.recur_start)

@@ -148,11 +148,11 @@ jest.mock('../../src/lib/rate-limit-store', () => ({
   }),
 }));
 
-jest.mock('../../src/services/gemini-tracked-call', () => ({
+jest.mock('../../src/slices/ai-enrichment/adapters/gemini-tracked-call', () => ({
   trackedGeminiCall: jest.fn(),
 }));
 
-jest.mock('../../src/services/ai-usage-queue.service', () => ({
+jest.mock('../../src/slices/ai-enrichment/adapters/ai-usage-queue.service', () => ({
   enqueue: jest.fn(),
 }));
 

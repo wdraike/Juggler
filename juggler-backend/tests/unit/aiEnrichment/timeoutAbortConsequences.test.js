@@ -76,7 +76,7 @@ const { assertDbAvailable } = require('../../helpers/requireDB');
 // Must be declared at module scope so Jest's babel hoisting can reference it
 // inside the jest.mock factory.
 const mockEnqueueFn = jest.fn().mockResolvedValue(undefined);
-jest.mock('../../../src/services/ai-usage-queue.service', () => ({
+jest.mock('../../../src/slices/ai-enrichment/adapters/ai-usage-queue.service', () => ({
   enqueue: mockEnqueueFn,
 }));
 
@@ -124,7 +124,7 @@ describe('B4 — timeout-abort must NOT enqueue a phantom telemetry row', () => 
       // Load a fresh trackedGeminiCall that reads the new env var.
       const { trackedGeminiCall } = await new Promise((resolve) => {
         jest.isolateModules(() => {
-          const mod = require('../../../src/services/gemini-tracked-call');
+          const mod = require('../../../src/slices/ai-enrichment/adapters/gemini-tracked-call');
           resolve(mod);
         });
       });
