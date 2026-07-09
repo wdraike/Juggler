@@ -1069,13 +1069,15 @@ describe('rolling recurrence integration', () => {
     expect(d2).not.toContain('2026-05-25'); // old anchor-based date gone
   });
 
-  test('rolling: missed is no longer a terminal status (df8adfa5)', () => {
-    // 'missed' was removed as a task status (df8adfa5, 2026-06-28). The
-    // rolling-anchor missed branch (+1 day nudge) was removed as dead code.
-    // computeRollingAnchor now returns null for non-terminal statuses.
+  test('rolling: missed is terminal — reanchors to the instance date (999.1411)', () => {
+    // Ruling 2026-07-06 (resolves 999.844): cancelled AND missed are BOTH
+    // terminal statuses. shared/task-status.js TERMINAL_STATUSES includes
+    // 'missed', and the DB CHECK constraints re-list it as terminal
+    // (migration 20260703000000). computeRollingAnchor treats missed like
+    // skip: reanchor to the scheduled instance date (not a completion).
     const { computeRollingAnchor } = require('../src/lib/rolling-anchor');
     const result = computeRollingAnchor('missed', '2026-05-25', '2026-05-18');
-    expect(result).toBe(null);
+    expect(result).toBe('2026-05-25');
   });
 
   test('rolling: skip reanchors to skip date', () => {

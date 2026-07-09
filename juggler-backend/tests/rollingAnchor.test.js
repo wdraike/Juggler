@@ -23,8 +23,11 @@ describe('computeRollingAnchor', () => {
     expect(computeRollingAnchor('skip', '2026-05-20', currentAnchor)).toBe('2026-05-20');
   });
 
-  test('missed: returns instance date + 1 day', () => {
-    expect(computeRollingAnchor('missed', '2026-05-20', currentAnchor)).toBe('2026-05-21');
+  test('missed: returns instance date (terminal, reanchors like skip — 999.1411)', () => {
+    // Ruling 2026-07-06 (resolves 999.844): missed is a terminal status. The
+    // old "+1 day nudge" branch was removed (df8adfa5); missed now reanchors
+    // to the scheduled instance date, same as skip.
+    expect(computeRollingAnchor('missed', '2026-05-20', currentAnchor)).toBe('2026-05-20');
   });
 
   test('cancel: returns null (no anchor change)', () => {

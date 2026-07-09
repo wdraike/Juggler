@@ -28,6 +28,12 @@ process.env.NODE_ENV = 'test';
 // Reassert unconditionally so this file's isolation always wins.
 process.env.DB_NAME = 'juggler_lifecycle844_test';
 
+// 999.1409 (JUGGLER-TESTDB-PROVISIONING-GAP, pattern 999.1052): self-provision
+// the isolated DB (create + migrate) in beforeAll so a freshly-reset test-bed
+// doesn't red out with TEST-FR-001 just because juggler_lifecycle844_test has
+// never been created (globalSetup only provisions juggler_test).
+var { ensureIsolatedDb } = require('../helpers/ensureIsolatedDb');
+
 var db = require('../../src/db');
 var tasksWrite = require('../../src/lib/tasks-write');
 var facade = require('../../src/slices/task/facade');
@@ -54,13 +60,16 @@ async function cleanup() {
 }
 
 beforeAll(async () => {
+  // 999.1409: create + migrate the isolated DB if absent (throws TEST-FR-001
+  // itself when the test-bed MySQL server is unreachable).
+  await ensureIsolatedDb();
   try { await db.raw('SELECT 1'); available = true; } catch (e) { available = false; }
   if (!available) throw new Error('TEST-FR-001: test-bed DB not reachable. Run: cd test-bed && make up');
   await cleanup();
   await db('users').insert({ id: USER_ID, email: 'lc844@test.com', timezone: TZ, created_at: db.fn.now(), updated_at: db.fn.now() });
   await db('user_config').insert({ user_id: USER_ID, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) });
   await db('user_config').insert({ user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) });
-}, 20000);
+}, 600000); // 999.1409: fresh-test-bed provisioning runs the full migration set (~6 min measured)
 
 afterAll(async () => { if (available) await cleanup(); await db.destroy(); });
 

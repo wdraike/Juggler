@@ -3,7 +3,11 @@
 const { z } = require('zod');
 
 const VALID_PRI = ['P1', 'P2', 'P3', 'P4'];
-const VALID_STATUS = ['', 'done', 'cancel', 'skip', 'pause'];
+// 'missed' is a valid terminal status (ruling 2026-07-06, resolves 999.844:
+// cancelled AND missed are both terminal). The DB CHECK constraints include it
+// (migration 20260703000000) and shared/task-status.js lists it in
+// TERMINAL_STATUSES — the update schema must not reject it (999.1418).
+const VALID_STATUS = ['', 'done', 'cancel', 'skip', 'pause', 'missed'];
 const VALID_PRECIP = ['any', 'wet_ok', 'light_ok', 'dry_only'];
 const VALID_CLOUD = ['any', 'overcast_ok', 'partly_ok', 'clear'];
 const VALID_TEMP_UNIT = ['F', 'C'];
