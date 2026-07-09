@@ -7,8 +7,8 @@
  */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { CAL_PROVIDER_NAMES } from '../../state/constants';
-import { toTime24, toDateISO, formatDateKey, fromTime24 } from '../../scheduler/dateHelpers';
-import { isAnchorDependentRecur } from '../../scheduler/expandRecurring';
+import { toTime24, toDateISO, formatDateKey, fromTime24, parseDate } from '../../scheduler/dateHelpers';
+import { isAnchorDependentRecur, nextMatchingDate } from '../../scheduler/expandRecurring';
 import { getTheme } from '../../theme/colors';
 import { convertTimeForDisplay } from '../../utils/timezone';
 import { addMinutesTo24h } from './sections/WhenSection';
@@ -161,6 +161,49 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   var [recurMonthDays, setRecurMonthDays] = useState(isCreate ? [1, 15] : (task.recur?.monthDays || [1, 15]));
   var [recurStart, setRecurringStart] = useState(isCreate ? '' : (task.recurStart || ''));
   var [recurEnd, setRecurringEnd] = useState(isCreate ? '' : (task.recurEnd || ''));
+  // 999.1110 (David 2026-07-04): the recurrence anchor — 'Next Cycle Starts' —
+  // is user-editable. Read side: the unified nextStart (FR-1) with the two
+  // legacy per-type anchor columns as the dual-write-era sources (rollingAnchor
+  // for recur.type='rolling', nextOccurrenceAnchor for pattern types).
+  var [nextStart, setNextStart] = useState(isCreate ? '' : (function() {
+    var v = task.nextStart || task.rollingAnchor || task.nextOccurrenceAnchor;
+    return v ? String(v).slice(0, 10) : '';
+  })());
+  var [nextStartNotice, setNextStartNotice] = useState(null);
+
+  // 999.1110 VALIDATION (David confirmed): for pattern-recur types the chosen
+  // date MUST be snapped to a date the master's own recur pattern actually
+  // allows — reuse nextMatchingDate/matchesRecurrenceDay from shared
+  // expandRecurring (the same predicate the backend's next-occurrence-anchor.js
+  // calls) rather than accepting an arbitrary date. Rolling has no calendar
+  // pattern, so any date is valid there.
+  function handleNextStartChange(val) {
+    setNextStartNotice(null);
+    if (!val || recurType === 'none' || recurType === 'rolling') {
+      setNextStart(val || '');
+      return;
+    }
+    var recur = {
+      type: recurType,
+      days: recurDays,
+      timesPerCycle: recurTimesPerCycle > 0 ? recurTimesPerCycle : undefined,
+      every: parseInt(recurEvery) || undefined,
+      unit: recurUnit || undefined,
+      monthDays: recurType === 'monthly' ? recurMonthDays : undefined
+    };
+    // nextMatchingDate walks strictly AFTER its afterDateKey, so start the walk
+    // one day before the chosen date — if the chosen date itself matches the
+    // pattern it comes back unchanged, otherwise we snap forward.
+    var chosen = parseDate(val);
+    if (!chosen) { setNextStart(val); return; }
+    chosen.setDate(chosen.getDate() - 1);
+    var phaseAnchor = nextStart || recurStart || val; // biweekly parity epoch
+    var snapped = nextMatchingDate(recur, formatDateKey(chosen), phaseAnchor);
+    if (snapped && snapped !== val) {
+      setNextStartNotice('Adjusted to ' + snapped + ' — the next date this task’s repeat pattern allows.');
+    }
+    setNextStart(snapped || val);
+  }
 
   var recurIsAnchorDependent = React.useMemo(function() {
     if (!recurring || recurType === 'none') return false;
@@ -251,6 +294,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     setRecurEvery(newSnap.recurEvery); setRecurUnit(newSnap.recurUnit);
     setRecurMonthDays(newSnap.recurMonthDays);
     setRecurringStart(newSnap.recurStart); setRecurringEnd(newSnap.recurEnd);
+    setNextStart(newSnap.nextStart || ''); setNextStartNotice(null);
     setWeatherPrecip(newSnap.weatherPrecip || 'any');
     setWeatherCloud(newSnap.weatherCloud   || 'any');
     setWeatherTempMin(newSnap.weatherTempMin != null ? String(newSnap.weatherTempMin) : '');
@@ -264,7 +308,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     deadline, earliestStart, notes, url, when, dayReq, recurring, exactTime,
     timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools,
     marker, flexWhen, recurType, recurDays, recurTimesPerCycle, recurFillPolicy,
-    recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd,
+    recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, nextStart,
     placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax,
     weatherHumidityMin, weatherHumidityMax, activeTimezone, onUpdate,
     onRecurDayConflict, onClose, onCreate, endTimeError, setEndTimeError
@@ -341,6 +385,8 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             recurMonthDays={recurMonthDays} onRecurMonthDaysChange={setRecurMonthDays}
             recurStart={recurStart} onRecurStartChange={setRecurringStart}
             recurEnd={recurEnd} onRecurEndChange={setRecurringEnd}
+            nextStart={nextStart} onNextStartChange={handleNextStartChange}
+            nextStartNotice={nextStartNotice}
             recurIsAnchorDependent={recurIsAnchorDependent}
             configWarnings={configWarnings}
             deadline={deadline} onDeadlineChange={setDeadline}

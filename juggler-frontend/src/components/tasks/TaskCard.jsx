@@ -6,19 +6,22 @@
  */
 
 import React from 'react';
-import { PRI_COLORS, locIcon, isTerminalStatus } from '../../state/constants';
+import { PRI_COLORS, locIcon, isTerminalStatus, STATUS_MAP } from '../../state/constants';
 import { getTaskIcon } from '../../utils/taskIcon';
 import { getTheme } from '../../theme/colors';
 import StatusToggle from '../schedule/StatusToggle';
 import { parseDate } from '../../scheduler/dateHelpers';
 import { isTaskOverdue } from '../../utils/overdue';
 
-var TERMINAL_BORDER_COLORS = {
-  done:   { light: '#2D6A4F', dark: '#6EE7B7' },
-  cancel: { light: '#8B2635', dark: '#FCA5A5' },
-  skip:   { light: '#475569', dark: '#94A3B8' },
-  pause:  { light: '#4338CA', dark: '#A5B4FC' },
-};
+// 999.1231: terminal border colors derive from the canonical status descriptor
+// table (state/constants.js) instead of a hardcoded local fork — the pause
+// indigo now comes from PAUSE_TOKENS via the table, and the backend-set
+// cancelled/missed statuses get a border too instead of falling through.
+var TERMINAL_BORDER_COLORS = {};
+['done', 'cancel', 'cancelled', 'skip', 'pause', 'missed'].forEach(function(v) {
+  var d = STATUS_MAP[v];
+  if (d) TERMINAL_BORDER_COLORS[v] = { light: d.color, dark: d.colorDark };
+});
 
 function formatTimeAmPm(date) {
   var h = date.getHours();

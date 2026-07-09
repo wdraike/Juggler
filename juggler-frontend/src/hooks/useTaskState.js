@@ -34,7 +34,10 @@ var SAVE_FIELDS = [
   'pri', 'project', 'section', 'notes', 'due', 'earliestStart',
   'location', 'tools', 'when', 'dayReq', 'recurring', 'rigid',
   'split', 'splitMin', 'travelBefore', 'travelAfter', 'recur', 'dependsOn', 'datePinned',
-  'preferredTime', 'tz', '_timezone', 'anchorDate'
+  // 999.1110: nextStart = the editable 'Next Cycle Starts' recurrence anchor
+  // (unified FR-1 column). NOTE: distinct from anchorDate, which the backend
+  // maps to the template's scheduled_at.
+  'preferredTime', 'tz', '_timezone', 'anchorDate', 'nextStart'
 ];
 
 export default function useTaskState() {

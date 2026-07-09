@@ -178,6 +178,7 @@ export default function WhenSection(props) {
     recurMonthDays, onRecurMonthDaysChange,
     recurStart, onRecurStartChange,
     recurEnd, onRecurEndChange,
+    nextStart, onNextStartChange, nextStartNotice,
     recurIsAnchorDependent,
     // datePinned and onDatePinnedChange are intentionally omitted — removed in When-mode redesign
     configWarnings,
@@ -761,15 +762,18 @@ export default function WhenSection(props) {
               </div>
               <div style={{ marginTop: 8 }}>
                 <div style={{ fontSize: 9, color: TH.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>Last completion</div>
-                {(task && task.rolling_anchor) ? (
+                {(task && (task.rollingAnchor || task.rolling_anchor)) ? (
+                  // 999.1110: the API task shape is camelCase (rowToTask maps
+                  // rolling_anchor → rollingAnchor); the snake_case read only
+                  // ever matched test fixtures. Accept both.
                   <div style={{ display: 'flex', gap: 16, background: TH.bgCard, border: '1px solid ' + TH.inputBorder, borderRadius: 4, padding: '6px 10px', fontSize: 11 }}>
                     <div>
                       <div style={{ fontSize: 9, color: TH.textMuted, marginBottom: 1 }}>Completed on</div>
-                      <div style={{ color: TH.text, fontWeight: 500 }}>{formatAnchorDate(task.rolling_anchor)}</div>
+                      <div style={{ color: TH.text, fontWeight: 500 }}>{formatAnchorDate(task.rollingAnchor || task.rolling_anchor)}</div>
                     </div>
                     <div>
                       <div style={{ fontSize: 9, color: TH.textMuted, marginBottom: 1 }}>Next due</div>
-                      <div style={{ color: TH.accent, fontWeight: 500 }}>{formatAnchorDate(addIntervalToDate(task.rolling_anchor, recurEvery || 7, recurUnit || 'days'))}</div>
+                      <div style={{ color: TH.accent, fontWeight: 500 }}>{formatAnchorDate(addIntervalToDate(task.rollingAnchor || task.rolling_anchor, recurEvery || 7, recurUnit || 'days'))}</div>
                     </div>
                   </div>
                 ) : (
@@ -806,6 +810,26 @@ export default function WhenSection(props) {
                 )}
               </div>
             </label>
+            {/* 999.1110 (David 2026-07-04): editable recurrence anchor. Editing
+                the 'Recurrence starts' field above is silently a no-op once an
+                anchor exists (getAnchor prefers the anchor over recur_start),
+                so the anchor itself must be exposed. Pattern types snap the
+                chosen date to the task's own pattern (handled by the parent's
+                onNextStartChange); rolling accepts any date. Edit-only — a
+                brand-new task has no anchor until its first completion. */}
+            {!isCreate && (
+              <label style={lStyle}>
+                <span title="The date the next occurrence counts from. For patterned repeats the date is adjusted to the nearest day the pattern allows.">⏭ Next Cycle Starts</span>
+                <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                  <input type="date" aria-label="Next Cycle Starts" value={nextStart || ''}
+                    onChange={function(e) { if (onNextStartChange) onNextStartChange(e.target.value || ''); }}
+                    style={{ ...iStyle, width: 130 }} />
+                </div>
+                {nextStartNotice && (
+                  <span role="status" style={{ fontSize: 9, color: BRAND.gold, maxWidth: 280 }}>{nextStartNotice}</span>
+                )}
+              </label>
+            )}
           </div>
         )}
 

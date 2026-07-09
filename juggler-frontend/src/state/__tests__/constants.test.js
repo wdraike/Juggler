@@ -2,7 +2,7 @@
  * Tests for state/constants.js — STATUS_OPTIONS + isTerminalStatus + PAST_OPACITY.
  * juggler-cal-history Plan B.
  */
-import { STATUS_OPTIONS, STATUS_MAP, isTerminalStatus, PAST_OPACITY } from '../constants';
+import { STATUS_OPTIONS, STATUS_MAP, STATUS_DESCRIPTORS, STATUS_VALID_TRANSITIONS, canTransitionTo, PAUSE_TOKENS, PRI_RANK, isTerminalStatus, PAST_OPACITY } from '../constants';
 
 describe('state/constants — juggler-cal-history Plan B', () => {
   test('STATUS_OPTIONS does not contain a missed entry (removed)', () => {
@@ -62,5 +62,77 @@ describe('state/constants — juggler-cal-history Plan B', () => {
 
   test('PAST_OPACITY exported as 0.60', () => {
     expect(PAST_OPACITY).toBe(0.60);
+  });
+});
+
+// ── 999.1231: canonical status descriptor table ─────────────────────────────
+describe('state/constants — canonical status descriptors (999.1231)', () => {
+  test('every descriptor carries the full display-token contract', () => {
+    STATUS_DESCRIPTORS.forEach((s) => {
+      expect(typeof s.value).toBe('string');
+      ['icon', 'label', 'tip', 'bg', 'bgDark', 'color', 'colorDark'].forEach((k) => {
+        expect(typeof s[k]).toBe('string');
+        expect(s[k].length).toBeGreaterThan(0);
+      });
+      expect(typeof s.selectable).toBe('boolean');
+    });
+  });
+
+  test('STATUS_OPTIONS = selectable subset (backend-set cancelled/missed excluded)', () => {
+    expect(STATUS_OPTIONS.map((s) => s.value)).toEqual(['', 'done', 'wip', 'cancel', 'skip', 'pause']);
+  });
+
+  test('picker set includes wip (999.1231: detail-header picker could not set WIP)', () => {
+    expect(STATUS_OPTIONS.find((s) => s.value === 'wip')).toBeDefined();
+  });
+
+  test('skip uses the U+23ED glyph with the StatusToggle slate palette (the ruled winners)', () => {
+    expect(STATUS_MAP.skip.icon).toBe('⏭');
+    expect(STATUS_MAP.skip.bg).toBe('#F1F5F9');
+    expect(STATUS_MAP.skip.color).toBe('#475569');
+  });
+
+  test("STATUS_MAP.missed exists with badge tokens + its own glyph (finding 2: missed rendered nothing)", () => {
+    expect(STATUS_MAP.missed).toBeDefined();
+    expect(STATUS_MAP.missed.icon).toBe('⊘');
+    expect(STATUS_MAP.missed.label).toBe('Missed');
+    // Mirrors the cancel palette (999.882 alias pattern applied to missed).
+    expect(STATUS_MAP.missed.bg).toBe(STATUS_MAP.cancel.bg);
+    expect(STATUS_MAP.missed.colorDark).toBe(STATUS_MAP.cancel.colorDark);
+  });
+
+  test("'missed' is NOT in the user-selectable toggle set", () => {
+    expect(STATUS_OPTIONS.find((s) => s.value === 'missed')).toBeUndefined();
+  });
+
+  test('pause tokens come from the shared PAUSE_TOKENS (999.1245 deferred token)', () => {
+    expect(STATUS_MAP.pause.bg).toBe(PAUSE_TOKENS.bg);
+    expect(STATUS_MAP.pause.bgDark).toBe(PAUSE_TOKENS.bgDark);
+    expect(STATUS_MAP.pause.color).toBe(PAUSE_TOKENS.color);
+    expect(STATUS_MAP.pause.colorDark).toBe(PAUSE_TOKENS.colorDark);
+  });
+
+  test('missed + cancelled are reopen-only in the transition map (David 2026-07-06: terminal, explicit reactivation)', () => {
+    expect(canTransitionTo('missed', '')).toBe(true);
+    expect(canTransitionTo('cancelled', '')).toBe(true);
+    ['done', 'wip', 'skip', 'cancel', 'pause'].forEach((target) => {
+      expect(canTransitionTo('missed', target)).toBe(false);
+      expect(canTransitionTo('cancelled', target)).toBe(false);
+    });
+  });
+
+  test('open → wip is a legal transition (picker parity with cards)', () => {
+    expect(canTransitionTo('', 'wip')).toBe(true);
+    expect(STATUS_VALID_TRANSITIONS['wip']['']).toBe(1);
+  });
+});
+
+// ── 999.1426(e): PRI_RANK re-exported from juggler-shared ───────────────────
+describe('state/constants — PRI_RANK shared source (999.1426)', () => {
+  test('PRI_RANK is the juggler-shared object (single source), values unchanged', () => {
+    const shared = require('juggler-shared/scheduler/constants').PRI_RANK;
+    expect(PRI_RANK).toBe(shared); // identity, not a copy
+    expect(PRI_RANK).toEqual({ P1: 100, P2: 80, P3: 50, P4: 20 });
+    expect(Object.isFrozen(PRI_RANK)).toBe(true);
   });
 });

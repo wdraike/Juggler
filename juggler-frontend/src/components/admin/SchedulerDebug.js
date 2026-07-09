@@ -11,6 +11,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../auth/AuthProvider';
 import apiClient from '../../services/apiClient';
+import { parseDate } from '../../scheduler/dateHelpers';
 
 const PHASE_COLORS = {
   fixed: '#E53935',
@@ -37,8 +38,13 @@ function formatTime(mins) {
 }
 
 function parseDateKey(dk) {
-  var parts = dk.split('/');
-  return new Date(2026, parseInt(parts[0]) - 1, parseInt(parts[1]));
+  // 999.1426 (999.1185(f) BUG): delegate to the shared parseDate — the old
+  // local copy handled only 'M/D' and hardcoded new Date(2026, ...), so the
+  // ISO 'YYYY-MM-DD' dateKeys the scheduler now emits misparsed and every
+  // year was pinned to 2026. shared parseDate accepts both ISO and legacy
+  // 'M/D' (with inferYear). Invalid keys keep the old non-crashing Invalid
+  // Date behavior instead of parseDate's null (callers do d.getDay()).
+  return parseDate(dk) || new Date(NaN);
 }
 
 var DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];

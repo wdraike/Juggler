@@ -271,7 +271,21 @@ function isValidTimezone(tz) {
     try { _validTimezones = new Set(Intl.supportedValuesOf('timeZone')); }
     catch (e) { return true; } // older runtimes: allow through
   }
-  return _validTimezones.has(tz);
+  if (_validTimezones.has(tz)) return true;
+  // 999.1426: Intl.supportedValuesOf('timeZone') omits aliases that
+  // Intl.DateTimeFormat itself ACCEPTS — notably 'UTC' and the 'Etc/*' /
+  // legacy ('US/Eastern') names. Treating those as invalid silently computed
+  // times in the America/New_York fallback instead of the caller's real zone
+  // (surfaced by the frontend serverClock AC3 tests when the frontend started
+  // consuming this shared validator). Accept anything DateTimeFormat can
+  // format with, and cache the verdict so the try/catch runs once per name.
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    _validTimezones.add(tz);
+    return true;
+  } catch (e) {
+    return false;
+  }
 }
 
 function safeTimezone(tz, fallback) {

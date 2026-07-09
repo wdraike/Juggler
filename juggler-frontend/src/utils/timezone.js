@@ -3,7 +3,22 @@
  *
  * Uses the browser-detected timezone (or manual override) for
  * "today", "now", and UTC ↔ local conversions.
+ *
+ * 999.1426 (frontend halves of 999.1185/999.1186): the validation and parsing
+ * primitives — isValidTimezone/safeTimezone, parseDbUtc, getNowInTimezone,
+ * DEFAULT_TIMEZONE — are the SHARED implementations required from
+ * juggler-shared (the backend SSOT, fixed in juggler ae41e05d), not local
+ * copies. The old "CRA cannot require shared" justification is stale:
+ * src/scheduler/*.js shims have required juggler-shared for months.
  */
+const sharedDateHelpers = require('juggler-shared/scheduler/dateHelpers');
+const sharedNowInTimezone = require('juggler-shared/scheduler/getNowInTimezone');
+
+// parseDbUtc — the single normalizer for DB-origin timestamps (999.1186):
+// mysql2 dateStrings:true emits 'YYYY-MM-DD HH:MM:SS' with NO zone marker,
+// which a bare `new Date()` misparses as LOCAL time. Re-exported so frontend
+// callers (CalSyncPanel, etc.) share the backend implementation.
+export const parseDbUtc = sharedDateHelpers.parseDbUtc;
 
 /**
  * Detect the browser's IANA timezone.
@@ -18,42 +33,32 @@ export function getBrowserTimezone() {
 }
 
 /**
- * Check if a string is a valid IANA timezone name.
- * @param {string|null|undefined} tz
- * @returns {boolean}
- */
-function isValidTimezone(tz) {
-  if (!tz) return false;
-  try {
-    var zones = Intl.supportedValuesOf('timeZone');
-    return zones.indexOf(tz) !== -1;
-  } catch (e) {
-    return true; // older runtimes: allow through
-  }
-}
-
-/**
  * Validate a timezone string; fall back to America/New_York if invalid.
+ * Shared implementation (cached-Set isValidTimezone) — 999.1426 removed the
+ * local uncached copy that had drifted from shared/scheduler/dateHelpers.js.
  * @param {string|null|undefined} tz - IANA timezone to validate
  * @param {string} [fallback='America/New_York'] - fallback on invalid
  * @returns {string} validated IANA timezone
  */
-export function safeTimezone(tz, fallback) {
-  return isValidTimezone(tz) ? tz : (fallback || 'America/New_York');
-}
+export const safeTimezone = sharedDateHelpers.safeTimezone;
 
 /**
- * Convert a UTC ISO string to local date/time in a target timezone.
+ * Convert a UTC datetime to local date/time in a target timezone.
  * Used by the "View in..." dropdown for task-level timezone conversion.
  *
- * @param {string} isoString - UTC ISO datetime (e.g. '2026-03-23T18:00:00Z')
+ * Input parsing delegates to shared parseDbUtc (999.1426/999.1186): a MySQL
+ * dateStrings-shaped input ('YYYY-MM-DD HH:MM:SS') is pinned to UTC instead of
+ * being misparsed as browser-local time; ISO strings with explicit zone info
+ * behave exactly as before.
+ *
+ * @param {string} isoString - UTC datetime (ISO or MySQL dateStrings shape)
  * @param {string} timezone - IANA timezone to display in
  * @returns {{ date: string, time: string, day: string }} local representation
  */
 export function convertTimeForDisplay(isoString, timezone) {
   if (!isoString || !timezone) return { date: null, time: null, day: null };
-  var d = new Date(isoString);
-  if (isNaN(d.getTime())) return { date: null, time: null, day: null };
+  var d = parseDbUtc(isoString);
+  if (!d) return { date: null, time: null, day: null };
   var tz = safeTimezone(timezone);
   var parts = {};
   new Intl.DateTimeFormat('en-US', {
@@ -182,9 +187,10 @@ export function buildServerClock(serverEpochMs, capturedNow) {
   return { now: function() { return new Date(Date.now() + offset); } };
 }
 
-// Default timezone — matches the shared backend contract (shared/scheduler/getNowInTimezone.js)
-// so that null/undefined tz produces identical todayKey/nowMins on both sides (R50.8 W2 fix).
-var DEFAULT_TIMEZONE = 'America/New_York';
+// Default timezone — THE shared backend contract value (999.1426: imported
+// from shared/scheduler/getNowInTimezone.js instead of a re-stated literal) so
+// null/undefined tz produces identical todayKey/nowMins on both sides (R50.8).
+var DEFAULT_TIMEZONE = sharedNowInTimezone.DEFAULT_TIMEZONE;
 
 /**
  * Resolve the timezone to DISPLAY task times in. The user's configured timezone
@@ -217,31 +223,14 @@ export function resolveDisplayTimezone(opts) {
  * computation can run against canonical server time (AC3 serverClock). Single-arg
  * callers are unchanged — clock defaults to undefined → real new Date().
  *
+ * 999.1426 (999.1185(b)): this is now the SHARED implementation itself, not an
+ * ESM copy. The copy had validation drift — shared validates via safeTimezone
+ * (invalid IANA → NY fallback) while the copy did a bare `timezone ||
+ * DEFAULT_TIMEZONE`, so a corrupt tz string THREW in the browser while the
+ * server silently fell back, breaking the todayKey parity this doc promises.
+ *
  * @param {string|null} timezone - IANA timezone (e.g. 'America/New_York')
  * @param {{ now: () => Date }|null|undefined} clock - optional injected clock
  * @returns {{ todayKey: string, todayDate: Date, nowMins: number }}
  */
-export function getNowInTimezone(timezone, clock) {
-  var now = clock ? clock.now() : new Date();
-  // Apply the same default as the shared backend module — never use browser-local clock
-  // for the no-tz branch (that would break R50.8 parity at day boundaries).
-  var tz = timezone || DEFAULT_TIMEZONE;
-
-  var parts = {};
-  new Intl.DateTimeFormat('en-US', {
-    timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric',
-    hour: 'numeric', minute: 'numeric', hourCycle: 'h23'
-  }).formatToParts(now).forEach(function(p) { parts[p.type] = parseInt(p.value, 10); });
-
-  var month = parts.month;
-  var day = parts.day;
-  var year = parts.year;
-  var hour = parts.hour % 24;
-  var minute = parts.minute;
-
-  return {
-    todayKey: year + '-' + (month < 10 ? '0' : '') + month + '-' + (day < 10 ? '0' : '') + day,
-    todayDate: new Date(year, month - 1, day),
-    nowMins: hour * 60 + minute
-  };
-}
+export const getNowInTimezone = sharedNowInTimezone.getNowInTimezone;

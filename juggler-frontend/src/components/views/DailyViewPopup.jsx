@@ -68,7 +68,7 @@ export default function FixedPopup({ mousePos, item, status, theme, darkMode, ca
             background: darkMode ? statusObj.bgDark : statusObj.bg,
             color: darkMode ? statusObj.colorDark : statusObj.color
           }}>
-            {statusObj.label} {statusObj.value}
+            {statusObj.icon} {statusObj.value}
           </span>
         )}
         {t.project && (

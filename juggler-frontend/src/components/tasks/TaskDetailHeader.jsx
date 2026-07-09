@@ -1,5 +1,5 @@
 import React from 'react';
-import { STATUS_OPTIONS } from '../../state/constants';
+import { STATUS_OPTIONS, canTransitionTo } from '../../state/constants';
 import { BRAND } from '../../theme/colors';
 import { TERMINAL_STATUSES } from '../../shared/task-status';
 import { formatDateKey } from '../../scheduler/dateHelpers';
@@ -107,17 +107,12 @@ export default function TaskDetailHeader({
             <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
               {STATUS_OPTIONS.map(function(s) {
                 var isActive = (status || '') === s.value;
-                // Same transition rules as StatusToggle — disable current status
-                // and invalid transitions. Terminal → reopen only.
+                // Same transition rules as StatusToggle — 999.1231: both now
+                // read the ONE canonical map in state/constants.js (the inline
+                // copy that used to live here lacked wip, so this picker could
+                // never set WIP while every card could). Terminal → reopen only.
                 var currentStatus = status || '';
-                var transitions = {
-                  '':      { 'done': 1, 'cancel': 1, 'skip': 1, 'pause': 1 },
-                  'done':  { '': 1 },
-                  'cancel': { '': 1 },
-                  'skip':  { '': 1 },
-                  'pause': { '': 1 },
-                };
-                var canTransit = !!(transitions[currentStatus] && transitions[currentStatus][s.value]);
+                var canTransit = canTransitionTo(currentStatus, s.value);
                 // FR-2/AC3 (juggler-recur-lifecycle-redesign): explicit reactivation
                 // ("reopen", target "") of an already-settled (terminal) instance is
                 // blocked when the instance's own date (task.date) is before today.
@@ -147,7 +142,7 @@ export default function TaskDetailHeader({
                       height: BTN_H, boxSizing: 'border-box',
                       opacity: isDisabled ? 0.45 : 1
                     }}>
-                    {s.label} {s.tip.split(' — ')[0]}
+                    {s.icon} {s.label}
                   </button>
                 );
               })}

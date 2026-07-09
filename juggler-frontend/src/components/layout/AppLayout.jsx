@@ -219,6 +219,12 @@ export default function AppLayout() {
   // message when a series-delete is rejected, keeping RecurringDeleteDialog open with
   // an explanation instead of the dialog silently closing like every other outcome.
   var [recurringDeleteBlockedMessage, setRecurringDeleteBlockedMessage] = useState(null);
+  // 999.1240: escape hatch for the provider-origin delete wall. When a delete is
+  // rejected with PROVIDER_ORIGIN_DELETE_BLOCKED (403), offer the backend's
+  // POST /api/tasks/:id/take-ownership — detaches the task from its calendar
+  // link so Juggler owns the schedule (and it becomes deletable). Shape:
+  // { taskId, taskText, message }.
+  var [takeOwnershipPrompt, setTakeOwnershipPrompt] = useState(null);
 
   var theme = getTheme(darkMode);
   var statuses = taskState.statuses;
@@ -1662,6 +1668,7 @@ export default function AppLayout() {
             message={'Delete "' + (deleteConfirmTask.text || 'this task').slice(0, 60) + '"?'}
             onConfirm={function() {
               var id = deleteConfirmTask.id;
+              var taskText = deleteConfirmTask.text || 'this task';
               // deleteTask rethrows on failure (bird-w6-002 fix). 999.1225:
               // surface the server's rejection body (e.g. the deliberate 403
               // INGEST_DELETE_BLOCKED "Calendar-linked tasks cannot be deleted
@@ -1669,7 +1676,14 @@ export default function AppLayout() {
               // instead of swallowing it — the task never leaves local state
               // on a failed delete, so the user needs to know why.
               deleteTask(id).catch(function(error) {
-                var serverMsg = error && error.response && error.response.data && error.response.data.error;
+                var data = error && error.response && error.response.data;
+                var serverMsg = data && data.error;
+                // 999.1240: the provider-origin wall gets an escape hatch —
+                // offer the take-ownership endpoint instead of a dead-end toast.
+                if (data && data.code === 'PROVIDER_ORIGIN_DELETE_BLOCKED') {
+                  setTakeOwnershipPrompt({ taskId: id, taskText: taskText, message: serverMsg });
+                  return;
+                }
                 showToast(serverMsg || 'Failed to delete task', 'error');
               });
               setExpandedTasks(function(prev) { return prev.filter(function(x) { return x !== id; }); });
@@ -1680,6 +1694,35 @@ export default function AppLayout() {
             isMobile={isMobile}
           />
         )
+      )}
+
+      {/* 999.1240: provider-origin delete wall escape hatch. The delete was
+          rejected (PROVIDER_ORIGIN_DELETE_BLOCKED) because the task came from a
+          calendar provider; offer POST /tasks/:id/take-ownership, which detaches
+          the calendar link so Juggler owns the schedule from here on. */}
+      {takeOwnershipPrompt && (
+        <ConfirmDialog
+          title="This task belongs to your calendar"
+          message={(takeOwnershipPrompt.message || 'This task came from a connected calendar, so it can’t be deleted here.') +
+            ' You can instead have Juggler take ownership of "' + takeOwnershipPrompt.taskText.slice(0, 60) +
+            '" — it will be detached from the calendar event and Juggler will manage (and can delete) it from then on.'}
+          confirmLabel="Take ownership"
+          onConfirm={function() {
+            var id = takeOwnershipPrompt.taskId;
+            setTakeOwnershipPrompt(null);
+            apiClient.post('/tasks/' + id + '/take-ownership').then(function() {
+              showToast('Juggler now owns this task — it’s detached from your calendar.', 'success');
+              loadTasks();
+            }).catch(function(error) {
+              // apiClient's interceptor (999.1226) has already normalized
+              // error.message to human copy (server body wins when present).
+              showToast(error && error.message ? error.message : 'Could not take ownership of this task.', 'error');
+            });
+          }}
+          onCancel={function() { setTakeOwnershipPrompt(null); }}
+          darkMode={darkMode}
+          isMobile={isMobile}
+        />
       )}
 
       <AppFooter darkMode={darkMode} />

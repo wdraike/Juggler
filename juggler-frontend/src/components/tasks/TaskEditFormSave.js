@@ -11,7 +11,7 @@ export function useTaskEditFormSave({
   deadline, earliestStart, notes, url, when, dayReq, recurring, exactTime,
   timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools,
   marker, flexWhen, recurType, recurDays, recurTimesPerCycle, recurFillPolicy,
-  recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd,
+  recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, nextStart,
   placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax,
   weatherHumidityMin, weatherHumidityMax, activeTimezone, onUpdate, onRecurDayConflict,
   onClose, onCreate, endTimeError, _setEndTimeError
@@ -44,6 +44,12 @@ export function useTaskEditFormSave({
       recurMonthDays: t.recur?.monthDays || [1, 15],
       tz: t.tz || activeTimezone || 'America/New_York',
       recurStart: t.recurStart || '', recurEnd: t.recurEnd || '',
+      // 999.1110: 'Next Cycle Starts' anchor — unified nextStart (FR-1) with
+      // the dual-write-era per-type columns as read sources.
+      nextStart: (function() {
+        var v = t.nextStart || t.rollingAnchor || t.nextOccurrenceAnchor;
+        return v ? String(v).slice(0, 10) : '';
+      })(),
       preferredTimeMins: t.preferredTimeMins != null ? t.preferredTimeMins : null,
       weatherPrecip: t.weatherPrecip || 'any', weatherCloud: t.weatherCloud || 'any',
       weatherTempMin: t.weatherTempMin != null ? t.weatherTempMin : null,
@@ -93,6 +99,7 @@ export function useTaskEditFormSave({
       tz: taskTz, _timezone: taskTz,
       recurStart: recurring ? (recurStart || null) : null,
       recurEnd: recurring ? (recurEnd || null) : null,
+      nextStart: recurring ? (nextStart || null) : null,
       preferredTimeMins: placementMode === 'time_window' && time
         ? (function() { var parts = time.split(':'); return parseInt(parts[0], 10) * 60 + parseInt(parts[1] || '0', 10); })()
         : (placementMode === 'time_window' ? null : undefined),
@@ -103,7 +110,7 @@ export function useTaskEditFormSave({
       weatherHumidityMin: weatherHumidityMin !== '' && weatherHumidityMin !== null ? parseInt(weatherHumidityMin) : null,
       weatherHumidityMax: weatherHumidityMax !== '' && weatherHumidityMax !== null ? parseInt(weatherHumidityMax) : null
     };
-  }, [text, project, pri, date, time, dur, timeRemaining, deadline, earliestStart, notes, url, when, dayReq, recurring, exactTime, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
+  }, [text, project, pri, date, time, dur, timeRemaining, deadline, earliestStart, notes, url, when, dayReq, recurring, exactTime, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, nextStart, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
 
   var buildChangedFields = useCallback(function() {
     var all = buildFields();
@@ -144,6 +151,7 @@ export function useTaskEditFormSave({
     }
     if (recurStart !== (snap.recurStart || '')) changed.recurStart = all.recurStart;
     if (recurEnd !== (snap.recurEnd || '')) changed.recurEnd = all.recurEnd;
+    if ((nextStart || '') !== (snap.nextStart || '')) changed.nextStart = all.nextStart;
     if (weatherPrecip !== (snap.weatherPrecip || 'any')) changed.weatherPrecip = all.weatherPrecip;
     if (weatherCloud !== (snap.weatherCloud || 'any')) changed.weatherCloud = all.weatherCloud;
     var snapTMin = snap.weatherTempMin != null ? snap.weatherTempMin : null;
@@ -163,7 +171,7 @@ export function useTaskEditFormSave({
       changed._timezone = all._timezone;
     }
     return Object.keys(changed).length > 0 ? changed : null;
-  }, [buildFields, text, project, pri, notes, url, when, dayReq, recurring, exactTime, dur, timeRemaining, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, date, time, deadline, earliestStart, taskLoc, taskTools, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, recurStart, recurEnd, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
+  }, [buildFields, text, project, pri, notes, url, when, dayReq, recurring, exactTime, dur, timeRemaining, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, date, time, deadline, earliestStart, taskLoc, taskTools, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, recurStart, recurEnd, nextStart, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
 
   var [isDirty, setIsDirty] = useState(false);
   useEffect(function() {
@@ -172,7 +180,7 @@ export function useTaskEditFormSave({
     userDirtyRef.current = true;
     var changed = buildChangedFields();
     setIsDirty(!!changed);
-  }, [text, project, pri, date, time, dur, timeRemaining, deadline, earliestStart, notes, url, when, dayReq, recurring, exactTime, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
+  }, [text, project, pri, date, time, dur, timeRemaining, deadline, earliestStart, notes, url, when, dayReq, recurring, exactTime, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, nextStart, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
 
   function commitSave(changed) {
     var willRegenerateInstances = changed.recur !== undefined;

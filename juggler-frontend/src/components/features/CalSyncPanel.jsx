@@ -6,16 +6,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import apiClient from '../../services/apiClient';
 import { getTheme } from '../../theme/colors';
+import { parseDbUtc } from '../../utils/timezone';
 
 // knex dateStrings:true returns MySQL format "2026-05-01 19:44:00" (UTC, no Z).
-// Normalize to a proper UTC ISO string so browsers parse it correctly.
+// 999.1426: delegate to the SHARED parseDbUtc normalizer (backend SSOT,
+// shared/scheduler/dateHelpers.js — juggler ae41e05d) instead of a local
+// mini-copy of the normalization. Same contract for callers: Date for
+// parseable input, null for empty/invalid (callers already null-guard).
 function parseDbDate(str) {
-  if (!str) return null;
-  var s = String(str);
-  if (!s.includes('Z') && !s.includes('+') && s.includes(' ') && !s.includes('T')) {
-    s = s.replace(' ', 'T') + 'Z';
-  }
-  return new Date(s);
+  return parseDbUtc(str);
 }
 
 // Pick the most-recent last-synced timestamp among CONNECTED providers only

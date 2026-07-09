@@ -13,29 +13,83 @@ export const PRI_COLORS = {
   P1: "#E11D48", P2: "#D97706", P3: "#2E4A7A", P4: "#5C5A55",
 };
 
-export const PRI_RANK = { P1: 100, P2: 80, P3: 50, P4: 20 };
+// PRI_RANK lives in juggler-shared (999.1426 / 999.1185(e)) — re-exported here
+// so existing imports keep working. Do NOT restate the literal in frontend code.
+export const PRI_RANK = require('juggler-shared/scheduler/constants').PRI_RANK;
 
-export const STATUS_OPTIONS = [
-  { value: "", label: "—", bg: "#F5F0E8", bgDark: "#1E2D4A", color: "#5C5A55", colorDark: "#B0A898", tip: "Open — not started" },
-  { value: "done", label: "\u2713", bg: "#D1FAE5", bgDark: "#0A3622", color: "#2D6A4F", colorDark: "#6EE7B7", tip: "Complete — mark this task finished" },
-  { value: "cancel", label: "\u2715", bg: "#FEE2E2", bgDark: "#3A0A10", color: "#8B2635", colorDark: "#FCA5A5", tip: "Cancel — won't do" },
-  { value: "skip", label: "\u23ED", bg: "#E8E0D0", bgDark: "#2C2B28", color: "#5C5A55", colorDark: "#B0A898", tip: "Skip — not today, keep the schedule" },
-  { value: "pause", label: "\u23F8", bg: "#E0E7FF", bgDark: "#1E1B4B", color: "#4338CA", colorDark: "#A5B4FC", tip: "Pause — temporarily inactive" },
+// Pause status tokens (999.1231; the pause-indigo shared token deferred from
+// 999.1245). BRAND.indigo family (#4338CA — theme/colors.js). This is the ONE
+// home for the pause palette; it was previously hardcoded in constants.js,
+// StatusToggle.jsx, and TaskCard.jsx.
+export const PAUSE_TOKENS = { bg: "#E0E7FF", bgDark: "#1E1B4B", color: "#4338CA", colorDark: "#A5B4FC" };
+
+// ── Canonical status descriptor table (999.1231) ────────────────────────────
+// The ONE display-token source for every task lifecycle status: glyph (`icon`),
+// imperative action label (`label`), tooltip (`tip`), and light/dark badge
+// tokens. Previously forked between this file's STATUS_OPTIONS and
+// StatusToggle.jsx's ALL_STATUSES (disagreeing on skip glyph/palette, open
+// glyph, and the wip option). Resolve glyph/token questions HERE, never in a
+// component. Decisions:
+//   - skip palette: StatusToggle's slate palette wins (newer, WCAG-checked).
+//   - skip glyph: U+23ED ("next track") wins — semantically "skip ahead" and
+//     already pinned by DailyView tests.
+//   - open glyph: U+25CB (open circle) wins over the old em-dash.
+//   - selectable:false rows (cancelled, missed) are backend-set statuses that
+//     render badges but are never user-toggle buttons (999.882 alias pattern,
+//     now also applied to 'missed').
+// Semantics (which transitions are LEGAL) stay in shared/task-status.js +
+// STATUS_VALID_TRANSITIONS below; 999.1181 owns the semantics-layer unification.
+const CANCEL_DESCRIPTOR = { value: "cancel", icon: "✕", label: "Cancel", tip: "Cancel — won't do", bg: "#FEE2E2", bgDark: "#3A0A10", color: "#8B2635", colorDark: "#FCA5A5", selectable: true };
+
+export const STATUS_DESCRIPTORS = [
+  { value: "", icon: "○", label: "Open", tip: "Open — not started", bg: "#F5F0E8", bgDark: "#2C2B28", color: "#5C5A55", colorDark: "#B0A898", selectable: true },
+  { value: "done", icon: "✓", label: "Complete", tip: "Complete — mark this task finished", bg: "#D1FAE5", bgDark: "#0A3622", color: "#2D6A4F", colorDark: "#6EE7B7", selectable: true },
+  { value: "wip", icon: "⌛", label: "Start", tip: "Start — mark as in progress", bg: "#FEF3C7", bgDark: "#3A2A08", color: "#9E6B3B", colorDark: "#E8C878", selectable: true },
+  CANCEL_DESCRIPTOR,
+  { value: "skip", icon: "⏭", label: "Skip", tip: "Skip — not today, keep the schedule", bg: "#F1F5F9", bgDark: "#1E293B", color: "#475569", colorDark: "#94A3B8", selectable: true },
+  { value: "pause", icon: "⏸", label: "Pause", tip: "Pause — temporarily inactive", ...PAUSE_TOKENS, selectable: true },
+  // Backend-set terminal statuses — display badge + reopen only (999.882 alias
+  // pattern). 'cancelled' mirrors 'cancel' tokens exactly; 'missed' (auto-set by
+  // the scheduler on past recurring instances — runSchedule.js) reuses the
+  // cancel palette with its own glyph so a missed instance is no longer
+  // renderless (999.1231 finding 2).
+  { ...CANCEL_DESCRIPTOR, value: "cancelled", label: "Cancelled", tip: "Cancelled — series/instance cancelled", selectable: false },
+  { ...CANCEL_DESCRIPTOR, value: "missed", icon: "⊘", label: "Missed", tip: "Missed — the scheduled occurrence passed without being completed", selectable: false },
 ];
+
+// User-selectable toggle options (grid cards, detail-header picker). Includes
+// wip (999.1231: the picker previously could not set WIP while cards could).
+export const STATUS_OPTIONS = STATUS_DESCRIPTORS.filter(s => s.selectable);
 
 // juggler-cal-history Plan B: faded opacity for past terminal-state tasks (D-10).
 export const PAST_OPACITY = 0.60;
 
-export const STATUS_MAP = Object.fromEntries(STATUS_OPTIONS.map(s => [s.value, s]));
+// Full display map — includes the backend-set 'cancelled' and 'missed' entries.
+export const STATUS_MAP = Object.fromEntries(STATUS_DESCRIPTORS.map(s => [s.value, s]));
 
-// Display-only alias: 'cancelled' is a backend-set series/instance-cancel terminal
-// status (shared/task-status.js) that is NOT a user-selectable STATUS_OPTIONS toggle
-// choice. It must still render a styled status badge (mirroring user 'cancel') wherever
-// STATUS_MAP drives display — e.g. the calendar grid card + status popup — now that the
-// grid shows every lifecycle state (999.882). Aliased here, not added to STATUS_OPTIONS,
-// so the toggle UI is unchanged.
-if (!STATUS_MAP.cancelled && STATUS_MAP.cancel) {
-  STATUS_MAP.cancelled = { ...STATUS_MAP.cancel, value: 'cancelled', tip: 'Cancelled — series/instance cancelled' };
+// ── Status transition map (999.1231) ────────────────────────────────────────
+// Single UI-side source for "which status buttons are enabled" — previously
+// forked between StatusToggle.jsx VALID_TRANSITIONS and an inline map in
+// TaskDetailHeader.jsx (which lacked wip). Terminal → reopen ("") only:
+// cancelled + missed are BOTH terminal and reactivation is an explicit
+// un-terminal action (David ruling 2026-07-06, resolves 999.844).
+//   "" (open) → done, wip, skip, cancel, pause
+//   wip       → done, "" (reopen), skip, cancel
+//   terminal  → "" (reopen only)
+export const STATUS_VALID_TRANSITIONS = {
+  '':          { 'done': 1, 'wip': 1, 'skip': 1, 'cancel': 1, 'pause': 1 },
+  'wip':       { 'done': 1, '': 1, 'skip': 1, 'cancel': 1 },
+  'done':      { '': 1 },
+  'cancel':    { '': 1 },
+  'cancelled': { '': 1 },
+  'skip':      { '': 1 },
+  'pause':     { '': 1 },
+  'missed':    { '': 1 },
+};
+
+export function canTransitionTo(current, target) {
+  var map = STATUS_VALID_TRANSITIONS[current || ''];
+  return !!(map && map[target]);
 }
 
 export const TASK_DEFAULTS = {
@@ -64,19 +118,19 @@ export const LOC_TINT = { home: "#2E4A7A", work: "#C8942A", transit: "#5C5A55", 
 export const LOC_TINT_FALLBACK = "#4338CA";
 
 export const DEFAULT_LOCATIONS = [
-  { id: "home", name: "Home", icon: "\uD83C\uDFE0" },
-  { id: "work", name: "Work", icon: "\uD83C\uDFE2" },
-  { id: "transit", name: "Transit", icon: "\uD83D\uDE97" },
-  { id: "downtown", name: "Downtown", icon: "\uD83C\uDFD9\uFE0F" },
-  { id: "gym", name: "Gym", icon: "\uD83C\uDFCB\uFE0F" },
+  { id: "home", name: "Home", icon: "🏠" },
+  { id: "work", name: "Work", icon: "🏢" },
+  { id: "transit", name: "Transit", icon: "🚗" },
+  { id: "downtown", name: "Downtown", icon: "🏙️" },
+  { id: "gym", name: "Gym", icon: "🏋️" },
 ];
 
 export const DEFAULT_TOOLS = [
-  { id: "phone", name: "Phone", icon: "\uD83D\uDCF1" },
-  { id: "personal_pc", name: "Personal PC", icon: "\uD83D\uDCBB" },
-  { id: "work_pc", name: "Work PC", icon: "\uD83D\uDDA5\uFE0F" },
-  { id: "printer", name: "Printer", icon: "\uD83D\uDDA8\uFE0F" },
-  { id: "car", name: "Car", icon: "\uD83D\uDE97" },
+  { id: "phone", name: "Phone", icon: "📱" },
+  { id: "personal_pc", name: "Personal PC", icon: "💻" },
+  { id: "work_pc", name: "Work PC", icon: "🖥️" },
+  { id: "printer", name: "Printer", icon: "🖨️" },
+  { id: "car", name: "Car", icon: "🚗" },
 ];
 
 export const DEFAULT_TOOL_MATRIX = {
@@ -88,19 +142,19 @@ export const DEFAULT_TOOL_MATRIX = {
 };
 
 export const DEFAULT_WEEKDAY_BLOCKS = [
-  { id: "morning", tag: "morning", name: "Morning", start: 360, end: 480, color: "#C8942A", icon: "\u2600\uFE0F", loc: "home" },
-  { id: "biz1", tag: "biz", name: "Biz", start: 480, end: 720, color: "#2E4A7A", icon: "\uD83D\uDCBC", loc: "work" },
-  { id: "lunch", tag: "lunch", name: "Lunch", start: 720, end: 780, color: "#2D6A4F", icon: "\uD83C\uDF7D\uFE0F", loc: "work" },
-  { id: "biz2", tag: "biz", name: "Biz", start: 780, end: 1020, color: "#2E4A7A", icon: "\uD83D\uDCBC", loc: "work" },
-  { id: "evening", tag: "evening", name: "Evening", start: 1020, end: 1260, color: "#9E6B3B", icon: "\uD83C\uDF19", loc: "home" },
-  { id: "night", tag: "night", name: "Night", start: 1260, end: 1380, color: "#475569", icon: "\uD83C\uDF11", loc: "home" },
+  { id: "morning", tag: "morning", name: "Morning", start: 360, end: 480, color: "#C8942A", icon: "☀️", loc: "home" },
+  { id: "biz1", tag: "biz", name: "Biz", start: 480, end: 720, color: "#2E4A7A", icon: "💼", loc: "work" },
+  { id: "lunch", tag: "lunch", name: "Lunch", start: 720, end: 780, color: "#2D6A4F", icon: "🍽️", loc: "work" },
+  { id: "biz2", tag: "biz", name: "Biz", start: 780, end: 1020, color: "#2E4A7A", icon: "💼", loc: "work" },
+  { id: "evening", tag: "evening", name: "Evening", start: 1020, end: 1260, color: "#9E6B3B", icon: "🌙", loc: "home" },
+  { id: "night", tag: "night", name: "Night", start: 1260, end: 1380, color: "#475569", icon: "🌑", loc: "home" },
 ];
 
 export const DEFAULT_WEEKEND_BLOCKS = [
-  { id: "morning", tag: "morning", name: "Morning", start: 420, end: 720, color: "#C8942A", icon: "\u2600\uFE0F", loc: "home" },
-  { id: "afternoon", tag: "afternoon", name: "Afternoon", start: 720, end: 1020, color: "#C8942A", icon: "\uD83C\uDF24\uFE0F", loc: "home" },
-  { id: "evening", tag: "evening", name: "Evening", start: 1020, end: 1260, color: "#9E6B3B", icon: "\uD83C\uDF19", loc: "home" },
-  { id: "night", tag: "night", name: "Night", start: 1260, end: 1380, color: "#475569", icon: "\uD83C\uDF11", loc: "home" },
+  { id: "morning", tag: "morning", name: "Morning", start: 420, end: 720, color: "#C8942A", icon: "☀️", loc: "home" },
+  { id: "afternoon", tag: "afternoon", name: "Afternoon", start: 720, end: 1020, color: "#C8942A", icon: "🌤️", loc: "home" },
+  { id: "evening", tag: "evening", name: "Evening", start: 1020, end: 1260, color: "#9E6B3B", icon: "🌙", loc: "home" },
+  { id: "night", tag: "night", name: "Night", start: 1260, end: 1380, color: "#475569", icon: "🌑", loc: "home" },
 ];
 
 export const DEFAULT_TIME_BLOCKS = {
@@ -111,12 +165,12 @@ export const DEFAULT_TIME_BLOCKS = {
 
 export const DEFAULT_SCHEDULE_TEMPLATES = {
   weekday: {
-    name: "Weekday", icon: "\uD83C\uDFE2", system: true,
+    name: "Weekday", icon: "🏢", system: true,
     blocks: DEFAULT_WEEKDAY_BLOCKS.map(function(b) { return Object.assign({}, b); }),
     locOverrides: {}
   },
   weekend: {
-    name: "Weekend", icon: "\uD83C\uDFE0", system: true,
+    name: "Weekend", icon: "🏠", system: true,
     blocks: DEFAULT_WEEKEND_BLOCKS.map(function(b) { return Object.assign({}, b); }),
     locOverrides: {}
   }
@@ -133,9 +187,9 @@ export const DEFAULT_WEEKLY_SCHEDULE = {
 };
 
 export const WHEN_TAG_ICONS = {
-  morning: "\u2600\uFE0F", biz: "\uD83D\uDCBC", lunch: "\uD83C\uDF7D\uFE0F",
-  afternoon: "\uD83C\uDF24\uFE0F", evening: "\uD83C\uDF19", night: "\uD83C\uDF11",
-  fixed: "\uD83D\uDCCC"
+  morning: "☀️", biz: "💼", lunch: "🍽️",
+  afternoon: "🌤️", evening: "🌙", night: "🌑",
+  fixed: "📌"
 };
 
 export function applyDefaults(t) {
@@ -149,10 +203,10 @@ export function locBgTint(locId, alpha) {
 }
 
 var LOC_ICONS = {
-  home: "\uD83C\uDFE0", work: "\uD83C\uDFE2", transit: "\uD83D\uDE97",
-  downtown: "\uD83C\uDFD9\uFE0F", gym: "\uD83C\uDFCB\uFE0F",
-  phone: "\uD83D\uDCF1", personal_pc: "\uD83D\uDCBB", work_pc: "\uD83D\uDCBB",
-  tablet: "\uD83D\uDCF1", car: "\uD83D\uDE97"
+  home: "🏠", work: "🏢", transit: "🚗",
+  downtown: "🏙️", gym: "🏋️",
+  phone: "📱", personal_pc: "💻", work_pc: "💻",
+  tablet: "📱", car: "🚗"
 };
 export function locIcon(locId) {
   return LOC_ICONS[locId] || "";

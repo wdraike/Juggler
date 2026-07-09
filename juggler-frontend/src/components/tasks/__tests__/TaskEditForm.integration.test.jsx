@@ -259,3 +259,92 @@ it('W4: recurring time_window task keeps ± Window visible after external task-p
   // The task title input must reflect the updated prop (confirms the sync effect ran at all)
   expect(screen.getByDisplayValue('Time window task v2')).toBeInTheDocument();
 });
+
+// ── 999.1110: editable recurrence anchor — "Next Cycle Starts" (David 2026-07-04) ──
+// The anchor (nextStart / rollingAnchor / nextOccurrenceAnchor) previously had no
+// UI/API path once set — editing 'Recurrence starts' is silently a no-op
+// post-first-completion because getAnchor prefers the anchor. These tests cover
+// the new control: render, save payload, and pattern-snap validation.
+
+function openRecurrenceCollapse() {
+  localStorage.clear();
+  localStorage.setItem('juggler_task_detail_collapse', JSON.stringify({
+    when: true, when_recurrence: true
+  }));
+}
+
+var WEEKLY_MONDAY_TASK = Object.assign({}, BASE_TASK, {
+  id: 'trec', text: 'Weekly report',
+  recurring: true,
+  recur: { type: 'weekly', days: 'M' },
+  nextOccurrenceAnchor: '2026-07-13', // a Monday
+});
+
+function renderAnchorTask(task, onUpdate) {
+  render(<TaskEditForm task={task} status="todo" onUpdate={onUpdate || function() {}} onStatusChange={function() {}}
+    onDelete={function() {}} onClose={function() {}} darkMode={false} isMobile={false}
+    locations={[]} tools={[]} uniqueTags={[]} allProjectNames={[]}
+    scheduleTemplates={[]} templateDefaults={{}} tempUnitPref="F"
+  />);
+}
+
+it('999.1110: "Next Cycle Starts" control renders for an existing recurring task, initialized from the anchor', function() {
+  openRecurrenceCollapse();
+  renderAnchorTask(WEEKLY_MONDAY_TASK);
+  var input = screen.getByLabelText('Next Cycle Starts');
+  expect(input).toBeInTheDocument();
+  expect(input.value).toBe('2026-07-13');
+});
+
+it('999.1110: control is NOT rendered in create mode (no anchor exists before first completion)', function() {
+  openRecurrenceCollapse();
+  render(<TaskEditForm task={null} status="todo" onUpdate={function() {}} onStatusChange={function() {}}
+    onDelete={function() {}} onClose={function() {}} darkMode={false} isMobile={false}
+    locations={[]} tools={[]} uniqueTags={[]} allProjectNames={[]}
+    scheduleTemplates={[]} templateDefaults={{}} tempUnitPref="F"
+    mode="create" onCreate={function() {}}
+  />);
+  expect(screen.queryByLabelText('Next Cycle Starts')).not.toBeInTheDocument();
+});
+
+it('999.1110: saving an edited anchor sends nextStart in the update payload', async function() {
+  openRecurrenceCollapse();
+  var onUpdate = jest.fn().mockResolvedValue(undefined);
+  renderAnchorTask(WEEKLY_MONDAY_TASK, onUpdate);
+  var input = screen.getByLabelText('Next Cycle Starts');
+  // 2026-07-20 is also a Monday — valid for the pattern, no snap.
+  fireEvent.change(input, { target: { value: '2026-07-20' } });
+  expect(input.value).toBe('2026-07-20');
+  var saveButton = screen.getByText(/Save/);
+  await act(async function() {
+    fireEvent.click(saveButton);
+  });
+  expect(onUpdate).toHaveBeenCalledTimes(1);
+  expect(onUpdate).toHaveBeenCalledWith('trec', expect.objectContaining({ nextStart: '2026-07-20' }));
+});
+
+it('999.1110 VALIDATION: a pattern-invalid date snaps forward to the next date the recur pattern allows, with a notice', function() {
+  openRecurrenceCollapse();
+  renderAnchorTask(WEEKLY_MONDAY_TASK);
+  var input = screen.getByLabelText('Next Cycle Starts');
+  // 2026-07-22 is a Wednesday; the pattern is Mondays-only → snap to Mon 2026-07-27.
+  fireEvent.change(input, { target: { value: '2026-07-22' } });
+  expect(input.value).toBe('2026-07-27');
+  expect(screen.getByRole('status').textContent).toMatch(/Adjusted to 2026-07-27/);
+});
+
+it('999.1110: rolling recur type accepts ANY date without snapping (no pattern constraint)', function() {
+  openRecurrenceCollapse();
+  var rollingTask = Object.assign({}, BASE_TASK, {
+    id: 'troll', text: 'Water plants',
+    recurring: true,
+    recur: { type: 'rolling', every: 7, unit: 'days' },
+    rollingAnchor: '2026-07-01',
+  });
+  renderAnchorTask(rollingTask);
+  var input = screen.getByLabelText('Next Cycle Starts');
+  expect(input.value).toBe('2026-07-01');
+  fireEvent.change(input, { target: { value: '2026-07-22' } }); // arbitrary Wednesday
+  expect(input.value).toBe('2026-07-22');
+  expect(screen.queryByRole('status')).not.toBeInTheDocument();
+});

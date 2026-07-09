@@ -6,39 +6,17 @@
 import React from 'react';
 import { TERMINAL_STATUSES } from '../../shared/task-status';
 import { formatDateKey } from '../../scheduler/dateHelpers';
+import { STATUS_OPTIONS, canTransitionTo } from '../../state/constants';
 
-// Labels are imperative verbs — they describe the ACTION clicking the button
-// performs, not the state the task ends up in. Keeps the UI consistent
-// ("Complete this task") instead of mixing past-participles ("Done", "Cancelled")
-// with imperatives ("Cancel", "Pause").
-var ALL_STATUSES = [
-  { value: '',       icon: '\u25CB', label: 'Open',     activeBg: '#F5F0E8', activeBgDark: '#2C2B28', color: '#5C5A55', colorDark: '#B0A898' },
-  { value: 'done',   icon: '\u2713', label: 'Complete', activeBg: '#D1FAE5', activeBgDark: '#0A3622', color: '#2D6A4F', colorDark: '#6EE7B7' },
-  { value: 'wip',    icon: '\u231B', label: 'Start',    activeBg: '#FEF3C7', activeBgDark: '#3A2A08', color: '#9E6B3B', colorDark: '#E8C878' },
-  { value: 'cancel', icon: '\u2715', label: 'Cancel',   activeBg: '#FEE2E2', activeBgDark: '#3A0A10', color: '#8B2635', colorDark: '#FCA5A5' },
-  { value: 'skip',   icon: '\u21ED', label: 'Skip',     activeBg: '#F1F5F9', activeBgDark: '#1E293B', color: '#475569', colorDark: '#94A3B8' },
-  { value: 'pause',  icon: '\u23F8', label: 'Pause',    activeBg: '#E0E7FF', activeBgDark: '#1E1B4B', color: '#4338CA', colorDark: '#A5B4FC' },
-];
-
-// Valid status transitions. A button is disabled if the transition from the
-// current status to the button's status is not in this map. A status always
-// maps to the set of statuses it can transition TO (not including itself).
-//   "" (open) → done, wip, skip, cancel, pause
-//   wip       → done, "" (reopen), skip, cancel
-//   terminal  → "" (reopen only)
-var VALID_TRANSITIONS = {
-  '':      { 'done': 1, 'wip': 1, 'skip': 1, 'cancel': 1, 'pause': 1 },
-  'wip':   { 'done': 1, '': 1, 'skip': 1, 'cancel': 1 },
-  'done':  { '': 1 },
-  'cancel': { '': 1 },
-  'skip':  { '': 1 },
-  'pause': { '': 1 },
-};
-
-function canTransitionTo(current, target) {
-  var map = VALID_TRANSITIONS[current || ''];
-  return !!(map && map[target]);
-}
+// 999.1231: descriptors (glyph/label/tokens) and the transition map both come
+// from the canonical table in state/constants.js — this component previously
+// forked its own ALL_STATUSES/VALID_TRANSITIONS copies (drifting on skip
+// glyph/palette and the open glyph, and TaskDetailHeader forked a third,
+// wip-less transition map). Labels are imperative verbs — they describe the
+// ACTION clicking the button performs, not the state the task ends up in.
+// A button is disabled if canTransitionTo(current, target) is false; terminal
+// statuses (incl. backend-set cancelled/missed) allow reopen ("") only.
+var ALL_STATUSES = STATUS_OPTIONS;
 
 // juggler-cal-history Plan C — D-15: terminal transitions require scheduled_at.
 // Disable done/skip/cancel buttons when the task has no scheduled time. Backend 400 guard
@@ -124,7 +102,7 @@ export default React.memo(function StatusToggle({ value, onChange, onDelete, dar
               fontSize: fontSize,
               fontWeight: 700,
               padding: 0,
-              background: active ? (darkMode ? s.activeBgDark : s.activeBg) : (darkMode ? '#1E293B' : '#F5F0E8'),
+              background: active ? (darkMode ? s.bgDark : s.bg) : (darkMode ? '#1E293B' : '#F5F0E8'),
               color: active ? (darkMode ? s.colorDark : s.color) : (darkMode ? '#64748B' : '#6B7280'),
               opacity: isDisabled ? 0.45 : 1,
               transition: 'background 0.1s, color 0.1s, border-color 0.1s',

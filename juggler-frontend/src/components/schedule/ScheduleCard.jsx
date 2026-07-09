@@ -6,7 +6,7 @@
 
 import React from 'react';
 import './ScheduleCard.css';
-import { PRI_COLORS, locIcon, WHEN_TAG_ICONS, DEFAULT_TOOLS, isTerminalStatus, PAST_OPACITY } from '../../state/constants';
+import { PRI_COLORS, locIcon, WHEN_TAG_ICONS, DEFAULT_TOOLS, isTerminalStatus, PAST_OPACITY, STATUS_MAP } from '../../state/constants';
 import { formatDateKey } from '../../scheduler/dateHelpers';
 import { getTheme } from '../../theme/colors';
 import { getTaskIcon } from '../../utils/taskIcon';
@@ -62,7 +62,10 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
   var durLabel = item.splitTotal > 1
     ? item.dur + ' of ' + task.dur + 'm'
     : (task.dur >= 60 ? Math.round(task.dur / 60 * 10) / 10 + 'h' : task.dur + 'm');
-  var statusIcon = status === 'done' ? '\u2713' : status === 'wip' ? '\u231B' : status === 'cancel' ? '\u2715' : status === 'skip' ? '\u21ED' : status === 'pause' ? '\u23F8' : null;
+  // 999.1231: icon comes from the canonical descriptor table \u2014 the old inline
+  // chain here was a third fork and rendered NOTHING for backend-set statuses
+  // (missed/cancelled). Open ('') has no icon on the card.
+  var statusIcon = (status && STATUS_MAP[status] && STATUS_MAP[status].icon) || null;
   var startLabel = item.start != null ? formatStartTime(item.start) : null;
   var typeBadges = [];
   if (task.recurring) typeBadges.push({ icon: '\uD83D\uDD01', title: 'Recurring — recurring daily task' });
