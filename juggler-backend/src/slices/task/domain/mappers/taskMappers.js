@@ -70,6 +70,14 @@ var toDateISO = dateHelpers.toDateISO;
 var fromDateISO = dateHelpers.fromDateISO;
 var localToUtc = dateHelpers.localToUtc;
 
+// ponytail: guard against MySQL zero-dates (0000-00-00) which produce
+// Invalid Date objects — isNaN(d.getTime()) is true for those.
+function isValidDate(val) {
+  if (val === null || val === undefined) return false;
+  var d = val instanceof Date ? val : new Date(val);
+  return !isNaN(d.getTime());
+}
+
 // isTerminalStatus predicate — characterized identical to lib/task-status via the
 // TaskStatus VO's TERMINAL set (rowToTask uses it for the terminal-clamp below).
 function isTerminalStatus(s) {
@@ -448,10 +456,13 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
   // to updated_at (completion time) or now, whichever is earlier.
   if (row.scheduled_at && isTerminalStatus(row.status)) {
     var sa = new Date(row.scheduled_at);
-    var now = new Date();
-    if (sa > now) {
-      var ua = row.updated_at ? new Date(row.updated_at) : now;
-      row.scheduled_at = ua <= now ? ua : now;
+    if (isNaN(sa.getTime())) { row.scheduled_at = null; }
+    else {
+      var now = new Date();
+      if (sa > now) {
+        var ua = (row.updated_at && isValidDate(row.updated_at)) ? new Date(row.updated_at) : now;
+        row.scheduled_at = ua <= now ? ua : now;
+      }
     }
   }
 
@@ -583,7 +594,10 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
     // runSchedule.js (W3, via the task slice facade) share exactly ONE implementation.
     overdue: computeOverdueForRow(row, timezone, nowInfo),
     slackMins: row.slack_mins != null ? Number(row.slack_mins) : null,
-    createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
+    // ponytail: guard against MySQL zero-dates (0000-00-00) which produce
+    // Invalid Date → toISOString() throws RangeError, poisoning the entire
+    // task list response. Return null instead of crashing.
+    createdAt: row.created_at && isValidDate(row.created_at) ? new Date(row.created_at).toISOString() : null,
     recurStart: row.recur_start || null,
     recurEnd: row.recur_end || null,
     // Multiday all-day task support: endDate for tasks spanning multiple days

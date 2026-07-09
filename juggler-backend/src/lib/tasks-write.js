@@ -128,6 +128,13 @@ function pickInstance(row, id, masterId, occOrdinal) {
     // column/insert-time default — computed-on-read only (taskMappers.js).
     generated: row.generated ? 1 : 0
   };
+  // ponytail: copy created_at/updated_at from the row so task_instances gets
+  // valid JS Dates instead of relying on MySQL DEFAULT CURRENT_TIMESTAMP —
+  // which silently stores 0000-00-00 in non-strict mode when Knex sends an
+  // explicit NULL. pickMaster already copies these via MASTER_FIELDS; this
+  // mirrors that for the instance table.
+  if (row.created_at !== undefined) out.created_at = row.created_at;
+  if (row.updated_at !== undefined) out.updated_at = row.updated_at;
   // Derived local-tz caches — written by the scheduler when placing chunks
   if (row.date !== undefined) out.date = row.date;
   if (row.day !== undefined) out.day = row.day;
