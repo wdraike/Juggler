@@ -73,10 +73,10 @@ export default function SettingsPanel({ onClose, darkMode, config, allProjectNam
 
         {/* Content */}
         <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
-          {tab === 'locations' && <LocationsTab config={config} theme={theme} />}
-          {tab === 'tools' && <ToolsTab config={config} theme={theme} />}
+          {tab === 'locations' && <LocationsTab config={config} theme={theme} darkMode={darkMode} isMobile={isMobile} />}
+          {tab === 'tools' && <ToolsTab config={config} theme={theme} darkMode={darkMode} isMobile={isMobile} />}
           {tab === 'matrix' && <MatrixTab config={config} theme={theme} />}
-          {tab === 'projects' && <ProjectsTab config={config} theme={theme} allProjectNames={allProjectNames} allTasks={allTasks || []} onRenameProject={onRenameProject} />}
+          {tab === 'projects' && <ProjectsTab config={config} theme={theme} darkMode={darkMode} isMobile={isMobile} allProjectNames={allProjectNames} allTasks={allTasks || []} onRenameProject={onRenameProject} />}
           {tab === 'preferences' && <PreferencesTab config={config} theme={theme} />}
           {tab === 'notifications' && <NotificationsTab theme={theme} showToast={showToast} />}
           {tab === 'templates' && <UnifiedTemplateTab config={config} theme={theme} showToast={showToast} allTasks={allTasks} />}

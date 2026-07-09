@@ -4,6 +4,17 @@
 
 import React from 'react';
 import { useAuth } from './AuthProvider';
+import useDocumentTitle from '../../hooks/useDocumentTitle';
+
+// 999.1237 — WCAG AA text variants of the brand gold/bronze. #C8942A measures
+// 2.40:1 on the parchment page bg (#F5F0E8) and 2.61:1 on cards (#FDFAF5), and
+// #9E6B3B measures 4.01:1 — all below the 4.5:1 AA floor for normal text. All
+// TEXT rendered on light backgrounds uses these darker shades instead;
+// #C8942A stays for borders, rules, backgrounds (decorative, plus the CTA
+// background where navy-on-gold measures 5.19:1) and for text on the navy
+// (#1A2B4A) MCP section, where it measures 4.71:1.
+var GOLD_TEXT = '#82600F';   // 5.10:1 on #F5F0E8, 5.56:1 on #FDFAF5
+var BRONZE_TEXT = '#8A5C33'; // 5.06:1 on #F5F0E8, 5.51:1 on #FDFAF5
 
 var FEATURES = [
   { icon: '\uD83C\uDFAF', title: 'Auto-Scheduling', desc: 'Drop in your tasks. We find the slots. Priorities, deadlines, locations — handled.' },
@@ -43,6 +54,8 @@ function GoldRule() {
 export default function LoginPage() {
   var { login } = useAuth();
   var [loginError, setLoginError] = React.useState(null);
+  // 999.1237 — mandated marketing-page tab title: "Sign In — StriveRS by Raike & Sons"
+  useDocumentTitle('Sign In', { marketing: true });
 
   function handleLogin() {
     setLoginError(null);
@@ -56,7 +69,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div style={{
+    <div className="rs-login" style={{
       minHeight: '100vh',
       background: '#F5F0E8',
       fontFamily: "'Inter', system-ui, sans-serif",
@@ -73,6 +86,13 @@ export default function LoginPage() {
         .rs-step:hover { border-top-color: #C8942A !important; transform: translateY(-3px); box-shadow: 0 8px 24px rgba(26,43,74,0.1) !important; }
         .rs-view:hover { background: #1A2B4A !important; color: #FDFAF5 !important; }
         .rs-feature, .rs-step { transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.2s !important; }
+        /* 999.1237 — the rsFadeUp opacity animation renders the whole page
+           semi-transparent ("washed out") for up to ~1.2s after load (0.6s
+           duration + staggered delays, fill-mode both). Honor reduced-motion:
+           render at full contrast immediately, no fade. */
+        @media (prefers-reduced-motion: reduce) {
+          .rs-login, .rs-login * { animation: none !important; transition: none !important; }
+        }
       `}</style>
 
       {/* Parchment texture overlay */}
@@ -117,17 +137,17 @@ export default function LoginPage() {
             fontFamily: "'Inter', sans-serif",
             fontSize: 10, fontWeight: 700,
             letterSpacing: '0.2em', textTransform: 'uppercase',
-            color: '#C8942A',
+            color: GOLD_TEXT,
             border: '1.5px solid #C8942A',
             padding: '4px 14px',
-            borderRadius: 1, opacity: 0.85,
+            borderRadius: 1, // opacity 0.85 removed — attenuated AA text contrast (999.1237)
             marginBottom: 24
           }}>Est. 2025</div>
 
           {/* Logo wordmark */}
           <div style={{ marginBottom: 8 }}>
             <span style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700, color: '#1A2B4A', fontSize: 48, letterSpacing: '-0.01em' }}>Raike</span>
-            <span style={{ fontFamily: "'Cormorant Garamond', serif", fontStyle: 'italic', fontWeight: 300, color: '#C8942A', fontSize: 60, lineHeight: 1, margin: '0 2px' }}>&amp;</span>
+            <span style={{ fontFamily: "'Cormorant Garamond', serif", fontStyle: 'italic', fontWeight: 300, color: GOLD_TEXT, fontSize: 60, lineHeight: 1, margin: '0 2px' }}>&amp;</span>
             <span style={{ fontFamily: "'Playfair Display', serif", fontWeight: 400, color: '#1A2B4A', fontSize: 48, letterSpacing: '-0.01em' }}>Sons</span>
           </div>
 
@@ -138,7 +158,7 @@ export default function LoginPage() {
           <p style={{
             fontFamily: "'Cormorant Garamond', serif",
             fontStyle: 'italic', fontSize: 14,
-            fontWeight: 300, color: '#9E6B3B',
+            fontWeight: 300, color: BRONZE_TEXT,
             letterSpacing: '0.08em',
             marginBottom: 4
           }}>
@@ -149,13 +169,13 @@ export default function LoginPage() {
           <div style={{
             fontFamily: "'Inter', sans-serif", fontSize: 9, fontWeight: 600,
             letterSpacing: '0.3em', textTransform: 'uppercase',
-            color: '#C8942A', opacity: 0.7, marginBottom: 20
+            color: GOLD_TEXT, marginBottom: 20 // opacity 0.7 removed — attenuated AA text contrast (999.1237)
           }}>Est. 2025</div>
 
           {/* Ornamental divider */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '16px auto', maxWidth: 300 }}>
             <span style={{ flex: 1, height: 1, background: '#C8942A', opacity: 0.4 }} />
-            <span style={{ fontSize: '0.5rem', color: '#C8942A', letterSpacing: 4 }}>&#x25C6;</span>
+            <span style={{ fontSize: '0.5rem', color: GOLD_TEXT, letterSpacing: 4 }}>&#x25C6;</span>
             <span style={{ flex: 1, height: 1, background: '#C8942A', opacity: 0.4 }} />
           </div>
 
@@ -164,14 +184,14 @@ export default function LoginPage() {
             <span style={{
               fontFamily: "'Playfair Display', serif",
               fontSize: 28, fontWeight: 700, color: '#1A2B4A', letterSpacing: '-0.02em'
-            }}>Strive<span style={{ color: '#C8942A' }}>RS</span></span>
+            }}>Strive<span style={{ color: GOLD_TEXT }}>RS</span></span>
           </div>
 
           {/* Product tagline */}
           <p style={{
             fontFamily: "'Cormorant Garamond', serif",
             fontStyle: 'italic', fontSize: 18,
-            fontWeight: 300, color: '#C8942A',
+            fontWeight: 300, color: GOLD_TEXT,
             letterSpacing: '0.02em',
             marginBottom: 20
           }}>
@@ -208,7 +228,7 @@ export default function LoginPage() {
           <div style={{
             fontFamily: "'Inter', sans-serif", fontSize: 10, fontWeight: 600,
             letterSpacing: '0.25em', textTransform: 'uppercase',
-            color: '#C8942A', textAlign: 'center', marginBottom: 12
+            color: GOLD_TEXT, textAlign: 'center', marginBottom: 12
           }}>How it works</div>
           <h2 style={{
             textAlign: 'center', fontFamily: "'EB Garamond', serif",
@@ -250,7 +270,7 @@ export default function LoginPage() {
           <div style={{
             fontFamily: "'Inter', sans-serif", fontSize: 10, fontWeight: 600,
             letterSpacing: '0.25em', textTransform: 'uppercase',
-            color: '#C8942A', textAlign: 'center', marginBottom: 12
+            color: GOLD_TEXT, textAlign: 'center', marginBottom: 12
           }}>Features</div>
           <h2 style={{
             textAlign: 'center', fontFamily: "'EB Garamond', serif",
@@ -309,7 +329,7 @@ export default function LoginPage() {
               <div style={{
                 fontFamily: "'Inter', sans-serif", fontSize: 9, fontWeight: 700,
                 letterSpacing: '0.3em', textTransform: 'uppercase',
-                color: '#C8942A', marginBottom: 12
+                color: '#C8942A', marginBottom: 12 // gold-on-navy: 4.71:1 — keep brand gold here (999.1237)
               }}>Game Changer</div>
               <h3 style={{
                 fontFamily: "'Playfair Display', serif",
@@ -405,8 +425,8 @@ export default function LoginPage() {
             position: 'relative'
           }}>
             {/* Corner ornaments */}
-            <span style={{ position: 'absolute', top: 8, left: 10, color: '#C8942A', fontSize: 9, opacity: 0.6 }}>{'\u2726'}</span>
-            <span style={{ position: 'absolute', bottom: 8, right: 10, color: '#C8942A', fontSize: 9, opacity: 0.6 }}>{'\u2726'}</span>
+            <span style={{ position: 'absolute', top: 8, left: 10, color: GOLD_TEXT, fontSize: 9, opacity: 0.6 }}>{'\u2726'}</span>
+            <span style={{ position: 'absolute', bottom: 8, right: 10, color: GOLD_TEXT, fontSize: 9, opacity: 0.6 }}>{'\u2726'}</span>
             <div style={{ flex: '1 1 280px' }}>
               <h3 style={{
                 fontFamily: "'EB Garamond', serif",
@@ -421,7 +441,7 @@ export default function LoginPage() {
             <div style={{ flex: '0 0 auto', display: 'flex', gap: 6 }}>
               {[
                 { label: 'AM', color: '#1A2B4A', icon: '\uD83C\uDFE0', h: 44 },
-                { label: 'Lunch', color: '#9E6B3B', icon: '\uD83C\uDF55', h: 20 },
+                { label: 'Lunch', color: BRONZE_TEXT, icon: '\uD83C\uDF55', h: 20 },
                 { label: 'PM', color: '#2E4A7A', icon: '\uD83C\uDFE2', h: 44 },
                 { label: 'Eve', color: '#5C5A55', icon: '\uD83C\uDFCB\uFE0F', h: 28 },
               ].map(function(b) {
@@ -448,7 +468,7 @@ export default function LoginPage() {
           <div style={{
             fontFamily: "'Inter', sans-serif", fontSize: 10, fontWeight: 600,
             letterSpacing: '0.25em', textTransform: 'uppercase',
-            color: '#C8942A', textAlign: 'center', marginBottom: 12
+            color: GOLD_TEXT, textAlign: 'center', marginBottom: 12
           }}>The Family</div>
           <h2 style={{
             textAlign: 'center', fontFamily: "'Playfair Display', serif",
@@ -464,7 +484,7 @@ export default function LoginPage() {
           </h2>
           <p style={{
             textAlign: 'center', fontFamily: "'Cormorant Garamond', serif",
-            fontStyle: 'italic', fontSize: 15, color: '#C8942A', marginBottom: 24
+            fontStyle: 'italic', fontSize: 15, color: GOLD_TEXT, marginBottom: 24
           }}>
             RS = Raike &amp; Sons. Always.
           </p>
@@ -480,18 +500,18 @@ export default function LoginPage() {
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 4 }}>
                 <span style={{
                   fontFamily: "'Playfair Display', serif",
-                  fontSize: 22, fontWeight: 700, color: '#9E6B3B'
+                  fontSize: 22, fontWeight: 700, color: BRONZE_TEXT
                 }}>Strive<span style={{ color: '#1A2B4A' }}>RS</span></span>
                 <span style={{
                   fontFamily: "'Inter', sans-serif", fontSize: 9,
                   fontWeight: 600, letterSpacing: '0.15em',
-                  textTransform: 'uppercase', color: '#9E6B3B',
+                  textTransform: 'uppercase', color: BRONZE_TEXT,
                   border: '1px solid #9E6B3B', padding: '1px 6px', borderRadius: 1
                 }}>Strive</span>
               </div>
               <div style={{
                 fontFamily: "'Cormorant Garamond', serif",
-                fontStyle: 'italic', fontSize: 14, color: '#C8942A', marginBottom: 12
+                fontStyle: 'italic', fontSize: 14, color: GOLD_TEXT, marginBottom: 12
               }}>Never stops striving.</div>
               <p style={{ fontSize: 13, color: '#5C5A55', lineHeight: 1.6 }}>
                 AI task manager that never sits still. Tasks dispatched, priorities managed,
@@ -500,7 +520,7 @@ export default function LoginPage() {
               <div style={{
                 marginTop: 12, fontFamily: "'Inter', sans-serif",
                 fontSize: 10, fontWeight: 600, letterSpacing: '0.1em',
-                textTransform: 'uppercase', color: '#9E6B3B'
+                textTransform: 'uppercase', color: BRONZE_TEXT
               }}>Available now</div>
             </div>
             {/* ClimbRS */}
@@ -511,18 +531,18 @@ export default function LoginPage() {
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 4 }}>
                 <span style={{
                   fontFamily: "'Playfair Display', serif",
-                  fontSize: 22, fontWeight: 700, color: '#C8942A'
+                  fontSize: 22, fontWeight: 700, color: GOLD_TEXT
                 }}>Climb<span style={{ color: '#1A2B4A' }}>RS</span></span>
                 <span style={{
                   fontFamily: "'Inter', sans-serif", fontSize: 9,
                   fontWeight: 600, letterSpacing: '0.15em',
-                  textTransform: 'uppercase', color: '#C8942A',
+                  textTransform: 'uppercase', color: GOLD_TEXT,
                   border: '1px solid #C8942A', padding: '1px 6px', borderRadius: 1
                 }}>Climbers</span>
               </div>
               <div style={{
                 fontFamily: "'Cormorant Garamond', serif",
-                fontStyle: 'italic', fontSize: 14, color: '#C8942A', marginBottom: 12
+                fontStyle: 'italic', fontSize: 14, color: GOLD_TEXT, marginBottom: 12
               }}>Always climbing.</div>
               <p style={{ fontSize: 13, color: '#5C5A55', lineHeight: 1.6 }}>
                 AI career tool that takes your raw experience and shapes it into something
@@ -531,7 +551,7 @@ export default function LoginPage() {
               <div style={{
                 marginTop: 12, fontFamily: "'Inter', sans-serif",
                 fontSize: 10, fontWeight: 600, letterSpacing: '0.1em',
-                textTransform: 'uppercase', color: '#C8942A'
+                textTransform: 'uppercase', color: GOLD_TEXT
               }}>Coming soon</div>
             </div>
           </div>
@@ -581,11 +601,11 @@ export default function LoginPage() {
         <div style={{
           textAlign: 'center', paddingBottom: 32, fontSize: 11, color: '#5C5A55'
         }}>
-          <span style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700, color: '#9E6B3B' }}>Raike</span>
-          <span style={{ fontFamily: "'Cormorant Garamond', serif", fontStyle: 'italic', color: '#C8942A', fontSize: 13 }}> &amp; </span>
-          <span style={{ fontFamily: "'Playfair Display', serif", fontWeight: 400, color: '#9E6B3B' }}>Sons</span>
+          <span style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700, color: BRONZE_TEXT }}>Raike</span>
+          <span style={{ fontFamily: "'Cormorant Garamond', serif", fontStyle: 'italic', color: GOLD_TEXT, fontSize: 13 }}> &amp; </span>
+          <span style={{ fontFamily: "'Playfair Display', serif", fontWeight: 400, color: BRONZE_TEXT }}>Sons</span>
           <span style={{ margin: '0 8px', color: '#E8E0D0' }}>&mdash;</span>
-          <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 9, letterSpacing: '0.3em', textTransform: 'uppercase', color: '#C8942A' }}>Est. 2025</span>
+          <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 9, letterSpacing: '0.3em', textTransform: 'uppercase', color: GOLD_TEXT }}>Est. 2025</span>
         </div>
 
       </div>

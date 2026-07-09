@@ -2,7 +2,7 @@
  * useConfig — manages locations, tools, matrix, schedule templates, preferences
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import apiClient, { TZ_OVERRIDE_KEY, USER_TZ_KEY } from '../services/apiClient';
 import {
   DEFAULT_LOCATIONS, DEFAULT_TOOLS, DEFAULT_TOOL_MATRIX,
@@ -103,7 +103,21 @@ function migrateToUnified(timeBlocks, locSchedules, locScheduleDefaults) {
   return result;
 }
 
-export default function useConfig() {
+export default function useConfig(onSaveError) {
+  // 999.1225 — persistence-failure reporter. Config saves used to swallow
+  // rejections (console.error only), silently keeping optimistic UI state the
+  // server never persisted. Held in a ref so the wrapped setters (useCallback
+  // with [] deps) always see the caller's latest callback without identity
+  // churn; caller (AppLayout) routes it to showToast.
+  var onSaveErrorRef = useRef(null);
+  onSaveErrorRef.current = onSaveError || null;
+  var reportSaveError = useCallback(function(what, error) {
+    var serverMsg = error && error.response && error.response.data && error.response.data.error;
+    if (onSaveErrorRef.current) {
+      onSaveErrorRef.current(serverMsg || ('Failed to save ' + what + ' — your change was not persisted'), error);
+    }
+  }, []);
+
   var [locations, setLocations] = useState(DEFAULT_LOCATIONS);
   var [tools, setTools] = useState(DEFAULT_TOOLS);
   var [toolMatrix, setToolMatrix] = useState(DEFAULT_TOOL_MATRIX);
@@ -243,9 +257,12 @@ export default function useConfig() {
       return resp.data;
     } catch (error) {
       console.error('Failed to save config ' + key + ':', error);
+      // 999.1225 — surface the failure; callers keep optimistic state, so the
+      // user must at least know the save was rejected.
+      reportSaveError(key.replace(/_/g, ' '), error);
       return null;
     }
-  }, []);
+  }, [reportSaveError]);
 
   // Wrapped setters that auto-persist
   var updateToolMatrix = useCallback(function(val) {
@@ -335,23 +352,33 @@ export default function useConfig() {
   }, [saveConfig]);
 
   var updateLocations = useCallback(async function(locs) {
+    // 999.1225 — capture the pre-update value (functional updater) so a server
+    // rejection rolls the optimistic state back instead of silently keeping it.
+    var prevLocs;
+    setLocations(function(cur) { prevLocs = cur; return locs; });
     registerLocations(locs);
-    setLocations(locs);
     try {
       await apiClient.put('/locations', { locations: locs });
     } catch (error) {
       console.error('Failed to save locations:', error);
+      setLocations(prevLocs);
+      registerLocations(prevLocs);
+      reportSaveError('locations', error);
     }
-  }, []);
+  }, [reportSaveError]);
 
   var updateTools = useCallback(async function(tls) {
-    setTools(tls);
+    // 999.1225 — rollback-on-reject, same pattern as updateLocations.
+    var prevTools;
+    setTools(function(cur) { prevTools = cur; return tls; });
     try {
       await apiClient.put('/tools', { tools: tls });
     } catch (error) {
       console.error('Failed to save tools:', error);
+      setTools(prevTools);
+      reportSaveError('tools', error);
     }
-  }, []);
+  }, [reportSaveError]);
 
   return {
     locations, tools, toolMatrix, timeBlocks, projects,

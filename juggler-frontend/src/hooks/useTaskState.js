@@ -62,6 +62,10 @@ export default function useTaskState() {
   // rapid drags). Maps taskId -> the sequence number of the most recently
   // STARTED updateTask call for that id.
   const writeSeqRef = useRef({});
+  // 999.1225 — same per-task write-sequence guard, but for setStatus's own
+  // optimistic dispatch/rollback (kept separate from writeSeqRef so a status
+  // rollback never suppresses/clobbers an updateTask rollback or vice versa).
+  const statusSeqRef = useRef({});
   // IDs of tasks this client just wrote. The server echoes our writes back
   // over tasks:changed, and without filtering we'd re-fetch them — which
   // races any still-queued writes and flashes the UI back to pre-write
@@ -218,6 +222,22 @@ export default function useTaskState() {
   // Status changes save immediately (not debounced) to prevent race conditions
   // with loadTasks/GCal sync that could overwrite in-memory state
   const setStatus = useCallback((id, val, opts = {}) => {
+    // 999.1225 — capture the pre-change status (and the pre-values of any
+    // taskFields this call is about to overwrite) BEFORE the optimistic
+    // dispatch, mirroring updateTask's REG-44/F3 rollback pattern, so a server
+    // rejection can be rolled back instead of leaving a Done/Cancelled
+    // checkmark the server never recorded.
+    var prevVal = (taskStateRef.current && taskStateRef.current.statuses && taskStateRef.current.statuses[id]) || '';
+    var prevTask = ((taskStateRef.current && taskStateRef.current.tasks) || []).find(function(t) { return t.id === id; });
+    var prevFields = null;
+    if (opts.taskFields && prevTask) {
+      prevFields = {};
+      Object.keys(opts.taskFields).forEach(function(k) { prevFields[k] = prevTask[k]; });
+    }
+    // Per-task monotonic sequence (same guard as updateTask's WARN-2): only
+    // roll back if no NEWER setStatus call for this id has started since.
+    var mySeq = (statusSeqRef.current[id] || 0) + 1;
+    statusSeqRef.current[id] = mySeq;
     dispatch({
       type: 'SET_STATUS',
       id, val,
@@ -249,7 +269,23 @@ export default function useTaskState() {
         }).catch(function() { /* SSE will catch up */ });
       }
       // Placements refresh via SSE schedule:changed
-    }).catch(err => console.error('Failed to save status:', err));
+    }).catch(function(err) {
+      console.error('Failed to save status:', err);
+      // 999.1225 — the server rejected the status change: revert the
+      // optimistic SET_STATUS (guarded: skip if a newer status write for this
+      // id has since started — that call's own outcome is authoritative) and
+      // clear the dirty markers this call minted so the debounced flushSave
+      // doesn't re-send the reverted value.
+      if (statusSeqRef.current[id] === mySeq) {
+        dispatch({ type: 'SET_STATUS', id: id, val: prevVal, taskFields: prevFields || undefined });
+        dispatch({ type: 'CLEAR_DIRTY_STATUS', id: id, taskFields: opts.taskFields });
+      }
+      // Surface the failure instead of swallowing it (JUG-UI-FEEDBACK-STANDARD).
+      if (typeof opts.onError === 'function') {
+        var serverMsg = err && err.response && err.response.data && err.response.data.error;
+        opts.onError(serverMsg || 'Status change failed — change reverted', err);
+      }
+    });
     // If there are also taskFields (e.g. date changes on recurring completion), save those too
     if (opts.taskFields) scheduleSave();
   }, [scheduleSave]);

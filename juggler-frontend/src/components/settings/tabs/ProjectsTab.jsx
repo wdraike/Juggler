@@ -4,8 +4,9 @@
  */
 import React, { useState, useMemo } from 'react';
 import HelpIcon from '../HelpIcon';
+import ConfirmDialog from '../../features/ConfirmDialog';
 
-function ProjectRow({ p, config, theme, onRename, taskCount, canReorder, isFirst, isLast, onMoveUp, onMoveDown }) {
+function ProjectRow({ p, config, theme, onRename, taskCount, canReorder, isFirst, isLast, onMoveUp, onMoveDown, onRequestDelete }) {
   var [editing, setEditing] = useState(false);
   var [editName, setEditName] = useState(p.name);
   var [editColor, setEditColor] = useState(p.color || '#2E4A7A');
@@ -49,14 +50,18 @@ function ProjectRow({ p, config, theme, onRename, taskCount, canReorder, isFirst
       <span style={{ color: theme.text, flex: 1 }}>{p.name}</span>
       <span style={{ fontSize: 11, color: theme.textMuted, minWidth: 28, textAlign: 'right' }}>{taskCount}</span>
       <button onClick={function() { setEditing(true); }} title="Edit project" style={{ border: 'none', background: 'transparent', color: theme.textMuted, cursor: 'pointer', fontSize: 12 }}>&#x270E;</button>
-      <button onClick={async function() { if (!p.id) return; try { var { default: apiClient } = await import('../../../services/apiClient'); await apiClient.delete('/projects/' + p.id); config.setProjects(config.projects.filter(function(x) { return x.id !== p.id; })); } catch (e) { console.error(e); } }} style={{ border: 'none', background: 'transparent', color: theme.redText, cursor: 'pointer', fontSize: 14 }}>&times;</button>
+      <button onClick={function() { if (!p.id) return; onRequestDelete(p); }} title={'Delete project ' + p.name} style={{ border: 'none', background: 'transparent', color: theme.redText, cursor: 'pointer', fontSize: 14 }}>&times;</button>
     </div>
   );
 }
 
-export default function ProjectsTab({ config, theme, allProjectNames, allTasks, onRenameProject }) {
+export default function ProjectsTab({ config, theme, darkMode, isMobile, allProjectNames, allTasks, onRenameProject }) {
   var [newName, setNewName] = useState('');
   var [newColor, setNewColor] = useState('#2E4A7A');
+  // 999.1228 — project delete is irreversible AND detaches every task in the
+  // project; it was the only destructive settings action MORE severe than the
+  // (already-confirmed) single-task delete. Gate it behind ConfirmDialog.
+  var [pendingDelete, setPendingDelete] = useState(null); // project object
   var [sortBy, setSortBy] = useState('custom');
   var [sortDir, setSortDir] = useState('asc');
   var [filter, setFilter] = useState('');
@@ -122,7 +127,7 @@ export default function ProjectsTab({ config, theme, allProjectNames, allTasks, 
         <button onClick={function() { toggleSort('tasks'); }} style={btnStyle(sortBy === 'tasks')}>Tasks{sortBy === 'tasks' ? sortArrow : ''}</button>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 12 }}>
-        {sortedProjects.map(function(p, i) { var canReorder = sortBy === 'custom' && !filter; return <ProjectRow key={p.id || p.name} p={p} config={config} theme={theme} onRename={onRenameProject} taskCount={taskCounts[p.name] || 0} canReorder={canReorder} isFirst={i === 0} isLast={i === sortedProjects.length - 1} onMoveUp={function() { moveProject(p.id, -1); }} onMoveDown={function() { moveProject(p.id, 1); }} />; })}
+        {sortedProjects.map(function(p, i) { var canReorder = sortBy === 'custom' && !filter; return <ProjectRow key={p.id || p.name} p={p} config={config} theme={theme} onRename={onRenameProject} taskCount={taskCounts[p.name] || 0} canReorder={canReorder} isFirst={i === 0} isLast={i === sortedProjects.length - 1} onMoveUp={function() { moveProject(p.id, -1); }} onMoveDown={function() { moveProject(p.id, 1); }} onRequestDelete={setPendingDelete} />; })}
         {sortedTaskOnly.map(function(name) { return (<div key={name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', background: theme.bgTertiary, borderRadius: 6, fontSize: 13, opacity: 0.7 }}><div style={{ width: 12, height: 12, borderRadius: 3, background: theme.textMuted, opacity: 0.3 }} /><span style={{ color: theme.text, flex: 1 }}>{name}</span><span style={{ fontSize: 11, color: theme.textMuted, minWidth: 28, textAlign: 'right' }}>{taskCounts[name] || 0}</span><button onClick={function() { promoteTaskProject(name); }} title="Add as managed project" style={{ border: 'none', background: 'transparent', color: theme.accent, cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>+ Add</button><span style={{ fontSize: 10, color: theme.textMuted }}>from tasks</span></div>); })}
       </div>
       {config.projects.length === 0 && taskOnlyNames.length === 0 && (<div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 12 }}>No projects yet.</div>)}
@@ -131,6 +136,24 @@ export default function ProjectsTab({ config, theme, allProjectNames, allTasks, 
         <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Project name" onKeyDown={function(e) { if (e.key === 'Enter') document.getElementById('add-project-btn').click(); }} style={{ flex: 1, padding: '4px 6px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }} />
         <button id="add-project-btn" onClick={async () => { if (!newName) return; try { var { default: apiClient } = await import('../../../services/apiClient'); var res = await apiClient.post('/projects', { name: newName, color: newColor }); config.setProjects([...config.projects, res.data.project]); setNewName(''); } catch (e) { console.error(e); } }} style={{ border: 'none', borderRadius: 4, padding: '4px 12px', background: theme.accent, color: '#FDFAF5', fontSize: 12, cursor: 'pointer' }}>Add</button>
       </div>
+      {pendingDelete && (
+        <ConfirmDialog
+          title="Delete project?"
+          message={'Delete project "' + pendingDelete.name + '"? This cannot be undone.'}
+          onConfirm={async function() {
+            var p = pendingDelete;
+            setPendingDelete(null);
+            try {
+              var { default: apiClient } = await import('../../../services/apiClient');
+              await apiClient.delete('/projects/' + p.id);
+              config.setProjects(config.projects.filter(function(x) { return x.id !== p.id; }));
+            } catch (e) { console.error(e); }
+          }}
+          onCancel={function() { setPendingDelete(null); }}
+          darkMode={darkMode}
+          isMobile={isMobile}
+        />
+      )}
     </div>
   );
 }

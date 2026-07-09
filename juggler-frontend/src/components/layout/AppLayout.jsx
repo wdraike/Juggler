@@ -69,7 +69,11 @@ var VIEW_TITLES = {
 export default function AppLayout() {
   // Auth & timezone
   var { user: authUser } = useAuth();
-  var config = useConfig();
+  // 999.1225 — config persistence failures surface as an error toast.
+  // `showToast` is destructured further down (var — hoisted), and useConfig
+  // re-arms its internal ref with this closure every render, so by the time a
+  // save rejection actually invokes it, showToast is assigned.
+  var config = useConfig(function(msg) { if (typeof showToast === 'function') showToast(msg, 'error'); });
   var { activeTimezone, source: tzSource, browserTimezone } = useTimezone(config);
   var userTimezone = activeTimezone;
 
@@ -824,7 +828,10 @@ export default function AppLayout() {
     }
     pushUndo('status change');
     setStatus(id, val, {
-      taskFields: { status: val }
+      taskFields: { status: val },
+      // 999.1225 — a rejected status save now rolls back in useTaskState;
+      // surface it so the revert isn't silent.
+      onError: function(msg) { showToast(msg, 'error'); }
     });
     var labels = { done: 'Done', wip: 'WIP', cancel: 'Cancelled', skip: 'Skipped', '': 'Reopened' };
     showToast((labels[val] || val) + ': ' + (tasks.find(t => t.id === id)?.text || id).slice(0, 40), 'success');
@@ -845,7 +852,8 @@ export default function AppLayout() {
     pushUndo('status change');
     setStatus(task.id, 'done', {
       taskFields: { status: 'done' },
-      completedAt: completedAt
+      completedAt: completedAt,
+      onError: function(msg) { showToast(msg, 'error'); } // 999.1225
     });
     showToast('Done: ' + (task.text || task.id).slice(0, 40), 'success');
   }, [completionPickerTask, pushUndo, setStatus, showToast]);
@@ -967,7 +975,10 @@ export default function AppLayout() {
     var count = 0;
     allTasks.forEach(t => {
       if (t.recurring && t.date === dateKey && (statuses[t.id] || '') !== 'done') {
-        setStatus(t.id, 'done', { taskFields: { status: 'done' } });
+        setStatus(t.id, 'done', {
+          taskFields: { status: 'done' },
+          onError: function(msg) { showToast(msg, 'error'); } // 999.1225
+        });
         count++;
       }
     });
@@ -1621,8 +1632,12 @@ export default function AppLayout() {
                     'This series has a calendar-linked instance. Remove the calendar link before deleting the whole series.'
                   );
                 } else {
-                  // Non-cal_locked failure: preserve the prior fire-and-forget behavior
-                  // (dialog closes; deleteTask already logged the error).
+                  // 999.1225 — surface the server's rejection (e.g. the 403
+                  // INGEST_DELETE_BLOCKED / PROVIDER_ORIGIN_DELETE_BLOCKED
+                  // bodies) instead of closing silently; the task stays in
+                  // place (deleteTask defers all local removal until success).
+                  var serverMsg = error && error.response && error.response.data && error.response.data.error;
+                  showToast(serverMsg || 'Failed to delete series', 'error');
                   setExpandedTasks(function(prev) { return prev.filter(function(x) { return x !== id; }); });
                   setDeleteConfirmTask(null);
                 }
@@ -1639,10 +1654,16 @@ export default function AppLayout() {
             message={'Delete "' + (deleteConfirmTask.text || 'this task').slice(0, 60) + '"?'}
             onConfirm={function() {
               var id = deleteConfirmTask.id;
-              // deleteTask now rethrows on failure (bird-w6-002 fix) so the
-              // series-delete path above can react to it; this single-task path
-              // preserves its pre-existing fire-and-forget behavior.
-              deleteTask(id).catch(function() {});
+              // deleteTask rethrows on failure (bird-w6-002 fix). 999.1225:
+              // surface the server's rejection body (e.g. the deliberate 403
+              // INGEST_DELETE_BLOCKED "Calendar-linked tasks cannot be deleted
+              // in ingest-only mode..." / PROVIDER_ORIGIN_DELETE_BLOCKED)
+              // instead of swallowing it — the task never leaves local state
+              // on a failed delete, so the user needs to know why.
+              deleteTask(id).catch(function(error) {
+                var serverMsg = error && error.response && error.response.data && error.response.data.error;
+                showToast(serverMsg || 'Failed to delete task', 'error');
+              });
               setExpandedTasks(function(prev) { return prev.filter(function(x) { return x !== id; }); });
               setDeleteConfirmTask(null);
             }}

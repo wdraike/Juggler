@@ -8,6 +8,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Stage, Layer, Image as KonvaImage, Line, Arrow, Text, Rect } from 'react-konva';
+import ConfirmDialog from '../features/ConfirmDialog';
 
 var TOOLS = [
   { value: 'pen', label: 'Draw', icon: '\u270F\uFE0F' },
@@ -18,8 +19,11 @@ var TOOLS = [
 
 var COLORS = ['#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#000000'];
 
-export default function AnnotationCanvas({ screenshot, onComplete, onCancel, theme }) {
+export default function AnnotationCanvas({ screenshot, onComplete, onCancel, theme, darkMode }) {
   var [image, setImage] = useState(null);
+  // 999.1228 — ConfirmDialog is the app's "modal replacement for window.confirm";
+  // this was the one remaining raw window.confirm call.
+  var [confirmClear, setConfirmClear] = useState(false);
   var [tool, setTool] = useState('pen');
   var [lines, setLines] = useState([]);
   var [arrows, setArrows] = useState([]);
@@ -111,12 +115,15 @@ export default function AnnotationCanvas({ screenshot, onComplete, onCancel, the
   }
 
   function handleClear() {
-    if (window.confirm('Clear all annotations?')) {
-      setLines([]);
-      setArrows([]);
-      setTexts([]);
-      setBlurs([]);
-    }
+    setConfirmClear(true);
+  }
+
+  function doClear() {
+    setLines([]);
+    setArrows([]);
+    setTexts([]);
+    setBlurs([]);
+    setConfirmClear(false);
   }
 
   function handleComplete() {
@@ -234,6 +241,17 @@ export default function AnnotationCanvas({ screenshot, onComplete, onCancel, the
           fontSize: 14, fontWeight: 600, fontFamily: "'Inter', sans-serif"
         }}>Use This Screenshot</button>
       </div>
+
+      {confirmClear && (
+        <ConfirmDialog
+          title="Clear annotations?"
+          message="Clear all annotations? This cannot be undone."
+          onConfirm={doClear}
+          onCancel={function() { setConfirmClear(false); }}
+          darkMode={darkMode}
+          zIndex={10002}
+        />
+      )}
     </div>
   );
 }

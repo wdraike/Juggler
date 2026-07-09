@@ -3,6 +3,7 @@
  */
 import React, { useState } from 'react';
 import HelpIcon from '../HelpIcon';
+import ConfirmDialog from '../../features/ConfirmDialog';
 
 var TOOL_ICONS = [
   [['phone', 'mobile', 'cell', 'iphone', 'android'], '\uD83D\uDCF1'],
@@ -48,9 +49,12 @@ function pickUniqueIcon(name, iconMap, usedIcons, fallbacks) {
   return picked || fallbacks[0];
 }
 
-export default function ToolsTab({ config, theme }) {
+export default function ToolsTab({ config, theme, darkMode, isMobile }) {
   var [newName, setNewName] = useState('');
   var [error, setError] = useState('');
+  // 999.1228 — deleting a tool is irreversible; gate it behind the shared
+  // ConfirmDialog like every other unrecoverable delete.
+  var [pendingDelete, setPendingDelete] = useState(null); // tool object
 
   function handleAdd() {
     var name = newName.trim();
@@ -80,7 +84,7 @@ export default function ToolsTab({ config, theme }) {
           <div key={tool.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', background: theme.bgTertiary, borderRadius: 6, fontSize: 13 }}>
             <span>{tool.icon}</span>
             <span style={{ color: theme.text, flex: 1 }}>{tool.name}</span>
-            <button onClick={() => { config.updateTools(config.tools.filter((_, idx) => idx !== i)); }}
+            <button onClick={() => { setPendingDelete(tool); }}
               title={'Delete tool ' + tool.name} style={{ border: 'none', background: 'transparent', color: theme.redText, cursor: 'pointer', fontSize: 14 }}>&times;</button>
           </div>
         ))}
@@ -91,6 +95,19 @@ export default function ToolsTab({ config, theme }) {
         <button onClick={handleAdd} title="Add a new tool" style={{ border: 'none', borderRadius: 4, padding: '4px 12px', background: theme.accent, color: '#FDFAF5', fontSize: 12, cursor: 'pointer' }}>Add</button>
       </div>
       {error && <div style={{ fontSize: 11, color: theme.redText, marginTop: 4 }}>{error}</div>}
+      {pendingDelete && (
+        <ConfirmDialog
+          title="Delete tool?"
+          message={'Delete "' + pendingDelete.name + '"? This cannot be undone.'}
+          onConfirm={function() {
+            config.updateTools(config.tools.filter(function(t) { return t.id !== pendingDelete.id; }));
+            setPendingDelete(null);
+          }}
+          onCancel={function() { setPendingDelete(null); }}
+          darkMode={darkMode}
+          isMobile={isMobile}
+        />
+      )}
     </div>
   );
 }

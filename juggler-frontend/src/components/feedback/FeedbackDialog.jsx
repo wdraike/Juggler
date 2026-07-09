@@ -341,6 +341,7 @@ export default function FeedbackDialog({ open, onClose, darkMode, theme }) {
                     onComplete={handleAnnotationComplete}
                     onCancel={function() { setShowAnnotation(false); setScreenshot(null); }}
                     theme={theme}
+                    darkMode={darkMode}
                   />
                 ) : (
                   <div style={{ textAlign: 'center', padding: '24px 0' }}>

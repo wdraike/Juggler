@@ -3,6 +3,7 @@
  */
 import React, { useState } from 'react';
 import HelpIcon from '../HelpIcon';
+import ConfirmDialog from '../../features/ConfirmDialog';
 
 var hasGeolocation = typeof navigator !== 'undefined' && !!navigator.geolocation;
 
@@ -53,7 +54,7 @@ function pickUniqueIcon(name, iconMap, usedIcons, fallbacks) {
   return picked || fallbacks[0];
 }
 
-function LocationRow({ loc, config, theme }) {
+function LocationRow({ loc, config, theme, onRequestDelete }) {
   var [geocodeInput, setGeocodeInput] = useState(loc.displayName || '');
   var [displayName, setDisplayName] = useState(loc.displayName || '');
   var [loading, setLoading] = useState(false);
@@ -124,9 +125,8 @@ function LocationRow({ loc, config, theme }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span>{loc.icon}</span>
         <span style={{ color: theme.text, flex: 1 }}>{loc.name}</span>
-        <button onClick={function() {
-          config.updateLocations(config.locations.filter(function(l) { return l.id !== loc.id; }));
-        }} title={'Delete location ' + loc.name} style={{ border: 'none', background: 'transparent', color: theme.redText, cursor: 'pointer', fontSize: 14 }}>&times;</button>
+        <button onClick={function() { onRequestDelete(loc); }}
+          title={'Delete location ' + loc.name} style={{ border: 'none', background: 'transparent', color: theme.redText, cursor: 'pointer', fontSize: 14 }}>&times;</button>
       </div>
       <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
         {hasCoords ? (
@@ -160,9 +160,12 @@ function LocationRow({ loc, config, theme }) {
   );
 }
 
-export default function LocationsTab({ config, theme }) {
+export default function LocationsTab({ config, theme, darkMode, isMobile }) {
   var [newName, setNewName] = useState('');
   var [error, setError] = useState('');
+  // 999.1228 — deleting a location is irreversible; gate it behind the shared
+  // ConfirmDialog like every other unrecoverable delete.
+  var [pendingDelete, setPendingDelete] = useState(null); // location object
 
   function handleAdd() {
     var name = newName.trim();
@@ -189,7 +192,7 @@ export default function LocationsTab({ config, theme }) {
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
         {config.locations.map(function(loc) {
-          return <LocationRow key={loc.id} loc={loc} config={config} theme={theme} />;
+          return <LocationRow key={loc.id} loc={loc} config={config} theme={theme} onRequestDelete={setPendingDelete} />;
         })}
       </div>
       <div style={{ display: 'flex', gap: 6 }}>
@@ -198,6 +201,19 @@ export default function LocationsTab({ config, theme }) {
         <button onClick={handleAdd} title="Add a new location" style={{ border: 'none', borderRadius: 4, padding: '4px 12px', background: theme.accent, color: '#FDFAF5', fontSize: 12, cursor: 'pointer' }}>Add</button>
       </div>
       {error && <div style={{ fontSize: 11, color: theme.redText, marginTop: 4 }}>{error}</div>}
+      {pendingDelete && (
+        <ConfirmDialog
+          title="Delete location?"
+          message={'Delete "' + pendingDelete.name + '"? This cannot be undone.'}
+          onConfirm={function() {
+            config.updateLocations(config.locations.filter(function(l) { return l.id !== pendingDelete.id; }));
+            setPendingDelete(null);
+          }}
+          onCancel={function() { setPendingDelete(null); }}
+          darkMode={darkMode}
+          isMobile={isMobile}
+        />
+      )}
     </div>
   );
 }
