@@ -60,4 +60,26 @@ function computeRollingAnchor(status, instanceDate, currentAnchor, completionDat
   return candidate;
 }
 
-module.exports = { isRollingMaster, computeRollingAnchor };
+/**
+ * Statuses whose terminal event projects a recurrence anchor forward
+ * (999.1098 — single source for every anchor-projection call site: the HTTP
+ * status path (UpdateTaskStatus), both batch paths (facade lockedBatchUpdate /
+ * batchUpdateTxn via applyRecurrenceAnchors), and MCP (routes through the
+ * facade)).
+ *
+ * Ruling 2026-07-06 (resolves 999.844): cancelled AND missed are BOTH
+ * terminal; 'missed' reanchors to the instance date like skip (999.1411 pins
+ * in rollingAnchor.test.js / schedulerScenarios.test.js), while 'cancel'
+ * does NOT count (computeRollingAnchor/computeNextOccurrenceAnchor return
+ * null for it).
+ *
+ * This gate is LOAD-BEARING, not an optimization: TERMINAL_STATUSES (shared/
+ * task-status.js) also contains 'pause' and 'cancelled', which the compute
+ * functions' own isTerminalStatus() guard would wrongly treat as an
+ * anchor-advancing event — only the explicit cancel check inside them blocks
+ * 'cancel', not 'pause'/'cancelled'. Callers must gate on THIS list before
+ * invoking the projection.
+ */
+var ANCHOR_PROJECTION_STATUSES = Object.freeze(['done', 'skip', 'missed']);
+
+module.exports = { isRollingMaster, computeRollingAnchor, ANCHOR_PROJECTION_STATUSES };

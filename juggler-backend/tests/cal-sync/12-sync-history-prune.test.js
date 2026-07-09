@@ -188,7 +188,13 @@ describe('Inline sync_history prune at end of sync run (D-11)', () => {
     var newRow = await db('sync_history').where('id', newId).first();
 
     expect(oldRow).toBeFalsy(); // 4-day-old row must be gone
-    expect(newRow).toBeTruthy(); // 2-day-old row must remain
+    // 999.1207: the survivor must be OUR seeded row, byte-identical — the
+    // prune deletes, it must never mutate what it keeps.
+    expect(newRow).toBeTruthy();
+    expect(newRow.user_id).toBe(USER_PRIMARY);
+    expect(newRow.task_text).toBe('age=2d');
+    expect(newRow.sync_run_id).toBe('run-' + USER_PRIMARY + '-2');
+    expect(newRow.action).toBe('pushed');
   }));
 
   test('boundary: rows just under 3 days survive; rows just over 3 days are pruned', requireDB(async () => {
@@ -203,6 +209,9 @@ describe('Inline sync_history prune at end of sync run (D-11)', () => {
     var inside = await db('sync_history').where('id', insideId).first();
     var outside = await db('sync_history').where('id', outsideId).first();
     expect(inside).toBeTruthy();
+    // 999.1207: pin WHICH row survived by content, not just row presence.
+    expect(inside.task_text).toBe('age=2.9d');
+    expect(inside.user_id).toBe(USER_PRIMARY);
     expect(outside).toBeFalsy();
   }));
 
@@ -228,11 +237,17 @@ describe('Inline sync_history prune is per-user scoped (D-13)', () => {
     var primaryFound = await db('sync_history').where('id', primaryOld).first();
     expect(primaryFound).toBeFalsy();
 
-    // Other user's rows untouched (different user_id — outside the WHERE clause)
+    // Other user's rows untouched (different user_id — outside the WHERE clause).
+    // 999.1207: assert content too — the D-13 guarantee is that the OTHER
+    // user's rows come through the prune bit-for-bit, stale or not.
     var otherOldFound = await db('sync_history').where('id', otherOld).first();
     var otherNewFound = await db('sync_history').where('id', otherNew).first();
     expect(otherOldFound).toBeTruthy();
+    expect(otherOldFound.user_id).toBe(USER_OTHER);
+    expect(otherOldFound.task_text).toBe('age=14d');
     expect(otherNewFound).toBeTruthy();
+    expect(otherNewFound.user_id).toBe(USER_OTHER);
+    expect(otherNewFound.task_text).toBe('age=1d');
   }));
 
 });

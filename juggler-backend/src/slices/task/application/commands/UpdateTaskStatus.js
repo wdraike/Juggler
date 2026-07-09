@@ -48,6 +48,13 @@
 
 var assertDeps = require('../_assertDeps');
 var { getNowInTimezone } = require('juggler-shared/scheduler/getNowInTimezone');
+// 999.1098: the anchor-projection status gate is single-sourced in
+// lib/rolling-anchor.js — do NOT inline a status list here (the hand-copied
+// ['done','skip'] gates drifted from the 2026-07-06 'missed is terminal,
+// reanchors' ruling). Note: 'missed' is not in VALID_STATUSES below, so it
+// cannot arrive via this endpoint today — the shared gate keeps this path
+// correct if that ever changes (batch paths DO accept it).
+var { ANCHOR_PROJECTION_STATUSES } = require('../../../../lib/rolling-anchor');
 
 var TERMINAL_REQUIRES_SCHEDULE = ['done', 'skip', 'cancel'];
 var VALID_STATUSES = ['', 'wip', 'done', 'cancel', 'skip', 'pause', 'disabled'];
@@ -255,9 +262,10 @@ UpdateTaskStatus.prototype.execute = async function execute(input) {
 
   await this.repo.updateTaskById(id, update, userId);
 
-  // rolling-anchor projection (handler L1789-1808) — delegated.
+  // rolling-anchor projection (handler L1789-1808) — delegated. Gate is the
+  // shared ANCHOR_PROJECTION_STATUSES (999.1098), not a hand-copied list.
   var _anchorMasterId = existing.master_id || existing.source_id;
-  if (_anchorMasterId && ['done', 'skip'].includes(status)) {
+  if (_anchorMasterId && ANCHOR_PROJECTION_STATUSES.indexOf(status) !== -1) {
     await this.applyRollingAnchor({
       masterId: _anchorMasterId,
       userId: userId,

@@ -95,12 +95,24 @@ describeWithCreds(() => hasGCalCredentials(), 'Full Lifecycle E2E', () => {
         .where({ user_id: TEST_USER_ID, task_id: taskIds[j], provider: 'gcal', status: 'active' })
         .first();
       expect(ledger).toBeTruthy();
-      expect(ledger.provider_event_id).toBeTruthy();
+      // 999.1207: content, not existence — juggler-origin link, clean miss
+      // counter, real event id.
+      expect(ledger.origin).toBe('juggler');
+      expect(ledger.miss_count).toBe(0);
+      expect(typeof ledger.provider_event_id).toBe('string');
+      expect(ledger.provider_event_id.length).toBeGreaterThan(0);
 
-      // Verify event exists on GCal
+      // Verify event exists on GCal with the RIGHT title and the RIGHT start
+      // instant (the tz-misparse bug class writes an event at the wrong hour
+      // while a bare existence check stays green).
       var event = await getGCalEvent(token, ledger.provider_event_id);
       expect(event).toBeTruthy();
-      expect(event.summary).toContain('Test Task E2E');
+      expect(event.summary).toContain('Test Task E2E ' + (j + 1));
+      var expectedStart = new Date();
+      expectedStart.setDate(expectedStart.getDate() + 1);
+      expectedStart.setHours(9 + j, 0, 0, 0);
+      expect(Math.abs(new Date(event.start.dateTime) - expectedStart))
+        .toBeLessThan(2 * 60 * 1000);
     }
 
     // Assign roles for subsequent tests
@@ -141,6 +153,16 @@ describeWithCreds(() => hasGCalCredentials(), 'Full Lifecycle E2E', () => {
     expect(task.when).toMatch(/fixed/);
     var taskSched = new Date(String(task.scheduled_at).replace(' ', 'T') + 'Z');
     expect(Math.abs(taskSched - newStart)).toBeLessThan(2 * 60 * 1000);
+
+    // 999.1207: the ledger's cached event_start must track the move too —
+    // a stale cache here is exactly the hash-drift/tz bug class.
+    var ledgerAfterMove = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, task_id: movedTaskId, provider: 'gcal', status: 'active' })
+      .first();
+    expect(ledgerAfterMove).toBeTruthy();
+    expect(ledgerAfterMove.event_start).toBeTruthy();
+    var cachedStart = new Date(String(ledgerAfterMove.event_start).replace(' ', 'T') + 'Z');
+    expect(Math.abs(cachedStart - newStart)).toBeLessThan(2 * 60 * 1000);
   });
 
   test('3. delete 1 event on GCal -> sync 3x -> task deleted', async () => {
@@ -150,6 +172,8 @@ describeWithCreds(() => hasGCalCredentials(), 'Full Lifecycle E2E', () => {
       .where({ user_id: TEST_USER_ID, task_id: deletedTaskId, provider: 'gcal', status: 'active' })
       .first();
     expect(ledger).toBeTruthy();
+    expect(ledger.miss_count).toBe(0); // ramp must start clean
+    var deletedLedgerId = ledger.id;
 
     // Delete the event on GCal
     await gcalApi.deleteEvent(token, ledger.provider_event_id);
@@ -168,6 +192,13 @@ describeWithCreds(() => hasGCalCredentials(), 'Full Lifecycle E2E', () => {
     // Verify task row is gone
     var task = await db('tasks_v').where('id', deletedTaskId).first();
     expect(task).toBeFalsy();
+
+    // 999.1207: and the ledger must carry the full deleted_remote state
+    // (status + task link severed), not just "the task vanished somehow".
+    var deletedLedger = await db('cal_sync_ledger').where('id', deletedLedgerId).first();
+    expect(deletedLedger).toBeTruthy();
+    expect(deletedLedger.status).toBe('deleted_remote');
+    expect(deletedLedger.task_id).toBeNull();
   });
 
   test('4. edit task title -> sync -> event title updated', async () => {
@@ -191,6 +222,10 @@ describeWithCreds(() => hasGCalCredentials(), 'Full Lifecycle E2E', () => {
       .where({ user_id: TEST_USER_ID, task_id: editedTaskId, provider: 'gcal', status: 'active' })
       .first();
     expect(ledger).toBeTruthy();
+    // 999.1207: the edit push must not degrade the link — same task,
+    // still zero misses.
+    expect(ledger.task_id).toBe(editedTaskId);
+    expect(ledger.miss_count).toBe(0);
 
     var event = await getGCalEvent(token, ledger.provider_event_id);
     expect(event).toBeTruthy();
@@ -206,6 +241,7 @@ describeWithCreds(() => hasGCalCredentials(), 'Full Lifecycle E2E', () => {
       .first();
     expect(ledger).toBeTruthy();
     var eventId = ledger.provider_event_id;
+    expect(typeof eventId).toBe('string');
 
     // Delete task from DB
     await tasksWrite.deleteTaskById(db, deleteFromDbTaskId, TEST_USER_ID);
@@ -221,6 +257,12 @@ describeWithCreds(() => hasGCalCredentials(), 'Full Lifecycle E2E', () => {
     var event = await getGCalEvent(token, eventId);
     var isGone = !event || event.status === 'cancelled';
     expect(isGone).toBe(true);
+
+    // 999.1207: ledger retired as deleted_local — kept for history, no longer
+    // presenting as an active link.
+    var retired = await db('cal_sync_ledger').where('id', ledger.id).first();
+    expect(retired).toBeTruthy();
+    expect(retired.status).toBe('deleted_local');
   });
 
   test('6. create event on GCal -> sync -> new task in DB', async () => {
@@ -255,6 +297,14 @@ describeWithCreds(() => hasGCalCredentials(), 'Full Lifecycle E2E', () => {
     var newTask = await db('tasks_v').where('id', ledger.task_id).first();
     expect(newTask).toBeTruthy();
     expect(newTask.text).toBe('Test Event Ingested From GCal');
+    // 999.1207: the ingested task must carry the event's CONTENT, not just
+    // its title — duration from the event (45 min) and the exact start
+    // instant (controller: dur = durationMinutes, scheduled_at =
+    // localToUtc(event local date/time)). A tz-misparse lands the task at
+    // the wrong hour while text-only checks stay green.
+    expect(newTask.dur).toBe(45);
+    var ingestedSched = new Date(String(newTask.scheduled_at).replace(' ', 'T') + 'Z');
+    expect(Math.abs(ingestedSched - tomorrow)).toBeLessThan(2 * 60 * 1000);
   });
 
   test('7. sync_history contains all actions', async () => {

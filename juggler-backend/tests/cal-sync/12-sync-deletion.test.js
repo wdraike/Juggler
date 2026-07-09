@@ -83,8 +83,13 @@ describe('Sync Deletion Scenarios', () => {
       .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal', status: 'active' })
       .first();
     expect(ledger).toBeTruthy();
+    // 999.1207: content, not existence — a fresh push must record a
+    // juggler-origin link with a clean miss counter and a real event id.
+    expect(ledger.origin).toBe('juggler');
+    expect(ledger.miss_count).toBe(0);
     var eventId = ledger.provider_event_id;
-    expect(eventId).toBeTruthy();
+    expect(typeof eventId).toBe('string');
+    expect(eventId.length).toBeGreaterThan(0);
 
     // Delete event from GCal
     await deleteGCalEvent(gcalToken, eventId);
@@ -102,10 +107,17 @@ describe('Sync Deletion Scenarios', () => {
       .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal' }).first();
     expect(ledgerAfter).toBeTruthy();
     expect(ledgerAfter.miss_count).toBe(1);
+    // One miss is BELOW the threshold: the link must stay live and intact —
+    // status still active, task link NOT nulled, same provider event id.
+    expect(ledgerAfter.status).toBe('active');
+    expect(ledgerAfter.task_id).toBe(task.id);
+    expect(ledgerAfter.provider_event_id).toBe(eventId);
 
-    // Task should still exist
+    // Task should still exist, untouched (same text, still pending)
     var taskStill = await db('tasks_v').where('id', task.id).first();
     expect(taskStill).toBeTruthy();
+    expect(taskStill.text).toBe('Test Task Miss Count');
+    expect(taskStill.status || '').toBe('');
   }));
 
   testWithCreds(() => hasGCalCredentials(), 'after 3 syncs with event deleted: task deleted', requireDB(async () => {
@@ -127,7 +139,12 @@ describe('Sync Deletion Scenarios', () => {
       .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal', status: 'active' })
       .first();
     expect(ledger).toBeTruthy();
+    // 999.1207: a fresh push starts with a clean miss counter (the 3-miss
+    // ramp below is meaningless if it doesn't start at 0).
+    expect(ledger.miss_count).toBe(0);
+    expect(ledger.origin).toBe('juggler');
     var eventId = ledger.provider_event_id;
+    expect(typeof eventId).toBe('string');
 
     // Delete event from GCal
     await deleteGCalEvent(gcalToken, eventId);
@@ -149,10 +166,15 @@ describe('Sync Deletion Scenarios', () => {
     var taskGone = await db('tasks_v').where('id', task.id).first();
     expect(taskGone).toBeFalsy();
 
-    // Ledger should be marked deleted_remote (task_id is nulled by controller)
+    // Ledger must record the full deleted_remote state (999.1207): the
+    // controller writes { status: 'deleted_remote', task_id: null,
+    // miss_count: <threshold> } in one update — assert all three fields so a
+    // partial write (e.g. status flipped but the stale task link kept) fails.
     var ledgerAfter = await db('cal_sync_ledger').where('id', ledgerId).first();
     expect(ledgerAfter).toBeTruthy();
     expect(ledgerAfter.status).toBe('deleted_remote');
+    expect(ledgerAfter.task_id).toBeNull();
+    expect(ledgerAfter.miss_count).toBe(3);
   }));
 
   testWithCreds(() => hasGCalCredentials(), 'task deleted from Strive: event deleted from GCal', requireDB(async () => {
@@ -174,8 +196,10 @@ describe('Sync Deletion Scenarios', () => {
       .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal', status: 'active' })
       .first();
     expect(ledger).toBeTruthy();
+    expect(ledger.origin).toBe('juggler');
     var eventId = ledger.provider_event_id;
-    expect(eventId).toBeTruthy();
+    expect(typeof eventId).toBe('string');
+    expect(eventId.length).toBeGreaterThan(0);
 
     // Delete task from DB
     await tasksWrite.deleteTaskById(db, task.id, TEST_USER_ID);
@@ -188,7 +212,14 @@ describe('Sync Deletion Scenarios', () => {
     res = mockRes();
     await sync(req, res);
 
+    expect(res.statusCode).toBe(200);
     expect(res._json.deleted_local).toBeGreaterThanOrEqual(1);
+
+    // Ledger must be retired as deleted_local (999.1207): the row is kept for
+    // history but must no longer present itself as an active link.
+    var ledgerAfterDel = await db('cal_sync_ledger').where('id', ledger.id).first();
+    expect(ledgerAfterDel).toBeTruthy();
+    expect(ledgerAfterDel.status).toBe('deleted_local');
 
     // Verify event is gone from GCal
     await waitForPropagation(1000);
@@ -231,9 +262,20 @@ describe('Sync Deletion Scenarios', () => {
     expect(delRes.statusCode).toBe(403);
     expect(delRes._json.code).toBe('INGEST_DELETE_BLOCKED');
 
-    // Task should still exist
+    // Task must survive UNCHANGED (999.1207): same text, still pending —
+    // a soft-cancel would leave the row "existing" but effectively deleted.
     var taskStill = await db('tasks_v').where('id', task.id).first();
     expect(taskStill).toBeTruthy();
+    expect(taskStill.text).toBe('Test Task Ingest Delete Block');
+    expect(taskStill.status || '').toBe('');
+
+    // And the calendar link must remain live — blocked delete must not have
+    // side effects on the ledger.
+    var ledgerStill = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal' }).first();
+    expect(ledgerStill).toBeTruthy();
+    expect(ledgerStill.status).toBe('active');
+    expect(ledgerStill.provider_event_id).toBe('fake-event-id-ingest-test');
   }));
 
   testWithCreds(() => hasGCalCredentials(), 'dependency transfer on deletion', requireDB(async () => {
@@ -265,7 +307,9 @@ describe('Sync Deletion Scenarios', () => {
       .where({ user_id: TEST_USER_ID, task_id: taskB.id, provider: 'gcal', status: 'active' })
       .first();
     expect(ledgerB).toBeTruthy();
+    expect(ledgerB.miss_count).toBe(0);
     var eventId = ledgerB.provider_event_id;
+    expect(typeof eventId).toBe('string');
 
     // Delete event from GCal
     await deleteGCalEvent(gcalToken, eventId);
@@ -279,13 +323,21 @@ describe('Sync Deletion Scenarios', () => {
       await sync(req, res);
     }
 
-    // taskB should be deleted
+    // taskB should be deleted, and its ledger row fully retired (999.1207 —
+    // same deleted_remote contract as the 3x-miss test above).
     var taskBGone = await db('tasks_v').where('id', taskB.id).first();
     expect(taskBGone).toBeFalsy();
+    var ledgerBAfter = await db('cal_sync_ledger').where('id', ledgerB.id).first();
+    expect(ledgerBAfter).toBeTruthy();
+    expect(ledgerBAfter.status).toBe('deleted_remote');
+    expect(ledgerBAfter.task_id).toBeNull();
 
-    // taskA should have its depends_on updated (taskB removed)
+    // taskA must SURVIVE the neighbour's deletion with its own identity
+    // intact, and have its depends_on updated (taskB removed).
     var taskAUpdated = await db('tasks_v').where('id', taskA.id).first();
     expect(taskAUpdated).toBeTruthy();
+    expect(taskAUpdated.text).toBe('Test Task DepA');
+    expect(taskAUpdated.status || '').toBe('');
     var depsRaw = taskAUpdated.depends_on;
     var deps = [];
     if (depsRaw) {
@@ -315,7 +367,9 @@ describe('Sync Deletion Scenarios', () => {
       .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal', status: 'active' })
       .first();
     expect(ledger).toBeTruthy();
+    expect(ledger.miss_count).toBe(0);
     var eventId = ledger.provider_event_id;
+    expect(typeof eventId).toBe('string');
     createdGCalEventIds.push(eventId);
 
     // Delete the real event and backdate event_start so it looks like
@@ -337,6 +391,13 @@ describe('Sync Deletion Scenarios', () => {
       .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal' }).first();
     expect(ledgerAfter).toBeTruthy();
     expect(ledgerAfter.miss_count).toBe(0);
+    // Outside-window rows must be left fully alone (999.1207): still an
+    // active link to the same task, and the task itself untouched.
+    expect(ledgerAfter.status).toBe('active');
+    expect(ledgerAfter.task_id).toBe(task.id);
+    var taskUntouched = await db('tasks_v').where('id', task.id).first();
+    expect(taskUntouched).toBeTruthy();
+    expect(taskUntouched.text).toBe('Test Task Outside Window');
   }));
 
 });
@@ -360,6 +421,13 @@ describe('Provider-origin delete protection (D-08)', () => {
     expect(delRes.statusCode).toBe(403);
     expect(delRes._json.code).toBe('PROVIDER_ORIGIN_DELETE_BLOCKED');
     expect(delRes._json.error).toMatch(/Google Calendar/);
+
+    // Blocked means blocked (999.1207): the task row must survive unchanged —
+    // not soft-cancelled, not stripped of its text.
+    var survivor = await db('tasks_v').where('id', task.id).first();
+    expect(survivor).toBeTruthy();
+    expect(survivor.text).toBe('Test Task Provider Origin GCal');
+    expect(survivor.status || '').toBe('');
   }));
 
   test('deleteTask: allows deletion of juggler-origin task normally', requireDB(async () => {
@@ -376,7 +444,13 @@ describe('Provider-origin delete protection (D-08)', () => {
     var delRes = mockRes();
     await deleteTask(delReq, delRes);
 
-    expect(delRes.statusCode).not.toBe(403);
+    // 999.1207: "not 403" also passed on 500s — assert the delete actually
+    // SUCCEEDED and did what R55 rules: soft-cancel, row kept.
+    expect(delRes.statusCode).toBe(200);
+    expect(delRes._json.message).toMatch(/deleted/i);
+    var row = await db('tasks_v').where('id', task.id).first();
+    expect(row).toBeTruthy();
+    expect(row.status).toBe('cancelled');
   }));
 
   test('deleteTask: allows deletion when no ledger row exists', requireDB(async () => {
@@ -393,7 +467,13 @@ describe('Provider-origin delete protection (D-08)', () => {
     var delRes = mockRes();
     await deleteTask(delReq, delRes);
 
-    expect(delRes.statusCode).not.toBe(403);
+    // 999.1207: same success contract as the juggler-origin case — a task
+    // with no calendar link deletes cleanly via R55 soft-cancel.
+    expect(delRes.statusCode).toBe(200);
+    expect(delRes._json.message).toMatch(/deleted/i);
+    var row = await db('tasks_v').where('id', task.id).first();
+    expect(row).toBeTruthy();
+    expect(row.status).toBe('cancelled');
   }));
 
 });
@@ -424,9 +504,17 @@ describe('Done-task reactivation — done_frozen reset (D-04)', () => {
     var statusRes = mockRes();
     await updateTaskStatus(statusReq, statusRes);
 
+    // 999.1207: assert the transition actually happened end-to-end — the
+    // task row must be back to pending, AND the frozen ledger reactivated.
+    expect(statusRes.statusCode).toBe(200);
+    var taskRow = await db('tasks_v').where('id', task.id).first();
+    expect(taskRow).toBeTruthy();
+    expect(taskRow.status || '').toBe('');
+
     var ledgerRow = await db('cal_sync_ledger').where({ task_id: task.id, user_id: TEST_USER_ID }).first();
     expect(ledgerRow).toBeTruthy();
     expect(ledgerRow.status).toBe('active');
+    expect(ledgerRow.origin).toBe('juggler');
   }));
 
 });

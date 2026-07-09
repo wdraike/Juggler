@@ -90,7 +90,7 @@ var splitFields = taskWriteQueue.splitFields;
 var tasksWrite = require('../../lib/tasks-write');
 var { PLACEMENT_MODES } = require('../../lib/placementModes');
 var { isTerminalStatus } = require('../../lib/task-status');
-var { isRollingMaster, computeRollingAnchor } = require('../../lib/rolling-anchor');
+var { isRollingMaster, computeRollingAnchor, ANCHOR_PROJECTION_STATUSES } = require('../../lib/rolling-anchor');
 var { isPatternRecurMaster, computeNextOccurrenceAnchor } = require('../../lib/next-occurrence-anchor');
 var { applyCalLockedLedgerFilter } = require('./domain/calLockedPredicate');
 var { getNowInTimezone } = require('juggler-shared/scheduler/getNowInTimezone');
@@ -916,6 +916,44 @@ async function applyRollingAnchor(ctx) {
   }
 }
 
+// 999.1098 — SINGLE shared gate + master-id resolution for the terminal-event
+// recurrence-anchor projection (covers BOTH anchor fields: rolling_anchor via
+// computeRollingAnchor and next_occurrence_anchor via
+// computeNextOccurrenceAnchor, both inside applyRollingAnchor above).
+//
+// Every terminal-status write path must funnel through here instead of
+// hand-copying the status gate: the previous hand-copied ['done','skip']
+// gates (lockedBatchUpdate, batchUpdateTxn) had drifted from the 2026-07-06
+// ruling (resolves 999.844) that 'missed' is terminal and reanchors to the
+// instance date — computeRollingAnchor/computeNextOccurrenceAnchor already
+// handled 'missed' (rollingAnchor.test.js / schedulerScenarios.test.js pins),
+// but the stale caller gates never let a 'missed' event reach them.
+//
+// The gate itself lives in lib/rolling-anchor.js ANCHOR_PROJECTION_STATUSES
+// (see its header for why the gate is load-bearing — 'pause'/'cancelled' are
+// terminal but must NOT advance anchors).
+//
+// ctx: { status, existing, userId, masterId?, preloadedMaster?, db?, tz? }
+//   masterId defaults to existing.master_id || existing.source_id.
+//   db: optional trx handle — threaded through to applyRollingAnchor (see its
+//   header for the transaction-escape hazard).
+async function applyRecurrenceAnchors(ctx) {
+  var _mid = ctx.masterId != null
+    ? ctx.masterId
+    : (ctx.existing ? (ctx.existing.master_id || ctx.existing.source_id) : null);
+  if (!_mid) return;
+  if (ANCHOR_PROJECTION_STATUSES.indexOf(ctx.status) === -1) return;
+  await applyRollingAnchor({
+    masterId: _mid,
+    userId: ctx.userId,
+    status: ctx.status,
+    existing: ctx.existing,
+    preloadedMaster: ctx.preloadedMaster || null,
+    db: ctx.db,
+    tz: ctx.tz
+  });
+}
+
 // updateTaskStatus split-chunk sibling lookup (999.354: folded into TaskRepositoryPort).
 function loadSplitSiblings(ctx) {
   return _repo.getSplitSiblingIds(ctx.userId, ctx.masterId, ctx.occurrenceOrdinal, ctx.excludeId);
@@ -1250,19 +1288,18 @@ async function lockedBatchUpdate(ctx) {
     }
 
     // BUG1 (W1, leg sched-anchor-split-bugs) fix: rolling-anchor projection —
-    // mirrors UpdateTaskStatus.js:236-244, which the LOCKED batch path never
+    // mirrors UpdateTaskStatus's anchor step, which the LOCKED batch path never
     // called (only the single-item status-update use-case did).
+    // 999.1098: gate + master-id resolution consolidated into
+    // applyRecurrenceAnchors (also brings this path in line with the
+    // 2026-07-06 'missed is terminal, reanchors' ruling).
     if (qExisting && qExisting.task_type === 'recurring_instance') {
-      var qAnchorMasterId = qExisting.master_id || qExisting.source_id;
-      if (qAnchorMasterId && qRow.status !== undefined && ['done', 'skip'].indexOf(qRow.status) >= 0) {
-        await applyRollingAnchor({
-          masterId: qAnchorMasterId,
-          userId: userId,
-          status: qRow.status,
-          existing: qExisting,
-          preloadedMaster: null
-        });
-      }
+      await applyRecurrenceAnchors({
+        userId: userId,
+        status: qRow.status,
+        existing: qExisting,
+        preloadedMaster: null
+      });
     }
   }
 
@@ -1420,24 +1457,23 @@ async function batchUpdateTxn(ctx) {
       }
 
       // BUG1 (W1, leg sched-anchor-split-bugs) fix: rolling-anchor projection —
-      // mirrors UpdateTaskStatus.js:236-244, which the UNLOCKED batch txn path
-      // never called (only the single-item status-update use-case did).
-      var _batchAnchorMasterId = existing.master_id || existing.source_id;
-      if (_batchAnchorMasterId && row.status !== undefined && ['done', 'skip'].indexOf(row.status) >= 0) {
-        // WARN ernie-w1-anchor-trx-escape / cookie-C1 (2026-07-04): this call site runs
-        // inside batchUpdateTxn's own `trx` — thread it through so the anchor UPDATE
-        // commits/rolls back atomically with the rest of the batch (see applyRollingAnchor
-        // header for the escape hazard this closes). lockedBatchUpdate's call site is
-        // non-transactional already and is intentionally left on the getDb() default.
-        await applyRollingAnchor({
-          masterId: _batchAnchorMasterId,
-          userId: userId,
-          status: row.status,
-          existing: existing,
-          preloadedMaster: null,
-          db: trx
-        });
-      }
+      // mirrors UpdateTaskStatus's anchor step, which the UNLOCKED batch txn
+      // path never called (only the single-item status-update use-case did).
+      // 999.1098: gate + master-id resolution consolidated into
+      // applyRecurrenceAnchors (also brings this path in line with the
+      // 2026-07-06 'missed is terminal, reanchors' ruling).
+      // WARN ernie-w1-anchor-trx-escape / cookie-C1 (2026-07-04): this call site runs
+      // inside batchUpdateTxn's own `trx` — thread it through so the anchor UPDATE
+      // commits/rolls back atomically with the rest of the batch (see applyRollingAnchor
+      // header for the escape hazard this closes). lockedBatchUpdate's call site is
+      // non-transactional already and is intentionally left on the getDb() default.
+      await applyRecurrenceAnchors({
+        userId: userId,
+        status: row.status,
+        existing: existing,
+        preloadedMaster: null,
+        db: trx
+      });
     } else {
       if (anchorDateVal && taskType === 'recurring_template') {
         row.scheduled_at = localToUtc(anchorDateVal, null, updateTz) || null;
