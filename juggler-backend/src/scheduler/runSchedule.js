@@ -2345,12 +2345,20 @@ async function runScheduleAndPersist(userId, _retries, options) {
         if (rawRowPast.scheduled_at != null) {
           // W3 (sched-drop-overdue-column, M-5): overdue is computed-on-read
           // only — no write needed here, this instance already reads
-          // overdue:true on the next GET via computeOverdueForRow. Only clear
-          // a stale `unscheduled` flag if one was left over from a prior run.
-          if (rawRowPast.unscheduled) {
+          // overdue:true on the next GET via computeOverdueForRow.
+          //
+          // David ruling (2026-07-09): a past-incomplete recurring instance
+          // that already HAD a placement must ALSO be pulled off the grid
+          // (unscheduled=1), not left pinned/visible at its stale scheduled_at
+          // — matching the never-placed branch below. It stays fully visible
+          // via the Unplaced list (derivePlacements.js) with overdue=true; this
+          // does not violate the never-missing invariant, it just moves WHERE
+          // the still-live commitment is shown. Supersedes the prior "stay
+          // pinned at the old slot" half of R50 for this specific branch.
+          if (!rawRowPast.unscheduled) {
             pendingUpdates.push({
               id: t.id,
-              dbUpdate: { unscheduled: null, updated_at: _runScheduleCommand.clockNow() }
+              dbUpdate: { unscheduled: 1, updated_at: _runScheduleCommand.clockNow() }
             });
           }
           // Emit SSE transition only when crossing placed → overdue. `t.overdue`
@@ -2364,9 +2372,11 @@ async function runScheduleAndPersist(userId, _retries, options) {
           // effective deadline check here diverges from computeOverdueForRow's
           // hasHardCommitment / implied_deadline logic).
           if (!t.overdue) {
+            // Simulate the pending update above: unscheduled becomes 1 unless
+            // it already was (matches the `if (!rawRowPast.unscheduled)` guard).
             var _patchRow = rawRowPast.unscheduled
-              ? Object.assign({}, rawRowPast, { unscheduled: null })
-              : rawRowPast;
+              ? rawRowPast
+              : Object.assign({}, rawRowPast, { unscheduled: 1 });
             var _willBeOverdue = !!_computeOverdueForRow(_patchRow, TIMEZONE, timeInfo);
             if (_willBeOverdue) {
               updatedTasks.push({
