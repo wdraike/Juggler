@@ -18,7 +18,7 @@ var FEATURES = [
 var STEPS = [
   { num: '1', title: 'Add your tasks', desc: 'Name it, set a duration, pick a priority. We fill in the rest.' },
   { num: '2', title: 'We schedule it', desc: 'Automatic. Every flexible task lands in the best available slot.' },
-  { num: '3', title: 'Cruise through your day', desc: 'Check things off, drag to adjust, recurringTasks auto-repeat.' },
+  { num: '3', title: 'Cruise through your day', desc: 'Check things off, drag to adjust, recurring tasks auto-repeat.' },
 ];
 
 var VIEWS = [
@@ -327,7 +327,7 @@ export default function LoginPage() {
                 {[
                   { label: 'Create & update tasks', detail: 'Add tasks with priorities, durations, dependencies, and deadlines' },
                   { label: 'Run the scheduler', detail: 'Trigger auto-scheduling and see what landed where' },
-                  { label: 'Query your schedule', detail: 'Ask what\u2019s on today, what\u2019s unplaced, what\u2019s blocked' },
+                  { label: 'Query your schedule', detail: 'Ask what\u2019s on today, what\u2019s unscheduled, what\u2019s blocked' },
                   { label: 'Manage projects', detail: 'List projects, filter tasks, batch operations' },
                 ].map(function(item) {
                   return (

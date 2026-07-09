@@ -16,7 +16,7 @@ const VIEW_MODES = [
   { id: 'list', label: 'List', icon: '\u2261', tip: 'List view — all tasks grouped by date' },
   { id: 'priority', label: 'Priority', icon: 'P', tip: 'Priority view — P1-P4 kanban columns' },
   { id: 'deps', label: 'Deps', icon: '\u2192', tip: 'Dependencies view — DAG graph of task dependencies, filter by project' },
-  { id: 'conflicts', label: 'Issues', icon: '!', tip: 'Issues view — unplaced tasks, conflicts, and deadline misses' },
+  { id: 'conflicts', label: 'Issues', icon: '!', tip: 'Issues view — unscheduled tasks, conflicts, and deadline misses' },
 ];
 
 const FILTERS = [
@@ -28,7 +28,7 @@ const FILTERS = [
   { id: 'pastdue', label: 'Overdue', tip: 'Tasks past their deadline or scheduled date' },
   { id: 'fixed', label: 'Fixed', tip: 'Tasks pinned to a specific date/time (not moved by scheduler)' },
   { id: 'blocked', label: 'Blocked', tip: 'Tasks waiting on incomplete dependencies' },
-  { id: 'unplaced', label: 'Unplaced', tip: 'Tasks the scheduler couldn\u2019t place into any time slot' },
+  { id: 'unplaced', label: 'Unscheduled', tip: 'Tasks the scheduler couldn\u2019t place into any time slot' },
   { id: 'pause', label: 'Paused', tip: 'Tasks temporarily paused' },
 ];
 

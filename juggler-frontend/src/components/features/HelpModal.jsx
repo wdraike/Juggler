@@ -11,6 +11,7 @@ var SHORTCUTS = [
   { key: 'J / K', desc: 'Navigate tasks' },
   { key: 'S', desc: 'Cycle task status' },
   { key: 'Ctrl/Cmd + Z', desc: 'Undo' },
+  { key: '?', desc: 'Open this help guide' },
   { key: 'Esc', desc: 'Close expanded panel' },
 ];
 
@@ -65,7 +66,7 @@ export default function HelpModal({ onClose, darkMode, isMobile }) {
         <Section title="1. Getting Started" theme={theme}>
           <P>Raike &amp; Sons StriveRS is an auto-scheduling task manager. You create tasks with time windows, locations, tool requirements, priorities, and deadlines — then the scheduler places them into available time slots on your calendar. Never stops striving.</P>
           <P>The basic workflow is: <B>add tasks</B> with constraints (when, where, how long), then hit <B>Reschedule</B> to let the scheduler place them automatically. You can also drag tasks manually and mark them done/wip/skipped as you go.</P>
-          <P>Tasks that the scheduler can&apos;t place (due to conflicts, lack of available time, or missing tools at a location) appear in the <B>Unplaced</B> filter and the <B>Issues</B> view.</P>
+          <P>Tasks that the scheduler can&apos;t place (due to conflicts, lack of available time, or missing tools at a location) appear in the <B>Unscheduled</B> filter and the <B>Issues</B> view.</P>
         </Section>
 
         {/* 2. How the Scheduler Works */}
@@ -77,7 +78,7 @@ export default function HelpModal({ onClose, darkMode, isMobile }) {
           <P><B>Date-pinned tasks</B> remain on their assigned date but can be moved within that day.</P>
           <P><B>Dependencies:</B> A task with dependencies won&apos;t be scheduled until all its dependencies are done or scheduled earlier.</P>
           <P><B>Splitting:</B> Tasks with split enabled can be broken into multiple chunks across different time blocks or even days, with each chunk at least <em>splitMin</em> minutes long.</P>
-          <P>Tasks that can&apos;t fit anywhere are marked <B>unplaced</B>. Check the Issues view for details on why.</P>
+          <P>Tasks that can&apos;t fit anywhere are marked <B>unscheduled</B>. Check the Issues view for details on why.</P>
         </Section>
 
         {/* 3. Task Properties */}
@@ -123,7 +124,7 @@ export default function HelpModal({ onClose, darkMode, isMobile }) {
           <P><B>Month (M):</B> Monthly date grid. Each date shows task dots or small cards. Drag tasks between dates to reschedule.</P>
           <P><B>List (&#x2261;):</B> All tasks grouped by date in a flat list. Inline status controls let you quickly mark tasks done.</P>
           <P><B>Priority (P):</B> Kanban-style board with P1, P2, P3, P4 columns. Drag tasks between columns to change priority.</P>
-          <P><B>Issues (!):</B> Shows unplaced tasks (couldn&apos;t fit in schedule), conflicts (overlapping tasks), and deadline misses.</P>
+          <P><B>Issues (!):</B> Shows unscheduled tasks (couldn&apos;t fit in schedule), conflicts (overlapping tasks), and deadline misses.</P>
         </Section>
 
         {/* 6. Filters */}
@@ -134,8 +135,8 @@ export default function HelpModal({ onClose, darkMode, isMobile }) {
           <P><B>Done:</B> Only tasks that are done.</P>
           <P><B>WIP:</B> Only tasks currently in progress.</P>
           <P><B>Blocked:</B> Tasks waiting on incomplete dependencies. The red badge shows how many. These can&apos;t proceed until their dependencies are done.</P>
-          <P><B>Unplaced:</B> Tasks the scheduler couldn&apos;t place into any time slot. The red badge shows how many. Check the Issues view for details.</P>
-          <P><B>Hide Recurring:</B> Toggle to hide recurringTasks from the view, reducing clutter when you want to focus on one-off tasks.</P>
+          <P><B>Unscheduled:</B> Tasks the scheduler couldn&apos;t place into any time slot. The red badge shows how many. Check the Issues view for details.</P>
+          <P><B>Hide Recurring:</B> Toggle to hide recurring tasks from the view, reducing clutter when you want to focus on one-off tasks.</P>
         </Section>
 
         {/* 7. AI Commands */}
@@ -209,8 +210,8 @@ export default function HelpModal({ onClose, darkMode, isMobile }) {
         {/* 11. Tips */}
         <Section title="11. Tips" theme={theme}>
           <P>&bull; Click hour labels in Day view to change the location for that hour.</P>
-          <P>&bull; Drag tasks between days, times, or priority columns.</P>
-          <P>&bull; Use the batch-done button to mark all recurringTasks done for the day.</P>
+          <P>&bull; Drag tasks between days or times in the calendar views, or between priority columns in Priority view.</P>
+          <P>&bull; Use the batch-done button to mark all recurring tasks done for the day.</P>
           <P>&bull; Ctrl/Cmd + scroll to zoom the timeline grid.</P>
           <P>&bull; Pinch to zoom on mobile.</P>
           <P>&bull; Hover over any button or badge for a tooltip explaining what it does.</P>

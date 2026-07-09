@@ -65,7 +65,7 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
     {
       key: 'overdue', title: 'Overdue', tasks: issues.overdue, color: theme.redText,
       tip: 'Tasks past their due date/time that aren\'t done',
-      help: 'These tasks are past their due date/time and still open — including calendar events and recurring occurrences whose date has already passed. They stay pinned on the calendar at their original time, flagged overdue. Mark them done, reschedule to a new date, or cancel them.'
+      help: 'These tasks are past their due date/time and still open — including calendar events and recurring instances whose date has already passed. They stay pinned on the calendar at their original time, flagged overdue. Mark them done, reschedule to a new date, or cancel them.'
     },
     {
       // sched-audit L3 ernie BLOCK (l3-ernie-1) — use the deduped
@@ -73,7 +73,7 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
       // BOTH overdue and unplaced renders ONCE, under Overdue (the canonical
       // bucket for a dual-shape row per conflictBuckets.js), keeping this page's
       // count and rendered rows in agreement with the badge (999.862 invariant).
-      key: 'unplaced', title: 'Unplaced', tasks: issues.unplacedForDisplay, color: theme.amberText,
+      key: 'unplaced', title: 'Unscheduled', tasks: issues.unplacedForDisplay, color: theme.amberText,
       tip: 'Tasks the scheduler couldn\'t fit into any available time slot',
       help: 'The scheduler tried to place these tasks but ran out of room. Common causes: the day is too full, time window constraints are too narrow, a non-splittable task is too long for any available gap, or no suitable weather window exists within the 14-day horizon. Try shortening the task, enabling splitting, relaxing the time window, adjusting weather conditions, or moving other tasks to free up space.'
     },
@@ -334,7 +334,7 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
                         <span style={{ fontWeight: 600 }}>Recurring conflict: </span>
                         <span style={taskLinkStyle} onClick={function() { if (w.taskId && onExpand) onExpand(w.taskId); }} title="Open task details">{taskA ? taskA.text : w.taskId}</span>
                         <div style={{ fontSize: 10, color: theme.textMuted, marginTop: 2 }}>
-                          A recurring occurrence couldn't be placed without colliding with another fixed or recurring task on the same day, so the scheduler left it unplaced. Adjust its time, day requirement, or recurrence so it has a free slot.
+                          A recurring instance couldn't be placed without colliding with another fixed or recurring task on the same day, so the scheduler left it unscheduled. Adjust its time, day requirement, or recurrence so it has a free slot.
                         </div>
                       </div>
                     )}

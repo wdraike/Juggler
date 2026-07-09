@@ -971,7 +971,7 @@ export default function AppLayout() {
         count++;
       }
     });
-    showToast(count + ' recurringTasks marked done', 'success');
+    showToast(count + ' recurring tasks marked done', 'success');
   }, [allTasks, statuses, pushUndo, setStatus, showToast]);
 
   // Per-hour location override handler
@@ -993,7 +993,7 @@ export default function AppLayout() {
       if (v === null) setExpandedTasks([]);
       else setExpandedTasks([v]);
     },
-    setDayOffset, setShowSettings, setShowExport,
+    setDayOffset, setShowHelp,
     onStatusChange: handleStatusChange, popUndo, showToast
   });
 

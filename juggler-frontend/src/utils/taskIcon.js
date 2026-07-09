@@ -1,3 +1,5 @@
+import apiClient from '../services/apiClient';
+
 var iconCache = new Map(); // text → emoji string ('' = checked, no keyword match)
 var pendingAI = new Set(); // texts currently being AI-fetched
 
@@ -81,9 +83,11 @@ export function requestAIIcon(text, onResult) {
 
   pendingAI.add(text);
 
-  fetch('/api/tasks/suggest-icon?text=' + encodeURIComponent(text))
-    .then(function (res) { return res.json(); })
-    .then(function (data) {
+  // apiClient (not bare fetch): the task router is JWT-guarded, so the request
+  // needs the Bearer token + apiBase the shared client provides (999.1239).
+  apiClient.get('/tasks/suggest-icon', { params: { text: text } })
+    .then(function (res) {
+      var data = res.data;
       if (data && data.icon) {
         iconCache.set(text, data.icon);
         if (typeof onResult === 'function') onResult(data.icon);

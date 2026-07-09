@@ -7,6 +7,21 @@ import React, { useState, useEffect, useCallback } from 'react';
 import apiClient from '../../services/apiClient';
 import ConfirmDialog from '../features/ConfirmDialog';
 
+// Human copy for plan-limit keys (999.1233 — never show raw config keys to
+// users). Unknown keys fall back to the old derived form so the message still
+// names the limit rather than hiding it.
+var LIMIT_LABELS = {
+  'limits.active_tasks': 'active task',
+  'limits.recurring_templates': 'recurring task',
+  'limits.projects': 'project',
+  'limits.locations': 'location',
+  'limits.schedule_templates': 'schedule template'
+};
+
+function limitLabel(limitKey) {
+  return LIMIT_LABELS[limitKey] || (limitKey || '').replace('limits.', '').replace(/_/g, ' ');
+}
+
 export default function DisabledItemsPanel({ theme, onClose, onRefreshTasks }) {
   var [items, setItems] = useState([]);
   var [loading, setLoading] = useState(true);
@@ -35,7 +50,7 @@ export default function DisabledItemsPanel({ theme, onClose, onRefreshTasks }) {
       setActionPending(null);
       var data = err.response?.data;
       if (data?.code === 'ENTITY_LIMIT_REACHED') {
-        alert('Cannot re-enable: you have reached the ' + (data.limit_key || '').replace('limits.', '').replace(/_/g, ' ') + ' limit for your plan (' + data.current_count + '/' + data.limit + ').');
+        alert('Cannot re-enable: you have reached the ' + limitLabel(data.limit_key) + ' limit for your plan (' + data.current_count + '/' + data.limit + ').');
       } else {
         alert(data?.error || 'Failed to re-enable');
       }

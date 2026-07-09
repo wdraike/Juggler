@@ -62,7 +62,7 @@ const VIEW_MODES = [
   { id: 'list',      label: 'List',     icon: '≡',  tip: 'List view — all tasks grouped by date' },
   { id: 'priority',  label: 'Priority', icon: 'P',  tip: 'Priority view — P1-P4 kanban columns' },
   { id: 'deps',      label: 'Deps',     icon: '→',  tip: 'Dependencies view — DAG graph of task dependencies, filter by project' },
-  { id: 'conflicts', label: 'Issues',   icon: '!',  tip: 'Issues view — unplaced tasks, conflicts, and deadline misses' },
+  { id: 'conflicts', label: 'Issues',   icon: '!',  tip: 'Issues view — unscheduled tasks, conflicts, and deadline misses' },
 ];
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

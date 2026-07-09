@@ -617,7 +617,7 @@ describe('F10-integration (l3-ernie-8) — badge==page invariant for a dual-shap
     expect(allMatches.length).toBe(1);
 
     var overdueSection = findSectionContainer(container, 'Overdue');
-    var unplacedSection = findSectionContainer(container, 'Unplaced');
+    var unplacedSection = findSectionContainer(container, 'Unscheduled');
     expect(overdueSection).not.toBeNull();
     expect(unplacedSection).not.toBeNull();
 

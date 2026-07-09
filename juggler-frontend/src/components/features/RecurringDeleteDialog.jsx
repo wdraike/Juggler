@@ -51,7 +51,7 @@ export default function RecurringDeleteDialog({
       <div>
         <div>This is a recurring task. What would you like to do?</div>
         <div style={{ fontSize: 11, marginTop: 8 }}>
-          Skipping marks this occurrence done; the series continues.
+          Skipping marks this instance done; the series continues.
         </div>
         <div style={{ fontSize: 11, marginTop: 4 }}>
           Deleting the series removes it and all future instances; past instances stay.
