@@ -104,7 +104,9 @@ var mockDb = (function() {
       return mockCreatedRow ? [mockCreatedRow] : [];
     }
     if (t === 'tasks_v') {
-      return [];
+      // 999.1395: the facade re-reads the created task via KnexTaskRepository,
+      // which selects from tasks_v (fetchTasksWithEventIds), NOT tasks_with_sync_v.
+      return mockCreatedRow ? [mockCreatedRow] : [];
     }
     return [];
   }
@@ -131,13 +133,30 @@ var mockDb = (function() {
 
 jest.mock('../src/db', function() { return mockDb; });
 
+// 999.1395: the facade path (slices/task, ADR-0002) gets its knex via
+// lib/db.getDefaultDb() — NOT via src/db. Without this mock the facade reaches
+// the real DB and every capture-based assertion misses the write. Route lib/db
+// to the same mocked instance src/db returns.
+jest.mock('../src/lib/db', function() {
+  return {
+    getDefaultDb: function() { return require('../src/db'); },
+    createKnex: function() { return require('../src/db'); },
+    withTransaction: function(cb) { return cb(require('../src/db')); },
+    TransactionContext: function TransactionContext() {},
+    defaultPoolConfig: {},
+    ENVIRONMENTS: {},
+    _resetForTests: function() {}
+  };
+});
+
 jest.mock('../src/lib/tasks-write', function() {
   return {
     insertTask: function(_db, row) {
       mockInsertCalls.push({ row: Object.assign({}, row) });
       return Promise.resolve();
     },
-    updateTaskById: function() { return Promise.resolve(); },
+    // 999.1398: batchUpdateTxn reads the affected-row counts off the result
+    updateTaskById: function() { return Promise.resolve({ masterUpdated: 1, instanceUpdated: 0 }); },
     deleteTaskById: function() { return Promise.resolve(); }
   };
 });
@@ -160,7 +179,9 @@ jest.mock('../src/lib/task-write-queue', function() {
 });
 
 jest.mock('../src/lib/sse-emitter', function() {
-  return { emitTasksChanged: jest.fn() };
+  // facade.js calls sseEmitter.emit(...) directly (S4/S6 mutation->schedule
+  // trigger); stubbing only emitTasksChanged crashes mutating handlers.
+  return { emit: jest.fn(), emitTasksChanged: jest.fn() };
 });
 
 // ── Handler capture ───────────────────────────────────────────────────────────
@@ -399,29 +420,33 @@ describe('create_task boundary — deadline vs earliestStart', function() {
   });
 
   test('deadline same as earliestStart → accepted (same-day is allowed)', async function() {
+    // 999.1395: dates moved to the far future — create_task now rejects a
+    // deadline already in the past (BUG-5/AC4 create-time plausibility check,
+    // taskValidation.js:209), which the old 2026-06 fixtures started tripping.
     mockCreatedRow = makeSuccessRow({
       text: 'Task',
-      deadline: '2026-06-15',
-      earliest_start_at: '2026-06-15'
+      deadline: '2030-06-15',
+      earliest_start_at: '2030-06-15'
     });
     var result = await captureHandlers()['create_task']({
       text: 'Task',
-      deadline: '2026-06-15',
-      earliestStart: '2026-06-15'
+      deadline: '2030-06-15',
+      earliestStart: '2030-06-15'
     });
     expect(result.isError).toBeFalsy();
   });
 
   test('deadline after earliestStart → accepted', async function() {
+    // 999.1395: future dates — see past-deadline rejection note above.
     mockCreatedRow = makeSuccessRow({
       text: 'Task',
-      deadline: '2026-06-20',
-      earliest_start_at: '2026-06-15'
+      deadline: '2030-06-20',
+      earliest_start_at: '2030-06-15'
     });
     var result = await captureHandlers()['create_task']({
       text: 'Task',
-      deadline: '2026-06-20',
-      earliestStart: '2026-06-15'
+      deadline: '2030-06-20',
+      earliestStart: '2030-06-15'
     });
     expect(result.isError).toBeFalsy();
   });

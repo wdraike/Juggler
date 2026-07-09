@@ -123,9 +123,26 @@ This helper is the **sole source** of the XOR decision. Every enforcement path d
 
 | Property | DB | JS | Type | Set By | Scheduler Effect |
 |----------|-----|-----|------|--------|-----------------|
-| Deadline | `deadline` | `deadline` | date | User | Hard upper bound. Tasks with deadline enter constrained pool (Phase 2). Slack computed against this. Past-due = placed ASAP with P1 boost. |
+| Deadline | `deadline` | `deadline` | date | User | Hard upper bound. Tasks with deadline enter constrained pool (Phase 2). Slack computed against this. Past-due = placed ASAP with P1 boost. Rejected at create time if already in the past (see below). |
 | Start After | `start_after_at` | `startAfter` | date | User | Hard lower bound. Task won't place before this date. |
 | Depends On | `depends_on` | `dependsOn` | JSON array of IDs | User | Task waits until all deps are placed. Done/cancelled deps are considered met. Circular deps auto-broken. |
+
+**Create-time past-deadline rejection** (999.1224 fold-in, leg jug-overdue-flag-fork): creating a
+task whose `deadline` is already in the past is rejected with `Deadline must not be in the past`
+— a deadline in the past would mint a task that is overdue from the moment it exists. Details
+(`taskValidation.js` ~line 173, the `_requireText` create-only gate):
+
+- **Create only.** The check is gated on the create-path discriminator (`_requireText`), so
+  update paths — e.g. editing an already-overdue task — are unaffected. Both single create and
+  batch create (`create_task` / `create_tasks` over MCP, `POST /api/tasks` and
+  `POST /api/tasks/batch` over HTTP) enforce it.
+- **Timezone-aware, date-only.** "Today" is resolved in the user's timezone
+  (`getNowInTimezone`, the same SSOT the overdue display predicate uses) and compared as
+  date KEYS (`YYYY-MM-DD`), never raw `Date` objects — a same-day deadline is accepted
+  everywhere on Earth.
+- **Format tolerance.** Deadlines in neither documented format (`YYYY-MM-DD` or `M/D`) skip
+  this plausibility check (the separate "Deadline must be a valid date" check still rejects
+  garbage).
 
 ### Pinning & Anchoring
 

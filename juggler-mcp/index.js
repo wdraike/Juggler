@@ -107,7 +107,7 @@ server.tool(
     dependsOn: z.array(z.string()).optional(),
     // UTC ISO fields (preferred)
     scheduledAt: z.string().optional().describe('Scheduled date+time as ISO string — UTC ("2026-03-08T22:45:00Z") or with offset ("2026-03-08T18:45:00-04:00"). Takes precedence over date/time.'),
-    deadline: z.string().optional().describe('Hard deadline as YYYY-MM-DD. Not negotiable — the scheduler places the task on or before this date.'),
+    deadline: z.string().optional().describe('Hard deadline as YYYY-MM-DD. Not negotiable — the scheduler places the task on or before this date. Must not already be in the past: create is rejected with "Deadline must not be in the past" (date-only, resolved in the user\'s timezone; today is accepted). Updating an existing task is unaffected.'),
     startAfterAt: z.string().optional().describe('Start-after date as ISO date string (e.g. "2026-03-10"). Takes precedence over startAfter.'),
     // Local string fields (convenience)
     date: z.string().optional(),
@@ -148,7 +148,7 @@ server.tool(
       dayReq: z.string().optional(),
       dependsOn: z.array(z.string()).optional(),
       scheduledAt: z.string().optional(),
-      deadline: z.string().optional(),
+      deadline: z.string().optional().describe('Hard deadline as YYYY-MM-DD. Must not already be in the past — the whole batch is rejected with "Deadline must not be in the past" (date-only, user\'s timezone; today is accepted).'),
       startAfterAt: z.string().optional(),
       date: z.string().optional(),
       time: z.string().optional(),

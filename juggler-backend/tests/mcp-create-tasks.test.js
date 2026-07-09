@@ -122,13 +122,30 @@ var mockDb = (function() {
 
 jest.mock('../src/db', function() { return mockDb; });
 
+// 999.1395: the facade path (slices/task, ADR-0002) gets its knex via
+// lib/db.getDefaultDb() — NOT via src/db. Without this mock the facade reaches
+// the real DB and every capture-based assertion misses the write. Route lib/db
+// to the same mocked instance src/db returns.
+jest.mock('../src/lib/db', function() {
+  return {
+    getDefaultDb: function() { return require('../src/db'); },
+    createKnex: function() { return require('../src/db'); },
+    withTransaction: function(cb) { return cb(require('../src/db')); },
+    TransactionContext: function TransactionContext() {},
+    defaultPoolConfig: {},
+    ENVIRONMENTS: {},
+    _resetForTests: function() {}
+  };
+});
+
 jest.mock('../src/lib/tasks-write', function() {
   return {
     insertTask: function(_db, row) {
       mockInsertCalls.push({ row: Object.assign({}, row) });
       return Promise.resolve();
     },
-    updateTaskById: function() { return Promise.resolve(); },
+    // 999.1398: batchUpdateTxn reads the affected-row counts off the result
+    updateTaskById: function() { return Promise.resolve({ masterUpdated: 1, instanceUpdated: 0 }); },
     deleteTaskById: function() { return Promise.resolve(); }
   };
 });
@@ -152,7 +169,9 @@ jest.mock('../src/lib/task-write-queue', function() {
 });
 
 jest.mock('../src/lib/sse-emitter', function() {
-  return { emitTasksChanged: jest.fn() };
+  // facade.js calls sseEmitter.emit(...) directly (S4/S6 mutation->schedule
+  // trigger); stubbing only emitTasksChanged crashes mutating handlers.
+  return { emit: jest.fn(), emitTasksChanged: jest.fn() };
 });
 
 // ── Handler capture ───────────────────────────────────────────────────────────
@@ -582,25 +601,39 @@ describe('create_tasks — no cal-sync guard on create', function() {
 
 describe('create_tasks — enqueueScheduleRun', function() {
 
-  test('successful batch → enqueueScheduleRun called with userId and all task ids', async function() {
+  test('successful batch → schedule trigger fires with all task ids (SSE payload) + deferred scheduler enqueue', async function() {
+    // 999.1395: the facade's enqueueScheduleRun wrapper (facade.js:145) emits
+    // the ids on the SSE 'tasks:changed' payload synchronously and defers the
+    // actual scheduleQueue.enqueueScheduleRun by 2s with (userId, source) only.
+    // The source is the facade's own 'api:batchCreateTasks'.
     var { enqueueScheduleRun } = require('../src/scheduler/scheduleQueue');
+    var sseEmitter = require('../src/lib/sse-emitter');
     enqueueScheduleRun.mockClear();
+    sseEmitter.emit.mockClear();
 
-    var result = await captureHandlers()['create_tasks']({
-      tasks: [
-        { text: 'Task A' },
-        { text: 'Task B' }
-      ]
-    });
-    expect(result.isError).toBeFalsy();
-    expect(enqueueScheduleRun).toHaveBeenCalledWith(
-      'user-001',
-      'mcp:create_tasks',
-      expect.arrayContaining([expect.any(String), expect.any(String)])
-    );
-    // Both task ids must be in the array
-    var callArgs = enqueueScheduleRun.mock.calls[0][2];
-    expect(callArgs.length).toBe(2);
+    jest.useFakeTimers();
+    try {
+      var result = await captureHandlers()['create_tasks']({
+        tasks: [
+          { text: 'Task A' },
+          { text: 'Task B' }
+        ]
+      });
+      expect(result.isError).toBeFalsy();
+      // Synchronous SSE emit carries the source + both created ids
+      expect(sseEmitter.emit).toHaveBeenCalledWith(
+        'user-001',
+        'tasks:changed',
+        expect.objectContaining({ source: 'api:batchCreateTasks' })
+      );
+      var payload = sseEmitter.emit.mock.calls[0][2];
+      expect(payload.ids.length).toBe(2);
+      // Deferred scheduler enqueue fires after the 2s timer
+      jest.runOnlyPendingTimers();
+      expect(enqueueScheduleRun).toHaveBeenCalledWith('user-001', 'api:batchCreateTasks');
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   test('validation failure → enqueueScheduleRun NOT called', async function() {
@@ -645,7 +678,9 @@ describe('create_tasks — queued path (isLocked=true)', function() {
     expect(mockEnqueueCalls.length).toBe(2);
     mockEnqueueCalls.forEach(function(call) {
       expect(call.op).toBe('create');
-      expect(call.src).toBe('mcp:create_tasks');
+      // 999.1395: facade BatchCreateTasks enqueues with its own
+      // 'api:batchCreateTasks' src, no longer an MCP-specific tag.
+      expect(call.src).toBe('api:batchCreateTasks');
     });
   });
 
@@ -671,18 +706,23 @@ describe('create_tasks — queued path (isLocked=true)', function() {
     });
   });
 
-  test('locked: enqueueScheduleRun still called', async function() {
+  test('locked: enqueueScheduleRun still called (deferred, api:batchCreateTasks)', async function() {
+    // 999.1395: locked batch create calls the facade wrapper with
+    // skipEmit:true — no SSE — and the actual scheduleQueue.enqueueScheduleRun
+    // fires 2s later with (userId, source). Flush with fake timers.
     var { enqueueScheduleRun } = require('../src/scheduler/scheduleQueue');
     enqueueScheduleRun.mockClear();
 
-    await captureHandlers()['create_tasks']({
-      tasks: [{ text: 'Queued for schedule' }]
-    });
-    expect(enqueueScheduleRun).toHaveBeenCalledWith(
-      'user-001',
-      'mcp:create_tasks',
-      expect.arrayContaining([expect.any(String)])
-    );
+    jest.useFakeTimers();
+    try {
+      await captureHandlers()['create_tasks']({
+        tasks: [{ text: 'Queued for schedule' }]
+      });
+      jest.runOnlyPendingTimers();
+      expect(enqueueScheduleRun).toHaveBeenCalledWith('user-001', 'api:batchCreateTasks');
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
 
@@ -717,13 +757,16 @@ describe('create_tasks — response shape', function() {
     expect(parsed.ids).toContain('my-explicit-id-001');
   });
 
-  test('empty tasks array → succeeds with created:0', async function() {
+  test('empty tasks array → rejected (999.1394 batch/single parity)', async function() {
+    // 999.1395: facade BatchCreateTasks rejects an empty batch — the zod
+    // batchCreateSchema fires first ('Invalid batch payload',
+    // BatchCreateTasks.js:96), backstopped by the explicit array guard
+    // ('Tasks array required'). An empty batch is an error, matching HTTP.
     var result = await captureHandlers()['create_tasks']({
       tasks: []
     });
-    expect(result.isError).toBeFalsy();
-    var parsed = parseResult(result);
-    expect(parsed.created).toBe(0);
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/invalid batch payload|tasks array required/i);
     expect(mockInsertCalls.length).toBe(0);
   });
 });

@@ -202,10 +202,27 @@ var mockDb = (function() {
 
 jest.mock('../src/db', function() { return mockDb; });
 
+// 999.1395: the facade path (slices/task, ADR-0002) gets its knex via
+// lib/db.getDefaultDb() — NOT via src/db. Without this mock the facade reaches
+// the real DB and every capture-based assertion misses the write. Route lib/db
+// to the same mocked instance src/db returns.
+jest.mock('../src/lib/db', function() {
+  return {
+    getDefaultDb: function() { return require('../src/db'); },
+    createKnex: function() { return require('../src/db'); },
+    withTransaction: function(cb) { return cb(require('../src/db')); },
+    TransactionContext: function TransactionContext() {},
+    defaultPoolConfig: {},
+    ENVIRONMENTS: {},
+    _resetForTests: function() {}
+  };
+});
+
 jest.mock('../src/lib/tasks-write', function() {
   return {
     insertTask:     function() { return Promise.resolve(); },
-    updateTaskById: function() { return Promise.resolve(); },
+    // 999.1398: batchUpdateTxn reads the affected-row counts off the result
+    updateTaskById: function() { return Promise.resolve({ masterUpdated: 1, instanceUpdated: 0 }); },
     deleteTaskById: function() { return Promise.resolve(); }
   };
 });
@@ -276,15 +293,17 @@ describe('ZOE-JUG-025 — MCP: calendar-synced task rejects disallowed fields', 
     expect(result.content[0].text).toMatch(/synced from an external calendar/i);
   });
 
-  test('(b) MCP update_task on synced task with _allowUnfix → isError (MCP does not allow it)', async function() {
-    // HTTP allows _allowUnfix; MCP does NOT — this is the key divergence
+  test('(b) MCP update_task on synced task with _allowUnfix → allowed (999.1395: MCP now shares the HTTP guard)', async function() {
+    // Pre-facade the MCP adapter had its own guard that rejected _allowUnfix.
+    // Since jug-mcp-facade, update_task routes through the shared facade
+    // UpdateTask use-case and the ONE checkCalSyncEditGuard — whose allowed
+    // list includes '_allowUnfix' (taskValidation.js:66). The MCP-only
+    // divergence is retired; a bare _allowUnfix passes on both paths.
     resetStore({ gcal_event_id: 'gcal-evt-001', cal_sync_origin: 'gcal' });
     var result = await captureMcpHandlers()['update_task']({
       id: 'task-001', _allowUnfix: true
     });
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toMatch(/synced from an external calendar/i);
-    expect(result.content[0].text).toContain('_allowUnfix');
+    expect(result.isError).toBeFalsy();
   });
 
   test('(c) MCP update_task on synced task with text → isError', async function() {
@@ -420,7 +439,7 @@ describe('ZOE-JUG-025 — HTTP checkCalSyncEditGuard: allow list diverges from M
 
 describe('ZOE-JUG-025 — Divergence contract: _allowUnfix on synced task', function() {
 
-  test('_allowUnfix: HTTP guard returns null (allowed); MCP returns isError (blocked)', async function() {
+  test('_allowUnfix: HTTP guard returns null (allowed); MCP CONVERGES (999.1395: shared facade guard)', async function() {
     // HTTP side: null = no error
     var existing = makeTask({
       gcal_event_id: 'gcal-evt-001',
@@ -429,12 +448,14 @@ describe('ZOE-JUG-025 — Divergence contract: _allowUnfix on synced task', func
     var httpGuard = checkCalSyncEditGuard(existing, { _allowUnfix: true });
     expect(httpGuard).toBeNull(); // HTTP: permitted
 
-    // MCP side: isError = true
+    // MCP side: since jug-mcp-facade, update_task routes through the same
+    // facade guard — the pre-facade MCP-only _allowUnfix block is retired,
+    // so both paths permit a bare _allowUnfix (divergence → convergence).
     resetStore({ gcal_event_id: 'gcal-evt-001', cal_sync_origin: 'gcal' });
     var mcpResult = await captureMcpHandlers()['update_task']({
       id: 'task-001', _allowUnfix: true
     });
-    expect(mcpResult.isError).toBe(true); // MCP: blocked
+    expect(mcpResult.isError).toBeFalsy(); // MCP: also permitted
   });
 
   test('origin-awareness: juggler-origin task — both HTTP and MCP allow any field', async function() {

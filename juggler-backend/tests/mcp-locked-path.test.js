@@ -180,6 +180,22 @@ var mockDb = (function() {
 
 jest.mock('../src/db', function() { return mockDb; });
 
+// 999.1395: the facade path (slices/task, ADR-0002) gets its knex via
+// lib/db.getDefaultDb() — NOT via src/db. Without this mock the facade reaches
+// the real DB and every capture-based assertion misses the write. Route lib/db
+// to the same mocked instance src/db returns.
+jest.mock('../src/lib/db', function() {
+  return {
+    getDefaultDb: function() { return require('../src/db'); },
+    createKnex: function() { return require('../src/db'); },
+    withTransaction: function(cb) { return cb(require('../src/db')); },
+    TransactionContext: function TransactionContext() {},
+    defaultPoolConfig: {},
+    ENVIRONMENTS: {},
+    _resetForTests: function() {}
+  };
+});
+
 jest.mock('../src/lib/tasks-write', function() {
   return {
     insertTask: function(_db, row) {
@@ -188,7 +204,8 @@ jest.mock('../src/lib/tasks-write', function() {
     },
     updateTaskById: function(_db, id, row) {
       mockWriteCalls.push({ id: id, row: Object.assign({}, row) });
-      return Promise.resolve();
+      // 999.1398: batchUpdateTxn reads the affected-row counts off the result
+      return Promise.resolve({ masterUpdated: 1, instanceUpdated: 0 });
     },
     deleteTaskById: function() { return Promise.resolve(); }
   };
@@ -224,7 +241,9 @@ jest.mock('../src/lib/task-write-queue', function() {
 });
 
 jest.mock('../src/lib/sse-emitter', function() {
-  return { emitTasksChanged: jest.fn() };
+  // facade.js calls sseEmitter.emit(...) directly (S4/S6 mutation->schedule
+  // trigger); stubbing only emitTasksChanged crashes mutating handlers.
+  return { emit: jest.fn(), emitTasksChanged: jest.fn() };
 });
 
 // ── Handler capture ───────────────────────────────────────────────────────────
@@ -258,12 +277,15 @@ beforeEach(function() {
 
 describe('create_task — locked path (isLocked=true)', function() {
 
-  test('enqueueWrite is called with op=create and src=mcp:create_task', async function() {
+  test('enqueueWrite is called with op=create and src=api:createTask', async function() {
     var result = await captureHandlers()['create_task']({ text: 'New locked task' });
     expect(result.isError).toBeFalsy();
     expect(mockEnqueueCalls.length).toBe(1);
     expect(mockEnqueueCalls[0].op).toBe('create');
-    expect(mockEnqueueCalls[0].src).toBe('mcp:create_task');
+    // 999.1395: since jug-mcp-facade, MCP create routes through the shared
+    // facade CreateTask use-case — the queue src is the facade's own
+    // 'api:createTask' (CreateTask.js), no longer an MCP-specific tag.
+    expect(mockEnqueueCalls[0].src).toBe('api:createTask');
     expect(mockEnqueueCalls[0].userId).toBe('user-001');
   });
 
@@ -302,14 +324,21 @@ describe('create_task — locked path (isLocked=true)', function() {
   });
 
   test('enqueueScheduleRun is still called when locked', async function() {
+    // 999.1395: the facade's enqueueScheduleRun wrapper (facade.js:145) defers
+    // the actual scheduleQueue.enqueueScheduleRun via setTimeout(..., 2000) and
+    // calls it with (userId, source) only — ids ride on the SSE payload, and
+    // the source is the facade's 'api:createTask'. Flush the deferred timer
+    // with fake timers to observe the call.
     var { enqueueScheduleRun } = require('../src/scheduler/scheduleQueue');
     enqueueScheduleRun.mockClear();
-    await captureHandlers()['create_task']({ text: 'Schedule run on locked create' });
-    expect(enqueueScheduleRun).toHaveBeenCalledWith(
-      'user-001',
-      'mcp:create_task',
-      expect.arrayContaining([expect.any(String)])
-    );
+    jest.useFakeTimers();
+    try {
+      await captureHandlers()['create_task']({ text: 'Schedule run on locked create' });
+      jest.runOnlyPendingTimers();
+      expect(enqueueScheduleRun).toHaveBeenCalledWith('user-001', 'api:createTask');
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   test('db.transaction is NOT invoked when locked', async function() {
@@ -341,47 +370,55 @@ describe('create_task — locked path (isLocked=true)', function() {
 });
 
 // =============================================================================
-// 2. update_task — locked path (scheduling fields → enqueueWrite)
+// 2. update_task — simple edits take the FAST PATH even when locked
 // =============================================================================
+// 999.1395 REWRITE: since jug-mcp-facade, MCP update_task routes through the
+// shared facade UpdateTask use-case, which sends simple (non-complex) edits down
+// the legacy HTTP FAST PATH (UpdateTask.js:225 → _fastPath, handler L953-1062
+// parity). The fast path performs a DIRECT repo write WITHOUT consulting the
+// write-lock — only the complex path (recurrence toggles etc.) checks isLocked.
+// The pre-facade MCP adapter checked the lock for every update; that MCP-only
+// divergence is retired. These tests now pin the unified fast-path contract.
 
-describe('update_task — locked path, scheduling fields', function() {
+describe('update_task — simple edits take the fast path even when locked', function() {
 
-  test('scheduling field (dur) → enqueueWrite called, not a direct write', async function() {
+  test('scheduling field (dur) → direct write via fast path, enqueueWrite NOT called', async function() {
     var result = await captureHandlers()['update_task']({ id: 'task-001', dur: 60 });
     expect(result.isError).toBeFalsy();
-    // dur is a scheduling field → must appear in enqueue, not in direct write
-    var eq = mockEnqueueCalls.find(function(e) { return e.taskId === 'task-001'; });
-    expect(eq).toBeDefined();
-    expect(eq.op).toBe('update');
-    expect(eq.src).toBe('mcp:update_task');
-    expect(eq.fields.dur).toBe(60);
-    // ZOE-JUG-023-W2: taskToRow unconditionally sets updated_at (non-scheduling).
-    // splitFields always produces a non-empty nonSchedulingFields for the timestamp,
-    // so updateTaskById IS called exactly once — but only with { updated_at }.
-    // dur must NOT appear in the direct write.
-    expect(mockWriteCalls.length).toBe(1);
-    expect(mockWriteCalls[0].row.dur).toBeUndefined();
+    // fast path bypasses the queue entirely — dur lands in the direct write
+    expect(mockEnqueueCalls.length).toBe(0);
+    var write = mockWriteCalls.find(function(c) { return c.id === 'task-001'; });
+    expect(write).toBeDefined();
+    expect(write.row.dur).toBe(60);
   });
 
-  test('scheduling field update → response has queued:true', async function() {
+  test('scheduling field update → response has NO queued flag (fast path writes directly)', async function() {
     var result = await captureHandlers()['update_task']({ id: 'task-001', dur: 45 });
     expect(result.isError).toBeFalsy();
     var parsed = parseResult(result);
-    expect(parsed.queued).toBe(true);
+    expect(parsed.queued).toBeUndefined();
   });
 
-  test('scheduling field (placement_mode via placementMode) → enqueued with correct value', async function() {
+  test('scheduling field (placement_mode via placementMode) → written directly with correct value', async function() {
     await captureHandlers()['update_task']({ id: 'task-001', placementMode: 'time_window' });
-    var eq = mockEnqueueCalls.find(function(e) { return e.taskId === 'task-001'; });
-    expect(eq).toBeDefined();
-    expect(eq.fields.placement_mode).toBe('time_window');
+    var write = mockWriteCalls.find(function(c) { return c.id === 'task-001'; });
+    expect(write).toBeDefined();
+    expect(write.row.placement_mode).toBe('time_window');
   });
 
-  test('enqueueScheduleRun is still called in locked update path', async function() {
+  test('enqueueScheduleRun is still called for a fast-path scheduling edit', async function() {
+    // facade wrapper defers scheduleQueue.enqueueScheduleRun by 2s and calls it
+    // with (userId, source) — source is the facade's 'api:updateTask'.
     var { enqueueScheduleRun } = require('../src/scheduler/scheduleQueue');
     enqueueScheduleRun.mockClear();
-    await captureHandlers()['update_task']({ id: 'task-001', dur: 30 });
-    expect(enqueueScheduleRun).toHaveBeenCalledWith('user-001', 'mcp:update_task', ['task-001']);
+    jest.useFakeTimers();
+    try {
+      await captureHandlers()['update_task']({ id: 'task-001', dur: 30 });
+      jest.runOnlyPendingTimers();
+      expect(enqueueScheduleRun).toHaveBeenCalledWith('user-001', 'api:updateTask');
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
 
@@ -400,13 +437,13 @@ describe('update_task — locked path, non-scheduling fields', function() {
     expect(mockEnqueueCalls.length).toBe(0);
   });
 
-  test('notes (non-scheduling) → direct write, response still has queued:true', async function() {
-    // The handler always returns queued:true on the locked path, even if only
-    // non-scheduling fields were provided (enqueueScheduleRun still fired).
+  test('notes (non-scheduling) → direct write, response has NO queued flag (fast path)', async function() {
+    // 999.1395: simple edits take the facade fast path (direct write, no
+    // queued flag) even when locked — see the section-2 rewrite note above.
     var result = await captureHandlers()['update_task']({ id: 'task-001', notes: 'A note' });
     expect(result.isError).toBeFalsy();
     var parsed = parseResult(result);
-    expect(parsed.queued).toBe(true);
+    expect(parsed.queued).toBeUndefined();
     var directWrite = mockWriteCalls.find(function(c) { return c.id === 'task-001' && c.row.notes === 'A note'; });
     expect(directWrite).toBeDefined();
   });
@@ -448,16 +485,19 @@ describe('batch_update_tasks — locked path (isLocked=true)', function() {
     expect(mockTransactionCalls).toBe(0);
   });
 
-  test('all enqueue calls have op=update and src=mcp:batch_update_tasks', async function() {
+  test('all enqueue calls have op=update and src=api:batchUpdateTasks', async function() {
     await captureHandlers()['batch_update_tasks']({
       updates: [
         { id: 'task-001', dur: 30 },
         { id: 'task-002', pri: 'P1' }
       ]
     });
+    expect(mockEnqueueCalls.length).toBeGreaterThan(0);
     mockEnqueueCalls.forEach(function(call) {
       expect(call.op).toBe('update');
-      expect(call.src).toBe('mcp:batch_update_tasks');
+      // 999.1395: facade lockedBatchUpdate enqueues with its own
+      // 'api:batchUpdateTasks' src (facade.js:1286), not an MCP-specific tag.
+      expect(call.src).toBe('api:batchUpdateTasks');
     });
   });
 
@@ -511,24 +551,30 @@ describe('batch_update_tasks — locked path (isLocked=true)', function() {
     expect(mockTransactionCalls).toBe(0);
   });
 
-  test('enqueueScheduleRun is called for all task ids in the locked batch path', async function() {
+  test('enqueueScheduleRun is called after the locked batch path (deferred)', async function() {
+    // 999.1395: facade wrapper defers scheduleQueue.enqueueScheduleRun by 2s
+    // and calls it with (userId, source) — ids ride on the SSE payload only.
     var { enqueueScheduleRun } = require('../src/scheduler/scheduleQueue');
     enqueueScheduleRun.mockClear();
-
-    await captureHandlers()['batch_update_tasks']({
-      updates: [
-        { id: 'task-001', dur: 30 },
-        { id: 'task-002', dur: 45 }
-      ]
-    });
-    expect(enqueueScheduleRun).toHaveBeenCalledWith(
-      'user-001',
-      'mcp:batch_update_tasks',
-      expect.arrayContaining(['task-001', 'task-002'])
-    );
+    jest.useFakeTimers();
+    try {
+      await captureHandlers()['batch_update_tasks']({
+        updates: [
+          { id: 'task-001', dur: 30 },
+          { id: 'task-002', dur: 45 }
+        ]
+      });
+      jest.runOnlyPendingTimers();
+      expect(enqueueScheduleRun).toHaveBeenCalledWith('user-001', 'api:batchUpdateTasks');
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
-  test('unknown task id in batch → skipped (existById guard), no enqueue for missing id', async function() {
+  test('unknown task id in batch → still enqueued (999.1398: existence resolved by affected-row counts on flush)', async function() {
+    // 999.1395/999.1398: the facade lockedBatchUpdate loop no longer pre-skips
+    // unknown ids — it enqueues the write and lets the user-scoped WHERE write
+    // 0 rows on flush (updatedCount is gated on actual affected rows instead).
     var result = await captureHandlers()['batch_update_tasks']({
       updates: [
         { id: 'task-001', dur: 30 },
@@ -536,10 +582,9 @@ describe('batch_update_tasks — locked path (isLocked=true)', function() {
       ]
     });
     expect(result.isError).toBeFalsy();
-    // Only task-001 should have been enqueued
     var enqueueIds = mockEnqueueCalls.map(function(e) { return e.taskId; });
     expect(enqueueIds).toContain('task-001');
-    expect(enqueueIds).not.toContain('does-not-exist');
+    expect(enqueueIds).toContain('does-not-exist');
   });
 });
 
@@ -563,9 +608,11 @@ describe('mock isolation — resets between tests', function() {
     expect(mockTransactionCalls).toBe(0);
   });
 
-  test('third test: update_task enqueue count is exactly 1 per call', async function() {
-    await captureHandlers()['update_task']({ id: 'task-001', dur: 45 });
-    // One scheduling field → one enqueue call
+  test('third test: create_task enqueue count is exactly 1 per call', async function() {
+    // 999.1395: update_task simple edits now take the fast path (no enqueue) —
+    // use locked create_task, which still enqueues exactly once, to verify
+    // captures do not bleed across tests.
+    await captureHandlers()['create_task']({ text: 'Isolation test C' });
     expect(mockEnqueueCalls.length).toBe(1);
   });
 });

@@ -19,7 +19,13 @@ jest.mock('../src/db', function() {
   };
   mock.fn = fn;
   mock.where = function() { return mock; };
-  mock.whereIn = function() { return mock; };
+  mock.whereIn = function(_col, ids) {
+    // 999.1395: capture whereIn ids — validateTaskReferences (facade.js:187)
+    // checks dependsOn against task_masters; echoing the requested ids back
+    // makes every referenced dependency "exist" for field-mapping tests.
+    mock._whereInIds = Array.isArray(ids) ? ids.slice() : [];
+    return mock;
+  };
   mock.whereNot = function() { return mock; };
   // cal_sync_ledger calendar-born lookup: the batch guard does
   //   db('cal_sync_ledger').where(...).whereIn(...).whereNot('origin','juggler').distinct('task_id')
@@ -35,7 +41,22 @@ jest.mock('../src/db', function() {
     return Promise.resolve([]);
   };
   mock.select = function() {
-    var arr = mock._table === 'tasks_with_sync_v' ? (mock._tasksWithSyncRows || []) : [];
+    var arr = [];
+    if (mock._table === 'tasks_with_sync_v') {
+      arr = mock._tasksWithSyncRows || [];
+    } else if (mock._table === 'cal_sync_ledger') {
+      // 999.1395: batchUpdateTxn attaches cal_sync_origin from the active
+      // ledger rows (facade.js:1331) — derive them from _tasksWithSyncRows so
+      // the checkCalSyncEditGuard sees a non-juggler origin for synced tasks.
+      arr = (mock._tasksWithSyncRows || [])
+        .filter(function(r) { return r.gcal_event_id || r.msft_event_id || r.apple_event_id; })
+        .map(function(r) {
+          return { task_id: r.id, origin: r.gcal_event_id ? 'gcal' : (r.msft_event_id ? 'msft' : 'apple') };
+        });
+    } else if (mock._table === 'task_masters') {
+      // dependsOn existence check: echo requested ids back as existing masters.
+      arr = (mock._whereInIds || []).map(function(id) { return { id: id }; });
+    }
     var p = Promise.resolve(arr);
     p.first = function() {
       if (mock._table === 'users') return Promise.resolve({ timezone: 'America/New_York' });
@@ -59,6 +80,22 @@ jest.mock('../src/db', function() {
   return mock;
 });
 
+// 999.1395: the facade path (slices/task, ADR-0002) gets its knex via
+// lib/db.getDefaultDb() — NOT via src/db. Without this mock the facade reaches
+// the real DB and every capture-based assertion misses the write. Route lib/db
+// to the same mocked instance src/db returns.
+jest.mock('../src/lib/db', function() {
+  return {
+    getDefaultDb: function() { return require('../src/db'); },
+    createKnex: function() { return require('../src/db'); },
+    withTransaction: function(cb) { return cb(require('../src/db')); },
+    TransactionContext: function TransactionContext() {},
+    defaultPoolConfig: {},
+    ENVIRONMENTS: {},
+    _resetForTests: function() {}
+  };
+});
+
 jest.mock('../src/lib/tasks-write', function() {
   return {
     insertTask: function(_db, row) {
@@ -67,7 +104,8 @@ jest.mock('../src/lib/tasks-write', function() {
     },
     updateTaskById: function(_db, _id, row) {
       capturedUpdateRow = row;
-      return Promise.resolve();
+      // 999.1398: batchUpdateTxn reads the affected-row counts off the result
+      return Promise.resolve({ masterUpdated: 1, instanceUpdated: 0 });
     }
   };
 });
@@ -79,15 +117,34 @@ jest.mock('../src/scheduler/scheduleQueue', function() {
 });
 
 jest.mock('../src/lib/task-write-queue', function() {
+  // 999.1395: the facade's hasSchedulingFields does
+  // Object.keys(splitFields(row).schedulingFields) — a bare `return {}` stub
+  // crashes it. Inline splitFields mirrors the production NON_SCHEDULING_FIELDS
+  // set exactly (same pattern as mcp-update-task/mcp-locked-path; cannot
+  // jest.requireActual task-write-queue — it drags in @raike/lib-logger).
+  var NON_SCHEDULING = new Set(['text', 'notes', 'project', 'section',
+    'gcal_event_id', 'msft_event_id', 'tz', 'updated_at']);
+  function splitFields(row) {
+    var scheduling = {};
+    var nonScheduling = {};
+    Object.keys(row).forEach(function(k) {
+      if (NON_SCHEDULING.has(k)) { nonScheduling[k] = row[k]; }
+      else { scheduling[k] = row[k]; }
+    });
+    return { schedulingFields: scheduling, nonSchedulingFields: nonScheduling };
+  }
   return {
     isLocked: function() { return Promise.resolve(false); },
     enqueueWrite: function() { return Promise.resolve(); },
-    splitFields: function() { return {}; }
+    splitFields: splitFields
   };
 });
 
 jest.mock('../src/lib/sse-emitter', function() {
+  // facade.js calls sseEmitter.emit(...) directly (S4/S6 mutation->schedule
+  // trigger); stubbing only emitTasksChanged crashes mutating handlers.
   return {
+    emit: function() {},
     emitTasksChanged: function() {}
   };
 });

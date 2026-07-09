@@ -210,6 +210,22 @@ jest.mock('../src/db', function() {
   return mock;
 });
 
+// 999.1395: the facade path (slices/task, ADR-0002) gets its knex via
+// lib/db.getDefaultDb() — NOT via src/db. Without this mock the facade reaches
+// the real DB and every capture-based assertion misses the write. Route lib/db
+// to the same mocked instance src/db returns.
+jest.mock('../src/lib/db', function() {
+  return {
+    getDefaultDb: function() { return require('../src/db'); },
+    createKnex: function() { return require('../src/db'); },
+    withTransaction: function(cb) { return cb(require('../src/db')); },
+    TransactionContext: function TransactionContext() {},
+    defaultPoolConfig: {},
+    ENVIRONMENTS: {},
+    _resetForTests: function() {}
+  };
+});
+
 // 999.1398: mirror the REAL tasks-write.js updateTaskById contract — it returns
 // { masterUpdated, instanceUpdated } affected-row counts, and its WHERE is
 // user_id-scoped, so a foreign/nonexistent id writes 0 rows. batchUpdateTxn now
@@ -222,11 +238,22 @@ var mockUpdateTaskById = function(_db, id, _changes, userId) {
   return Promise.resolve({ masterUpdated: owned ? 1 : 0, instanceUpdated: 0 });
 };
 
+// 999.1395: facade DeleteTask soft-cancels (R55 no-hard-delete) via
+// tasks-write.softCancelById — ownership-aware like mockUpdateTaskById above.
+// (Defined outside the jest.mock factory, mock-prefixed, per Jest's factory
+// scoping rule.)
+var mockSoftCancelById = function(_db, id, userId) {
+  var row = taskStore[id];
+  var owned = !!(row && (!userId || row.user_id === userId));
+  return Promise.resolve({ instanceCancelled: owned ? 1 : 0, masterCancelled: 0 });
+};
+
 jest.mock('../src/lib/tasks-write', function() {
   return {
     insertTask: function() { return Promise.resolve(); },
     updateTaskById: function() { return mockUpdateTaskById.apply(null, arguments); },
-    deleteTaskById: function() { return Promise.resolve(); }
+    deleteTaskById: function() { return Promise.resolve(); },
+    softCancelById: function() { return mockSoftCancelById.apply(null, arguments); }
   };
 });
 
