@@ -102,6 +102,37 @@ describe('validateTaskInput — placementMode enum validation (ZOE-JUG-019)', ()
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// 999.1396 — existing-aware fixed-mode cross-field check: update paths pass the
+// task's existing row; a row already carrying a schedule satisfies the
+// "fixed requires a date, time, or scheduledAt" rule. Create paths (no
+// `existing` arg) reject exactly as before.
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('validateTaskInput — existing-aware fixed-mode cross-field (999.1396)', () => {
+  const FIXED_REQ = /placementMode "fixed" requires a date, time, or scheduledAt/;
+
+  test('fixed + no inline schedule + no existing row → rejects (create-path behavior unchanged)', () => {
+    const errors = validateTaskInput({ placementMode: 'fixed' });
+    expect(errors.some((e) => FIXED_REQ.test(e))).toBe(true);
+  });
+
+  test('fixed + no inline schedule + existing row WITH scheduled_at → passes', () => {
+    const errors = validateTaskInput({ placementMode: 'fixed', notes: 'x' }, { scheduled_at: '2026-08-01 15:00:00' });
+    expect(errors.some((e) => FIXED_REQ.test(e))).toBe(false);
+  });
+
+  test('fixed + no inline schedule + existing row WITH date only → passes', () => {
+    const errors = validateTaskInput({ placementMode: 'fixed' }, { scheduled_at: null, date: '2026-08-01' });
+    expect(errors.some((e) => FIXED_REQ.test(e))).toBe(false);
+  });
+
+  test('fixed + no inline schedule + existing row WITHOUT any schedule → still rejects', () => {
+    const errors = validateTaskInput({ placementMode: 'fixed' }, { scheduled_at: null, date: null });
+    expect(errors.some((e) => FIXED_REQ.test(e))).toBe(true);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 // 999.586 — JSON-field shape validation (recur.days / monthDays / timesPerCycle,
 // and depends_on / location / tools array-of-string shape). EXISTENCE of
 // referenced IDs is DB-backed and tested separately (validateReferences).

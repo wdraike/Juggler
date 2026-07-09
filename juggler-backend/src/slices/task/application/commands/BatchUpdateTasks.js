@@ -89,7 +89,19 @@ BatchUpdateTasks.prototype.execute = async function execute(input) {
     if (!bvItem || !bvItem.id) continue;
     var bvFields = {};
     Object.keys(bvItem).forEach(function (k) { if (k !== 'id') bvFields[k] = bvItem[k]; });
-    var bvErrs = this.validation.validateTaskInput(bvFields);
+    // 999.1396: same existing-aware fixed-mode exemption as UpdateTask — fetch
+    // the row only when the item re-sends placementMode='fixed' with no inline
+    // date/time/scheduledAt, so an already-scheduled row is not false-rejected.
+    // Read-only fetch; no write side-effect (cookie WARN-2 rule-b: both call
+    // sites treated identically).
+    var bvExisting = null;
+    if (bvFields.placementMode === 'fixed'
+        && (bvFields.date === undefined || bvFields.date === null || bvFields.date === '')
+        && (bvFields.time === undefined || bvFields.time === null || bvFields.time === '')
+        && (bvFields.scheduledAt === undefined || bvFields.scheduledAt === null || bvFields.scheduledAt === '')) {
+      bvExisting = await this.repo.fetchTaskWithEventIds(bvItem.id, userId);
+    }
+    var bvErrs = this.validation.validateTaskInput(bvFields, bvExisting);
     if (bvErrs.length > 0) {
       return { status: 400, body: { error: 'Update item ' + bvi + ' (' + bvItem.id + '): ' + bvErrs.join('; ') } };
     }

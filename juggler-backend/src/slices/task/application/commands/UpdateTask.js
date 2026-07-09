@@ -107,7 +107,18 @@ UpdateTask.prototype.execute = async function execute(input) {
   var localToUtc = this.dateHelpers.localToUtc;
 
   // validate (handler L946-949)
-  var validationErrors = this.validation.validateTaskInput(body);
+  // 999.1396: validateTaskInput's fixed-mode cross-field check is existing-aware.
+  // Fetch the row ONLY for the narrow case that needs it (placementMode='fixed'
+  // re-sent with no inline date/time/scheduledAt) so a row that already carries
+  // a schedule is not false-rejected. Read-only — no write side-effect.
+  var _fixedValExisting = null;
+  if (body.placementMode === 'fixed'
+      && (body.date === undefined || body.date === null || body.date === '')
+      && (body.time === undefined || body.time === null || body.time === '')
+      && (body.scheduledAt === undefined || body.scheduledAt === null || body.scheduledAt === '')) {
+    _fixedValExisting = await this.repo.fetchTaskWithEventIds(id, userId);
+  }
+  var validationErrors = this.validation.validateTaskInput(body, _fixedValExisting);
   if (validationErrors.length > 0) {
     return { status: 400, body: { error: validationErrors.join('; ') } };
   }

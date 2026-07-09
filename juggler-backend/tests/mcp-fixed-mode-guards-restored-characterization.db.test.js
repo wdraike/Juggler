@@ -27,6 +27,14 @@
  * returning the joined 'id: error; id: error' text — stronger than the old
  * transaction-rollback-after-partial-attempt (nothing is even attempted here).
  *
+ * ── 999.1396 UPDATE (2026-07-09) ────────────────────────────────────────────
+ * The shared-facade shadow described below is FIXED: validateTaskInput() takes
+ * an optional `existing` row and its fixed-mode cross-field check honors an
+ * existing scheduled_at/date; UpdateTask.js and BatchUpdateTasks.js both fetch
+ * the row (read-only) for the fixed-without-inline-schedule case and pass it
+ * through. The two former "STILL rejects" pins below now pin SUCCESS. The
+ * analysis below is kept as history of the pre-fix state.
+ *
  * ── FINAL STATE (3rd/final characterization pass, cookie WARN-2 ruled) ──────
  * The "existing scheduled_at satisfies the guard" exemption bert/ernie originally
  * described (e1/e2 "RESOLVED") is UNREACHABLE end-to-end for BOTH update_task and
@@ -136,7 +144,7 @@ async function insertTask(id, overrides) {
 
 var LEGACY_FIXED_GUARD_STRING = 'Validation error: placementMode "fixed" requires a date, time, or scheduledAt';
 
-describe('MCP fixed-mode-requires-schedule guards — restored at the adapter layer, existing-scheduled_at exemption still shared-facade-shadowed (FINAL state, cookie WARN-2 ruled, backlog 999.1382)', function () {
+describe('MCP fixed-mode-requires-schedule guards — restored at the adapter layer; existing-scheduled_at exemption restored end-to-end (999.1396 fixed the shared-facade shadow formerly pinned per cookie WARN-2 / backlog 999.1382)', function () {
 
   beforeAll(async function () {
     await assertDbAvailable();
@@ -170,7 +178,7 @@ describe('MCP fixed-mode-requires-schedule guards — restored at the adapter la
       expect(row.status).toBe(''); // unchanged — no facade call was made
     });
 
-    test('FINAL DOCUMENTED STATE (cookie WARN-2 RULE-b accept, backlog 999.1382): fixed mode explicitly re-sent + no date/time/scheduledAt in the call -> STILL rejects even with an EXISTING scheduled_at, because facade UpdateTask.js:110\'s own existing-blind validateTaskInput independently re-rejects the real body downstream of tasks.js\'s adapter-level reorder', async function () {
+    test('999.1396 FIXED (supersedes the cookie WARN-2 "still rejects" pin, backlog 999.1382): fixed mode explicitly re-sent + no date/time/scheduledAt in the call -> SUCCEEDS when the row has an EXISTING scheduled_at (validateTaskInput is now existing-aware at the facade/command layer)', async function () {
       var taskId = 'mcp-fg-upd-allow-' + Date.now();
       await insertTask(taskId, {
         instance: { scheduled_at: new Date('2026-08-01T15:00:00Z'), date: '2026-08-01', time: '15:00' }
@@ -179,18 +187,14 @@ describe('MCP fixed-mode-requires-schedule guards — restored at the adapter la
       var handlers = captureHandlers(USER_ID);
       var result = await handlers.update_task({ id: taskId, placementMode: 'fixed', notes: 'still fixed, already scheduled' });
 
-      // Pinning the FINAL, cookie-ruled REALITY: tasks.js's own adapter-level
-      // reorder (fix-loop iter2) removed tasks.js's OWN local shadow of this
-      // check (a real, kept improvement — see file header), but facade's
-      // UpdateTask.js:110 independently calls the SAME existing-blind
-      // validateTaskInput() on the REAL body BEFORE its own existing-aware
-      // AND-guard (256-262, complex-path-only) ever runs — so the exemption
-      // is still unreachable end-to-end. Not a bug in this leg's adapter code;
-      // a pre-existing shared-facade gap affecting HTTP too (backlog 999.1382).
-      expect(result.isError).toBe(true);
-      expect(result.content[0].text).toBe(LEGACY_FIXED_GUARD_STRING);
+      // 999.1396: UpdateTask.js now fetches the existing row for the narrow
+      // fixed-without-inline-schedule case and passes it into the shared
+      // validateTaskInput(), whose fixed-mode cross-field check honors the
+      // row's existing scheduled_at — so the legacy MCP exemption is restored
+      // END-TO-END (the adapter's own pre-guard already exempted it locally).
+      expect(result.isError).toBeFalsy();
       var row = await db('task_masters').where('id', taskId).first();
-      expect(row.notes).toBeNull(); // update did NOT apply
+      expect(row.notes).toBe('still fixed, already scheduled'); // update APPLIED
     });
 
     test('workaround that DOES succeed: omitting placementMode entirely on an already-fixed+scheduled row (guard never evaluates — no placementMode field in the call)', async function () {
@@ -240,7 +244,7 @@ describe('MCP fixed-mode-requires-schedule guards — restored at the adapter la
       expect(badRow.status).toBe('');
     });
 
-    test('FINAL DOCUMENTED STATE (cookie WARN-2 RULE-b accept, backlog 999.1382): a fixed item explicitly re-sent WITH an existing scheduled_at in a batch STILL rejects (facade\'s own per-item validateTaskInput, existing-blind, fires downstream of the adapter\'s pre-check) — accepted as out-of-scope, not fixed this leg', async function () {
+    test('999.1396 FIXED (supersedes the cookie WARN-2 "still rejects" pin, backlog 999.1382): a fixed item explicitly re-sent WITH an existing scheduled_at in a batch SUCCEEDS (BatchUpdateTasks passes the existing row into the shared existing-aware validateTaskInput — no write side-effect needed)', async function () {
       var taskId = 'mcp-fg-batch-allow-' + Date.now();
       await insertTask(taskId, {
         instance: { scheduled_at: new Date('2026-08-01T15:00:00Z'), date: '2026-08-01', time: '15:00' }
@@ -251,20 +255,13 @@ describe('MCP fixed-mode-requires-schedule guards — restored at the adapter la
         updates: [{ id: taskId, placementMode: 'fixed', notes: 'batch allow' }]
       });
 
-      // The adapter's OWN per-item pre-check (tasks.js:575-595) passes this
-      // item through (existing.scheduled_at satisfies it) — but
-      // facade.batchUpdateTasks -> BatchUpdateTasks.js:92 runs the SAME pure
-      // validateTaskInput() (existing-blind) per item internally, and that
-      // one has no exemption. Net: still rejects. Unlike update_task,
-      // batch_update_tasks got NO adapter-level workaround at all (a real
-      // adapter-only fix would require writing the existing scheduled_at back
-      // into the persisted item — a semantic write side-effect cookie rejected
-      // as disproportionate risk). RULED: accept + backlog 999.1382 (same item
-      // as the update_task case above — one shared-facade root cause, two
-      // call sites).
-      expect(result.isError).toBe(true);
+      // 999.1396 (cookie WARN-2 rule-b: BOTH call sites treated identically):
+      // BatchUpdateTasks.js's per-item validation now fetches the existing row
+      // for the fixed-without-inline-schedule case — a READ-ONLY exemption, not
+      // the write side-effect cookie rejected. The item passes end-to-end.
+      expect(result.isError).toBeFalsy();
       var row = await db('task_masters').where('id', taskId).first();
-      expect(row.notes).toBeNull();
+      expect(row.notes).toBe('batch allow');
     });
 
     test('workaround that DOES succeed: omitting placementMode entirely in the batch item (guard never evaluates)', async function () {

@@ -1095,6 +1095,12 @@ async function standardDelete(ctx) {
   }
 
   if (task.gcal_event_id || task.msft_event_id || task.apple_event_id) {
+    // 999.1399 RESOLVED by-design: provider_event_id is INTENTIONALLY RETAINED here
+    // (unlike the old pre-migration MCP delete_task, which nulled it). The sync loop
+    // explicitly loads deleted_local rows that still hold a provider_event_id and
+    // uses it to push the DELETE to the external provider, nulling it only after
+    // the provider event is gone (cal-sync.controller.js ~332-341, ~731-737).
+    // Nulling it here would strand the external calendar event forever.
     await trx('cal_sync_ledger')
       .where({ user_id: userId, task_id: id })
       .where('status', 'active')
@@ -1324,6 +1330,11 @@ async function batchUpdateTxn(ctx) {
     var anchorDateVal = fields.anchorDate;
     delete fields.anchorDate;
     var existing = existingById[id];
+    // 999.1398: count an item as updated only when its writes actually touched
+    // rows. tasks-write.js updateTaskById returns { masterUpdated,
+    // instanceUpdated } affected-row counts; a foreign/nonexistent id correctly
+    // writes 0 rows (user_id scoping) and must not inflate the reported count.
+    var itemAffected = 0;
     var _batchGuard = validation.checkCalSyncEditGuard(existing, fields);
     if (_batchGuard) {
       var _batchErr = new Error('CAL_SYNCED_READONLY');
@@ -1395,13 +1406,15 @@ async function batchUpdateTxn(ctx) {
       }
 
       if (Object.keys(templateUpdate).length > 0) {
-        await twrite.updateTaskById(trx, existing.source_id, templateUpdate, userId);
+        var _tmplRes = await twrite.updateTaskById(trx, existing.source_id, templateUpdate, userId);
+        itemAffected += _tmplRes.masterUpdated + _tmplRes.instanceUpdated;
       }
       if (templateUpdate.recur !== undefined || templateUpdate.recurring === 0) {
         await twrite.resetRecurringInstances(trx, userId, existing.source_id, '[BATCH] cycle reset');
       }
       if (Object.keys(instanceUpdate).length > 0) {
-        await twrite.updateTaskById(trx, id, instanceUpdate, userId);
+        var _instRes = await twrite.updateTaskById(trx, id, instanceUpdate, userId);
+        itemAffected += _instRes.masterUpdated + _instRes.instanceUpdated;
       } else {
         await twrite.updateTaskById(trx, id, {}, userId);
       }
@@ -1430,7 +1443,8 @@ async function batchUpdateTxn(ctx) {
         row.scheduled_at = localToUtc(anchorDateVal, null, updateTz) || null;
         row.desired_at = row.scheduled_at;
       }
-      await twrite.updateTaskById(trx, id, row, userId);
+      var _rowRes = await twrite.updateTaskById(trx, id, row, userId);
+      itemAffected += _rowRes.masterUpdated + _rowRes.instanceUpdated;
       if (taskType === 'recurring_template' && (row.recur !== undefined || row.recurring === 0)) {
         // 999.967(a/b): same ledger cleanup as the single-task toggle-off path
         // (David ruling 2026-07-01: done instances keep status='done' and their
@@ -1452,7 +1466,10 @@ async function batchUpdateTxn(ctx) {
         await twrite.resetRecurringInstances(trx, userId, id, '[BATCH] cycle reset on template');
       }
     }
-    updatedCount++;
+    // 999.1398: increment only when this item's writes affected rows — a
+    // foreign/nonexistent id (0 rows, user_id-scoped) no longer inflates
+    // the { updated: N } count callers see.
+    if (itemAffected > 0) updatedCount++;
   }
 
   return { updatedCount: updatedCount, anySchedulingInBatch: anySchedulingInBatch };
@@ -1554,6 +1571,7 @@ var _deleteTask = new app.DeleteTask({
 var _batchCreateTasks = new app.BatchCreateTasks({
   repo: _repo, cache: _cache, enqueueScheduleRun: enqueueScheduleRun,
   mappers: mappers, validation: validation, batchCreateSchema: batchCreateSchema,
+  validateReferences: validateTaskReferences,
   projects: _projects, isLocked: isLocked, enqueueWrite: enqueueWrite,
   safeTimezone: safeTimezone, sleep: sleep
 });

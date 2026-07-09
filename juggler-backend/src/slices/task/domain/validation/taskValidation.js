@@ -113,10 +113,16 @@ function isFixedRecurringConflict(opts) {
 /**
  * Validate a task input body, returning an array of error strings (empty = valid).
  * VERBATIM from task.controller.js ~749. (controller ~749)
+ *
+ * 999.1396: optional `existing` row makes the fixed-mode cross-field check
+ * existing-aware for UPDATE paths — see that check below. Create paths pass
+ * nothing and behave exactly as before. Still pure: `existing` is a plain row.
+ *
  * @param {Object} body
+ * @param {Object} [existing] the task's existing DB row (update paths only).
  * @returns {string[]}
  */
-function validateTaskInput(body) {
+function validateTaskInput(body, existing) {
   var errors = [];
   // text required for creation
   if (body._requireText && (!body.text || !body.text.trim())) {
@@ -360,12 +366,18 @@ function validateTaskInput(body) {
       errors.push('tools must be an array of tool IDs');
     }
   }
-  // cross-field: fixed placementMode requires scheduling info
+  // cross-field: fixed placementMode requires scheduling info.
+  // 999.1396: existing-aware — an UPDATE that (re-)sends placementMode='fixed'
+  // with no inline date/time/scheduledAt is valid when the row ALREADY carries a
+  // schedule (parity with UpdateTask's own downstream AND-based guard and the
+  // legacy pre-migration MCP OR-based guard). Callers on update paths pass the
+  // existing row; create paths pass nothing and reject exactly as before.
   if (body.placementMode === 'fixed') {
     var hasDate = body.date !== undefined && body.date !== null && body.date !== '';
     var hasTime = body.time !== undefined && body.time !== null && body.time !== '';
     var hasScheduledAt = body.scheduledAt !== undefined && body.scheduledAt !== null && body.scheduledAt !== '';
-    if (!hasDate && !hasTime && !hasScheduledAt) {
+    var hasExistingSchedule = !!(existing && (existing.scheduled_at || existing.date));
+    if (!hasDate && !hasTime && !hasScheduledAt && !hasExistingSchedule) {
       errors.push('placementMode "fixed" requires a date, time, or scheduledAt');
     }
   }

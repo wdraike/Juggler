@@ -23,8 +23,10 @@ var { acquireLock, releaseLock, refreshLock } = require('../lib/sync-lock');
 var { flushQueueInLock } = require('../lib/task-write-queue');
 var { PLACEMENT_MODES } = require('../lib/placementModes');
 var { isTerminalStatus } = require('../lib/task-status');
-// H7 (999.1020): route schedule_cache read through ScheduleRepositoryPort
-var KnexScheduleRepository = require('../slices/scheduler/adapters/KnexScheduleRepository');
+// H7 (999.1020): route schedule_cache read through ScheduleRepositoryPort.
+// 999.1401 (JUG-HEX-H6/999.435 boundary rule): import the adapter via the
+// scheduler facade's named export, never from slices/scheduler/adapters/ directly.
+var { KnexScheduleRepository } = require('../slices/scheduler/facade');
 var { isAllDayTaskBackend } = require('../lib/isAllDayTaskBackend');
 var { handleTerminalTaskSync } = require('../lib/cal-sync-helpers');
 const { createLogger } = require('@raike/lib-logger');

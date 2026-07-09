@@ -240,14 +240,8 @@ module.exports = [
   // (src/scheduler/*.js), NOT slices/scheduler/{adapters,domain,application}/** —
   // those keep their inward slice enforcement. Remove this block when the H7B
   // refactor lands and `npm run lint:boundaries` is clean without it.
-  { files: ['**/scheduler/*.js'], rules: { 'no-restricted-syntax': 'off' } },
-  // Grandfather exemption (999.1025): controllers/cal-sync.controller.js directly
-  // requires slices/scheduler/adapters/KnexScheduleRepository (predates the H6 slice
-  // extraction). The real fix is the planned cal-sync extraction into its own
-  // slice/facade (999.1025), which will remove this direct adapter import entirely —
-  // that is a separate, larger extraction and out of scope for this leg. Scoped to
-  // this single file only (not a controller-wide exemption) so the boundary rule
-  // still enforces the facade for every other controller. Remove this block when
-  // 999.1025 lands and `npm run lint:boundaries` is clean without it.
-  { files: ['**/controllers/cal-sync.controller.js'], rules: { 'no-restricted-syntax': 'off' } }
+  { files: ['**/scheduler/*.js'], rules: { 'no-restricted-syntax': 'off' } }
+  // (999.1401) The former grandfather exemption for controllers/cal-sync.controller.js
+  // is gone: the controller now imports KnexScheduleRepository via the scheduler
+  // facade's named export, so the boundary rule enforces the facade there too.
 ];

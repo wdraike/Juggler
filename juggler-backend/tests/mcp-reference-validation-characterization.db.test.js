@@ -129,18 +129,14 @@ describe('MCP reference-existence validation — dependsOn/location/tools (AFTER
     expect(rows.length).toBe(0);
   });
 
-  test('TELLY FINDING (asymmetry, not a ruled exception): create_tasks (batch) does NOT run the reference-existence check — a dangling dependsOn ID is SILENTLY ACCEPTED, unlike single-item create_task', async function () {
-    // facade.batchCreateTasks -> BatchCreateTasks.js only runs the pure
-    // validateTaskInput (shape check: is it an array of strings?) per item —
-    // it never calls validateReferences (facade.js:181-228, the DB-backed
-    // existence check CreateTask.js DOES call). This mirrors the exact same
-    // asymmetry shape cookie's INFO-2 finding already flagged for recurStart
-    // (create_task has the stricter facade-side check; create_tasks/
-    // batch_update_tasks do not) — not one of David's named ruled exceptions,
-    // so pinning REALITY rather than asserting the (absent) rejection.
-    // REFER->cookie (design: is this asymmetry acceptable, matching the
-    // recurStart precedent, or should BatchCreateTasks.js also call
-    // validateReferences for HTTP-batch-create parity too).
+  test('999.1394 FIXED (batch matches single — supersedes the telly asymmetry pin): create_tasks (batch) DOES run the reference-existence check — a dangling dependsOn ID rejects the batch, NO rows written', async function () {
+    // BatchCreateTasks.js now calls the same DB-backed validateReferences that
+    // CreateTask.js does (999.1394, closing telly finding #6 / cookie INFO-2's
+    // batch-vs-single asymmetry): per-task, with the same recurring-strips-
+    // dependsOn skip, erroring as 'Task <i>: <reference errors>' BEFORE any
+    // insert. The recurStart requirement (_requireRecurStartIfAnchor) is
+    // batch-enforced too; the MCP adapter already defaults recurStart per item,
+    // so MCP callers are unaffected by that half.
     var handlers = captureHandlers(USER_ID);
     var danglingId = 'does-not-exist-batch-dep-' + Date.now();
     var result = await handlers.create_tasks({
@@ -150,12 +146,13 @@ describe('MCP reference-existence validation — dependsOn/location/tools (AFTER
       ]
     });
 
-    expect(result.isError).toBeFalsy();
-    var body = JSON.parse(result.content[0].text);
-    expect(body.created).toBe(2);
-    var badRow = await db('task_masters').where('id', body.ids[1]).first();
-    var deps = typeof badRow.depends_on === 'string' ? JSON.parse(badRow.depends_on || '[]') : (badRow.depends_on || []);
-    expect(deps).toEqual([danglingId]); // dangling reference PERSISTED, unvalidated
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toBe(
+      'Validation error: Task 1: dependsOn references unknown task ID(s): ' + danglingId
+    );
+    // The whole batch is rejected before any insert — no rows persisted.
+    var rows = await db('task_masters').where('user_id', USER_ID).select();
+    expect(rows.length).toBe(0);
   });
 
   test('update_task: dependsOn updated to reference a NON-EXISTENT task ID -> validation error, row UNCHANGED (was: silently accepted pre-migration)', async function () {

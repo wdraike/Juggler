@@ -44,6 +44,8 @@
  * @property {Object} mappers  (taskToRow)
  * @property {Object} validation  (validateTaskInput)
  * @property {Object} batchCreateSchema  zod schema (safeParse).
+ * @property {Function} validateReferences (userId, body) — DB-backed
+ *   dependsOn/location/tools existence check (999.1394: batch matches single).
  * @property {import('../../domain/ports/ProjectsPort')} projects  projects-table port
  * @property {Function} isLocked
  * @property {Function} enqueueWrite
@@ -60,8 +62,8 @@ var MAX_RETRIES = 3;
 /** @param {BatchCreateTasksDeps} deps */
 function BatchCreateTasks(deps) {
   var required = ['repo', 'cache', 'enqueueScheduleRun', 'mappers', 'validation',
-    'batchCreateSchema', 'projects', 'isLocked', 'enqueueWrite', 'safeTimezone',
-    'sleep'];
+    'batchCreateSchema', 'validateReferences', 'projects', 'isLocked', 'enqueueWrite',
+    'safeTimezone', 'sleep'];
   assertDeps('BatchCreateTasks', deps, required);
   this.repo = deps.repo;
   this.cache = deps.cache;
@@ -69,6 +71,7 @@ function BatchCreateTasks(deps) {
   this.mappers = deps.mappers;
   this.validation = deps.validation;
   this.batchCreateSchema = deps.batchCreateSchema;
+  this.validateReferences = deps.validateReferences;
   this.projects = deps.projects;
   this.isLocked = deps.isLocked;
   this.enqueueWrite = deps.enqueueWrite;
@@ -103,11 +106,26 @@ BatchCreateTasks.prototype.execute = async function execute(input) {
   }
 
   // 3. per-task validate (handler L1892-1899)
+  // 999.1394: batch now matches single-item CreateTask — the same
+  // _requireRecurStartIfAnchor flag (anchor-dependent recur needs a recurStart)
+  // and the same DB-backed reference existence check (dependsOn/location/tools
+  // must reference IDs the user owns; dependsOn skipped for recurring tasks,
+  // whose deps are stripped downstream — mirrors CreateTask.js step 1b).
   for (var i = 0; i < tasks.length; i++) {
     var t = tasks[i];
-    var batchCreateErrs = this.validation.validateTaskInput(Object.assign({ _requireText: true }, t));
+    var batchCreateErrs = this.validation.validateTaskInput(
+      Object.assign({ _requireText: true, _requireRecurStartIfAnchor: true }, t));
     if (batchCreateErrs.length > 0) {
       return { status: 400, body: { error: 'Task ' + i + ': ' + batchCreateErrs.join('; ') } };
+    }
+    var refBody = t;
+    if (t.recurring) {
+      refBody = Object.assign({}, t);
+      delete refBody.dependsOn;
+    }
+    var referenceErrors = await this.validateReferences(userId, refBody);
+    if (referenceErrors.length > 0) {
+      return { status: 400, body: { error: 'Task ' + i + ': ' + referenceErrors.join('; ') } };
     }
   }
 

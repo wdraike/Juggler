@@ -289,6 +289,47 @@ describe('BatchCreateTasks (batchCreateTasks)', function () {
     });
   });
 
+  // ── 999.1394: batch matches single-item CreateTask ───────────────────────────
+  test('999.1394: dangling dependsOn in a batch item → 400 "Task <i>: ...", no transaction', function () {
+    var repo = new InMemoryTaskRepository();
+    var txnSpy = jest.spyOn(repo, 'runInTransaction');
+    var uc = new BatchCreateTasks(batchDeps(repo, H.makeTriggerSpy(), {
+      validateReferences: function (_uid, body) {
+        return Promise.resolve(Array.isArray(body.dependsOn) && body.dependsOn.length > 0
+          ? ['dependsOn references unknown task ID(s): ' + body.dependsOn.join(', ')]
+          : []);
+      }
+    }));
+    return uc.execute({ userId: USER, body: { tasks: [{ id: 'g1', text: 'ok' }, { id: 'g2', text: 'bad', dependsOn: ['ghost'] }] } }).then(function (out) {
+      expect(out.status).toBe(400);
+      expect(out.body.error).toBe('Task 1: dependsOn references unknown task ID(s): ghost');
+      expect(txnSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  test('999.1394: recurring batch item skips the dependsOn existence check (deps stripped downstream — CreateTask step-1b parity)', function () {
+    var repo = new InMemoryTaskRepository();
+    var seen = [];
+    var uc = new BatchCreateTasks(batchDeps(repo, H.makeTriggerSpy(), {
+      validateReferences: function (_uid, body) { seen.push(body); return Promise.resolve([]); }
+    }));
+    return uc.execute({ userId: USER, body: { tasks: [{ id: 'r1', text: 'rec', recurring: true, dependsOn: ['ghost'] }] } }).then(function (out) {
+      expect(out.status).toBe(201);
+      expect(seen.length).toBe(1);
+      expect(seen[0].dependsOn).toBeUndefined();
+    });
+  });
+
+  test('999.1394: anchor-dependent recur without recurStart → 400 (matches CreateTask\'s _requireRecurStartIfAnchor)', function () {
+    var repo = new InMemoryTaskRepository();
+    var uc = new BatchCreateTasks(batchDeps(repo, H.makeTriggerSpy()));
+    return uc.execute({ userId: USER, body: { tasks: [{ id: 'r2', text: 'biweekly', recurring: true, recur: { type: 'biweekly' } }] } }).then(function (out) {
+      expect(out.status).toBe(400);
+      expect(out.body.error).toMatch(/^Task 0: /);
+      expect(out.body.error).toMatch(/Recurrence start date is required/);
+    });
+  });
+
   // ── 999.589: deadlock-retry mirrors BatchUpdateTasks ────────────────────────
   // A repo fake whose runInTransaction throws ER_LOCK_DEADLOCK on the first N
   // calls then succeeds. We assert: (a) one deadlock then success → retried and

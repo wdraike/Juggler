@@ -37,9 +37,10 @@
  *     their `body.task` with `rowToTask(row, null)` (a hardcoded default tz,
  *     fine for HTTP where the client re-derives local fields, but wrong for
  *     MCP callers like ClimbRS who consume the server-formatted local fields
- *     directly). See bert-REVIEW.json for the one known residual gap (the
- *     create_task/create_tasks LOCKED/queued response, which has no DB row
- *     to re-read yet and so still carries the facade's default-tz formatting).
+ *     directly). The formerly-known residual gap here — the create_task
+ *     LOCKED/queued response, which has no DB row to re-read — is FIXED
+ *     (999.1400): CreateTask's locked branch now formats its queued echo with
+ *     the caller's resolved tz (the tz this adapter passes as timezoneHeader).
  *
  * ── RULED EXCEPTIONS (David, 2026-07-07) — intentional behavior changes ──────
  * 1. set_task_status / update_task: terminal-on-unscheduled status changes no
@@ -271,8 +272,9 @@ function registerTaskTools(server, userId) {
       var payload;
       if (body.queued) {
         // LOCKED/queued path: no DB row exists yet to re-read — use the
-        // facade's own optimistic task shape (known gap: formatted with the
-        // facade's default tz, not the user's actual tz — see file header).
+        // facade's own optimistic task shape. 999.1400: CreateTask formats
+        // this echo with the tz passed as timezoneHeader (the user's actual
+        // resolved tz), so its local date/time fields are correct.
         payload = Object.assign({}, body.task, { queued: true });
       } else {
         var created = await db('tasks_with_sync_v').where('id', body.task.id).first();
@@ -374,14 +376,13 @@ function registerTaskTools(server, userId) {
       // sent to the facade below) are untouched, so no extra write is introduced;
       // the row's real scheduled_at is left exactly as-is.
       //
-      // NOTE (bert iter2 self-verify finding, NOT resolved by this reorder alone):
-      // facade.updateTask's own UpdateTask.js:110 independently calls the SAME
-      // existing-blind `validateTaskInput(body)` on the REAL (unpadded) body
-      // BEFORE its own existing-aware AND-based guard (UpdateTask.js:256-260) —
-      // a duplicate of this exact shadowing bug one layer down, not cited by
-      // telly's finding. This tasks.js-level reorder is necessary but, per direct
-      // repro, NOT sufficient: the end-to-end call still rejects via the facade's
-      // internal check. See REFER→cookie / REFER→ernie below.
+      // 999.1396 RESOLVED: the facade-internal duplicate of this shadowing bug
+      // (UpdateTask.js's own existing-blind validateTaskInput call, which used
+      // to independently re-reject the real body downstream of this adapter
+      // padding) is fixed — validateTaskInput is now existing-aware and both
+      // UpdateTask and BatchUpdateTasks pass the row through for the
+      // fixed-without-inline-schedule case, so the exemption below holds
+      // end-to-end for single AND batch.
       var valInputFields = _uFixedExemptByExisting
         ? Object.assign({}, fields, { scheduledAt: _uExisting.scheduled_at })
         : fields;

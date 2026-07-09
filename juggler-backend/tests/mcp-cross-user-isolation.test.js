@@ -210,10 +210,22 @@ jest.mock('../src/db', function() {
   return mock;
 });
 
+// 999.1398: mirror the REAL tasks-write.js updateTaskById contract — it returns
+// { masterUpdated, instanceUpdated } affected-row counts, and its WHERE is
+// user_id-scoped, so a foreign/nonexistent id writes 0 rows. batchUpdateTxn now
+// inspects these counts before incrementing updatedCount; the mock must be
+// ownership-aware for that fix to be exercised here. (Defined outside the
+// jest.mock factory, mock-prefixed, per Jest's factory scoping rule.)
+var mockUpdateTaskById = function(_db, id, _changes, userId) {
+  var row = taskStore[id];
+  var owned = !!(row && (!userId || row.user_id === userId));
+  return Promise.resolve({ masterUpdated: owned ? 1 : 0, instanceUpdated: 0 });
+};
+
 jest.mock('../src/lib/tasks-write', function() {
   return {
     insertTask: function() { return Promise.resolve(); },
-    updateTaskById: function() { return Promise.resolve(); },
+    updateTaskById: function() { return mockUpdateTaskById.apply(null, arguments); },
     deleteTaskById: function() { return Promise.resolve(); }
   };
 });
@@ -405,35 +417,24 @@ describe('MCP cross-user isolation — list_tasks', function() {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// KNOWN-RED (telly, 2026-07-08 — corrects the prior "cross-user 5/5 PASS" overstatement,
-// zoe-jug-mcp-facade-crossuser-triage-overstated): the emit stub above fixed the CRASH
-// (facade.js:144 sseEmitter.emit was unmocked), so this assertion now RUNS — but it still
-// FAILS, for a real, different reason, blocked on TWO stacked gaps:
+// Formerly KNOWN-RED (telly, 2026-07-08) on two stacked gaps; gap (2) is FIXED:
 //  (1) 999.1381 (pre-existing, tracked): this file mocks only '../src/db', not
-//      '../../lib/db' — facade.batchUpdateTasks's unlocked path runs through the REAL
-//      KnexTaskRepository (test-bed 3407), where TASK_ID does not exist at all, so
-//      `existing` is undefined for every id regardless of which user calls it;
-//  (2) NEWLY DISCOVERED this pass: batchUpdateTxn (facade.js, non-recurring-instance
-//      branch, ~L1084/L1106) increments `updatedCount` once per ITERATED update item,
-//      unconditionally — it never inspects tasksWrite.updateTaskById's own returned
-//      `{masterUpdated, instanceUpdated}` affected-row counts. So even once (1) is fixed,
-//      `batch_update_tasks` will report `updated:1` for ANY id passed to it (foreign,
-//      nonexistent, or owned) as long as it reaches this branch — the underlying DB WRITE
-//      is correctly user_id-scoped (tasks-write.js:220, KnexTaskRepository) and mutates
-//      ZERO rows for a foreign/nonexistent id, so there is NO actual cross-user data
-//      mutation — but the API's reported count is not a truthful signal of what happened.
-// This assertion intentionally continues to pin the CORRECT/intended behavior
-// (updated===0 for a foreign id) rather than being weakened to match the current buggy
-// count — it will go GREEN once BOTH gaps are closed. See telly-REVIEW.json findings for
-// this leg (Pass 4) for the full root-cause + REFER.
+//      '../../lib/db' — facade.batchUpdateTasks's unlocked path preloads
+//      `existing` through the REAL KnexTaskRepository (test-bed 3407), where
+//      TASK_ID does not exist, so `existing` is undefined for every id. The
+//      per-item WRITE, however, goes through the mocked tasks-write above,
+//      which is now ownership-aware (returns real affected-row counts).
+//  (2) FIXED (999.1398): batchUpdateTxn now inspects tasksWrite.updateTaskById's
+//      returned {masterUpdated, instanceUpdated} affected-row counts and only
+//      increments `updatedCount` for items whose writes touched rows — a
+//      foreign/nonexistent id reports updated:0. With the ownership-aware
+//      tasks-write mock, both assertions below exercise that fix and are GREEN.
 describe('MCP cross-user isolation — batch_update_tasks', function() {
 
   test('User B batch_update_tasks on User A task is skipped (0 updates)', async function() {
-    // batch_update_tasks pre-loads existingRows with WHERE user_id = userId (the MCP
-    // adapter's OWN fixed-mode-guard pre-check, tasks.js:576-578) — but the actual write
-    // routes through facade.batchUpdateTasks -> batchUpdateTxn, which does NOT re-check
-    // ownership before counting an item as updated (see KNOWN-RED note above). Currently
-    // fails; tracked, not silently accepted.
+    // The write routes through facade.batchUpdateTasks -> batchUpdateTxn, whose
+    // updateTaskById write is user_id-scoped (0 rows for a foreign id) —
+    // 999.1398 makes the reported count reflect that.
     var handlers = captureHandlers(USER_B);
     var result = await handlers['batch_update_tasks']({
       updates: [{ id: TASK_ID, text: 'Batch hijack' }]

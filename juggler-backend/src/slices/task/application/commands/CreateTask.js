@@ -166,7 +166,12 @@ CreateTask.prototype.execute = async function execute(input) {
     await this.enqueueWrite(userId, row.id, 'create', row, 'api:createTask');
     await this.cache.invalidateTasks(userId);
     this.enqueueScheduleRun(userId, 'api:createTask', [row.id], { skipEmit: true });
-    return { status: 201, body: { task: this.mappers.rowToTask(row, null), queued: true } };
+    // 999.1400: format the queued echo with the caller's resolved tz, not the
+    // hardcoded default (rowToTask(row, null)). This is the ONE create response
+    // MCP callers cannot re-read+re-format themselves (no DB row exists yet), so
+    // the facade must produce correct local date/time fields here. `tz` is the
+    // same value taskToRow shaped the row with (step 2).
+    return { status: 201, body: { task: this.mappers.rowToTask(row, tz), queued: true } };
   }
 
   // 7. unlocked write path (handler L923-934)

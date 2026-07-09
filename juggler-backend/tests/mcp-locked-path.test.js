@@ -26,12 +26,14 @@ var mockWriteCalls = [];         // all updateTaskById calls: { id, row }
 var mockEnqueueCalls = [];       // all enqueueWrite calls: { userId, taskId, op, fields, src }
 var mockTransactionCalls = 0;    // count of db.transaction() invocations
 var mockIsLockedValue = true;    // ALL tests in this file use isLocked=true
+var mockUserTimezone = 'America/New_York'; // users.timezone returned by the DB mock
 
 function resetCaptures() {
   mockInsertCalls = [];
   mockWriteCalls = [];
   mockEnqueueCalls = [];
   mockTransactionCalls = 0;
+  mockUserTimezone = 'America/New_York';
   // mockIsLockedValue stays true for all tests in this file
 }
 
@@ -139,7 +141,7 @@ var mockDb = (function() {
     var t = _table;
     var w = _where;
     if (t === 'users') {
-      return [{ id: w.id || 'user-001', timezone: 'America/New_York' }];
+      return [{ id: w.id || 'user-001', timezone: mockUserTimezone }];
     }
     if (t === 'user_config') {
       return [{ config_key: 'preferences', config_value: JSON.stringify({ splitDefault: false }) }];
@@ -316,6 +318,25 @@ describe('create_task — locked path (isLocked=true)', function() {
     // We verify it is not called in the locked path regardless.
     await captureHandlers()['create_task']({ text: 'No transaction' });
     expect(mockTransactionCalls).toBe(0);
+  });
+
+  test('999.1400: queued response local fields use the USER\'s resolved tz, not the facade default', async function() {
+    // The queued/LOCKED response has no DB row to re-read, so the MCP adapter
+    // echoes the facade's own task shape — CreateTask must format it with the
+    // caller's tz (rowToTask(row, tz)), not the hardcoded default
+    // (rowToTask(row, null) -> America/New_York). Asia/Tokyo discriminates on
+    // BOTH fields: 2026-03-10T00:30:00Z is 9:30 AM Mar 10 in Tokyo but
+    // 8:30 PM Mar 9 in New York.
+    mockUserTimezone = 'Asia/Tokyo';
+    var result = await captureHandlers()['create_task']({
+      text: 'Queued tz task',
+      scheduledAt: '2026-03-10T00:30:00.000Z'
+    });
+    expect(result.isError).toBeFalsy();
+    var parsed = parseResult(result);
+    expect(parsed.queued).toBe(true);
+    expect(parsed.date).toBe('2026-03-10');
+    expect(parsed.time).toBe('9:30 AM');
   });
 });
 
