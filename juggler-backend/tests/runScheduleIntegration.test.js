@@ -205,33 +205,44 @@ describe('runScheduleAndPersist: immutable tasks', () => {
 // ═══════════════════════════════════════════════════════════════
 
 describe('runScheduleAndPersist: empty-when eligible for biz1 (999.1410)', () => {
-  // Pick a future weekday so the test is independent of real wall-clock
-  // "now" (the nowSlot gate only applies to the actual current day) and
-  // of weekend block layout (weekends have no 'biz' tag at all).
-  function nextWeekdayKey(daysOut) {
-    var d = new Date();
-    d.setDate(d.getDate() + daysOut);
-    while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
-    var y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), day = String(d.getDate()).padStart(2, '0');
-    return y + '-' + m + '-' + day;
-  }
+  // 999.1427: the original version of this test derived a future dateKey from
+  // the REAL wall clock and assumed the anytime task would stay on that day.
+  // But a one-off `date` is a deadline, not a pin — the scheduler pulls the
+  // anytime task forward to TODAY at the now-slot, so the asserted time simply
+  // tracked the test run's wall clock (ceil(now/15)*15) and the test only
+  // passed when run between 08:00 and 12:00 local (it was committed at 09:50).
+  // Fix: freeze the scheduler clock (test-only _setClock seam) at 05:00 on a
+  // FIXED weekday and seed everything on that same day — fully deterministic,
+  // and it still exercises the 999.1410 window-eligibility fix: with morning
+  // (360-480) and lunch (720-780) full, the earliest slot an empty-when task
+  // can take is biz1 (480-720) — which pre-fix was structurally ineligible.
+  var FROZEN_DAY = '2026-07-20'; // a Monday — weekday layout incl. biz1/biz2
 
   test('lands in biz1 (8am-12pm) when morning + lunch are already full and when is unset', async () => {
     if (!available) return;
-    var dateKey = nextWeekdayKey(10);
-    // Fill morning (360-480, 120min) and lunch (720-780, 60min) completely.
-    await seedTask({ id: 'fill-morning', text: 'Fills morning', when: 'morning', dur: 120, date: dateKey });
-    await seedTask({ id: 'fill-lunch', text: 'Fills lunch', when: 'lunch', dur: 60, date: dateKey });
-    // Target: no `when` set at all — production default for a plain task.
-    await seedTask({ id: 'no-when-task', text: 'Anytime task', dur: 60, date: dateKey, placement_mode: 'anytime' });
+    var { _setClock } = require('../src/scheduler/runSchedule');
+    var { FakeClockAdapter } = require('./helpers/clock');
+    // 05:00 EDT — before the 06:00 grid start, so the now-slot gate blocks
+    // nothing and the morning block can be filled completely.
+    var prevClock = _setClock(new FakeClockAdapter({ startTime: FROZEN_DAY + 'T05:00:00-04:00' }));
+    try {
+      // Fill morning (360-480, 120min) and lunch (720-780, 60min) completely.
+      await seedTask({ id: 'fill-morning', text: 'Fills morning', when: 'morning', dur: 120, date: FROZEN_DAY });
+      await seedTask({ id: 'fill-lunch', text: 'Fills lunch', when: 'lunch', dur: 60, date: FROZEN_DAY });
+      // Target: no `when` set at all — production default for a plain task.
+      await seedTask({ id: 'no-when-task', text: 'Anytime task', dur: 60, date: FROZEN_DAY, placement_mode: 'anytime' });
 
-    await runScheduleAndPersist(USER_ID);
+      await runScheduleAndPersist(USER_ID);
+    } finally {
+      _setClock(prevClock);
+    }
 
     var row = await db('tasks_v').where('id', 'no-when-task').first();
     expect(row.scheduled_at).toBeTruthy();
     // scheduled_at is stored tz-less local time (dateStrings:true) — read the
     // raw column directly to avoid the documented dateStrings misparse trap.
     var rawRow = await db('task_instances').where('id', 'no-when-task').first();
+    expect(String(rawRow.date)).toBe(FROZEN_DAY); // stayed on the frozen "today"
     var timeStr = String(rawRow.time); // 'HH:MM:SS'
     var parts = timeStr.split(':');
     var mins = Number(parts[0]) * 60 + Number(parts[1]);

@@ -2736,5 +2736,15 @@ module.exports = {
   // Never call from production code.
   _placementMatchesDbRow: process.env.NODE_ENV === 'test' ? placementMatchesDbRow : undefined,
   _computeNoLimboUpdates: process.env.NODE_ENV === 'test' ? computeNoLimboUpdates : undefined,
-  _ordinalSuffixOf: process.env.NODE_ENV === 'test' ? ordinalSuffixOf : undefined
+  _ordinalSuffixOf: process.env.NODE_ENV === 'test' ? ordinalSuffixOf : undefined,
+  // Test-only clock seam (999.1427): swap the ClockPort that drives
+  // getNowInTimezone (todayKey/nowMins) and clockNow() stamps, so DB-backed
+  // integration tests can freeze the scheduler wall clock deterministically
+  // (e.g. with FakeClockAdapter). Returns the previous clock so callers can
+  // restore it in a finally block. Never call from production code.
+  _setClock: process.env.NODE_ENV === 'test' ? function _setClock(clock) {
+    var prev = _runScheduleCommand.clock;
+    _runScheduleCommand.clock = clock;
+    return prev;
+  } : undefined
 };
