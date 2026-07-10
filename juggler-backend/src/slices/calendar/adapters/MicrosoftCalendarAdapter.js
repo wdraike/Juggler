@@ -15,7 +15,9 @@ var crypto = require('crypto');
 // W5 (juggler-hex-h2): route through lib/db's shared singleton (single pool).
 var db = require('../../../lib/db').getDefaultDb();
 var msftCalApi = require('../../../lib/msft-cal-api');
-var { jugglerDateToISO, isoToJugglerDate, computeDurationMinutes } = require('../../../controllers/cal-sync-helpers');
+// 999.1192: pure date transforms come from the slice's own domain module, not
+// the HTTP-layer controllers/cal-sync-helpers (which now shims to the same fns).
+var { jugglerDateToISO, isoToJugglerDate, computeDurationMinutes } = require('../domain/dateTransforms');
 var { localToUtc } = require('../../../scheduler/dateHelpers');
 var { PLACEMENT_MODES } = require('../../../lib/placementModes');
 var { isTerminalStatus } = require('../../../lib/task-status');

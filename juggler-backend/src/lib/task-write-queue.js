@@ -16,6 +16,14 @@ var db = require('../db');
 var { createLogger } = require('@raike/lib-logger');
 var logger = createLogger('task-write-queue');
 var tasksWrite = require('./tasks-write');
+// 999.1198: the mutation→schedule trigger comes from the dependency-free
+// scheduleTrigger seam (scheduleQueue registers itself there at load), not a
+// lazy require of scheduler/scheduleQueue — that lazy require papered over the
+// task-write-queue ↔ scheduleQueue require cycle.
+var { enqueueScheduleRun } = require('../scheduler/scheduleTrigger');
+// 999.1192: recurring-family id expansion lives in lib/task-instances (shared
+// with KnexTaskRepository) — no more reach into controllers/task.controller.
+var { expandToAllInstanceIds } = require('./task-instances');
 
 // Lazy require to avoid circular dependency
 var _acquireLock, _releaseLock, _refreshLock;
@@ -30,12 +38,6 @@ function getReleaseLock() {
 function getRefreshLock() {
   if (!_refreshLock) _refreshLock = require('./sync-lock').refreshLock;
   return _refreshLock;
-}
-
-var _enqueueScheduleRun;
-function getEnqueueScheduleRun() {
-  if (!_enqueueScheduleRun) _enqueueScheduleRun = require('../scheduler/scheduleQueue').enqueueScheduleRun;
-  return _enqueueScheduleRun;
 }
 
 var _sseEmitter;
@@ -286,17 +288,18 @@ async function _doFlush(userId) {
     });
     // If any flushed id belongs to a recurring template or one of its
     // instances, broadcast a refresh for every sibling so the frontend
-    // doesn't keep stale rows cached. Lazy require to avoid a circular
-    // dependency with task.controller.
+    // doesn't keep stale rows cached. 999.1192: expansion comes from
+    // lib/task-instances (top-level require — the cycle through
+    // task.controller is gone); the same-shape try/catch keeps the legacy
+    // broadcast-the-unexpanded-ids contract on expansion errors.
     var broadcastIds = affectedIds;
     try {
-      var expand = require('../controllers/task.controller').expandToAllInstanceIds;
-      if (typeof expand === 'function') broadcastIds = await expand(userId, affectedIds);
+      broadcastIds = await expandToAllInstanceIds(db, userId, affectedIds);
     } catch (_e) { /* fall back to affectedIds */ }
     var payload = { source: 'write-queue-flush', timestamp: Date.now() };
     payload.ids = broadcastIds;
     getSseEmitter().emit(userId, 'tasks:changed', payload);
-    getEnqueueScheduleRun()(userId, 'write-queue-flush');
+    enqueueScheduleRun(userId, 'write-queue-flush');
   }
 }
 

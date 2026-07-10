@@ -82,7 +82,11 @@ var localToUtc = dateHelpers.localToUtc;
 var utcToLocal = dateHelpers.utcToLocal;
 var libDb = require('../../lib/db');
 var sseEmitter = require('../../lib/sse-emitter');
-var { enqueueScheduleRun: _enqueueScheduleRun } = require('../../scheduler/scheduleQueue');
+// 999.1198 (ScheduleTriggerPort inversion): the schedule trigger comes from the
+// dependency-free scheduler/scheduleTrigger seam (scheduleQueue registers itself
+// there at load). Requiring scheduleQueue here closed the require cycle
+// task facade → scheduleQueue → scheduler facade → runSchedule → task facade.
+var { enqueueScheduleRun: _enqueueScheduleRun } = require('../../scheduler/scheduleTrigger');
 var taskWriteQueue = require('../../lib/task-write-queue');
 var isLocked = taskWriteQueue.isLocked;
 var enqueueWrite = taskWriteQueue.enqueueWrite;
@@ -99,6 +103,9 @@ var { getNowInTimezone } = require('juggler-shared/scheduler/getNowInTimezone');
 // fulfillment-counting primitives (999.1372) rather than reimplementing
 // cycle-counting (telly TELLY-W5-REVIEW.md prior-art note #2).
 var expandRecurringShared = require('juggler-shared/scheduler/expandRecurring');
+// 999.1198: the R50.0 implied-deadline boundary fn — pure scheduler domain
+// logic (recurringPeriod.js), NOT runSchedule (whose lazy require this replaces).
+var { recurringPeriodEndKey } = require('../scheduler/domain/logic/recurringPeriod');
 var { createLogger } = require('@raike/lib-logger');
 var logger = createLogger('task.facade');
 
@@ -715,12 +722,11 @@ async function materializeRcInstance(ctx) {
   // whenever impliedDeadlineISO is null — regressing the standing "past+incomplete
   // dated MUST stay pinned past-due" invariant now that the write-side overdue
   // persistence that used to mask this gap is gone (W3, this leg).
-  // Lazy require (mirrors SchedulerTaskProvider.js's own documented rationale):
-  // a plain top-level require of runSchedule.js here risks a facade<->scheduler
-  // circular-require — runSchedule.js instantiates SchedulerTaskProvider at
-  // module scope, which itself requires this facade; many unit tests also
-  // require this facade.js standalone, before runSchedule.js has ever loaded.
-  var recurringPeriodEndKey = require('../../scheduler/runSchedule').recurringPeriodEndKey;
+  // 999.1198: recurringPeriodEndKey now lives in the pure
+  // slices/scheduler/domain/logic/recurringPeriod module (top-level required
+  // below with the other imports) — the former mid-function lazy require of
+  // runSchedule.js, which papered over the facade↔scheduler require cycle, is
+  // gone. Same function, same SSOT delegation (runSchedule re-exports it).
   var impliedDeadline = source.recur ? recurringPeriodEndKey(source.recur, localDate) : null;
   // P1: created_at/updated_at via new Date() (repo asserts Dates on insert).
   await repo.insertTask({
@@ -826,6 +832,14 @@ function loadMaster(masterId, userId) {
 // status change it was derived from reverts. Callers outside a transaction
 // (UpdateTaskStatus.js, lockedBatchUpdate — both already non-transactional, matching
 // this function's pre-existing getDb() default) omit ctx.db and are unaffected.
+// Test-only clock seam (999.1440, same pattern as runSchedule.js _setClock /
+// 999.1427): applyRollingAnchor's `done` branch derives the completion date
+// from "today in the user's tz" — wall-clock-boundary-sensitive for tests
+// (UTC day ≠ local day between 20:00 and 24:00 EDT). getNowInTimezone already
+// takes an optional injectable clock (R50.8); production always passes null
+// (real clock). Set via the NODE_ENV=test-gated `_setAnchorClock` export.
+var _anchorTestClock = null;
+
 async function applyRollingAnchor(ctx) {
   var masterId = ctx.masterId;
   var userId = ctx.userId;
@@ -841,7 +855,7 @@ async function applyRollingAnchor(ctx) {
       : null;
     // Option B: anchor `done` to the ACTUAL completion date (today in the user's tz),
     // not the scheduled date, so a late completion pushes the next occurrence out.
-    var _completionDate = getNowInTimezone(ctx.tz || _masterForAnchor.tz).todayKey;
+    var _completionDate = getNowInTimezone(ctx.tz || _masterForAnchor.tz, _anchorTestClock).todayKey;
     var _newAnchor = computeRollingAnchor(status, _instanceDate, _currentAnchor, _completionDate);
     if (_newAnchor) {
       // FR-1(a) dual-write (SPEC.md AC1, revised 2026-07-09): `next_start` is
@@ -966,23 +980,18 @@ async function reactivateDoneFrozen(ctx) {
     .update({ status: 'active', synced_at: getDb().fn.now() });
 }
 
-// updateTaskStatus skip/cancel outbound cal-sync trigger (verbatim — controller L1843-1854).
+// updateTaskStatus skip/cancel outbound cal-sync trigger.
 // Exposes a `.sync({ userId })` shape the use-case calls fire-and-forget.
+// 999.1192 (CalSyncTriggerPort inversion): the facade no longer lazy-requires
+// controllers/cal-sync.controller with a fake express req/res from inside the
+// domain layer — cal-sync.controller registers its HTTP-shaped sync entry into
+// lib/cal-sync-trigger at load (fake req/res construction now controller-side),
+// and this facade calls the seam. Failure contract unchanged: fire-and-forget,
+// all trigger errors swallowed + logged inside the seam.
+var calSyncTrigger = require('../../lib/cal-sync-trigger');
 var triggerCalSync = {
   sync: function (args) {
-    var userId = args.userId;
-    try {
-      var syncController = require('../../controllers/cal-sync.controller');
-      if (syncController && typeof syncController.sync === 'function') {
-        return syncController.sync(
-          { user: { id: userId }, body: {} },
-          { json: function () {}, status: function () { return { json: function () {} }; } }
-        );
-      }
-    } catch (err) {
-      logger.error('[cal-sync] trigger import failed:', err && err.message);
-    }
-    return Promise.resolve();
+    return calSyncTrigger.triggerSync(args);
   }
 };
 
@@ -1278,8 +1287,14 @@ async function lockedBatchUpdate(ctx) {
 
     if (Object.keys(nonSchedulingFields).length > 0) {
       // P1: omit updated_at — repo stamps new Date() (legacy passed fn.now()).
-      await ctx.repo.updateTaskById(qId, nonSchedulingFields, userId);
-      updatedCount++;
+      // 999.1422 (residue of 999.1398): count this item only when the write
+      // actually touched rows — repo.updateTaskById returns tasks-write's
+      // { masterUpdated, instanceUpdated } affected-row counts, and a
+      // foreign/nonexistent id correctly writes 0 rows (user_id scoping), so
+      // it must not inflate the { updated: N } count callers see (same
+      // truthful-count contract batchUpdateTxn already enforces).
+      var qWriteRes = await ctx.repo.updateTaskById(qId, nonSchedulingFields, userId);
+      if (qWriteRes.masterUpdated + qWriteRes.instanceUpdated > 0) updatedCount++;
     }
 
     if (Object.keys(schedulingFields).length > 0) {
@@ -1749,6 +1764,16 @@ module.exports = {
   // 999.681: undo operations
   recordAction: recordAction,
   undoTask: undoTask,
+
+  // Test-only clock seam (999.1440; pattern: runSchedule.js _setClock /
+  // 999.1427). Swaps the clock feeding applyRollingAnchor's completion-date
+  // getNowInTimezone call. Returns the previous clock so tests can restore
+  // it in a finally block. Never call from production code.
+  _setAnchorClock: process.env.NODE_ENV === 'test' ? function _setAnchorClock(clock) {
+    var prev = _anchorTestClock;
+    _anchorTestClock = clock;
+    return prev;
+  } : undefined,
 
   // pure helper re-exports the controller keeps for its external consumers
   rowToTask: mappers.rowToTask,

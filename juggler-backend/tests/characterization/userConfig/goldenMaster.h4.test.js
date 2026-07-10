@@ -221,6 +221,18 @@ jest.mock('../../../src/controllers/weather.controller', () => ({
   roundCoord: jest.fn((n) => n)
 }));
 
+// ─── weather slice facade mock ───────────────────────────────────────────────
+// 999.1192: the user-config facade's replaceLocations enrichment now calls the
+// weather SLICE facade's reverseGeocodeDisplayName (the controller export above
+// is a re-export of the same function). Stub the facade so the golden-master
+// keeps the same 'Test City' enrichment without loading the real weather slice.
+jest.mock('../../../src/slices/weather/facade', () => ({
+  reverseGeocodeDisplayName: jest.fn(() => Promise.resolve('Test City')),
+  // SchedulerWeatherProvider's constructor default sources roundCoord from this
+  // facade at app boot — keep it callable (same stub as the controller mock).
+  roundCoord: jest.fn((n) => n)
+}));
+
 // ─── fetch mock (payment-service calls in plan-features) ─────────────────────
 // Not applied globally here — Surface 7 tests use jest.spyOn(global, 'fetch').
 // Surface 7 is loaded in an isolated describe block with jest.isolateModules.

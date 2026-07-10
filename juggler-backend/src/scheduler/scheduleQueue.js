@@ -623,3 +623,12 @@ module.exports = {
     getQueueBackendForTests: function () { return _queueBackend; }
   }
 };
+
+// 999.1198 (ScheduleTriggerPort inversion): register this module's
+// enqueueScheduleRun as THE schedule trigger. slices/task/facade and
+// lib/task-write-queue call scheduler/scheduleTrigger instead of requiring
+// this module, which broke the facade→scheduleQueue→…→facade and
+// task-write-queue↔scheduleQueue require cycles. Load-time registration:
+// every production entrypoint (server.js, routes, controllers, jobs) loads
+// this module before any mutation can fire a trigger.
+require('./scheduleTrigger').registerScheduleTrigger(enqueueScheduleRun);

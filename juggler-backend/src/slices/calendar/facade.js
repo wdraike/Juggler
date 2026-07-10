@@ -842,7 +842,11 @@ async function auditCalendarSync(userId, userRow, days) {
   };
 
   // Load Strive tasks in window
-  var { fetchTasksWithEventIds } = require('../../controllers/task.controller');
+  // 999.1192: cross-slice read via the task slice's own facade (which binds this
+  // over its repo), not the HTTP controller's re-export of the same function.
+  // Function-local require kept: this facade is loaded by cal-sync.controller at
+  // boot and the task facade is heavy — same laziness as before, new target.
+  var { fetchTasksWithEventIds } = require('../task/facade');
   // 999.488/489: signature is (userId, queryBuilder) — see note at the other
   // call site; the legacy 3-arg shape caused ER_NO_TABLES_USED.
   var taskRows = await fetchTasksWithEventIds(userId, function(q) {

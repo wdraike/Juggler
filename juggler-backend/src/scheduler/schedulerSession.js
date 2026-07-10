@@ -52,7 +52,10 @@ if (sweepTimer.unref) sweepTimer.unref();
 async function startSession(userId, options) {
   var opts = options || {};
   var unifiedSchedule = require('../slices/scheduler/facade').unifiedScheduleV2;
-  var rowToTask = require('../controllers/task.controller').rowToTask;
+  // 999.1192/999.1198: rowToTask is the task slice's pure domain mapper — take
+  // it from taskMappers directly instead of reaching through the HTTP
+  // controller (whose re-export is the same function object).
+  var rowToTask = require('../slices/task/domain/mappers/taskMappers').rowToTask;
 
   var TIMEZONE = safeTimezone(opts.timezone, DEFAULT_TIMEZONE);
   // 999.1185: shared R50.8 contract (was an inline formatToParts copy).

@@ -2434,3 +2434,17 @@ async function audit(req, res) {
 }
 
 module.exports = { sync, hasChanges, getSyncHistory, audit, withinCdnGrace };
+
+// 999.1192 (CalSyncTriggerPort inversion): register the HTTP-shaped sync entry
+// with the lib/cal-sync-trigger seam. The task slice's skip/cancel outbound
+// trigger used to lazy-require THIS controller from inside the domain layer and
+// construct the fake req/res itself; the request-shaped call now lives here,
+// controller-side, and the slice depends only on the seam. sync() itself is
+// untouched (999.1025's territory). Load-time registration: routes load this
+// controller at boot, before any task mutation can fire the trigger.
+require('../lib/cal-sync-trigger').registerCalSyncTrigger(function (args) {
+  return sync(
+    { user: { id: args.userId }, body: {} },
+    { json: function () {}, status: function () { return { json: function () {} }; } }
+  );
+});

@@ -123,10 +123,13 @@ var _entitlement = new PaymentServiceEntitlementAdapter(); // slug-keyed payment
 // transaction they use `trxRepo.db` (the raw trx handle the config repo carries);
 // outside they use getDb().
 
-// reverseGeocodeDisplayName — weather controller (replaceLocations enrichment).
-// Lazily required so the golden-master's weather.controller mock is honored.
+// reverseGeocodeDisplayName — weather slice facade (replaceLocations enrichment).
+// 999.1192: cross-slice call via the weather slice's own facade, not the HTTP
+// controller (whose reverseGeocodeDisplayName is a re-export of this same
+// facade function). Still lazily required so test mocks of the weather facade
+// are honored (mirrors the prior weather.controller-mock rationale).
 function reverseGeocode(lat, lon) {
-  return require('../../controllers/weather.controller').reverseGeocodeDisplayName(lat, lon);
+  return require('../weather/facade').reverseGeocodeDisplayName(lat, lon);
 }
 
 // UpdateProject cross-table task-project rename (config.controller.js:273-277).
@@ -404,9 +407,11 @@ var _mergeImportData = new app.MergeImportData({
 });
 
 // feature-catalog.controller handler
+// 999.1192: CATALOG is this slice's own domain data (domain/featureCatalog.js);
+// the controller re-exports it, not the other way around.
 var _getFeatureCatalog = new app.GetFeatureCatalog({
   entitlement: _entitlement,
-  catalog: require('../../controllers/feature-catalog.controller').CATALOG
+  catalog: require('./domain/featureCatalog').CATALOG
 });
 
 // impersonation.controller handlers

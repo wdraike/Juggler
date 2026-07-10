@@ -16,11 +16,6 @@ var unifiedScheduleV2 = require('./unifiedScheduleV2');
 var constants = require('./constants');
 var { TERMINAL_STATUSES } = require('../lib/task-status');
 
-// v2 is the only scheduler. Kept as a thin wrapper so call sites don't have
-// to care about whether a shadow / diff layer exists (makes re-adding one
-// later for another migration trivial). The `userId` / `context` args are
-// accepted for signature compatibility with the historical shadow wrapper;
-// they're unused here.
 /**
  * Validate that all pending tasks have required scheduled_at values.
  * This is the scheduled_at-required guard for juggler-cal-history Plan C.
@@ -69,11 +64,6 @@ function validateScheduledAt(allTasks) {
   }
 }
 
-function runSchedulerWithShadow(allTasks, statuses, todayKey, nowMins, cfg, clock /*, userId, context */) {
-  // Wave C: scheduled_at-required guard
-  validateScheduledAt(allTasks);
-  return unifiedScheduleV2(allTasks, statuses, todayKey, nowMins, cfg, clock);
-}
 var DEFAULT_TIME_BLOCKS = constants.DEFAULT_TIME_BLOCKS;
 var DAY_NAMES = constants.DAY_NAMES;
 var SCHEDULER_VERSION = constants.SCHEDULER_VERSION;
@@ -285,86 +275,16 @@ function checkPlacementDisjointness(dayPlacements) {
   return violations;
 }
 
-var _ConstraintSolver = require('../slices/scheduler/domain/logic/ConstraintSolver');
-var recurringCycleDays = _ConstraintSolver.recurringCycleDays;
-
-/**
- * R50.0 — the recurrence-PERIOD boundary is a recurring instance's IMPLIED
- * deadline (recurring instances carry no explicit `deadline`). It is the value the
- * overdue/missed logic acts on:
- *   - Day-locked instance (timesPerCycle ≥ selected days, or no TPC) → end of its
- *     OCCURRENCE DAY: the deadline is the next day (cycle = 1).
- *   - Flexible-TPC instance (timesPerCycle < selected days → it may roam within the
- *     cycle) → end of its CYCLE: occurrence + cycleLen. It is NOT missed until the
- *     whole cycle has passed (it could still be completed on a later cycle day).
- * Day-locked instance (timesPerCycle ≥ selected days, or no TPC) → end of its
- * occurrence DAY (cycle = 1). Flexible-TPC instance (timesPerCycle < selected
- * days → may roam within the cycle) → end of its CYCLE (occurrence + cycleLen).
- * Returns the dateKey of the FIRST day past the period (instance is live through
- * periodEnd−1, missed ON periodEnd). Null when not recurring or no occurrence date.
- * (The separate timeFlex placement window is applied by the caller alongside this.)
- */
-// Flexible-TPC classification — the SINGLE source shared by recurringPeriodEndKey
-// (deadline) and the persist-loop roam guard (999.848). A flexible-TPC instance
-// (timesPerCycle < selected days) may roam to ANY allowed day within its cycle;
-// every other recurring is day-locked. The `r.days || 'MTWRF'` / `r.monthDays ||
-// [1,15]` shape-defaults are NOT data fallbacks — they are byte-identical to
-// unifiedScheduleV2's isFlexibleTpc, so a missing field is a malformed recur whose
-// default only affects classification (never corrupts data). Unrecognised types
-// (incl. `interval`) → selectedDays 1 → never flexible → day-locked.
-function isFlexibleTpcRecur(recur) {
-  var r = recur;
-  if (typeof r === 'string') { try { r = JSON.parse(r); } catch (_e) { return false; } }
-  if (!r || !r.timesPerCycle || r.timesPerCycle <= 0) return false;
-  var selectedDays;
-  if (r.type === 'daily') selectedDays = 7;
-  else if (r.type === 'weekly' || r.type === 'biweekly') {
-    var days = r.days || 'MTWRF';
-    selectedDays = (typeof days === 'object' && !Array.isArray(days)) ? Object.keys(days).length
-      : (typeof days === 'string' ? days.length : 0);
-  } else if (r.type === 'monthly') { selectedDays = (r.monthDays || [1, 15]).length; }
-  else { selectedDays = 1; }
-  return r.timesPerCycle < selectedDays;
-}
-
-// Rolling interval in days — 999.1185: delegated to the shared SSOT in
-// shared/scheduler/expandRecurring.js (was a mirrored local copy; the
-// 'mirrors' drift risk is gone). A rolling instance is NOT day-locked
-// (dayReq='any'); its window IS the interval, so its period boundary =
-// occ + interval.
-var rollingIntervalDays = expandRecurringShared.rollingIntervalDays;
-
-// 999.1191: the period-boundary DATE MATH lives in ONE place —
-// shared/scheduler/missedHelpers.js computeRecurringDeadlineKey (the ruled SSOT,
-// cycle buckets). This function only classifies (rolling / flexible-TPC /
-// day-locked → cycleDays) and converts the SSOT's inclusive last-in-period day
-// to the exclusive "first day PAST the period" form used throughout runSchedule.
-// No recurStart is passed, so the bucket math is anchored at the occurrence
-// (k=0) — byte-identical to the previous inline `occ + cycleDays` computation.
-var missedHelpers = require('juggler-shared/scheduler/missedHelpers');
-function recurringPeriodEndKey(recur, occurrenceDateKey) {
-  var r = recur;
-  if (typeof r === 'string') { try { r = JSON.parse(r); } catch (_e) { r = null; } }
-  var isRolling = !!(r && r.type === 'rolling');
-  var isFlexible = !isRolling && isFlexibleTpcRecur(recur);
-  var cycleDays = 1; // day-locked default: deadline = end of the occurrence day
-  if (isRolling) {
-    // Rolling: window = the recurrence interval (R5). Not day-locked.
-    cycleDays = rollingIntervalDays(r);
-  } else if (isFlexible) { // flexible-TPC → roams within the cycle
-    cycleDays = recurringCycleDays(recur) || 1;
-  }
-  var lastDayKey = missedHelpers.computeRecurringDeadlineKey({
-    occurrenceDate: occurrenceDateKey,
-    isDayLocked: !isRolling && !isFlexible,
-    isRolling: isRolling,
-    cycleDays: cycleDays
-  });
-  if (!lastDayKey) return null;
-  var end = parseDate(lastDayKey);
-  end.setDate(end.getDate() + 1); // exclusive boundary: first day PAST the period
-  return formatDateKey(end);
-}
+// R50.0 recurrence-period boundary (isFlexibleTpcRecur + recurringPeriodEndKey) —
+// 999.1198: moved VERBATIM to slices/scheduler/domain/logic/recurringPeriod.js
+// (pure classification + delegation to the missedHelpers SSOT) so the task
+// facade's implied-deadline write sites can call it WITHOUT lazy-requiring this
+// module (the facade → runSchedule → SchedulerTaskProvider → facade cycle).
+// Both functions are re-exported below unchanged; every in-file caller keeps
+// the same local names.
+var _recurringPeriod = require('../slices/scheduler/domain/logic/recurringPeriod');
+var isFlexibleTpcRecur = _recurringPeriod.isFlexibleTpcRecur;
+var recurringPeriodEndKey = _recurringPeriod.recurringPeriodEndKey;
 
 /**
  * Get current date/time in user's timezone — delegated to the shared contract
@@ -1630,10 +1550,12 @@ async function runScheduleAndPersist(userId, _retries, options) {
     cfg.weatherByDateHour = {};
   }
 
-  // 6. Run scheduler (primary chosen by SCHEDULER_V2 env var; shadow runs
-  //    in parallel when SCHEDULER_V2_SHADOW=true).
-  var result = runSchedulerWithShadow(
-    allTasks, statuses, timeInfo.todayKey, timeInfo.nowMins, cfg, _runScheduleCommand.clock, userId, 'main'
+  // 6. Run scheduler. unifiedScheduleV2 is the ONLY scheduler (999.1433
+  //    removed the historical shadow wrapper — no v1, no SCHEDULER_V2 env
+  //    switch). The Wave C scheduled_at-required guard runs first.
+  validateScheduledAt(allTasks);
+  var result = unifiedScheduleV2(
+    allTasks, statuses, timeInfo.todayKey, timeInfo.nowMins, cfg, _runScheduleCommand.clock
   );
   tPerf.scheduleEnd = Date.now() - tPerfStart;
 

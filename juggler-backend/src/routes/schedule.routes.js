@@ -7,10 +7,17 @@ var rateLimit = require('express-rate-limit');
 var router = express.Router();
 var { authenticateJWT } = require('../middleware/jwt-auth');
 var authenticateAdmin = require('../middleware/authenticateAdmin');
-var { runScheduleAndPersist } = require('../slices/scheduler/facade');
+// 999.1198: former mid-function lazy requires (unifiedScheduleV2, db,
+// loadSchedulerConfig, rowToTask) top-leveled — no cycle runs through this
+// route module. rowToTask comes from the task slice's pure domain mapper, not
+// the HTTP controller's re-export of the same function (999.1192 class).
+var { runScheduleAndPersist, unifiedScheduleV2 } = require('../slices/scheduler/facade');
 var { withSyncLock } = require('../lib/sync-lock');
 var schedulerSession = require('../scheduler/schedulerSession');
 var { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
+var db = require('../db');
+var { loadSchedulerConfig } = require('../scheduler/loadSchedulerConfig');
+var { rowToTask } = require('../slices/task/domain/mappers/taskMappers');
 const { createLogger } = require('@raike/lib-logger');
 const { safeTimezone } = require('juggler-shared/scheduler/dateHelpers');
 const { getNowInTimezone, DEFAULT_TIMEZONE } = require('juggler-shared/scheduler/getNowInTimezone');
@@ -70,8 +77,7 @@ router.post('/nudge', authenticateJWT, schedulerLimiter, async function(req, res
  */
 router.post('/debug', authenticateJWT, authenticateAdmin, debugLimiter, async function(req, res) {
   try {
-    var unifiedSchedule = require('../slices/scheduler/facade').unifiedScheduleV2;
-    var db = require('../db');
+    var unifiedSchedule = unifiedScheduleV2; // top-level import (999.1198)
     var TIMEZONE = safeTimezone(req.headers['x-timezone'], DEFAULT_TIMEZONE);
     var userId = req.user.id;
 
@@ -88,7 +94,7 @@ router.post('/debug', authenticateJWT, authenticateAdmin, debugLimiter, async fu
     // schedulerSession.js. The previous inline copy read camelCase keys that
     // never exist in user_config, so the debug run always used
     // DEFAULT_TIME_BLOCKS / DEFAULT_TOOL_MATRIX regardless of user settings.
-    var schedCfg = await require('../scheduler/loadSchedulerConfig').loadSchedulerConfig(userId);
+    var schedCfg = await loadSchedulerConfig(userId);
     schedCfg.timezone = TIMEZONE;
     schedCfg._debug = true; // Enable phase snapshots
 
@@ -96,7 +102,7 @@ router.post('/debug', authenticateJWT, authenticateAdmin, debugLimiter, async fu
     tasks.forEach(function(t) { statuses[t.id] = t.status || ''; });
 
     // Map DB rows to scheduler format using the same rowToTask as runSchedule
-    var rowToTask = require('../controllers/task.controller').rowToTask;
+    // (top-level import from the task slice's domain mappers — 999.1192/1198).
 
     // Build source map for recurring template inheritance
     var srcMap = {};
@@ -189,7 +195,6 @@ router.post('/step/:sessionId/stop', authenticateJWT, authenticateAdmin, async f
     var s = await schedulerSession.getSession(sessionId);
     if (!s) {
       // Session expired or already gone — check raw DB for ownership
-      var db = require('../db');
       var row = await db('scheduler_sessions').where('session_id', sessionId).first();
       if (row && row.user_id !== req.user.id) return res.status(403).json({ error: 'Not your session' });
       return res.json({ ok: true }); // already gone — idempotent

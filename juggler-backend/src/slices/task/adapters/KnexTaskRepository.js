@@ -61,6 +61,7 @@
 'use strict';
 
 var tasksWrite = require('../../../lib/tasks-write');
+var taskInstances = require('../../../lib/task-instances');
 
 var TASK_REPOSITORY_PORT_METHODS =
   require('../domain/ports/TaskRepositoryPort').TASK_REPOSITORY_PORT_METHODS;
@@ -426,42 +427,16 @@ KnexTaskRepository.prototype.getRecurringTemplateRows = function getRecurringTem
 /**
  * Expand a set of ids to include every sibling instance under any recurring
  * master they touch. Verbatim relocation of `expandToAllInstanceIds`
- * (controller ~112).
+ * (controller ~112); the query body now lives in lib/task-instances.js
+ * (999.1192/999.1198 — shared with lib/task-write-queue's post-flush
+ * broadcast, which previously reached back through controllers/task.controller
+ * for it). This method delegates over the repo's own db handle.
  * @param {string} userId
  * @param {string[]} ids
  * @returns {Promise<string[]>}
  */
 KnexTaskRepository.prototype.expandToAllInstanceIds = function expandToAllInstanceIds(userId, ids) {
-  var dbOrTrx = this.db;
-  if (!Array.isArray(ids) || ids.length === 0) return Promise.resolve(ids || []);
-  var masterIds = new Set();
-  return dbOrTrx('task_masters')
-    .where('user_id', userId)
-    .whereIn('id', ids)
-    .where('recurring', 1)
-    .select('id')
-    .then(function (masters) {
-      masters.forEach(function (r) { masterIds.add(r.id); });
-      return dbOrTrx('task_instances')
-        .where('user_id', userId)
-        .whereIn('id', ids)
-        .select('id', 'master_id');
-    })
-    .then(function (insts) {
-      insts.forEach(function (r) { if (r.master_id) masterIds.add(r.master_id); });
-      if (masterIds.size === 0) return ids;
-      return dbOrTrx('task_instances')
-        .where('user_id', userId)
-        .whereIn('master_id', Array.from(masterIds))
-        .select('id')
-        .then(function (siblings) {
-          var out = {};
-          ids.forEach(function (i) { out[i] = true; });
-          masterIds.forEach(function (m) { out[m] = true; });
-          siblings.forEach(function (r) { out[r.id] = true; });
-          return Object.keys(out);
-        });
-    });
+  return taskInstances.expandToAllInstanceIds(this.db, userId, ids);
 };
 
 /**

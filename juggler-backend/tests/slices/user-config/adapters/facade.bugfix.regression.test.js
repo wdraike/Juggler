@@ -219,7 +219,8 @@ describe('B1 — REGRESSION (real facade): plan-catalog cache split-brain after 
       jest.mock('../../../../src/slices/task/facade', function () {
         return { enforceDowngradeLimits: jest.fn(function () { return Promise.resolve(); }) };
       });
-      jest.mock('../../../../src/controllers/feature-catalog.controller', function () {
+      jest.mock('../../../../src/slices/user-config/domain/featureCatalog', function () {
+        // 999.1192: the facade reads CATALOG from its own domain module now.
         return { CATALOG: {} };
       });
       jest.mock('../../../../src/scheduler/scheduleQueue', function () {
@@ -342,7 +343,8 @@ describe('B1 — REGRESSION (real facade): plan-catalog cache split-brain after 
       jest.mock('../../../../src/slices/task/facade', function () {
         return { enforceDowngradeLimits: jest.fn(function () { return Promise.resolve(); }) };
       });
-      jest.mock('../../../../src/controllers/feature-catalog.controller', function () {
+      jest.mock('../../../../src/slices/user-config/domain/featureCatalog', function () {
+        // 999.1192: the facade reads CATALOG from its own domain module now.
         return { CATALOG: {} };
       });
       jest.mock('../../../../src/scheduler/scheduleQueue', function () {
@@ -490,7 +492,8 @@ describe('B2 — REGRESSION (real facade): renameTasks passes updated_at as knex
       jest.mock('../../../../src/slices/task/facade', function () {
         return { enforceDowngradeLimits: jest.fn(function () { return Promise.resolve(); }) };
       });
-      jest.mock('../../../../src/controllers/feature-catalog.controller', function () {
+      jest.mock('../../../../src/slices/user-config/domain/featureCatalog', function () {
+        // 999.1192: the facade reads CATALOG from its own domain module now.
         return { CATALOG: {} };
       });
       jest.mock('../../../../src/scheduler/scheduleQueue', function () {

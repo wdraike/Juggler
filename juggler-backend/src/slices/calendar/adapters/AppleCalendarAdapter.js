@@ -20,7 +20,11 @@ var crypto = require('crypto');
 var db = require('../../../lib/db').getDefaultDb();
 var appleCalApi = require('../../../lib/apple-cal-api');
 var { decrypt } = require('../../../lib/credential-encrypt');
-var { _jugglerDateToISO, isoToJugglerDate, _computeDurationMinutes } = require('../../../controllers/cal-sync-helpers');
+// 999.1192: pure date transform comes from the slice's own domain module, not
+// the HTTP-layer controllers/cal-sync-helpers (which now shims to the same fn).
+// (The previously destructured `_jugglerDateToISO`/`_computeDurationMinutes`
+// were never exported and never called — dead undefined bindings, dropped.)
+var { isoToJugglerDate } = require('../domain/dateTransforms');
 var { localToUtc } = require('../../../scheduler/dateHelpers');
 var { PLACEMENT_MODES } = require('../../../lib/placementModes');
 var { calAdapterAppleLogger } = require('../../../lib/logger');
