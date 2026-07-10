@@ -371,7 +371,14 @@ describe('B6 — suggest-icon: NOT-CONFIGURED path must NOT call logger.error', 
     // past Jest's 5s default under full-suite load and then cascades stale mock
     // state into B6-guard. Give it explicit headroom — the assertions are
     // unchanged; only the timeout budget accommodates the measured boot cost.
-    15000
+    //
+    // 999.1444: 15000ms was still not enough under `jest --coverage` — coverage
+    // instrumentation adds enough per-call overhead to the app-boot + supertest
+    // request path that this test timed out (not a logic failure: "Exceeded
+    // timeout of 15000 ms") and the aborted in-flight request's late-arriving
+    // logger.error call then cascaded into B6-guard's mockErrorSpy count. Bumped
+    // to 30000ms, same pattern as geminiAdapterTimeout.test.js's 2000->10000 bump.
+    30000
   );
 
   test(
