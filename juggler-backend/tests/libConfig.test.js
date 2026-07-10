@@ -142,6 +142,80 @@ describe('lib/config', () => {
     });
   });
 
+  describe('requiredInProduction (999.1202 — OAuth-redirect/CORS/payment URL fallbacks)', () => {
+    test.each([
+      ['FRONTEND_URL', 'http://localhost:3000'],
+      ['GCAL_REDIRECT_URI', 'http://localhost:5002/api/gcal/callback'],
+      ['MSFT_CAL_REDIRECT_URI', 'http://localhost:5002/api/msft-cal/callback'],
+      ['PAYMENT_SERVICE_URL', 'http://localhost:5020'],
+      ['BILLING_SERVICE_URL', 'http://localhost:5020'],
+    ])('%s: unset outside production → documented dev default', (key, defaultValue) => {
+      delete process.env[key];
+      process.env.NODE_ENV = 'test';
+      expect(config.getString(key)).toBe(defaultValue);
+    });
+
+    test.each([
+      'FRONTEND_URL',
+      'GCAL_REDIRECT_URI',
+      'MSFT_CAL_REDIRECT_URI',
+      'PAYMENT_SERVICE_URL',
+      'BILLING_SERVICE_URL',
+    ])('%s: unset in production → throws (fail loud, no localhost leak)', (key) => {
+      delete process.env[key];
+      process.env.NODE_ENV = 'production';
+      expect(() => config.getString(key)).toThrow(/required in production/);
+    });
+
+    test.each([
+      ['FRONTEND_URL', 'https://strivers.example.com'],
+      ['GCAL_REDIRECT_URI', 'https://juggler.example.com/api/gcal/callback'],
+      ['MSFT_CAL_REDIRECT_URI', 'https://juggler.example.com/api/msft-cal/callback'],
+      ['PAYMENT_SERVICE_URL', 'https://payment.example.com'],
+      ['BILLING_SERVICE_URL', 'https://payment.example.com'],
+    ])('%s: set in production → returns the env value', (key, prodValue) => {
+      process.env.NODE_ENV = 'production';
+      process.env[key] = prodValue;
+      expect(config.getString(key)).toBe(prodValue);
+    });
+  });
+
+  describe('operational defaults (999.1202 — not requiredInProduction)', () => {
+    test('PORT: returns declared default when absent', () => {
+      delete process.env.PORT;
+      expect(config.getInt('PORT')).toBe(5002);
+    });
+
+    test('PORT: coerces a numeric env value', () => {
+      process.env.PORT = '8080';
+      expect(config.getInt('PORT')).toBe(8080);
+    });
+
+    test('GCP_REGION: returns declared default when absent', () => {
+      delete process.env.GCP_REGION;
+      expect(config.getString('GCP_REGION')).toBe('us-central1');
+    });
+
+    test('JUGGLER_QUEUE_DRIVER: returns declared default when absent', () => {
+      delete process.env.JUGGLER_QUEUE_DRIVER;
+      expect(config.getString('JUGGLER_QUEUE_DRIVER')).toBe('db');
+    });
+
+    test('JUGGLER_SCHEDULER_QUEUE: returns declared default when absent', () => {
+      delete process.env.JUGGLER_SCHEDULER_QUEUE;
+      expect(config.getString('JUGGLER_SCHEDULER_QUEUE')).toBe('juggler-scheduler-runs');
+    });
+
+    test.each(['PORT', 'GCP_REGION', 'JUGGLER_QUEUE_DRIVER', 'JUGGLER_SCHEDULER_QUEUE'])(
+      '%s: unset in production does NOT throw (not requiredInProduction)',
+      (key) => {
+        delete process.env[key];
+        process.env.NODE_ENV = 'production';
+        expect(() => (key === 'PORT' ? config.getInt(key) : config.getString(key))).not.toThrow();
+      },
+    );
+  });
+
   describe('type mismatch', () => {
     test('getInt throws when key is declared as string', () => {
       expect(() => config.getInt('APP_ID')).toThrow(/not "int"/);

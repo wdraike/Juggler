@@ -7,6 +7,7 @@
 
 const { OAuth2Client } = require('google-auth-library');
 const { libGcalLogger } = require('./logger');
+const config = require('./config');
 
 const logger = libGcalLogger;
 
@@ -16,7 +17,9 @@ function createOAuth2Client() {
   return new OAuth2Client(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
-    process.env.GCAL_REDIRECT_URI || 'http://localhost:5002/api/gcal/callback'
+    // 999.1202: routed through lib/config (requiredInProduction — fails loud
+    // at the read site instead of silently masking a missing prod redirect URI).
+    config.getString('GCAL_REDIRECT_URI')
   );
 }
 

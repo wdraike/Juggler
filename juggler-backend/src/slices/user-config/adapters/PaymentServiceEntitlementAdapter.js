@@ -29,12 +29,16 @@
  * product UUID from `resolveProductId` is used ONLY as the `?product=` catalog
  * FILTER. The constructor ASSERTS the configured slug is not UUID-shaped.
  *
- * ── PAYMENT_SERVICE_URL (pre-existing approved fallback — PRESERVED VERBATIM) ─
- * `process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020'` is reproduced
- * byte-identically (golden-master H13: appears for getProductId, fetchPlanFeatures,
- * getUserPlanId). This is the pre-existing, characterized fallback — NOT a new
- * one. `INTERNAL_SERVICE_KEY || ''` is likewise preserved verbatim. PRODUCT_LABEL
- * (the slug) is read via lib-config (through service-identity, H2). No NEW `||`/`??`
+ * ── PAYMENT_SERVICE_URL (pre-existing approved fallback — VALUE PRESERVED VERBATIM) ─
+ * The `'http://localhost:5020'` dev default is reproduced byte-identically
+ * outside production (golden-master H13: appears for getProductId,
+ * fetchPlanFeatures, getUserPlanId) — same behavior as before. 999.1202 routes
+ * the read through lib/config's PAYMENT_SERVICE_URL (requiredInProduction),
+ * which only changes the PRODUCTION branch: a missing prod value now fails
+ * loud instead of silently resolving every payment-service call to localhost.
+ * `INTERNAL_SERVICE_KEY || ''` is still preserved verbatim (out of 999.1202
+ * scope — no existing URL-fallback risk there). PRODUCT_LABEL (the slug) is
+ * read via lib-config (through service-identity, H2). No NEW `||`/`??`
  * fallback is introduced.
  *
  * ── CIRCUIT BREAKER (999.374, instance-scoped, SHARED across the 3 calls) ─────
@@ -66,6 +70,7 @@ var EntitlementPort = require('../domain/ports/EntitlementPort');
 var PlanSlug = require('../domain/value-objects/PlanSlug');
 var Entitlement = require('../domain/entities/Entitlement');
 var entitlementLogic = require('../domain/logic/entitlement');
+var config = require('../../../lib/config');
 
 var CATALOG_CACHE_TTL_MS = EntitlementPort.CATALOG_CACHE_TTL_MS;     // 5 * 60 * 1000
 var USER_PLAN_CACHE_TTL_MS = EntitlementPort.USER_PLAN_CACHE_TTL_MS; // 2 * 60 * 1000
@@ -310,7 +315,7 @@ PaymentServiceEntitlementAdapter.prototype.resolveProductId = function resolvePr
  */
 PaymentServiceEntitlementAdapter.prototype._discoverProductIdRaw = async function _discoverProductIdRaw() {
   var PRODUCT_LABEL = this._slug();
-  var paymentUrl = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
+  var paymentUrl = config.getString('PAYMENT_SERVICE_URL'); // 999.1202
   var internalKey = process.env.INTERNAL_SERVICE_KEY || '';
   var res = await this._fetch()(paymentUrl + '/internal/products/' + PRODUCT_LABEL, {
     headers: { 'X-Internal-Key': internalKey, 'Content-Type': 'application/json' },
@@ -355,7 +360,7 @@ PaymentServiceEntitlementAdapter.prototype._fetchPlanCatalog = function _fetchPl
  * @returns {Promise<Object<string, Object>>}
  */
 PaymentServiceEntitlementAdapter.prototype._fetchPlanCatalogRaw = async function _fetchPlanCatalogRaw() {
-  var paymentUrl = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
+  var paymentUrl = config.getString('PAYMENT_SERVICE_URL'); // 999.1202
   var PRODUCT_LABEL = this._slug();
 
   // Resolve the UUID for the catalog filter WITHOUT a nested breaker record: reuse the
@@ -516,7 +521,7 @@ PaymentServiceEntitlementAdapter.prototype._fetchUserPlanIdViaBreaker = function
  * @returns {Promise<?string>}
  */
 PaymentServiceEntitlementAdapter.prototype._fetchUserPlanIdRaw = async function _fetchUserPlanIdRaw(userId) {
-  var paymentUrl = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
+  var paymentUrl = config.getString('PAYMENT_SERVICE_URL'); // 999.1202
   var internalKey = process.env.INTERNAL_SERVICE_KEY || '';
   var res = await this._fetch()(paymentUrl + '/internal/users/' + userId + '/active-plans', {
     headers: { 'X-Internal-Key': internalKey, 'Content-Type': 'application/json' },

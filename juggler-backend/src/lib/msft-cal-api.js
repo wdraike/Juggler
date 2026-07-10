@@ -7,6 +7,7 @@
 
 var crypto = require('crypto');
 var { libMsftLogger } = require('./logger');
+var config = require('./config');
 
 var GRAPH_BASE = 'https://graph.microsoft.com/v1.0';
 var TOKEN_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
@@ -15,7 +16,9 @@ var AUTH_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize';
 var SCOPES = 'Calendars.ReadWrite offline_access User.Read';
 
 function getRedirectUri() {
-  return process.env.MSFT_CAL_REDIRECT_URI || 'http://localhost:5002/api/msft-cal/callback';
+  // 999.1202: routed through lib/config (requiredInProduction — fails loud at
+  // the read site instead of silently masking a missing prod redirect URI).
+  return config.getString('MSFT_CAL_REDIRECT_URI');
 }
 
 /**

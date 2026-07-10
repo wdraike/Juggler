@@ -27,6 +27,7 @@
  */
 
 const { createLogger } = require('@raike/lib-logger');
+const config = require('../lib/config');
 const logger = createLogger('scheduler-queue-backend');
 
 // Injectable clock (999.1195): wall-clock reads derive from a ClockPort
@@ -35,8 +36,8 @@ const logger = createLogger('scheduler-queue-backend');
 const MysqlClockAdapter = require('../slices/scheduler/adapters/MysqlClockAdapter');
 let _clock = new MysqlClockAdapter();
 
-const DRIVER = (process.env.JUGGLER_QUEUE_DRIVER || 'db').toLowerCase();
-const SCHEDULER_QUEUE = process.env.JUGGLER_SCHEDULER_QUEUE || 'juggler-scheduler-runs';
+const DRIVER = config.getString('JUGGLER_QUEUE_DRIVER').toLowerCase(); // 999.1202
+const SCHEDULER_QUEUE = config.getString('JUGGLER_SCHEDULER_QUEUE'); // 999.1202
 
 function isCloudTasks() {
   return DRIVER === 'cloud-tasks';

@@ -32,6 +32,7 @@
  */
 
 const { createLogger } = require('@raike/lib-logger');
+const config = require('../lib/config');
 const logger = createLogger('scheduler-cloud-tasks-driver');
 
 // Injectable clock (999.1195): wall-clock reads derive from a ClockPort
@@ -67,7 +68,7 @@ function project() {
   return process.env.GCP_PROJECT || process.env.GOOGLE_CLOUD_PROJECT;
 }
 function location() {
-  return process.env.GCP_REGION || 'us-central1';
+  return config.getString('GCP_REGION'); // 999.1202
 }
 function workerBaseUrl() {
   return process.env.JUGGLER_WORKER_BASE_URL;

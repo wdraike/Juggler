@@ -16,15 +16,19 @@
 
 'use strict';
 
+var config = require('./config');
+
 var DEFAULT_TIMEOUT_MS = 30000;
 
 /**
- * The resolved payment-service base URL. Reads process.env at module load
- * (same as every existing call site did inline). Exported for test injection
- * via process.env before require.
+ * The resolved payment-service base URL. Reads via lib/config at module load
+ * (999.1202 — was `process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020'`
+ * inline; requiredInProduction now fails loud on a missing prod value instead
+ * of silently pointing at localhost). Exported for test injection via
+ * process.env before require + `_refreshUrl()`.
  * @type {string}
  */
-var paymentUrl = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
+var paymentUrl = config.getString('PAYMENT_SERVICE_URL');
 
 /**
  * Fetch wrapper for the payment service. Prepends the base URL to a relative
@@ -47,5 +51,5 @@ module.exports = {
   paymentUrl: paymentUrl,
   paymentFetch: paymentFetch,
   // Re-export for test reset after process.env changes
-  _refreshUrl: function () { paymentUrl = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020'; }
+  _refreshUrl: function () { paymentUrl = config.getString('PAYMENT_SERVICE_URL'); }
 };

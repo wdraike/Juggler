@@ -52,4 +52,31 @@ module.exports = [
     files: ['_*.js', 'check*.js', 'scripts/*.js'],
     rules: { 'no-unused-vars': 'off' },
   },
+  // 999.1202: env-var config hardening. Direct `process.env.X` reads are
+  // restricted outside lib/config (the declared-schema front door) and the
+  // two bootstrap entry points (server.js/app.js — the existing idiom here is
+  // plain top-level env reads at boot, not constructor injection; forcing DI
+  // onto them would fight the codebase's own pattern). 'warn' not 'error':
+  // ~90 process.env sites across 40+ files predate this rule and are only
+  // partially migrated so far (see 999.1202 follow-up items) — 'error' would
+  // fail lint on unmigrated code that hasn't regressed. Bump to 'error' once
+  // the remaining sites are migrated or explicitly exempted.
+  {
+    files: ['src/**/*.js'],
+    ignores: [
+      'src/lib/config/**',
+      'src/server.js',
+      'src/app.js',
+      '**/*.test.js',
+    ],
+    rules: {
+      'no-restricted-syntax': ['warn', {
+        selector: "MemberExpression[object.object.name='process'][object.property.name='env']",
+        message:
+          'Direct process.env reads are restricted outside lib/config + server bootstrap ' +
+          '(server.js/app.js). Declare the key in src/lib/config/index.js SCHEMA and read it ' +
+          'via config.getString/getInt/getBool. See 999.1202.',
+      }],
+    },
+  },
 ];

@@ -4,6 +4,7 @@
 
 require('dotenv').config();
 const { serverLogger } = require('./lib/logger');
+const config = require('./lib/config');
 
 // Kill any zombie server processes from previous nodemon restarts.
 // Nodemon's SIGKILL doesn't reliably kill all child processes.
@@ -11,7 +12,7 @@ const { serverLogger } = require('./lib/logger');
 if (process.env.NODE_ENV !== 'production') {
   try {
     var myPid = process.pid;
-    var port = process.env.PORT || 5002;
+    var port = config.getInt('PORT'); // 999.1202
     var pids = require('child_process')
       .execSync('lsof -ti :' + port + ' 2>/dev/null || true')
       .toString().trim().split('\n').filter(Boolean).map(Number)
@@ -28,7 +29,7 @@ const { loadJWTSecrets } = require('./middleware/jwt-auth');
 const db = require('./db');
 const { enqueueScheduleRun, startPollLoop, stopPollLoop } = require('./scheduler/scheduleQueue');
 
-const PORT = process.env.PORT || 5002;
+const PORT = config.getInt('PORT'); // 999.1202
 
 var server;
 
@@ -150,7 +151,11 @@ async function start() {
     const { createUsageFlusher } = require('./slices/ai-enrichment/facade');
     const flusher = createUsageFlusher({
       db,
-      billingUrl: process.env.BILLING_SERVICE_URL || 'http://localhost:5020',
+      // 999.1202: routed through lib/config (requiredInProduction). This whole
+      // block is already wrapped in a non-fatal try/catch below, so a missing
+      // prod BILLING_SERVICE_URL now surfaces as a clear boot warning instead
+      // of a silent localhost fallback that would fail every billing call.
+      billingUrl: config.getString('BILLING_SERVICE_URL'),
       serviceKey: process.env.INTERNAL_SERVICE_KEY || '',
       sourceApp:  process.env.AI_USAGE_SOURCE_APP  || 'juggler',
     });

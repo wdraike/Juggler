@@ -52,6 +52,103 @@ const SCHEMA = {
     default: 'http://localhost:5010/.well-known/jwks.json',
     requiredInProduction: true,
   },
+
+  // ── 999.1202: OAuth-redirect / CORS / cross-service URL fallbacks ─────────
+  // These five were previously inline `process.env.X || 'http://localhost:...'`
+  // reads scattered across 4 files — the exact no-unapproved-fallback violation
+  // class flagged by 999.1202 (a missing prod env var silently resolves to a
+  // dev URL instead of failing loud). All five ARE already set in the Cloud Run
+  // deploy config (deploy/juggler-backend.yaml) except BILLING_SERVICE_URL,
+  // which is a genuine pre-existing gap surfaced by this migration (see that
+  // key's own comment). requiredInProduction mirrors AUTH_JWKS_URL exactly.
+
+  // CORS allowed-origins source (src/app.js). Comma-split list of allowed
+  // frontend origins; loopback/*.localdev.test are separately allowed by app.js
+  // regardless of this value.
+  FRONTEND_URL: {
+    key: 'FRONTEND_URL',
+    type: 'string',
+    default: 'http://localhost:3000',
+    requiredInProduction: true,
+  },
+
+  // Google Calendar OAuth redirect URI (src/lib/gcal-api.js).
+  GCAL_REDIRECT_URI: {
+    key: 'GCAL_REDIRECT_URI',
+    type: 'string',
+    default: 'http://localhost:5002/api/gcal/callback',
+    requiredInProduction: true,
+  },
+
+  // Microsoft Calendar OAuth redirect URI (src/lib/msft-cal-api.js).
+  MSFT_CAL_REDIRECT_URI: {
+    key: 'MSFT_CAL_REDIRECT_URI',
+    type: 'string',
+    default: 'http://localhost:5002/api/msft-cal/callback',
+    requiredInProduction: true,
+  },
+
+  // payment-service base URL, used by src/lib/payment-service-client.js and
+  // src/slices/user-config/adapters/PaymentServiceEntitlementAdapter.js (5
+  // call sites total — the "4x PAYMENT_SERVICE_URL" cited in 999.1202, which
+  // has shifted to 5 since that count was taken). The PaymentServiceEntitlementAdapter
+  // call sites are documented (H13 golden-master) as reproducing this fallback
+  // BYTE-IDENTICALLY outside production; requiredInProduction only changes the
+  // production branch (fail loud instead of a silent, wrong localhost URL).
+  PAYMENT_SERVICE_URL: {
+    key: 'PAYMENT_SERVICE_URL',
+    type: 'string',
+    default: 'http://localhost:5020',
+    requiredInProduction: true,
+  },
+
+  // Billing/payment URL used ONLY by the AI-usage flusher at server.js boot
+  // (a DIFFERENT env var name than PAYMENT_SERVICE_URL, pointing at the same
+  // service — pre-existing naming inconsistency, out of scope to unify here).
+  // NOT currently set in deploy/juggler-backend.yaml — this migration surfaces
+  // that real gap; the read site is wrapped in server.js's existing non-fatal
+  // try/catch (flusher startup failure only warns, doesn't crash boot), so
+  // requiredInProduction is safe to enable here.
+  BILLING_SERVICE_URL: {
+    key: 'BILLING_SERVICE_URL',
+    type: 'string',
+    default: 'http://localhost:5020',
+    requiredInProduction: true,
+  },
+
+  // ── 999.1202: non-URL operational defaults (lower risk, not requiredInProduction) ──
+
+  // HTTP listen port. Cloud Run always injects PORT itself, so this is a
+  // legitimate dev-only convenience default, never required.
+  PORT: {
+    key: 'PORT',
+    type: 'int',
+    default: 5002,
+  },
+
+  // Cloud Tasks queue region (src/scheduler/cloud-tasks-driver.js). Only read
+  // when JUGGLER_QUEUE_DRIVER=cloud-tasks is selected (opt-in); 'us-central1'
+  // is a legitimate operational default, not a masked prod requirement.
+  GCP_REGION: {
+    key: 'GCP_REGION',
+    type: 'string',
+    default: 'us-central1',
+  },
+
+  // Scheduler-run queue backend selector (src/scheduler/queue-backend.js).
+  // 'db' is the safe, currently-universal default; cloud-tasks is opt-in.
+  JUGGLER_QUEUE_DRIVER: {
+    key: 'JUGGLER_QUEUE_DRIVER',
+    type: 'string',
+    default: 'db',
+  },
+
+  // Cloud Tasks queue id for scheduler runs (src/scheduler/queue-backend.js).
+  JUGGLER_SCHEDULER_QUEUE: {
+    key: 'JUGGLER_SCHEDULER_QUEUE',
+    type: 'string',
+    default: 'juggler-scheduler-runs',
+  },
 };
 
 /**

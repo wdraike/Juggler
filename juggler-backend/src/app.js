@@ -11,6 +11,7 @@ const bodyParser = require('body-parser');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 const { maybeRedisStore } = require('./lib/rate-limit-store');
+const config = require('./lib/config');
 
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('app');
@@ -77,7 +78,10 @@ app.use(compression({
 // any localhost/127.0.0.1/[::1] origin (dev loopback is never reachable
 // from outside the dev machine) + *.localdev.test + explicit
 // CORS_ALLOW_ANY_ORIGIN=true opt-in.
-const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:3000')
+// FRONTEND_URL is read via lib/config (999.1202): requiredInProduction means a
+// missing prod env var now fails loud at boot instead of silently resolving
+// to the dev URL (which would make CORS reject every real frontend request).
+const allowedOrigins = config.getString('FRONTEND_URL')
   .split(',')
   .map(s => s.trim())
   .filter(Boolean);
