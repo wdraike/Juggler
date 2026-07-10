@@ -1,13 +1,16 @@
 /**
  * 17-sync-split.test.js — Split Task Calendar Sync
  *
- * Path A (real chunk rows): scheduler writes task_instances rows with
+ * Real chunk rows only: the scheduler writes task_instances rows with
  * split_ordinal/split_total > 1. Sync groups them by occurrence, merges
  * contiguous runs into one event, and pushes non-contiguous chunks as
  * separate events with "(X/N)" title suffixes.
  *
- * Path B (legacy cache-based): backward-compat path for old-style splits
- * where only schedule_cache has the split placement info.
+ * 999.1217 (W4, SCHEDULER-SPEC.md D6): the legacy cache-based "Path B" (splits
+ * whose placement info lived ONLY in schedule_cache, from before 999.841 made
+ * split chunks persist as their own task_instances rows) is removed along with
+ * the schedule_cache read/write it exercised — there is no longer a code path
+ * where a split task's placements exist ONLY in the cache.
  */
 
 jest.setTimeout(60000);
@@ -26,8 +29,8 @@ var {
   getGCalToken, mockReq, mockRes
 } = require('./helpers/test-setup');
 var { assertDbAvailable } = require('../helpers/requireDB');
-var { makeTask, deleteAllGCalTestEvents } = require('./helpers/test-fixtures');
-var { getGCalEvent, listGCalEvents, waitForPropagation } = require('./helpers/api-helpers');
+var { deleteAllGCalTestEvents } = require('./helpers/test-fixtures');
+var { getGCalEvent, waitForPropagation } = require('./helpers/api-helpers');
 var { sync } = require('../../src/controllers/cal-sync.controller');
 var { describeWithCreds } = require('./helpers/credentialGate');
 
@@ -254,187 +257,8 @@ describeWithCreds(() => hasGCalCredentials(), 'Split: Real Chunk Rows (Path A)',
   });
 });
 
-// ─── Path B: Legacy Cache-Based Splits ─────────────────────────────────────
-
-function buildScheduleCache(taskId, dateKey, placements) {
-  var dayPlacements = {};
-  dayPlacements[dateKey] = placements.map(function(p, i) {
-    return {
-      taskId: taskId,
-      start: p.start,
-      dur: p.dur,
-      splitPart: i + 1,
-      splitTotal: placements.length,
-      scheduledAtUtc: p.scheduledAtUtc || null
-    };
-  });
-  return JSON.stringify({ dayPlacements: dayPlacements });
-}
-
-async function seedScheduleCache(cacheValue) {
-  await db('user_config').where({ user_id: TEST_USER_ID, config_key: 'schedule_cache' }).del();
-  await db('user_config').insert({
-    user_id: TEST_USER_ID,
-    config_key: 'schedule_cache',
-    config_value: cacheValue
-  });
-}
-
-describeWithCreds(() => hasGCalCredentials(), 'Split Task Expansion (legacy cache path)', () => {
-  test('120min task with 4x30min placements creates 4 calendar events', async () => {
-    var tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(9, 0, 0, 0);
-
-    var task = await makeTask({
-      text: 'Test Task Long Split',
-      dur: 120,
-      scheduled_at: tomorrow
-    });
-
-    var dateKey = (tomorrow.getMonth() + 1) + '/' + tomorrow.getDate();
-    var cache = buildScheduleCache(task.id, dateKey, [
-      { start: 540, dur: 30 },
-      { start: 600, dur: 30 },
-      { start: 660, dur: 30 },
-      { start: 720, dur: 30 }
-    ]);
-    await seedScheduleCache(cache);
-
-    var req = mockReq(user);
-    var res = mockRes();
-    await sync(req, res);
-
-    await waitForPropagation(3000);
-
-    var timeMin = new Date(tomorrow);
-    timeMin.setHours(0, 0, 0, 0);
-    var timeMax = new Date(tomorrow);
-    timeMax.setHours(23, 59, 59, 999);
-
-    var events = await listGCalEvents(token, timeMin.toISOString(), timeMax.toISOString());
-    var splitEvents = events.filter(function(e) {
-      return (e.summary || '').indexOf('Test Task Long Split') >= 0;
-    });
-
-    expect(splitEvents.length).toBe(4);
-
-    for (var i = 1; i <= 4; i++) {
-      var found = splitEvents.find(function(e) {
-        return (e.summary || '').indexOf('(part ' + i + '/4)') >= 0;
-      });
-      expect(found).toBeTruthy();
-    }
-  });
-
-  test('each split part has correct duration', async () => {
-    var tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(9, 0, 0, 0);
-
-    var task = await makeTask({
-      text: 'Test Task Split Times',
-      dur: 120,
-      scheduled_at: tomorrow
-    });
-
-    var dateKey = (tomorrow.getMonth() + 1) + '/' + tomorrow.getDate();
-    var placements = [
-      { start: 540, dur: 30 },
-      { start: 600, dur: 30 },
-      { start: 660, dur: 30 },
-      { start: 720, dur: 30 }
-    ];
-    var cache = buildScheduleCache(task.id, dateKey, placements);
-    await seedScheduleCache(cache);
-
-    var req = mockReq(user);
-    var res = mockRes();
-    await sync(req, res);
-
-    await waitForPropagation(3000);
-
-    var timeMin = new Date(tomorrow);
-    timeMin.setHours(0, 0, 0, 0);
-    var timeMax = new Date(tomorrow);
-    timeMax.setHours(23, 59, 59, 999);
-
-    var events = await listGCalEvents(token, timeMin.toISOString(), timeMax.toISOString());
-    var splitEvents = events.filter(function(e) {
-      return (e.summary || '').indexOf('Test Task Split Times') >= 0;
-    });
-
-    expect(splitEvents.length).toBe(4);
-
-    for (var i = 0; i < placements.length; i++) {
-      var partNum = i + 1;
-      var evt = splitEvents.find(function(e) {
-        return (e.summary || '').indexOf('(part ' + partNum + '/4)') >= 0;
-      });
-      expect(evt).toBeTruthy();
-
-      var evtStart = new Date(evt.start.dateTime);
-      var evtEnd = new Date(evt.end.dateTime);
-      expect((evtEnd - evtStart) / 60000).toBe(30);
-    }
-  });
-
-  test('non-split ledger replaced when task becomes split', async () => {
-    var tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(10, 0, 0, 0);
-
-    var task = await makeTask({
-      text: 'Test Task Becomes Split',
-      dur: 120,
-      scheduled_at: tomorrow
-    });
-
-    // First sync: no split placements → single event
-    var req1 = mockReq(user);
-    var res1 = mockRes();
-    await sync(req1, res1);
-
-    await waitForPropagation(3000);
-
-    var ledgerBefore = await db('cal_sync_ledger')
-      .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal', status: 'active' })
-      .select();
-    expect(ledgerBefore.length).toBe(1);
-    var oldEventId = ledgerBefore[0].provider_event_id;
-    expect(oldEventId).toBeTruthy();
-
-    // Seed split placements
-    var dateKey = (tomorrow.getMonth() + 1) + '/' + tomorrow.getDate();
-    var cache = buildScheduleCache(task.id, dateKey, [
-      { start: 540, dur: 30 },
-      { start: 600, dur: 30 },
-      { start: 660, dur: 30 },
-      { start: 720, dur: 30 }
-    ]);
-    await seedScheduleCache(cache);
-
-    user = await db('users').where('id', TEST_USER_ID).first();
-
-    var req2 = mockReq(user);
-    var res2 = mockRes();
-    await sync(req2, res2);
-
-    await waitForPropagation(3000);
-
-    var oldEvent = await getGCalEvent(token, oldEventId);
-    var isGone = !oldEvent || oldEvent.status === 'cancelled';
-    expect(isGone).toBe(true);
-
-    var timeMin = new Date(tomorrow);
-    timeMin.setHours(0, 0, 0, 0);
-    var timeMax = new Date(tomorrow);
-    timeMax.setHours(23, 59, 59, 999);
-
-    var events = await listGCalEvents(token, timeMin.toISOString(), timeMax.toISOString());
-    var splitEvents = events.filter(function(e) {
-      return (e.summary || '').indexOf('Test Task Becomes Split') >= 0 && e.status !== 'cancelled';
-    });
-    expect(splitEvents.length).toBe(4);
-  });
-});
+// 999.1217 (W4): the legacy "Path B" cache-based split-expansion suite lived
+// here (schedule_cache seeded directly, asserting synthetic "(part X/N)"
+// events). Removed along with the schedule_cache read/write in
+// cal-sync.controller.js / runSchedule.js — split placements now come only
+// from real task_instances chunk rows (Path A, above).

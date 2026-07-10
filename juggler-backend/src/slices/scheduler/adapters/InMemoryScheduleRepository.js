@@ -103,18 +103,9 @@ InMemoryScheduleRepository.prototype.backfillRollingAnchorIfNull = async functio
   return 0;
 };
 
-InMemoryScheduleRepository.prototype.now = async function now() {
-  return this.clock.now();
-};
-
-InMemoryScheduleRepository.prototype.getScheduleCache = async function getScheduleCache(userId) {
-  return this._scheduleCache && this._scheduleCache[userId] ? this._scheduleCache[userId] : null;
-};
-
-InMemoryScheduleRepository.prototype.upsertScheduleCache = async function upsertScheduleCache(userId, cacheJson) {
-  if (!this._scheduleCache) this._scheduleCache = {};
-  this._scheduleCache[userId] = { user_id: userId, config_key: 'schedule_cache', config_value: cacheJson };
-};
+// 999.1217 (W4, SCHEDULER-SPEC.md D6): `now()`/`getScheduleCache`/
+// `upsertScheduleCache` removed — see KnexScheduleRepository.js for the
+// rationale (schedule_cache has no remaining reader or writer).
 
 /**
  * Read ALL user_config rows for the user. Seed via deps.userConfigRows

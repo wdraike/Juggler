@@ -84,11 +84,6 @@
  *   ONLY when it is currently NULL — the legacy rolling-anchor backfill
  *   (runSchedule.js ~401-404, the `trx.fn.now()` at 404 corrected to new Date()).
  *   Returns rows updated (0 or 1).
- *
- * @property {() => Promise<Date>} now
- *   The DB clock (`SELECT NOW(3)`) the legacy persist reads for the placement
- *   cache `generatedAt` (runSchedule.js ~1682). Surfaced via the port so the
- *   command stays free of raw knex. Returns a JS Date.
  */
 
 'use strict';
@@ -111,30 +106,14 @@ ScheduleRepositoryPort.prototype.backfillRollingAnchorIfNull = function backfill
   throw new Error('ScheduleRepositoryPort.backfillRollingAnchorIfNull not implemented');
 };
 
-ScheduleRepositoryPort.prototype.now = function now() {
-  throw new Error('ScheduleRepositoryPort.now not implemented');
-};
-
-/**
- * Read the schedule_cache blob from user_config (legacy placement cache for
- * cal-sync split expansion + duration correction). Returns the raw row or null.
- * @param {string} userId tenant scope.
- * @returns {Promise<Object|null>} the user_config row (config_value is JSON string) or null.
- */
-ScheduleRepositoryPort.prototype.getScheduleCache = function getScheduleCache(_userId) {
-  throw new Error('ScheduleRepositoryPort.getScheduleCache not implemented');
-};
-
-/**
- * Upsert the schedule_cache blob into user_config (update if exists, insert if not).
- * Mirrors the legacy runSchedule.js:2428-2433 upsert pattern exactly.
- * @param {string} userId tenant scope.
- * @param {string} cacheJson JSON.stringify'd placement cache.
- * @returns {Promise<void>}
- */
-ScheduleRepositoryPort.prototype.upsertScheduleCache = function upsertScheduleCache(_userId, _cacheJson) {
-  throw new Error('ScheduleRepositoryPort.upsertScheduleCache not implemented');
-};
+// 999.1217 (W4, SCHEDULER-SPEC.md D6): `now()` (DB-clock read) and
+// `getScheduleCache`/`upsertScheduleCache` (user_config schedule_cache blob)
+// were removed — they existed solely to serve the legacy placement-cache
+// `generatedAt`/read/write for cal-sync's split-part+duration correction.
+// cal-sync now reads task_instances directly (999.841 — split chunks persist
+// as their own rows) and recomputes duration via
+// ConstraintSolver.effectiveDuration; nothing reads or writes schedule_cache
+// anymore.
 
 /**
  * Read ALL user_config rows for a user (legacy loadSchedulerConfig read,
@@ -175,9 +154,6 @@ var SCHEDULE_REPOSITORY_PORT_METHODS = Object.freeze([
   'writeChanged',
   'deleteTasksWhere',
   'backfillRollingAnchorIfNull',
-  'now',
-  'getScheduleCache',
-  'upsertScheduleCache',
   'getUserConfigRows',
   'getLocations',
   'insertTasksBatch'

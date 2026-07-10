@@ -313,42 +313,15 @@ describe('runScheduleAndPersist: recurring instances', () => {
 // ═══════════════════════════════════════════════════════════════
 // Cache management
 // ═══════════════════════════════════════════════════════════════
-
-describe('runScheduleAndPersist: cache', () => {
-  test('writes schedule_cache to user_config', async () => {
-    if (!available) return;
-    await seedTask({ text: 'Cache test', dur: 30 });
-    await runScheduleAndPersist(USER_ID);
-
-    var cacheRow = await db('user_config')
-      .where({ user_id: USER_ID, config_key: 'schedule_cache' }).first();
-    expect(cacheRow).toBeDefined();
-    var cache = typeof cacheRow.config_value === 'string' ? JSON.parse(cacheRow.config_value) : cacheRow.config_value;
-    expect(cache.generatedAt).toBeTruthy();
-    expect(cache.dayPlacements).toBeDefined();
-    expect(cache.timezone).toBe(TZ);
-  });
-
-  test('cache updates on subsequent runs', async () => {
-    if (!available) return;
-    await seedTask({ text: 'Cache update', dur: 30 });
-    await runScheduleAndPersist(USER_ID);
-    var cache1 = await db('user_config')
-      .where({ user_id: USER_ID, config_key: 'schedule_cache' }).first();
-    var c1 = typeof cache1.config_value === 'string' ? JSON.parse(cache1.config_value) : cache1.config_value;
-    var gen1 = c1.generatedAt;
-
-    // Wait a moment then run again
-    await new Promise(r => setTimeout(r, 50));
-    await runScheduleAndPersist(USER_ID);
-    var cache2 = await db('user_config')
-      .where({ user_id: USER_ID, config_key: 'schedule_cache' }).first();
-    var c2 = typeof cache2.config_value === 'string' ? JSON.parse(cache2.config_value) : cache2.config_value;
-    var gen2 = c2.generatedAt;
-
-    expect(new Date(gen2).getTime()).toBeGreaterThan(new Date(gen1).getTime());
-  });
-});
+//
+// 999.1217 (W4, SCHEDULER-SPEC.md D6): runScheduleAndPersist used to write a
+// placement snapshot into user_config as schedule_cache purely so
+// cal-sync.controller.js could read split-part placements + duration
+// corrections back out of it. cal-sync no longer reads schedule_cache
+// (task_instances is authoritative for placements incl. split parts, 999.841)
+// and GET /placements already moved off it earlier (W3,
+// deriveSchedulePlacements.js) — nothing reads schedule_cache anymore, so the
+// write + this describe block asserting it are removed.
 
 // ═══════════════════════════════════════════════════════════════
 // Terminal status tasks

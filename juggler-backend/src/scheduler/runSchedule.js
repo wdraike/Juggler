@@ -67,7 +67,8 @@ function validateScheduledAt(allTasks) {
 
 var DEFAULT_TIME_BLOCKS = constants.DEFAULT_TIME_BLOCKS;
 var DAY_NAMES = constants.DAY_NAMES;
-var SCHEDULER_VERSION = constants.SCHEDULER_VERSION;
+// 999.1217 (W4): SCHEDULER_VERSION was only read for the (now-removed)
+// schedule_cache write's `schedulerVersion` field.
 var RECUR_EXPAND_DAYS = constants.RECUR_EXPAND_DAYS;
 var dateHelpers = require('./dateHelpers');
 var parseDate = dateHelpers.parseDate;
@@ -2404,55 +2405,14 @@ async function runScheduleAndPersist(userId, _retries, options) {
     + 'ms tasks=' + taskRows.length
     + ' placed=' + updated);
 
-  // 10. Cache the placement result so GET /placements doesn't re-run the scheduler
-  // Use MySQL's clock for generatedAt so it's consistent with tasks.updated_at.
-  // Node.js Date.now() can lag MySQL by several seconds on Cloud SQL, making the
-  // cache appear stale immediately. H6 / W3: the `SELECT NOW(3)` read is surfaced
-  // through RunScheduleCommand.dbNow (→ repository.now) so this path stays free of
-  // raw knex. Returns a JS Date already parsed (the legacy ' '→'T' + 'Z' parse).
-  var _dbNowDate = await _runScheduleCommand.dbNow(trx);
-  var placementCache = { dayPlacements: {}, unplaced: [], score: result.score, warnings: result.warnings || [], generatedAt: _dbNowDate.toISOString(), timezone: TIMEZONE, schedulerVersion: SCHEDULER_VERSION };
-  Object.keys(result.dayPlacements).forEach(function(dk) {
-    placementCache.dayPlacements[dk] = result.dayPlacements[dk].map(function(p) {
-      var entry = { taskId: p.task ? p.task.id : null, start: p.start, dur: p.dur };
-      // Convert local start to UTC ISO for timezone-independent display
-      var timeStr = formatMinutesToTime(p.start);
-      var utcDate = localToUtc(dk, timeStr, TIMEZONE);
-      if (utcDate) entry.scheduledAtUtc = utcDate.toISOString();
-      if (p.locked) entry.locked = true;
-      if (p.marker) entry.marker = true;
-      if (p._whenRelaxed) entry.whenRelaxed = true;
-      if (p.splitPart) { entry.splitPart = p.splitPart; entry.splitTotal = p.splitTotal; }
-      if (p.travelBefore) entry.travelBefore = p.travelBefore;
-      if (p.travelAfter) entry.travelAfter = p.travelAfter;
-      if (p._moveReason) entry.moveReason = p._moveReason;
-      if (p._conflict) entry.conflict = true;
-      if (p._placementReason) entry.placementReason = p._placementReason;
-      // Overdue flag: preserve through the cache round-trip so the frontend
-      // sees it in both the fresh schedule:changed payload and the hydrated
-      // read-from-cache path.
-      if (p._overdue || (p.task && p.task._overdue)) entry.overdue = true;
-      return entry;
-    });
-  });
-  // Store unplaced IDs + diagnostic info in cache
-  var unplacedMeta = {};
-  result.unplaced.forEach(function(t) {
-    if (t._unplacedDetail || t._suggestions || t._unplacedReason) {
-      var meta = {};
-      if (t._unplacedDetail) meta.detail = t._unplacedDetail;
-      if (t._unplacedReason) meta.reason = t._unplacedReason;
-      if (t._suggestions) meta.suggestions = t._suggestions;
-      if (t._whenBlocked) meta.whenBlocked = true;
-      unplacedMeta[t.id] = meta;
-    }
-  });
-  placementCache.unplaced = result.unplaced.map(function(t) { return t.id; });
-  placementCache.unplacedMeta = unplacedMeta;
-  var cacheJson = JSON.stringify(placementCache);
-  // H7 (999.1020): route the schedule_cache upsert through ScheduleRepositoryPort
-  // instead of inline knex — same upsert semantics (update if exists, insert if not).
-  await _runScheduleCommand.upsertScheduleCache(trx, userId, cacheJson);
+  // 999.1217 (W4, SCHEDULER-SPEC.md D6): step 10 used to build a placementCache
+  // blob (dayPlacements/unplaced/unplacedMeta) and upsert it into user_config as
+  // schedule_cache, purely so cal-sync.controller.js could read split-part
+  // placements + duration corrections back out of it. cal-sync no longer reads
+  // schedule_cache (task_instances is authoritative for placements incl. split
+  // parts, 999.841) — nothing reads this table anymore, so the write is removed
+  // too. GET /placements also no longer reads it (see deriveSchedulePlacements.js
+  // W3 note) — it derives placements from the live task list instead.
 
   // Invalidate Redis caches — scheduler modified tasks
   cache.invalidateTasks(userId).catch(function(err) { logger.error("[silent-catch]", { error: err }); });

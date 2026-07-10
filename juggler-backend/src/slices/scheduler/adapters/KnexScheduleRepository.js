@@ -263,36 +263,11 @@ KnexScheduleRepository.prototype.setNextStart = function setNextStart(masterId, 
     .update({ next_start: nextStart, updated_at: this.clock.now() });
 };
 
-/**
- * DB clock read (legacy `SELECT NOW(3)`, runSchedule.js ~1682) → JS Date. Used
- * for the placement-cache generatedAt so it matches MySQL updated_at.
- */
-KnexScheduleRepository.prototype.now = async function now() {
-  var _nowRow = await this.db.raw('SELECT NOW(3) as ts');
-  var _dbNow = _nowRow[0][0].ts;
-  return new Date(String(_dbNow).replace(' ', 'T') + 'Z');
-};
-
-/**
- * Read the schedule_cache blob from user_config (legacy placement cache read,
- * cal-sync.controller.js ~524). Returns the raw row or null.
- */
-KnexScheduleRepository.prototype.getScheduleCache = async function getScheduleCache(userId) {
-  return this.db('user_config').where({ user_id: userId, config_key: 'schedule_cache' }).first();
-};
-
-/**
- * Upsert the schedule_cache blob into user_config (legacy runSchedule.js:2428-2433).
- * Update if the row exists, insert if it does not. Identical semantics.
- */
-KnexScheduleRepository.prototype.upsertScheduleCache = async function upsertScheduleCache(userId, cacheJson) {
-  var existing = await this.db('user_config').where({ user_id: userId, config_key: 'schedule_cache' }).first();
-  if (existing) {
-    await this.db('user_config').where({ user_id: userId, config_key: 'schedule_cache' }).update({ config_value: cacheJson });
-  } else {
-    await this.db('user_config').insert({ user_id: userId, config_key: 'schedule_cache', config_value: cacheJson });
-  }
-};
+// 999.1217 (W4, SCHEDULER-SPEC.md D6): `now()` (DB-clock read, was used only
+// for the placement-cache generatedAt) and `getScheduleCache`/
+// `upsertScheduleCache` (user_config `schedule_cache` blob read/write) are
+// removed — cal-sync.controller.js no longer reads schedule_cache (reads
+// task_instances directly; split chunks persist as their own rows, 999.841).
 
 /**
  * Read ALL user_config rows for the user (verbatim — the legacy

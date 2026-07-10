@@ -147,17 +147,6 @@ RunScheduleCommand.prototype.setNextStart = function setNextStart(trx, userId, m
 };
 
 /**
- * DB clock (`SELECT NOW(3)`) → JS Date for the placement-cache `generatedAt`
- * (legacy runSchedule.js ~1798). Surfaced via the port so the caller stays free
- * of raw knex for this read.
- * @param {Function} trx caller's transaction handle.
- * @returns {Promise<Date>}
- */
-RunScheduleCommand.prototype.dbNow = function dbNow(trx) {
-  return this._repo(trx).now();
-};
-
-/**
  * Process wall-clock as a JS Date (P1). The caller uses this for every timestamp
  * it previously stamped with `db.fn.now()` / `trx.fn.now()` on the inline
  * reconcile / phase-1 / pendingUpdates writes. NEVER the Knex now-builder.
@@ -167,26 +156,9 @@ RunScheduleCommand.prototype.clockNow = function clockNow() {
   return this.clock.now();
 };
 
-/**
- * Read the schedule_cache blob (delegates to the repository's getScheduleCache).
- * @param {Function} trx caller's transaction handle.
- * @param {string} userId tenant scope.
- * @returns {Promise<Object|null>} the user_config row or null.
- */
-RunScheduleCommand.prototype.getScheduleCache = function getScheduleCache(trx, userId) {
-  return this._repo(trx).getScheduleCache(userId);
-};
-
-/**
- * Upsert the schedule_cache blob (delegates to the repository's upsertScheduleCache).
- * @param {Function} trx caller's transaction handle.
- * @param {string} userId tenant scope.
- * @param {string} cacheJson JSON.stringify'd placement cache.
- * @returns {Promise<void>}
- */
-RunScheduleCommand.prototype.upsertScheduleCache = function upsertScheduleCache(trx, userId, cacheJson) {
-  return this._repo(trx).upsertScheduleCache(userId, cacheJson);
-};
+// 999.1217 (W4, SCHEDULER-SPEC.md D6): `dbNow`/`getScheduleCache`/
+// `upsertScheduleCache` removed — schedule_cache has no remaining reader or
+// writer (see ScheduleRepositoryPort.js).
 
 /**
  * Read ALL user_config rows for the user (delegates to the repository's

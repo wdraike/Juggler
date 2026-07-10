@@ -27,10 +27,13 @@ var { acquireLock, releaseLock, refreshLock } = require('../lib/sync-lock');
 var { flushQueueInLock } = require('../lib/task-write-queue');
 var { PLACEMENT_MODES } = require('../lib/placementModes');
 var { isTerminalStatus } = require('../lib/task-status');
-// H7 (999.1020): route schedule_cache read through ScheduleRepositoryPort.
-// 999.1401 (JUG-HEX-H6/999.435 boundary rule): import the adapter via the
-// scheduler facade's named export, never from slices/scheduler/adapters/ directly.
-var { KnexScheduleRepository } = require('../slices/scheduler/facade');
+// 999.1217 (W4, SCHEDULER-SPEC.md D6): schedule_cache is no longer read here —
+// task_instances is authoritative for placements incl. split parts (999.841).
+// ConstraintSolver.effectiveDuration is the same pure formula the scheduler
+// used to size a placement; importing it via the facade's named export keeps
+// the JUG-HEX-H6/999.435 boundary rule (never reach into slices/scheduler/domain/
+// directly).
+var { ConstraintSolver } = require('../slices/scheduler/facade');
 var { isAllDayTaskBackend } = require('../lib/isAllDayTaskBackend');
 var { handleTerminalTaskSync } = require('../lib/cal-sync-helpers');
 const { createLogger } = require('@raike/lib-logger');
@@ -518,84 +521,30 @@ async function sync(req, res) {
       }
     });
 
-    // Load placement cache to get split task placements.
-    // The scheduler splits long tasks into multiple time blocks — the DB only
-    // stores the first placement's time, but the cache has all of them.
-    // We use this to create one calendar event per split part.
-    // Load placement cache — the scheduler's actual placed times and durations.
-    // Used for: (1) split task expansion, (2) correcting durations that differ
-    // from DB (e.g. recurring instances where runSchedule persists partial dur).
-    var splitPlacements = {}; // { taskId: [{ start, dur, dateKey, splitPart, splitTotal }] }
-    // Index each individual placement by taskId+scheduledAtUtc so we can match
-    // a task to its SPECIFIC placement (not the sum of all placements).
-    var placementsByTaskId = {}; // { taskId: [{ start, dur, dateKey, scheduledAtUtc }] }
-    // H7 (999.1020): route through ScheduleRepositoryPort.getScheduleCache
-    var _schedRepo = new KnexScheduleRepository({ db: getDb() });
-    var cacheRow = await _schedRepo.getScheduleCache(userId);
-    if (cacheRow) {
-      try {
-        var cache = typeof cacheRow.config_value === 'string' ? JSON.parse(cacheRow.config_value) : cacheRow.config_value;
-        if (cache.dayPlacements) {
-          Object.keys(cache.dayPlacements).forEach(function(dk) {
-            (cache.dayPlacements[dk] || []).forEach(function(p) {
-              if (!p.taskId) return;
-              if (p.splitPart) {
-                if (!splitPlacements[p.taskId]) splitPlacements[p.taskId] = [];
-                splitPlacements[p.taskId].push({
-                  start: p.start, dur: p.dur, dateKey: dk,
-                  splitPart: p.splitPart, splitTotal: p.splitTotal,
-                  scheduledAtUtc: p.scheduledAtUtc || null
-                });
-              }
-              if (!placementsByTaskId[p.taskId]) placementsByTaskId[p.taskId] = [];
-              placementsByTaskId[p.taskId].push({
-                start: p.start, dur: p.dur, dateKey: dk,
-                scheduledAtUtc: p.scheduledAtUtc || null
-              });
-            });
-          });
-        }
-      } catch (_e) { /* ignore parse errors */ }
-    }
-
-    // Apply placed duration to each task — match by scheduled_at to find the
-    // SPECIFIC placement, not the sum. The scheduler may place a 180-min task
-    // as two 90-min blocks; each block should become its own calendar event
-    // with the block's duration, not the total.
+    // 999.1217 (W4): split task placements now come straight from allTasks —
+    // each split chunk persists as its OWN task_instances row (999.841 binding
+    // ruling: chunk rows are never merged/deleted), so it already carries its
+    // own scheduled_at/dur/splitOrdinal/splitTotal/splitGroup (see taskMappers.js
+    // + tasks_with_sync_v). One calendar event per chunk falls out of the
+    // normal per-task push loop below; mergeContiguousSplitChunks() (above)
+    // already folds CONTIGUOUS chunks into one event by reading these same DB
+    // rows directly. No cache-derived per-part expansion is needed.
     //
-    // Skip merged leaders (#46): mergeContiguousSplitChunks() already set the
-    // correct merged dur from the DB rows. The cache may still hold the old
-    // per-chunk dur for the leader's taskId (e.g. the schedule_cache was written
-    // before the #42 DB merge ran, or has a stale entry without a splitPart key).
-    // Overwriting here would replace the merged total with the short chunk dur,
-    // producing a calendar event that ends before the next block starts.
+    // Duration correction: DELTA-WRITE (runSchedule.js) deliberately does NOT
+    // overwrite instance.dur when a task's time_remaining drives the effective
+    // placement duration — dur stays the user-set full/nominal chunk size,
+    // time_remaining is the separate "how much is left" value (see
+    // runSchedule.js's "Don't overwrite instance.dur when time_remaining..."
+    // comment). Recompute the SAME effective duration the scheduler used
+    // (ConstraintSolver.effectiveDuration — a pure function of dur/timeRemaining,
+    // both already loaded on every task) so the pushed calendar event reflects
+    // the actually-placed block, not the full nominal duration. Skip merged
+    // leaders — mergeContiguousSplitChunks() already set their correct summed
+    // dur from the DB rows; this must not override that total.
     allTasks.forEach(function(t) {
-      var placements = placementsByTaskId[t.id];
-      if (!placements || placements.length === 0 || splitPlacements[t.id] || mergedLeaderInfo[t.id]) return;
-
-      if (placements.length === 1) {
-        // Single placement — use its duration directly
-        t.dur = placements[0].dur;
-      } else {
-        // Multiple placements — match by scheduled_at time
-        var taskSAStr = t._scheduled_at ? String(t._scheduled_at).replace(' ', 'T') : null;
-        if (!taskSAStr) return;
-        var taskSATime = new Date(taskSAStr + 'Z').getTime();
-        var matched = null;
-        for (var pi2 = 0; pi2 < placements.length; pi2++) {
-          var pl = placements[pi2];
-          if (pl.scheduledAtUtc) {
-            var plTime = new Date(pl.scheduledAtUtc).getTime();
-            if (Math.abs(plTime - taskSATime) < 2 * 60000) { matched = pl; break; }
-          }
-        }
-        if (matched) {
-          t.dur = matched.dur;
-        } else {
-          // Fallback: use the first placement's duration (better than summing)
-          t.dur = placements[0].dur;
-        }
-      }
+      if (mergedLeaderInfo[t.id]) return;
+      if (t.timeRemaining == null) return; // dur is already correct — nothing to recompute
+      t.dur = ConstraintSolver.effectiveDuration(t);
     });
 
     // Load Apple write-calendar display name for progress reporting (best-effort)
@@ -1420,30 +1369,18 @@ async function sync(req, res) {
         ledgeredTaskIds2.delete(followerId);
       });
 
-      for (var si = 0; si < allTasks.length; si++) {
-        var sTask = allTasks[si];
-        var sSplits = splitPlacements[sTask.id];
-        if (!sSplits || sSplits.length <= 1) continue;
-        // Has split placements — check if there's a NON-split ledger entry
-        var hasNonSplitLedger = ledgeredTaskIds2.has(sTask.id);
-        var hasEventId = !!(sTask[(eventIdCol === 'gcal_event_id' ? 'gcalEventId' : eventIdCol === 'msft_event_id' ? 'msftEventId' : 'appleEventId')]);
-        if (hasNonSplitLedger || hasEventId) {
-          if (hasNonSplitLedger) {
-            var oldLedger = (ledgerByProvider[pid2] || []).find(function(l) { return l.task_id === sTask.id; });
-            if (oldLedger && oldLedger.provider_event_id) {
-              splitDeleteQueue.push(oldLedger.provider_event_id);
-              ledgerUpdates.push({ id: oldLedger.id, fields: { status: 'deleted_local' } });
-            }
-          }
-          // Clear task event_id in-memory (DB write deferred to write phase)
-          taskUpdates.push({ id: sTask.id, fields: { [eventIdCol]: null } });
-          sTask[(eventIdCol === 'gcal_event_id' ? 'gcalEventId' : eventIdCol === 'msft_event_id' ? 'msftEventId' : 'appleEventId')] = null;
-          // Unblock from all skip checks
-          ledgeredTaskIds2.delete(sTask.id);
-          processedTaskIds2.delete(sTask.id);
-          splitReplacedIds.add(sTask.id);
-        }
-      }
+      // 999.1217 (W4): the old "cache-flagged split placements replace a
+      // stale non-split ledger entry" pass lived here. It only ever fired for
+      // tasks carrying schedule_cache splitPlacements (the pre-999.841 model,
+      // where a single row could gain split sub-placements only in the cache
+      // after already syncing as one event). Since split chunks now persist
+      // as separate task_instances rows from creation (999.841), a chunk's
+      // ledger/event identity is stable from its first sync — there is no
+      // "this task just became split" transition left to detect. Removed
+      // along with the schedule_cache read above; splitDeleteQueue/
+      // splitReplacedIds stay declared (still fed by the merged-follower
+      // cleanup above / still read by the push loop below) but this pass no
+      // longer contributes to either.
       if (splitDeleteQueue.length > 0 && pAdapter2.batchDeleteEvents) {
         await pAdapter2.batchDeleteEvents(pToken2, splitDeleteQueue);
       } else {
@@ -1477,37 +1414,14 @@ async function sync(req, res) {
         if (taskSA < todayStart) continue;
         if (taskSA > windowEnd) continue;
 
-        // Split tasks: create one calendar event per split placement.
-        // When splitTotal > 1 the task IS a real chunk row — Path A (merge
-        // pass) already set the right dur and title suffix, so push it as-is.
-        // Only fall into the synthetic-ID expansion for old-style cache-only
-        // splits where the task itself has no split_total.
-        var splits = splitPlacements[newTask.id];
-        if (splits && splits.length > 1 && !(Number(newTask.splitTotal) > 1)) {
-          var anySplitLedgered = splits.some(function(sp) {
-            return ledgeredTaskIds2.has(newTask.id + '_part' + sp.splitPart);
-          });
-          if (!anySplitLedgered) {
-            splits.forEach(function(sp) {
-              var hh = Math.floor(sp.start / 60), mm = sp.start % 60;
-              var ampm = hh >= 12 ? 'PM' : 'AM';
-              var dh = hh > 12 ? hh - 12 : (hh === 0 ? 12 : hh);
-              var splitTime = dh + ':' + (mm < 10 ? '0' : '') + mm + ' ' + ampm;
-              var splitTask = Object.assign({}, newTask, {
-                id: newTask.id + '_part' + sp.splitPart,
-                _originalId: newTask.id,
-                date: sp.dateKey,
-                time: splitTime,
-                dur: sp.dur,
-                text: (newTask.text || '') + ' (part ' + sp.splitPart + '/' + sp.splitTotal + ')',
-                _scheduled_at: sp.scheduledAtUtc || newTask._scheduled_at
-              });
-              pushQueue.push({ task: splitTask });
-            });
-          }
-        } else {
-          pushQueue.push({ task: newTask });
-        }
+        // 999.1217 (W4): split chunks persist as separate task_instances rows
+        // (999.841) — `newTask` here already IS a single chunk (or a merged
+        // leader with mergeContiguousSplitChunks' summed dur/title), so it
+        // pushes as one event with no synthetic per-part expansion needed.
+        // The old schedule_cache-driven expansion (one synthetic sub-task per
+        // cached splitPart) is removed; it only ever applied to the
+        // pre-999.841 model where a chunk had no DB row of its own.
+        pushQueue.push({ task: newTask });
       }
 
       // Batch create if adapter supports it, otherwise fall back to sequential
