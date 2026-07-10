@@ -114,9 +114,13 @@ describe('updateTasksWhere — field routing', () => {
   test('mixed fields land on correct table', async () => {
     if (!available) return;
     var id = uuidv7();
+    // scheduled_at is required: the update below sets status='done', and
+    // chk_task_instances_terminal_scheduled (migration 20260527213906) rejects
+    // terminal-status rows with NULL scheduled_at.
     await tw.insertTask(db, {
       id: id, user_id: USER_A, text: 'orig', task_type: 'task',
       dur: 30, pri: 'P3', status: '',
+      scheduled_at: new Date('2026-07-10T10:00:00Z'),
       created_at: db.fn.now(), updated_at: db.fn.now()
     });
     // text is master-only, status is instance-only, dur is both
