@@ -5,6 +5,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import useIsMobile from '../../hooks/useIsMobile';
 import { BRAND, THEME_DARK } from '../../theme/colors';
+import { formatTimeAmPm } from '../../utils/timezone';
 
 export function useToast() {
   const [toast, setToast] = useState(null);
@@ -72,7 +73,7 @@ export default function ToastNotification({ toast, toastHistory, showHistory, on
         }}>
           {toastHistory.map((t, i) => (
             <div key={i} style={{ color: THEME_DARK.badgeText, padding: '2px 0' }}>
-              {new Date(t.ts).toLocaleTimeString()} — {t.msg}
+              {formatTimeAmPm(new Date(t.ts))} — {t.msg}
             </div>
           ))}
         </div>

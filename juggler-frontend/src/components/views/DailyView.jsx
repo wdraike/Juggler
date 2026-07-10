@@ -11,9 +11,11 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import { getTheme } from '../../theme/colors';
-import { GRID_START, GRID_END, MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES, locIcon, LOC_TINT, LOC_TINT_FALLBACK, locBgTint } from '../../state/constants';
+import { GRID_START, GRID_END, DAY_NAMES_FULL, DAY_NAMES, locIcon, LOC_TINT, LOC_TINT_FALLBACK, locBgTint } from '../../state/constants';
 import { isTerminalStatus } from '../../shared/task-status';
 import { formatHour, formatDateKey, parseDate } from '../../scheduler/dateHelpers';
+import { formatDayLong, formatMinsAmPm } from '../../utils/timezone';
+import EmptyState from './EmptyState';
 import { getBlocksForDate } from '../../scheduler/timeBlockHelpers';
 import { resolveLocationId, getLocationForDatePure } from '../../scheduler/locationHelpers';
 import WeatherBadge from '../features/WeatherBadge';
@@ -323,7 +325,16 @@ export default function DailyView({
   var [dragOverY, setDragOverY] = useState(null);
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative' }}>
+      {/* 999.1235: first-run CTA — the default landing view showed a bare
+          hour grid on a zero-task account with no hint of what to do next. */}
+      {(allTasks || []).length === 0 && (
+        <EmptyState
+          theme={theme}
+          title="Add your first task"
+          hint="Press the + button in the header to create a task — the scheduler places it in the best open slot for you automatically."
+        />
+      )}
       {/* Header */}
       <div style={{
         padding: '8px 12px', borderBottom: '1px solid ' + theme.border,
@@ -331,7 +342,7 @@ export default function DailyView({
         display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap'
       }}>
         <div style={{ fontWeight: 600, fontSize: 15, color: theme.text }}>
-          {DAY_NAMES_FULL[selectedDate.getDay()]}, {MONTH_NAMES[selectedDate.getMonth()]} {selectedDate.getDate()}
+          {formatDayLong(selectedDate)}
         </div>
         <div style={{ fontSize: 12, color: theme.textMuted }}>
           {loc.icon} {loc.name}
@@ -443,11 +454,7 @@ export default function DailyView({
           var yPx = e.clientY - gridRect.top;
           var totalMin = GRID_START * 60 + (yPx / hourHeight) * 60;
           totalMin = Math.round(totalMin / 5) * 5;
-          var hr = Math.floor(totalMin / 60);
-          var mn = totalMin % 60;
-          var ap = hr >= 12 ? 'PM' : 'AM';
-          var h12 = hr > 12 ? hr - 12 : (hr === 0 ? 12 : hr);
-          var newTime = h12 + ':' + (mn < 10 ? '0' : '') + mn + ' ' + ap;
+          var newTime = formatMinsAmPm(totalMin);
           var fields = { time: newTime };
           var task = (allTasks || []).find(function (t) { return t.id === taskId; });
           if (task && task.date !== selectedDateKey) fields.date = selectedDateKey;

@@ -14,16 +14,14 @@ import { checkWeatherMatch, hasWeatherRestrictions } from '../../utils/weatherMa
 import { parseWhen } from '../../scheduler/timeBlockHelpers';
 import { isTaskOverdue } from '../../utils/overdue';
 import StatusToggle from './StatusToggle';
+import { formatMinsCompact } from '../../utils/timezone';
 
 var TOOL_ICON_MAP = {};
 DEFAULT_TOOLS.forEach(function(t) { TOOL_ICON_MAP[t.id] = t.icon; });
 
+// 999.1232: grid-cell card — shared compact dialect ('3:30p', was '3:30pm').
 function formatStartTime(mins) {
-  var h = Math.floor(mins / 60);
-  var m = mins % 60;
-  var ampm = h >= 12 ? 'pm' : 'am';
-  var h12 = h % 12 || 12;
-  return h12 + (m > 0 ? ':' + (m < 10 ? '0' : '') + m : '') + ampm;
+  return formatMinsCompact(mins);
 }
 
 export default React.memo(function ScheduleCard({ item, status, onStatusChange, onDelete, onExpand, darkMode, isBlocked, isMobile, layoutMode, cardHeight, weatherDay }) {

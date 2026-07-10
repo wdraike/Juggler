@@ -9,6 +9,7 @@
 import { useCallback } from 'react';
 import { GRID_START } from '../state/constants';
 import { parseDate } from '../scheduler/dateHelpers';
+import { formatMinsAmPm } from '../utils/timezone';
 
 var DAY_CODES = ['U', 'M', 'T', 'W', 'R', 'F', 'S']; // Sun=0 … Sat=6
 var DAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -59,11 +60,7 @@ export default function useDragDrop({ allTasks, onUpdate, gridZoom, showToast, o
     var yPx = e.clientY - rect.top;
     var totalMin = GRID_START * 60 + yPx / PX_PER_MIN;
     totalMin = Math.round(totalMin / 5) * 5;
-    var hr = Math.floor(totalMin / 60);
-    var mn = totalMin % 60;
-    var ap = hr >= 12 ? 'PM' : 'AM';
-    var h12 = hr > 12 ? hr - 12 : (hr === 0 ? 12 : hr);
-    var newTime = h12 + ':' + (mn < 10 ? '0' : '') + mn + ' ' + ap;
+    var newTime = formatMinsAmPm(totalMin);
     var fields = { time: newTime };
 
     var task = allTasks.find(t => t.id === taskId);

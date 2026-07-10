@@ -8,7 +8,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { getTheme, BRAND } from '../../theme/colors';
 import { DAY_NAMES } from '../../state/constants';
 import { formatDateKey } from '../../scheduler/dateHelpers';
-import { getTimezoneAbbr } from '../../utils/timezone';
+import { getTimezoneAbbr, formatDayHeader } from '../../utils/timezone';
 import FeedbackDialog from '../feedback/FeedbackDialog';
 import HealthDot from './HealthDot';
 import FontSizeControl from './FontSizeControl';
@@ -122,7 +122,7 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
               var totalCount = dayTasks.length;
               return (
                 <button key={i} onClick={function() { setDayOffset(Math.round((d - today) / 86400000)); }}
-                  title={DAY_NAMES[d.getDay()] + ' ' + (d.getMonth()+1) + '/' + d.getDate() + (totalCount > 0 ? ' (' + doneCount + '/' + totalCount + ')' : '')}
+                  title={formatDayHeader(d) + (totalCount > 0 ? ' (' + doneCount + '/' + totalCount + ')' : '')}
                   style={{
                     border: 'none', borderRadius: 2, padding: '2px 6px', cursor: 'pointer',
                     background: isSelected ? theme.accent : 'transparent',
@@ -199,7 +199,7 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
                     ? provLabel + ': ' + (calSyncProgress.detail || 'Syncing...') + ' (' + (calSyncProgress.pct || 0) + '%)'
                     : 'Calendar Sync';
                   return (
-                    <button onClick={onShowCalSync || onShowGCalSync || onShowMsftCalSync} style={{ ...btnStyle(theme, isMobile), position: 'relative' }} title={tipText}>
+                    <button onClick={onShowCalSync || onShowGCalSync || onShowMsftCalSync} style={{ ...btnStyle(theme, isMobile), position: 'relative' }} title={tipText} aria-label="Calendar sync">
                       <span style={Object.assign(
                         { fontWeight: iconColor ? 700 : undefined, color: iconColor || undefined },
                         calSyncing ? { display: 'inline-block', animation: 'gcal-spin 1s linear infinite' } : {}

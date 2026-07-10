@@ -64,6 +64,7 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
   var actionSections = [
     {
       key: 'overdue', title: 'Overdue', tasks: issues.overdue, color: theme.redText,
+      empty: 'All clear — nothing is overdue.',
       tip: 'Tasks past their due date/time that aren\'t done',
       help: 'These tasks are past their due date/time and still open — including calendar events and recurring instances whose date has already passed. They stay pinned on the calendar at their original time, flagged overdue. Mark them done, reschedule to a new date, or cancel them.'
     },
@@ -74,6 +75,7 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
       // bucket for a dual-shape row per conflictBuckets.js), keeping this page's
       // count and rendered rows in agreement with the badge (999.862 invariant).
       key: 'unplaced', title: 'Unscheduled', tasks: issues.unplacedForDisplay, color: theme.amberText,
+      empty: 'All clear — the scheduler found a slot for every task.',
       tip: 'Tasks the scheduler couldn\'t fit into any available time slot',
       help: 'The scheduler tried to place these tasks but ran out of room. Common causes: the day is too full, time window constraints are too narrow, a non-splittable task is too long for any available gap, or no suitable weather window exists within the 14-day horizon. Try shortening the task, enabling splitting, relaxing the time window, adjusting weather conditions, or moving other tasks to free up space.'
     },
@@ -82,16 +84,19 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
   var infoSections = [
     {
       key: 'stale', title: 'Past Scheduled Date', tasks: issues.stale, color: theme.amberText,
+      empty: 'All clear — nothing is lingering past its scheduled date.',
       tip: 'Tasks whose scheduled date has passed but have no hard deadline',
       help: "These tasks have a past scheduled date and no hard deadline. Flexible tasks roll forward on the next scheduler run; fixed-time tasks and calendar-linked events stay pinned at their original date. Reschedule manually when you're ready."
     },
     {
       key: 'blocked', title: 'Blocked by Dependencies', tasks: issues.blocked, color: theme.purpleText,
+      empty: 'All clear — no tasks are waiting on prerequisites.',
       tip: 'Tasks waiting on other tasks to be done first',
       help: 'These tasks depend on other tasks that aren\'t done yet. They\'ll become schedulable once their prerequisites are done.'
     },
     {
       key: 'unscheduled', title: 'Backlog (no date)', tasks: backlog || [], color: theme.muted2,
+      empty: 'Backlog is empty — every task has a date.',
       tip: 'Tasks with no date assigned — not on the schedule yet',
       help: 'These tasks have no date set, so they don\'t appear on the schedule. This is normal for backlog items. Assign a date when you\'re ready to work on them.'
     },
@@ -230,7 +235,8 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
                 ))}
               </div>
             ) : (
-              <div style={{ fontSize: 11, color: theme.textMuted }}>None</div>
+              // 999.1235 (3): per-section state line instead of a bare 'None'.
+              <div style={{ fontSize: 12, color: theme.textMuted }}>{sec.empty || 'None'}</div>
             )}
           </div>
         )}

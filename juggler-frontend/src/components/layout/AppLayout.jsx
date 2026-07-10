@@ -23,7 +23,7 @@ import { evaluateFutureCompletionGuard } from '../../utils/futureCompletionGuard
 import { DAY_NAMES, applyDefaults } from '../../state/constants';
 import { useAuth } from '../auth/AuthProvider';
 import { useTimezone } from '../../hooks/useTimezone';
-import { getNowInTimezone, buildServerClock } from '../../utils/timezone';
+import { getNowInTimezone, buildServerClock, formatMinsAmPm } from '../../utils/timezone';
 import { isAllDayTask } from '../../utils/isAllDayTask';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 
@@ -1043,11 +1043,7 @@ export default function AppLayout() {
 
   // Marker drag handler — convert minutes to time string and update task
   var handleMarkerDrag = useCallback(function(taskId, totalMins) {
-    var hr = Math.floor(totalMins / 60);
-    var mn = totalMins % 60;
-    var ap = hr >= 12 ? 'PM' : 'AM';
-    var h12 = hr > 12 ? hr - 12 : (hr === 0 ? 12 : hr);
-    var newTime = h12 + ':' + (mn < 10 ? '0' : '') + mn + ' ' + ap;
+    var newTime = formatMinsAmPm(totalMins);
     pushUndo('drag time');
 
     // Optimistically update placements so the marker stays where it was dropped

@@ -15,57 +15,13 @@ import { isTaskOverdue } from '../../utils/overdue';
 /* ── Main CalendarView ── */
 import WeatherBadge from '../features/WeatherBadge';
 
-function minsToTime(m) {
-  var h = Math.floor(m / 60);
-  var mm = m % 60;
-  var ampm = h >= 12 ? 'p' : 'a';
-  h = h % 12 || 12;
-  return h + (mm ? ':' + String(mm).padStart(2, '0') : '') + ampm;
-}
-
-function durLabel(dur) {
-  if (!dur) return '';
-  return dur >= 60 ? Math.round(dur / 60 * 10) / 10 + 'h' : dur + 'm';
-}
-
-// juggler-cal-history Plan E — past-fade + popup helpers (D-10/D-12).
-function isTaskPast(item, todayKey) {
-  var t = item && item.task;
-  if (!t || !t.scheduledAt) return false;
-  return formatDateKey(new Date(t.scheduledAt)) < todayKey;
-}
-
-function labelForStatus(s) {
-  if (s === 'done') return 'Done at';
-  if (s === 'skip') return 'Skipped at';
-  if (s === 'cancel' || s === 'cancelled') return 'Cancelled at';
-  if (s === 'pause') return 'Paused at';
-  return 'Resolved at';
-}
-
-function formatCompletedAt(iso) {
-  if (!iso) return '';
-  var d = new Date(iso);
-  if (isNaN(d.getTime())) return '';
-  var time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase().replace(/\s/g, '');
-  var day = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
-  return time + ' ' + day;
-}
-
-function getStatusReason(t, status) {
-  if (!t || !status) return null;
-
-  switch (status) {
-    case 'cancel':
-      return t.cancelReason ? 'cancelled: ' + t.cancelReason : 'cancelled by user';
-    case 'skip':
-      return t.skipReason ? 'skipped: ' + t.skipReason : 'skipped for today';
-    case 'pause':
-      return t.pauseReason ? 'paused: ' + t.pauseReason : 'temporarily paused';
-    default:
-      return null; // 'done' doesn't typically have automatic reasons
-  }
-}
+// 999.1232: these helpers were character-identical local copies of the
+// dailyViewHelpers implementations — import the single source instead.
+import {
+  minsToTime, durLabel, isTaskPast, labelForStatus,
+  formatCompletedAt, getStatusReason
+} from './dailyViewHelpers';
+import EmptyState from './EmptyState';
 
 /* ── Popup card rendered via portal directly below/above anchor ── */
 function FixedPopup({ mousePos, item, status, theme, darkMode, completedAt, statusReason }) {
@@ -304,7 +260,11 @@ export default function CalendarView({
   for (var r = 0; r < cells.length; r += 7) rows.push(cells.slice(r, r + 7));
 
   return (
-    <div style={{ flex: 1, overflow: 'auto', padding: isMobile ? 6 : 12, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+    <div style={{ flex: 1, overflow: 'auto', padding: isMobile ? 6 : 12, display: 'flex', flexDirection: 'column', minWidth: 0, position: 'relative' }}>
+      {/* 999.1235: empty-state one-liner instead of a bare month grid */}
+      {Object.keys(tasksByDate || {}).length === 0 && (
+        <EmptyState theme={theme} hint="No tasks yet — press + in the header to add your first task." />
+      )}
       {/* Month header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, marginBottom: 8 }}>
         <button onClick={function () { setMonthOffset(function (o) { return o - 1; }); }}

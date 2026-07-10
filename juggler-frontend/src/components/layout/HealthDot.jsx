@@ -15,6 +15,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import apiClient from '../../services/apiClient';
 import { getTheme } from '../../theme/colors';
+import { formatTimeAmPm, timeAgo } from '../../utils/timezone';
 
 var POLL_INTERVAL_MS = 60 * 1000; // 60s — matches climbrs default cadence
 var NETWORK_TIMEOUT_MS = 5000;
@@ -123,7 +124,7 @@ export default function HealthDot({ darkMode, theme }) {
         }
       });
     }
-    if (state.lastChecked) lines.push('Checked: ' + state.lastChecked.toLocaleTimeString());
+    if (state.lastChecked) lines.push('Checked: ' + formatTimeAmPm(state.lastChecked));
     return lines.join('\n');
   })();
 
@@ -224,7 +225,7 @@ export default function HealthDot({ darkMode, theme }) {
           {state.data && (
             <div style={{ marginTop: 8, fontSize: 11, color: theme ? theme.textMuted : '#666' }}>
               Uptime: {fmtUptime(state.data.uptime)}
-              {state.lastChecked && <span> · Checked {state.lastChecked.toLocaleTimeString()}</span>}
+              {state.lastChecked && <span> · Checked {formatTimeAmPm(state.lastChecked)}</span>}
             </div>
           )}
         </div>
@@ -246,16 +247,9 @@ function SyncTable({ sync, theme }) {
     if (ac !== bc) return ac - bc;
     return (providerLabels[a] || a).localeCompare(providerLabels[b] || b);
   });
+  // 999.1232: shared timeAgo (was a local duplicate of CalSyncPanel's).
   function fmtAgo(iso) {
-    if (!iso) return '—';
-    var diff = Date.now() - new Date(iso.replace(' ', 'T') + (iso.endsWith('Z') ? '' : 'Z')).getTime();
-    if (isNaN(diff)) return '—';
-    var m = Math.floor(diff / 60000);
-    if (m < 1) return 'just now';
-    if (m < 60) return m + 'm ago';
-    var h = Math.floor(m / 60);
-    if (h < 24) return h + 'h ago';
-    return Math.floor(h / 24) + 'd ago';
+    return timeAgo(iso) || '—';
   }
   return (
     <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px dashed ' + (theme ? theme.border : '#ddd') }}>

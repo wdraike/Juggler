@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import apiClient from '../../services/apiClient';
 import { getTheme } from '../../theme/colors';
-import { parseDbUtc } from '../../utils/timezone';
+import { parseDbUtc, formatAbsDateTime, timeAgo } from '../../utils/timezone';
 
 // knex dateStrings:true returns MySQL format "2026-05-01 19:44:00" (UTC, no Z).
 // 999.1426: delegate to the SHARED parseDbUtc normalizer (backend SSOT,
@@ -34,18 +34,10 @@ export function mostRecentSyncedAt(entries) {
   return best;
 }
 
+// 999.1232: shared timeAgo (was a local duplicate of HealthDot's fmtAgo —
+// 'Just now' capital-J dialect folded into the shared 'just now').
 function formatRelativeTime(isoString) {
-  if (!isoString) return 'Never';
-  var d = parseDbDate(isoString);
-  if (!d || isNaN(d.getTime())) return 'Never';
-  var diff = Date.now() - d.getTime();
-  var mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'Just now';
-  if (mins < 60) return mins + 'm ago';
-  var hours = Math.floor(mins / 60);
-  if (hours < 24) return hours + 'h ago';
-  var days = Math.floor(hours / 24);
-  return days + 'd ago';
+  return timeAgo(isoString) || 'Never';
 }
 
 var FREQUENCY_OPTIONS = [
@@ -1061,20 +1053,20 @@ export default function CalSyncPanel({
             repush: '♻', error: '⚠'
           };
 
+          // 999.1232 (4): both history datetimes use the shared 'Jul 6 at
+          // 3:00 PM' formatter — formatEventTime previously rendered the
+          // OPPOSITE order ('3:00 PM, Jul 6') in the same list.
           function formatAbsTime(isoString) {
-            if (!isoString) return '';
-            var d = parseDbDate(isoString);
-            if (!d || isNaN(d.getTime())) return '';
-            return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-              + ' at ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+            return formatAbsDateTime(parseDbDate(isoString));
           }
 
           function formatEventTime(input) {
             if (!input) return null;
+            // Provider-native startDateTime strings are already local — parse
+            // with new Date() (NOT parseDbUtc); Dates pass straight through.
             var d = input instanceof Date ? input : new Date(input);
             if (isNaN(d.getTime())) return null;
-            return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
-              + ', ' + d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            return formatAbsDateTime(d);
           }
 
           function summarizeRun(counts) {

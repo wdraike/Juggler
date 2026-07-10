@@ -6,17 +6,21 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { getTheme, BRAND } from '../../theme/colors';
 
+// 999.1238 (1): every view gets a DISTINCT icon plus a short label rendered
+// under it on mobile (Flex and Timeline previously shared the identical
+// left-right-arrow glyph, and the bare single chars 3/7/M/P/! were guesswork
+// for touch users who can't hover the title tooltips).
 const VIEW_MODES = [
-  { id: 'daily', label: 'Day', icon: '\uD83D\uDCC4', tip: 'Day view — plain hour grid with hover details' },
-  { id: 'day', label: 'Flex', icon: '\u2194', tip: 'Flex view — single-day timeline with bezier connectors' },
-  { id: '3day', label: '3-Day', icon: '3', tip: '3-Day view — three-day side-by-side timeline' },
-  { id: 'week', label: 'Week', icon: '7', tip: 'Week view — seven-day timeline overview' },
-  { id: 'month', label: 'Month', icon: 'M', tip: 'Month view — calendar with hover details' },
-  { id: 'timeline', label: 'Timeline', icon: '\u2194', tip: 'Timeline view — horizontal left-to-right timeline with cards above and below' },
-  { id: 'list', label: 'List', icon: '\u2261', tip: 'List view — all tasks grouped by date' },
-  { id: 'priority', label: 'Priority', icon: 'P', tip: 'Priority view — P1-P4 kanban columns' },
-  { id: 'deps', label: 'Deps', icon: '\u2192', tip: 'Dependencies view — DAG graph of task dependencies, filter by project' },
-  { id: 'conflicts', label: 'Issues', icon: '!', tip: 'Issues view — unscheduled tasks, conflicts, and deadline misses' },
+  { id: 'daily', label: 'Day', shortLabel: 'Day', icon: '\uD83D\uDCC4', tip: 'Day view — plain hour grid with hover details' },
+  { id: 'day', label: 'Flex', shortLabel: 'Flex', icon: '\u21c6', tip: 'Flex view — single-day timeline with bezier connectors' },
+  { id: '3day', label: '3-Day', shortLabel: '3-Day', icon: '3', tip: '3-Day view — three-day side-by-side timeline' },
+  { id: 'week', label: 'Week', shortLabel: 'Week', icon: '7', tip: 'Week view — seven-day timeline overview' },
+  { id: 'month', label: 'Month', shortLabel: 'Month', icon: 'M', tip: 'Month view — calendar with hover details' },
+  { id: 'timeline', label: 'Timeline', shortLabel: 'Time', icon: '\u2194', tip: 'Timeline view — horizontal left-to-right timeline with cards above and below' },
+  { id: 'list', label: 'List', shortLabel: 'List', icon: '\u2261', tip: 'List view — all tasks grouped by date' },
+  { id: 'priority', label: 'Priority', shortLabel: 'Pri', icon: 'P', tip: 'Priority view — P1-P4 kanban columns' },
+  { id: 'deps', label: 'Deps', shortLabel: 'Deps', icon: '\u2192', tip: 'Dependencies view — DAG graph of task dependencies, filter by project' },
+  { id: 'conflicts', label: 'Issues', shortLabel: 'Issues', icon: '!', tip: 'Issues view — unscheduled tasks, conflicts, and deadline misses' },
 ];
 
 const FILTERS = [
@@ -190,7 +194,12 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
             }}
             title={v.tip}
           >
-            {isMobile ? v.icon : v.label}
+            {isMobile ? (
+              <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.1 }}>
+                <span style={{ fontSize: 12 }}>{v.icon}</span>
+                <span style={{ fontSize: 8, letterSpacing: 0 }}>{v.shortLabel}</span>
+              </span>
+            ) : v.label}
             {v.id === 'conflicts' && issuesCount > 0 && (
               <span style={{
                 marginLeft: 2, background: theme.error, color: '#FDFAF5', borderRadius: 2,

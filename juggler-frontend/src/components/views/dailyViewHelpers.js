@@ -6,6 +6,7 @@
 
 import { GRID_START } from '../../state/constants';
 import { formatDateKey } from '../../scheduler/dateHelpers';
+import { formatMinsCompact, formatTimeAmPm, formatDayHeader } from '../../utils/timezone';
 
 export function weatherCodeLabel(code) {
   if (code == null || code === 0) return 'Clear';
@@ -25,12 +26,9 @@ export function weatherCodeLabel(code) {
   return 'Stormy';
 }
 
+// Compact grid-cell dialect — delegates to the shared formatter (999.1232).
 export function minsToTime(m) {
-  var h = Math.floor(m / 60);
-  var mm = m % 60;
-  var ampm = h >= 12 ? 'p' : 'a';
-  h = h % 12 || 12;
-  return h + (mm ? ':' + String(mm).padStart(2, '0') : '') + ampm;
+  return formatMinsCompact(m);
 }
 
 export function durLabel(dur) {
@@ -53,13 +51,13 @@ export function labelForStatus(s) {
   return 'Resolved at';
 }
 
+// 999.1232: standard '3:30 PM' dialect + 'Mon, Jul 6' day header, en-US
+// pinned (was browser-locale '3:30pm' — one of the four AM/PM dialects).
 export function formatCompletedAt(iso) {
   if (!iso) return '';
   var d = new Date(iso);
   if (isNaN(d.getTime())) return '';
-  var time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase().replace(/\s/g, '');
-  var day = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
-  return time + ' ' + day;
+  return formatTimeAmPm(d) + ' ' + formatDayHeader(d);
 }
 
 export function getStatusReason(t, status) {

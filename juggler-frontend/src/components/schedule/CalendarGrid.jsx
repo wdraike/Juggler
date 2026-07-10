@@ -16,6 +16,7 @@ import { GRID_START, GRID_END, GRID_HOURS_COUNT, PRI_COLORS, LOC_TINT, LOC_TINT_
 import { formatDateKey as cgFormatDateKey } from '../../scheduler/dateHelpers';
 import { formatHour } from '../../scheduler/dateHelpers';
 import { weatherIconUrl } from '../../utils/weatherIcons';
+import { formatMinsAmPm } from '../../utils/timezone';
 import { getTheme } from '../../theme/colors';
 import { resolveLocationId } from '../../scheduler/locationHelpers';
 import { isAllDayTask } from '../../utils/isAllDayTask';
@@ -335,13 +336,9 @@ export default function CalendarGrid({
     document.addEventListener('touchend', onEnd);
   }, [onMarkerDrag, hourHeight]);
 
-  // Format minutes to time label for drag preview
+  // Format minutes to time label for drag preview (shared dialect, 999.1232)
   function formatDragTime(totalMins) {
-    var h = Math.floor(totalMins / 60);
-    var m = totalMins % 60;
-    var ampm = h >= 12 ? 'PM' : 'AM';
-    var h12 = h % 12 || 12;
-    return h12 + ':' + (m < 10 ? '0' : '') + m + ' ' + ampm;
+    return formatMinsAmPm(totalMins);
   }
 
   var blockStartsByHour = {};

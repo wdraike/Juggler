@@ -5,12 +5,13 @@
 import React from 'react';
 import CalendarGrid from '../schedule/CalendarGrid';
 import { getTheme } from '../../theme/colors';
-import { DAY_NAMES } from '../../state/constants';
 import { formatDateKey } from '../../scheduler/dateHelpers';
+import { formatDayHeader } from '../../utils/timezone';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
 
 import WeatherBadge from '../features/WeatherBadge';
 import AllDayBanner from './AllDayBanner';
+import EmptyState from './EmptyState';
 
 export default function ThreeDayView({ selectedDate, dayPlacements, allTasks, statuses, onStatusChange, onDelete, onExpand, gridZoom, darkMode, schedCfg, nowMins, onGridDrop, blockedTaskIds, onZoomChange, isMobile, onMarkerDrag, weatherByDate }) {
   var theme = getTheme(darkMode);
@@ -24,7 +25,11 @@ export default function ThreeDayView({ selectedDate, dayPlacements, allTasks, st
   });
 
   return (
-    <div style={{ display: 'flex', flex: 1, flexDirection: 'column', minHeight: 0 }}>
+    <div style={{ display: 'flex', flex: 1, flexDirection: 'column', minHeight: 0, position: 'relative' }}>
+      {/* 999.1235: empty-state one-liner instead of a bare grid */}
+      {(allTasks || []).length === 0 && (
+        <EmptyState theme={theme} hint="No tasks yet — press + in the header to add one and watch it land on the grid." />
+      )}
       {/* Fixed day headers — outside scroll */}
       <div style={{ display: 'flex', flexShrink: 0 }}>
         {days.map((d, i) => {
@@ -36,7 +41,7 @@ export default function ThreeDayView({ selectedDate, dayPlacements, allTasks, st
               borderRight: i < 2 ? `1px solid ${theme.border}` : 'none',
               background: d.isToday ? theme.accent + '15' : theme.bg
             }}>
-              {DAY_NAMES[d.date.getDay()]} {d.date.getDate()} <span style={{ fontSize: 10, color: theme.textMuted }}>{loc.icon}</span>
+              {formatDayHeader(d.date)} <span style={{ fontSize: 10, color: theme.textMuted }}>{loc.icon}</span>
               {weatherByDate && weatherByDate[d.key] && <div style={{ marginTop: 2 }}><WeatherBadge weatherDay={weatherByDate[d.key]} darkMode={darkMode} /></div>}
             </div>
           );

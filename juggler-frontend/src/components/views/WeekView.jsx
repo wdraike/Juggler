@@ -5,12 +5,13 @@
 import React from 'react';
 import CalendarGrid from '../schedule/CalendarGrid';
 import { getTheme } from '../../theme/colors';
-import { DAY_NAMES } from '../../state/constants';
 import { formatDateKey, getWeekStart } from '../../scheduler/dateHelpers';
+import { formatDayHeader } from '../../utils/timezone';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
 
 import WeatherBadge from '../features/WeatherBadge';
 import AllDayBanner from './AllDayBanner';
+import EmptyState from './EmptyState';
 
 export default function WeekView({ selectedDate, dayPlacements, allTasks, statuses, onStatusChange, onDelete, onExpand, gridZoom, darkMode, schedCfg, nowMins, onGridDrop, blockedTaskIds, onZoomChange, isMobile, onMarkerDrag, weatherByDate }) {
   var theme = getTheme(darkMode);
@@ -25,7 +26,11 @@ export default function WeekView({ selectedDate, dayPlacements, allTasks, status
   });
 
   return (
-    <div style={{ display: 'flex', flex: 1, flexDirection: 'column', minHeight: 0 }}>
+    <div style={{ display: 'flex', flex: 1, flexDirection: 'column', minHeight: 0, position: 'relative' }}>
+      {/* 999.1235: empty-state one-liner instead of a bare grid */}
+      {(allTasks || []).length === 0 && (
+        <EmptyState theme={theme} hint="No tasks yet — press + in the header to add one and watch your week fill in." />
+      )}
       {/* Fixed day headers — outside scroll */}
       <div style={{ display: 'flex', flexShrink: 0 }}>
         {days.map((d, i) => {
@@ -38,7 +43,7 @@ export default function WeekView({ selectedDate, dayPlacements, allTasks, status
               textAlign: 'center',
               background: d.isToday ? theme.accent + '15' : theme.bg
             }}>
-              {DAY_NAMES[d.date.getDay()]} {d.date.getDate()} {loc.icon}
+              {formatDayHeader(d.date)} {loc.icon}
               {weatherByDate && weatherByDate[d.key] && <div style={{ marginTop: 1 }}><WeatherBadge weatherDay={weatherByDate[d.key]} compact darkMode={darkMode} /></div>}
             </div>
           );

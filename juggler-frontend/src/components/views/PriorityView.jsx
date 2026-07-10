@@ -112,7 +112,10 @@ export default function PriorityView({ allTasks, statuses, filter, search, proje
                 />
               ))}
               {tasks.length === 0 && (
-                <div style={{ fontSize: 11, color: theme.textMuted, padding: 12, textAlign: 'center' }}>No tasks</div>
+                // 999.1235 (3): state + next step instead of a terse 11px 'No tasks'.
+                <div style={{ fontSize: 12, color: theme.textMuted, padding: 12, textAlign: 'center', lineHeight: 1.4 }}>
+                  Nothing here — drag a card into this column to set its priority.
+                </div>
               )}
             </div>
           </div>

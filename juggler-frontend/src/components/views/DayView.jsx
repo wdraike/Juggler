@@ -5,7 +5,8 @@
 import React, { useRef, useEffect, useMemo, useCallback } from 'react';
 import CalendarGrid from '../schedule/CalendarGrid';
 import { getTheme } from '../../theme/colors';
-import { MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES, GRID_START, PAST_OPACITY } from '../../state/constants';
+import { DAY_NAMES_FULL, DAY_NAMES, GRID_START, PAST_OPACITY } from '../../state/constants';
+import { formatDayLong } from '../../utils/timezone';
 import { isTerminalStatus } from '../../shared/task-status';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
 import { formatDateKey } from '../../scheduler/dateHelpers';
@@ -96,7 +97,7 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
       {/* Fixed header — outside scroll area so cards never overlap it */}
       <div style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', borderBottom: `1px solid ${theme.border}`, background: theme.bg, flexShrink: 0 }}>
         <div style={{ fontWeight: 600, fontSize: 15, color: theme.text }}>
-          {DAY_NAMES_FULL[selectedDate.getDay()]}, {MONTH_NAMES[selectedDate.getMonth()]} {selectedDate.getDate()}
+          {formatDayLong(selectedDate)}
         </div>
         <div style={{ fontSize: 12, color: theme.textMuted }}>
           {loc.icon} {loc.name}

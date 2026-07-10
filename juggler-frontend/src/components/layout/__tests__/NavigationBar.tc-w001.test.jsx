@@ -53,16 +53,16 @@ const BASE_PROPS = {
 // SYNC: keep in sync with VIEW_MODES in NavigationBar.jsx. If a mode is added or
 // renamed there, update this array and the button count assertion (expect 10) below.
 const VIEW_MODES = [
-  { id: 'daily',     label: 'Day',      icon: '📄', tip: 'Day view — plain hour grid with hover details' },
-  { id: 'day',       label: 'Flex',     icon: '↔',  tip: 'Flex view — single-day timeline with bezier connectors' },
-  { id: '3day',      label: '3-Day',    icon: '3',  tip: '3-Day view — three-day side-by-side timeline' },
-  { id: 'week',      label: 'Week',     icon: '7',  tip: 'Week view — seven-day timeline overview' },
-  { id: 'month',     label: 'Month',    icon: 'M',  tip: 'Month view — calendar with hover details' },
-  { id: 'timeline',  label: 'Timeline', icon: '↔',  tip: 'Timeline view — horizontal left-to-right timeline with cards above and below' },
-  { id: 'list',      label: 'List',     icon: '≡',  tip: 'List view — all tasks grouped by date' },
-  { id: 'priority',  label: 'Priority', icon: 'P',  tip: 'Priority view — P1-P4 kanban columns' },
-  { id: 'deps',      label: 'Deps',     icon: '→',  tip: 'Dependencies view — DAG graph of task dependencies, filter by project' },
-  { id: 'conflicts', label: 'Issues',   icon: '!',  tip: 'Issues view — unscheduled tasks, conflicts, and deadline misses' },
+  { id: 'daily',     label: 'Day',      shortLabel: 'Day',    icon: '📄', tip: 'Day view — plain hour grid with hover details' },
+  { id: 'day',       label: 'Flex',     shortLabel: 'Flex',   icon: '⇆',  tip: 'Flex view — single-day timeline with bezier connectors' },
+  { id: '3day',      label: '3-Day',    shortLabel: '3-Day',  icon: '3',  tip: '3-Day view — three-day side-by-side timeline' },
+  { id: 'week',      label: 'Week',     shortLabel: 'Week',   icon: '7',  tip: 'Week view — seven-day timeline overview' },
+  { id: 'month',     label: 'Month',    shortLabel: 'Month',  icon: 'M',  tip: 'Month view — calendar with hover details' },
+  { id: 'timeline',  label: 'Timeline', shortLabel: 'Time',   icon: '↔',  tip: 'Timeline view — horizontal left-to-right timeline with cards above and below' },
+  { id: 'list',      label: 'List',     shortLabel: 'List',   icon: '≡',  tip: 'List view — all tasks grouped by date' },
+  { id: 'priority',  label: 'Priority', shortLabel: 'Pri',    icon: 'P',  tip: 'Priority view — P1-P4 kanban columns' },
+  { id: 'deps',      label: 'Deps',     shortLabel: 'Deps',   icon: '→',  tip: 'Dependencies view — DAG graph of task dependencies, filter by project' },
+  { id: 'conflicts', label: 'Issues',   shortLabel: 'Issues', icon: '!',  tip: 'Issues view — unscheduled tasks, conflicts, and deadline misses' },
 ];
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -163,14 +163,21 @@ describe('TC-W001 — NavigationBar mode-selector structural overflow guards', (
       }
     });
 
-    it('mobile: renders all 10 view-mode buttons with icon content', () => {
+    it('mobile: renders all 10 view-mode buttons with icon + short label', () => {
       renderNav({ isMobile: true });
       for (const mode of VIEW_MODES) {
         const btn = screen.getByTitle(mode.tip);
         expect(btn).toBeInTheDocument();
-        // 'day' and 'timeline' intentionally share icon ↔ — both map to mode.icon
+        // 999.1238: every icon is DISTINCT (Flex ⇆ vs Timeline ↔) and each
+        // button also carries a short text label for touch users.
         expect(btn).toHaveTextContent(mode.icon);
+        expect(btn).toHaveTextContent(mode.shortLabel);
       }
+    });
+
+    it('mobile: no two view-mode buttons share the same icon (999.1238)', () => {
+      const icons = VIEW_MODES.map(m => m.icon);
+      expect(new Set(icons).size).toBe(icons.length);
     });
   });
 

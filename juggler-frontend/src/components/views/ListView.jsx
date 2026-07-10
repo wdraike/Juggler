@@ -7,8 +7,8 @@ import TaskCard from '../tasks/TaskCard';
 import UnplacedReason from './UnplacedReason';
 import QuickAddTask from '../tasks/QuickAddTask';
 import { getTheme } from '../../theme/colors';
-import { DAY_NAMES, MONTH_NAMES } from '../../state/constants';
 import { isTerminalStatus } from '../../shared/task-status';
+import { formatDayHeader } from '../../utils/timezone';
 import { parseDate, formatDateKey } from '../../scheduler/dateHelpers';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
 
@@ -130,7 +130,7 @@ export default function ListView({ allTasks, statuses, filter, search, projectFi
               padding: '4px 0', borderBottom: `1px solid ${theme.border}`, marginBottom: 6,
               display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', minWidth: 0
             }}>
-              {d ? `${DAY_NAMES[d.getDay()]} ${MONTH_NAMES[d.getMonth()]} ${d.getDate()}` : 'TBD'}
+              {d ? formatDayHeader(d) : 'TBD'}
               {isToday && <span style={{ fontSize: 10, background: theme.accent, color: '#FDFAF5', borderRadius: 4, padding: '1px 6px' }}>Today</span>}
               {loc && <span style={{ fontSize: 10, color: theme.textMuted }}>{loc.icon}</span>}
               {weatherByDate && weatherByDate[dateKey] && <WeatherBadge weatherDay={weatherByDate[dateKey]} showLow darkMode={darkMode} />}
@@ -162,9 +162,15 @@ export default function ListView({ allTasks, statuses, filter, search, projectFi
       })}
       {grouped.length === 0 && (
         <div style={{ textAlign: 'center', color: theme.textMuted, padding: 40, fontSize: 14 }}>
+          {/* 999.1235 (2): distinguish no-tasks-yet from filtered-out — the old
+              copy blamed "current filters" on brand-new zero-task accounts. */}
           {filter === 'done'
             ? (doneRange === 'all' ? 'No completed tasks yet' : 'No completed tasks in the past ' + doneRange + ' days')
-            : 'No tasks match current filters'}
+            : (allTasks || []).length === 0
+              ? 'No tasks yet — press + in the header to add your first task.'
+              : (search || projectFilter
+                ? 'No tasks match your search or project filter — clear them to see everything.'
+                : 'No tasks match the current filter — try switching it to "All".')}
         </div>
       )}
     </div>

@@ -11,6 +11,7 @@
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import apiClient from '../../services/apiClient';
+import { formatMinsAmPm, formatMinsCompact } from '../../utils/timezone';
 
 var GRID_START = 6;
 var GRID_END = 23;
@@ -36,11 +37,7 @@ var PHASE_COLORS = {
 var DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 function fmt(mins) {
-  if (mins == null) return '';
-  var h = Math.floor(mins / 60), m = mins % 60;
-  var ampm = h >= 12 ? 'PM' : 'AM';
-  var h12 = h % 12 || 12;
-  return h12 + ':' + (m < 10 ? '0' : '') + m + ' ' + ampm;
+  return formatMinsAmPm(mins);
 }
 
 // Turn scheduler dateKey "M/D" into "Sun 4/19" using current year.
@@ -91,7 +88,7 @@ function DayGrid({ snapshot, highlightTaskId, highlightDateKey, highlightStart }
         <div style={{ height: 28 }} />
         {Array.from({ length: GRID_END - GRID_START + 1 }, function(_, i) {
           var h = GRID_START + i;
-          var label = (h % 12 || 12) + (h >= 12 ? 'p' : 'a');
+          var label = formatMinsCompact(h * 60);
           return (
             <div key={i} style={{
               height: 60 * PX_PER_MIN, fontSize: 9, color: '#677',

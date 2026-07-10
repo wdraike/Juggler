@@ -20,7 +20,6 @@ function getSavedLevel() {
 export default function FontSizeControl({ theme, isMobile }) {
   var [level, setLevel] = useState(getSavedLevel);
   var [isOpen, setIsOpen] = useState(false);
-  var [menuPos, setMenuPos] = useState({ top: 0, right: 0 });
   var containerRef = useRef(null);
   var toggleRef = useRef(null);
 
@@ -29,12 +28,12 @@ export default function FontSizeControl({ theme, isMobile }) {
     try { localStorage.setItem(STORAGE_KEY, level.key); } catch (e) {}
   }, [level]);
 
-  useEffect(function() {
-    if (isOpen && toggleRef.current) {
-      var rect = toggleRef.current.getBoundingClientRect();
-      setMenuPos({ top: rect.bottom + 5, right: window.innerWidth - rect.right });
-    }
-  }, [isOpen]);
+  // 999.1238 (2): the popover is anchored to its trigger via
+  // position:absolute in the trigger's own positioned container. The old
+  // position:fixed + getBoundingClientRect math broke as soon as this very
+  // control set document zoom != 1 (rect coords are in zoomed space, fixed
+  // coords get zoomed again), landing the menu under buttons to the LEFT of
+  // the trigger.
 
   useEffect(function() {
     if (!isOpen) return;
@@ -71,9 +70,10 @@ export default function FontSizeControl({ theme, isMobile }) {
 
       {isOpen && (
         <div style={{
-          position: 'fixed',
-          top: menuPos.top + 'px',
-          right: menuPos.right + 'px',
+          position: 'absolute',
+          top: '100%',
+          right: 0,
+          marginTop: 5,
           zIndex: 10001,
           background: theme.bgCard,
           border: '1px solid ' + theme.border,

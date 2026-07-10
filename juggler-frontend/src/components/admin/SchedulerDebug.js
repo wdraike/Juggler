@@ -12,6 +12,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../auth/AuthProvider';
 import apiClient from '../../services/apiClient';
 import { parseDate } from '../../scheduler/dateHelpers';
+import { formatMinsCompact } from '../../utils/timezone';
 
 const PHASE_COLORS = {
   fixed: '#E53935',
@@ -29,12 +30,9 @@ const TOTAL_MINS = (GRID_END - GRID_START) * MINS_PER_HOUR;
 const PX_PER_MIN = 1.8;
 const COL_WIDTH = 90;
 
+// 999.1232: admin grid — shared compact dialect.
 function formatTime(mins) {
-  var h = Math.floor(mins / 60);
-  var m = mins % 60;
-  var ampm = h >= 12 ? 'p' : 'a';
-  var h12 = h % 12 || 12;
-  return h12 + (m > 0 ? ':' + (m < 10 ? '0' : '') + m : '') + ampm;
+  return formatMinsCompact(mins);
 }
 
 function parseDateKey(dk) {

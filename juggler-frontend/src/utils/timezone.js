@@ -234,3 +234,95 @@ export function resolveDisplayTimezone(opts) {
  * @returns {{ todayKey: string, todayDate: Date, nowMins: number }}
  */
 export const getNowInTimezone = sharedNowInTimezone.getNowInTimezone;
+
+/* ── Shared display formatters (999.1232) ──────────────────────────────────
+ * Canonical date/time display dialects. Use these instead of hand-rolled
+ * toLocale*String calls or manual AM/PM math:
+ *
+ *   formatTimeAmPm(date)      → '3:30 PM'      default time dialect (no seconds)
+ *   formatMinsAmPm(mins)      → '3:30 PM'      from minutes-since-midnight
+ *   formatMinsCompact(mins)   → '3:30p' / '3p' dense grid cells ONLY
+ *   formatDayHeader(date)     → 'Mon, Jul 6'   multi-day column headers
+ *   formatDayLong(date)       → 'Monday, July 6' single-day view titles
+ *   formatAbsDateTime(input)  → 'Jul 6 at 3:30 PM' history/audit rows
+ *   timeAgo(input)            → 'just now'/'5m ago'/'3h ago'/'2d ago'
+ *
+ * Locale is pinned to en-US everywhere until real i18n (999.1232 target 3) —
+ * half the app hard-coded en-US and half used the browser locale, so non-US
+ * browsers got a mixed-format UI.
+ */
+
+/** @param {Date} date @returns {string} '3:30 PM' ('' on invalid) */
+export function formatTimeAmPm(date) {
+  if (!date || isNaN(date.getTime())) return '';
+  return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+}
+
+/** @param {number} mins minutes since midnight @returns {string} '3:30 PM' */
+export function formatMinsAmPm(mins) {
+  if (mins == null) return '';
+  var h = Math.floor(mins / 60);
+  var m = mins % 60;
+  var ampm = h >= 12 ? 'PM' : 'AM';
+  var h12 = h % 12 || 12;
+  return h12 + ':' + (m < 10 ? '0' : '') + m + ' ' + ampm;
+}
+
+/**
+ * Compact dialect for DENSE GRID CELLS ONLY (day/3-day/week blocks, month
+ * cells, admin grids). Everywhere else use formatTimeAmPm/formatMinsAmPm.
+ * @param {number} mins minutes since midnight @returns {string} '3:30p'/'3p'
+ */
+export function formatMinsCompact(mins) {
+  if (mins == null) return '';
+  var h = Math.floor(mins / 60);
+  var mm = mins % 60;
+  var ampm = h >= 12 ? 'p' : 'a';
+  var h12 = h % 12 || 12;
+  return h12 + (mm ? ':' + String(mm).padStart(2, '0') : '') + ampm;
+}
+
+/** @param {Date} date @returns {string} 'Mon, Jul 6' — keeps a month cue at boundaries */
+export function formatDayHeader(date) {
+  if (!date || isNaN(date.getTime())) return '';
+  return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+/** @param {Date} date @returns {string} 'Monday, July 6' — single-day view titles */
+export function formatDayLong(date) {
+  if (!date || isNaN(date.getTime())) return '';
+  return date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+}
+
+/**
+ * Absolute datetime for history/audit rows: 'Jul 6 at 3:30 PM'.
+ * Strings are parsed via parseDbUtc (DB dateStrings shape pinned to UTC —
+ * the 999.1186 misparse trap); pass a Date for provider-native local strings.
+ * @param {Date|string|null} input @returns {string} '' on null/invalid
+ */
+export function formatAbsDateTime(input) {
+  var d = input instanceof Date ? input : parseDbUtc(input);
+  if (!d || isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    + ' at ' + formatTimeAmPm(d);
+}
+
+/**
+ * Relative age: 'just now' | 'Nm ago' | 'Nh ago' | 'Nd ago'.
+ * Was duplicated in HealthDot (fmtAgo) and CalSyncPanel (formatRelativeTime).
+ * Returns '' on null/invalid so callers can supply their own placeholder
+ * ('—', 'Never', …).
+ * @param {Date|string|null} input @param {number} [nowMs] injected clock for tests
+ * @returns {string}
+ */
+export function timeAgo(input, nowMs) {
+  var d = input instanceof Date ? input : parseDbUtc(input);
+  if (!d || isNaN(d.getTime())) return '';
+  var diff = (nowMs != null ? nowMs : Date.now()) - d.getTime();
+  var m = Math.floor(diff / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return m + 'm ago';
+  var h = Math.floor(m / 60);
+  if (h < 24) return h + 'h ago';
+  return Math.floor(h / 24) + 'd ago';
+}

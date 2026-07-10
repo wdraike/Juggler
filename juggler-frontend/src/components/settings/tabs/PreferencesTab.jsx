@@ -4,6 +4,7 @@
  */
 import React from 'react';
 import { TZ_OVERRIDE_KEY } from '../../../services/apiClient';
+import { formatMinsAmPm } from '../../../utils/timezone';
 import HelpIcon from '../HelpIcon';
 
 var commonTimezones = [
@@ -71,13 +72,13 @@ export default function PreferencesTab({ config, theme }) {
         <label style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
           <HelpIcon text="The scheduler won't place tasks earlier than this time." theme={theme}><span>Earliest scheduling time:</span></HelpIcon>
           <select value={config.schedFloor} onChange={e => { var v = parseInt(e.target.value); config.setSchedFloor(v); savePrefs({ schedFloor: v }); }} style={{ padding: '4px 6px', border: `1px solid ${theme.inputBorder}`, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }}>
-            {[360,420,480,540,600,660,720].map(m => (<option key={m} value={m}>{Math.floor(m/60) % 12 || 12}:{(m%60) < 10 ? '0' : ''}{m%60} {m < 720 ? 'AM' : 'PM'}</option>))}
+            {[360,420,480,540,600,660,720].map(m => (<option key={m} value={m}>{formatMinsAmPm(m)}</option>))}
           </select>
         </label>
         <label style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
           <HelpIcon text="The scheduler won't place tasks later than this time." theme={theme}><span>Latest scheduling time:</span></HelpIcon>
           <select value={config.schedCeiling} onChange={e => { var v = parseInt(e.target.value); config.setSchedCeiling(v); savePrefs({ schedCeiling: v }); }} style={{ padding: '4px 6px', border: `1px solid ${theme.inputBorder}`, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }}>
-            {[1080,1140,1200,1260,1320,1380,1440].map(m => (<option key={m} value={m}>{m === 1440 ? '12:00 AM' : (Math.floor(m/60) % 12 || 12) + ':' + ((m%60) < 10 ? '0' : '') + (m%60) + (m < 720 ? ' AM' : ' PM')}</option>))}
+            {[1080,1140,1200,1260,1320,1380,1440].map(m => (<option key={m} value={m}>{m === 1440 ? '12:00 AM' : formatMinsAmPm(m)}</option>))}
           </select>
         </label>
         <label style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>

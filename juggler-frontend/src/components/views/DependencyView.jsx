@@ -223,7 +223,10 @@ function DepNode({ ct, pos, st, icon, isDone, isClosed, dateLabel, isExternal, i
                     </div>
                   );
                 }) : (
-                  <div style={{ fontSize: 9, color: theme.textMuted, padding: 4, textAlign: 'center' }}>No candidates</div>
+                  // 999.1235 (3): state + next step instead of a 9px 'No candidates'.
+                  <div style={{ fontSize: 11, color: theme.textMuted, padding: 6, textAlign: 'center', lineHeight: 1.4 }}>
+                    No tasks available to link — every other task is already in this chain or done.
+                  </div>
                 )}
               </div>
             );

@@ -55,7 +55,9 @@ describe('ListView Component', () => {
     expect(screen.getByText('Review code changes')).toBeInTheDocument();
   });
 
-  test('shows empty state when no tasks match filters', () => {
+  // 999.1235 (2): a zero-task account must NOT be told its filters are the
+  // problem — no-tasks-yet and filtered-out are distinct states.
+  test('shows first-task CTA when the account has no tasks at all', () => {
     render(
       <ListView
         allTasks={[]}
@@ -74,6 +76,29 @@ describe('ListView Component', () => {
       />
     );
 
-    expect(screen.getByText('No tasks match current filters')).toBeInTheDocument();
+    expect(screen.getByText(/No tasks yet — press \+ in the header/)).toBeInTheDocument();
+  });
+
+  test('shows filter-aware empty state when tasks exist but search excludes them', () => {
+    render(
+      <ListView
+        allTasks={[{ id: 't1', text: 'Write the report', date: '2026-07-08', pri: 'P3' }]}
+        statuses={{}}
+        filter="open"
+        search="zzz-no-match"
+        darkMode={false}
+        schedCfg={MOCK_SCHED_CFG}
+        blockedTaskIds={new Set()}
+        unplacedIds={new Set()}
+        pastDueIds={new Set()}
+        fixedIds={new Set()}
+        isMobile={false}
+        todayDate={todayDate}
+        weatherByDate={{}}
+        onCreate={() => {}}
+      />
+    );
+
+    expect(screen.getByText(/No tasks match your search or project filter/)).toBeInTheDocument();
   });
 });

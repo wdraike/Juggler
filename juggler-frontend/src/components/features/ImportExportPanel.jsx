@@ -5,6 +5,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import apiClient from '../../services/apiClient';
 import { getTheme, BRAND } from '../../theme/colors';
+import { formatMinsAmPm } from '../../utils/timezone';
 
 /* ── ICS helpers ──────────────────────────────────────── */
 
@@ -217,9 +218,7 @@ function parseICSDate(val) {
 
 function formatTime12(h, m) {
   if (h == null) return '';
-  var ampm = h >= 12 ? 'PM' : 'AM';
-  var h12 = h % 12 || 12;
-  return h12 + ':' + pad2(m || 0) + ' ' + ampm;
+  return formatMinsAmPm(h * 60 + (m || 0));
 }
 
 function dayAbbrev(date) {

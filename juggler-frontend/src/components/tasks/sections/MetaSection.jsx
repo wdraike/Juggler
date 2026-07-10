@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatMinsAmPm } from '../../../utils/timezone';
 
 var MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
@@ -18,10 +19,7 @@ export default function MetaSection({ task, TH }) {
       if (ap === 'AM' && hh === 12) hh = 0;
       var total = hh * 60 + mm + task.dur;
       if (total < 24 * 60) {
-        var eh = Math.floor(total / 60), em = total % 60;
-        var eap = eh >= 12 ? 'PM' : 'AM';
-        var eh12 = eh % 12 || 12;
-        endStr = eh12 + ':' + (em < 10 ? '0' : '') + em + ' ' + eap;
+        endStr = formatMinsAmPm(total);
       }
     }
   }

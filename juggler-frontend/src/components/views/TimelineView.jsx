@@ -7,9 +7,11 @@
 import React, { useRef, useEffect } from 'react';
 import HorizontalTimeline from '../schedule/HorizontalTimeline';
 import { getTheme } from '../../theme/colors';
-import { MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES } from '../../state/constants';
+import { DAY_NAMES } from '../../state/constants';
+import { formatDayLong } from '../../utils/timezone';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
 import WeatherBadge from '../features/WeatherBadge';
+import EmptyState from './EmptyState';
 
 export default function TimelineView({ selectedDate, selectedDateKey, placements, statuses, onStatusChange, onDelete, onExpand, onCreate, gridZoom, darkMode, schedCfg, nowMins, isToday, onGridDrop, locSchedules, onUpdateLocScheduleOverrides, allTasks, onBatchRecurringsDone, locations, onHourLocationOverride, blockedTaskIds, onZoomChange, isMobile, onMarkerDrag, weatherByDate }) {
   var theme = getTheme(darkMode);
@@ -44,11 +46,15 @@ export default function TimelineView({ selectedDate, selectedDateKey, placements
   }, [selectedDateKey]);
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative' }}>
+      {/* 999.1235: empty-state one-liner instead of a bare timeline */}
+      {(allTasks || []).length === 0 && (
+        <EmptyState theme={theme} hint="No tasks yet — press + in the header to add one and see it appear on the timeline." />
+      )}
       {/* Fixed header */}
       <div style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', borderBottom: '1px solid ' + theme.border, background: theme.bg, flexShrink: 0 }}>
         <div style={{ fontWeight: 600, fontSize: 15, color: theme.text }}>
-          {DAY_NAMES_FULL[selectedDate.getDay()]}, {MONTH_NAMES[selectedDate.getMonth()]} {selectedDate.getDate()}
+          {formatDayLong(selectedDate)}
         </div>
         <div style={{ fontSize: 12, color: theme.textMuted }}>
           {loc.icon} {loc.name}

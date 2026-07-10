@@ -12,6 +12,7 @@ import { getTheme } from '../../theme/colors';
 import StatusToggle from '../schedule/StatusToggle';
 import { parseDate } from '../../scheduler/dateHelpers';
 import { isTaskOverdue } from '../../utils/overdue';
+import { formatTimeAmPm } from '../../utils/timezone';
 
 // 999.1231: terminal border colors derive from the canonical status descriptor
 // table (state/constants.js) instead of a hardcoded local fork — the pause
@@ -22,15 +23,6 @@ var TERMINAL_BORDER_COLORS = {};
   var d = STATUS_MAP[v];
   if (d) TERMINAL_BORDER_COLORS[v] = { light: d.color, dark: d.colorDark };
 });
-
-function formatTimeAmPm(date) {
-  var h = date.getHours();
-  var m = date.getMinutes();
-  var ampm = h >= 12 ? 'PM' : 'AM';
-  var h12 = h % 12 || 12;
-  var mm = m < 10 ? '0' + m : String(m);
-  return h12 + ':' + mm + ' ' + ampm;
-}
 
 function TaskCard({ task, status, onStatusChange, onDelete, onExpand, darkMode, showDate, draggable, isBlocked, isMobile, allTasks, statuses, todayDate }) {
   var theme = getTheme(darkMode);

@@ -14,6 +14,7 @@ import { resolveLocationId } from '../../scheduler/locationHelpers';
 import { getBlocksForDate } from '../../scheduler/timeBlockHelpers';
 import ScheduleCard from './ScheduleCard';
 import { weatherIconUrl } from '../../utils/weatherIcons';
+import { formatMinsAmPm } from '../../utils/timezone';
 
 function weatherCodeLabel(code) {
   if (code == null || code === 0) return 'Clear';
@@ -227,11 +228,7 @@ export default function HorizontalTimeline({
   }, [onMarkerDrag, baseHourWidth]);
 
   function formatDragTime(totalMins) {
-    var h = Math.floor(totalMins / 60);
-    var m = totalMins % 60;
-    var ampm = h >= 12 ? 'PM' : 'AM';
-    var h12 = h % 12 || 12;
-    return h12 + ':' + (m < 10 ? '0' : '') + m + ' ' + ampm;
+    return formatMinsAmPm(totalMins);
   }
 
   return (
