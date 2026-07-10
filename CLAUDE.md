@@ -80,7 +80,8 @@ in the CLI wrapper, not `knexfile.js` (which the running app imports and must ne
 | `src/scheduler/scheduleQueue.js` | Event queue |
 | `src/scheduler/reconcileOccurrences.js` | Recurring instance reconciliation |
 | `src/scheduler/dependencyHelpers.js` | Chain/dependency resolution |
-| `juggler-backend/docs/SCHEDULER.md` | Full design doc |
+| `juggler-backend/docs/SCHEDULER-SPEC.md` | Full design doc (SCHEDULER.md is superseded) |
+| `juggler-backend/docs/architecture/SCHEDULER-RULES.md` | Behavior rules |
 | `juggler-backend/docs/TASK-PROPERTIES.md` | All task fields |
 | `juggler-backend/docs/TASK-STATE-MATRIX.md` | Valid state transitions |
 
@@ -129,4 +130,4 @@ See R15 for AI feature requirements (natural-language commands, emoji/icon sugge
 | `juggler-backend/src/routes/billing-webhooks.routes.js` line ~15 | `BILLING_WEBHOOK_SECRET \|\| INTERNAL_SERVICE_KEY` | The webhook signature secret falls back to the shared internal service key. Juggler and payment-service share one internal HMAC secret in deployments where a dedicated `BILLING_WEBHOOK_SECRET` is not separately provisioned; the fallback lets signature verification work with either. If **neither** is set the middleware hard-fails the request (500) — no silent unverified path. | Documented here per 999.368 |
 
 ## Open Work
-Canonical backlog: the monorepo `.planning/ROADMAP.md` `## Backlog` (per-service `BACKLOG.md` removed — backlog is single-source) — check before starting any new work.
+Canonical backlog: the monorepo JSON store `.planning/backlog/backlog.json` (query via jq; mutate ONLY via `~/.claude/skills/_backlog/backlog-add.sh`). The old `.planning/ROADMAP.md` `## Backlog` section is just a pointer now; per-service `BACKLOG.md` files are removed. Check before starting any new work.
