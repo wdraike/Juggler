@@ -391,7 +391,7 @@ function icsEventsToTasks(events, existingIds) {
 
 /* ── Component ────────────────────────────────────────── */
 
-export default function ImportExportPanel({ onClose, darkMode, showToast, allTasks, statuses, dayPlacements, isMobile, addTasks }) {
+export default function ImportExportPanel({ onClose, darkMode, showToast, allTasks, statuses, _dayPlacements, isMobile, addTasks }) {
   var theme = getTheme(darkMode);
   var [importText, setImportText] = useState('');
   var [importing, setImporting] = useState(false);
@@ -577,7 +577,7 @@ export default function ImportExportPanel({ onClose, darkMode, showToast, allTas
           await apiClient.put('/tasks/' + statusUpdates[i].id + '/status', {
             status: statusUpdates[i].status
           });
-        } catch (_) { /* ignore individual status failures */ }
+        } catch { /* ignore individual status failures */ }
       }
       showToast('Imported ' + tasksToAdd.length + ' events from ' + icsPreview.fileName, 'success');
       setIcsPreview(null);
