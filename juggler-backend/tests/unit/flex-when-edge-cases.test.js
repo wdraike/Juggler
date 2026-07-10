@@ -409,7 +409,7 @@ describe('999.553 AC3 — flexWhen + deadline interaction', function () {
     expect(p._flexWhenRelaxed).toBe(true);
   });
 
-  test('flexWhen + overdue deadline + blocked when — both overdue and relaxed fallbacks trigger', function () {
+  test('flexWhen + PAST deadline — unplaced missed, pinned to deadline (juggy4: no force-place fallback)', function () {
     // Fill morning on both days to force relaxation
     var fillers = fillWindow(TODAY, 'morning').concat(fillWindow(TOMORROW, 'morning'));
     // Also fill evening on both days so the task must go to afternoon
@@ -423,14 +423,19 @@ describe('999.553 AC3 — flexWhen + deadline interaction', function () {
       placementMode: PLACEMENT_MODES.TIME_BLOCKS,
       when: 'morning',
       dur: 60,
-      deadline: '2026-03-21', // yesterday — overdue
+      deadline: '2026-03-21', // yesterday — deadline already missed
     });
     var result = run(fillers.concat([overdueFlex]), { cfg: makeCfg({ recurExpandDays: 1 }) });
-    var p = findPlacement(result, overdueFlex.id);
-    // Combined overdue+flexWhen fallback should place it
-    expect(p).not.toBeNull();
-    // When relaxation is used, _flexWhenRelaxed should be true
-    // (could also get _overdue=true depending on which fallback wins)
+    // juggy4 doctrine (999.1440, model: juggler 27a95c30): a task whose
+    // deadline is already behind the horizon start is NEVER grid force-placed
+    // — no overdue/flexWhen relaxation ladder applies. It surfaces as
+    // unplaced with _unplacedReason='missed', date pinned to the (past)
+    // deadline (NEVER-MISSING: still visible, pinned past-due, never demoted).
+    expect(findPlacement(result, overdueFlex.id)).toBeNull();
+    var un = (result.unplaced || []).find(function (t) { return t.id === overdueFlex.id; });
+    expect(un).toBeDefined();
+    expect(un._unplacedReason).toBe('missed');
+    expect(un.date).toBe('2026-03-21'); // pinned to the past deadline date
   });
 
   test('ANYTIME mode tasks ignore flexWhen (no when-window to relax)', function () {

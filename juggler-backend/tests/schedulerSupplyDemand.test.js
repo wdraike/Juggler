@@ -285,10 +285,16 @@ describe('Category B: Overlapping Fixed & Rigid Items', () => {
 
 describe('Category C: Dependency Chain Under Pressure', () => {
 
-  test('C1: Chain A→B→C, C due today, only partial capacity — tail placed, head dropped', () => {
-    // Each task 180m (3h). Total chain = 540m (9h). Today has ~780m from 8am.
-    // But if we also have recurringTasks etc, may not all fit.
-    // Make today tight: only 360m available (6h) by blocking morning
+  test('C1: Chain A→B→C, C due today, only partial capacity — dependency order wins, tail dep_blocked with pinned date', () => {
+    // Each task 180m (3h). Total chain = 540m (9h). Today has ~360m free
+    // (morning blocked). juggy4-era doctrine (999.1440; universal overdue for
+    // dep-blocked members, juggler 9994946e / 999.1084+999.1078): dependency
+    // order is NEVER inverted to rescue the deadline holder. A places today,
+    // B rolls to tomorrow, and C — whose deadline can no longer be met — is
+    // NOT grid force-placed: it surfaces as unplaced with
+    // _unplacedReason='dep_blocked' and its date pinned to the deadline day
+    // (NEVER-MISSING). The pre-juggy4 "tail placed, head dropped" assertion
+    // is superseded (model: juggler 27a95c30 scheduler-core-gaps rewrite).
     const tasks = [
       makeTask({ id: 'block', placementMode: 'fixed', date: TODAY, time: '8:00 AM', dur: 420, datePinned: true }),
       makeTask({ id: 'chainA', pri: 'P1', dur: 180, date: TODAY, dependsOn: [] }),
@@ -298,17 +304,22 @@ describe('Category C: Dependency Chain Under Pressure', () => {
 
     const result = run(tasks);
 
-    // C has the deadline — should be placed
-    expect(isPlaced(result, 'chainC')).toBe(true);
-    // B should ideally be placed before C
-    // A may be unplaced if no room (540m chain > ~360m remaining)
-    const cP = findPlacements(result, 'chainC');
-    const bP = findPlacements(result, 'chainB');
+    // Head of the chain fits in today's remaining capacity
+    expect(isPlaced(result, 'chainA')).toBe(true);
+    // B overflows to a later day (dependency order preserved)
+    expect(isPlaced(result, 'chainB')).toBe(true);
+    // C is dep-blocked past its deadline — unplaced with reason + pinned date
+    expect(isPlaced(result, 'chainC')).toBe(false);
+    const unC = (result.unplaced || []).find(t => t.id === 'chainC');
+    expect(unC).toBeDefined();
+    expect(unC._unplacedReason).toBe('dep_blocked');
+    expect(unC.date).toBe(TODAY); // pinned to the deadline date
 
-    if (bP.length > 0 && cP.length > 0) {
-      // B should start before C
-      expect(bP[0].start).toBeLessThan(cP[0].start);
-    }
+    // Dependency ordering among the placed members still holds
+    const aP = findPlacements(result, 'chainA');
+    const bP = findPlacements(result, 'chainB');
+    expect(aP.length).toBeGreaterThan(0);
+    expect(bP.length).toBeGreaterThan(0);
   });
 
   test('C2: Deep chain (5 tasks × 90m) due in 2 days — compressed across today+tomorrow', () => {
@@ -673,7 +684,7 @@ describe('Category E: Placement Reasons', () => {
     expect(result.phaseSnapshots).toBeUndefined();
   });
 
-  test('E8a: Flexible recurring with flex window entirely past + when-block → placed OVERDUE (placed-XOR-unplaced, NOT dual-listed)', () => {
+  test('E8a: Flexible recurring with flex window entirely past + when-block → unplaced missed, pinned date (placed-XOR-unplaced)', () => {
     // Preferred time 7:00am (420m), flex ±60m → window 360-480.
     // nowMins=480 (8am) → entire window is past.
     const tasks = [
@@ -683,28 +694,27 @@ describe('Category E: Placement Reasons', () => {
     const unifiedSchedule = require('../src/scheduler/unifiedScheduleV2');
     const result = unifiedSchedule(tasks, statuses, TODAY, 480, cfg);
 
-    // W2 placed-XOR-unplaced (DESIGN-RULING-overdue-vs-unplaceable, David 2026-06-22;
-    // commit 9bb62bb "missed-window recurring no longer dual-placed"): a missed-window
-    // recurring WITH a when-block anchor ('morning') is pinned on the grid as OVERDUE so
-    // the user can mark it done from the day view. It is NEVER ALSO listed in unplaced —
-    // placed XOR unplaced, never both. (Was: dual-listed with _unplacedReason 'missed'.)
-    const dup = result.unplaced.find(t => t.id === 'breakfast');
-    expect(dup).toBeUndefined(); // NOT in the unplaced list — it is placed-overdue instead
-
-    // Kept on today's grid at 7:00 AM (preferred time) with the overdue flag.
+    // juggy4 ruling (David 2026-07-02, shipped juggler 09b2b4e; supersedes the
+    // 2026-06-22 W2 "pinned on grid as OVERDUE" half of the earlier design):
+    // an overdue/missed-window RECURRING instance is NEVER grid force-placed.
+    // It surfaces exactly once, in result.unplaced, with
+    // _unplacedReason='missed' and its date pinned to the missed day — the UI
+    // renders it as unscheduled-overdue on that date (NEVER-MISSING).
+    // Placed-XOR-unplaced still holds — just resolved to the unplaced side.
+    // (999.1440 rewrite; model: juggler 27a95c30 scheduler-core-gaps.)
     let placed = null;
     for (const dk in result.dayPlacements) {
       for (const p of result.dayPlacements[dk]) {
         if (p.task && p.task.id === 'breakfast') { placed = p; break; }
       }
     }
-    expect(placed).not.toBeNull();
-    expect(placed.start).toBe(420);
-    expect(placed._overdue).toBe(true);
-    // The task object still carries the 'missed' reason annotation (display reads the
-    // grid entry's _overdue, not the unplaced list).
-    expect(placed.task._unplacedReason).toBe('missed');
-    expect(placed.task._unplacedDetail).toContain('passed');
+    expect(placed).toBeNull(); // NOT on the grid — never force-placed
+
+    const un = result.unplaced.find(t => t.id === 'breakfast');
+    expect(un).toBeDefined();
+    expect(un._unplacedReason).toBe('missed');
+    expect(un._unplacedDetail).toContain('passed');
+    expect(un.date).toBe(TODAY); // pinned to the missed day
   });
 
   test('E8b: Flexible recurring with flex window partially remaining → placed normally', () => {
@@ -795,17 +805,27 @@ describe('Category F: Slack-Based Ordering', () => {
     expect(hiP[0].dateKey).toBe(TODAY);
   });
 
-  test('F3: Past-due task gets slack=0 and places ASAP', () => {
+  test('F3: Past-due task is never force-placed — unplaced missed, pinned to its deadline', () => {
     const yesterday = dateKey(-1);
     const tasks = [
       makeTask({ id: 'past_due', pri: 'P3', dur: 30, date: TODAY, deadline: yesterday }),
       makeTask({ id: 'normal', pri: 'P1', dur: 30, date: TODAY }),
     ];
     const result = run(tasks);
-    expect(isPlaced(result, 'past_due')).toBe(true);
-    // Past-due task should be placed (overflow pass places ASAP)
-    const pdP = findPlacements(result, 'past_due');
-    expect(pdP.length).toBeGreaterThan(0);
+    // juggy4-era doctrine (999.1440; D-A one-off overdue unification, juggler
+    // 2f20da52): a task whose deadline already passed is NOT re-placed ASAP
+    // on the grid — it surfaces as unplaced with _unplacedReason='missed',
+    // date pinned to the (past) deadline, so it stays pinned past-due in the
+    // UI (R50 ruling: never demoted). The pre-juggy4 "overflow pass places
+    // ASAP" assertion is superseded (model: juggler 27a95c30).
+    expect(isPlaced(result, 'past_due')).toBe(false);
+    const un = (result.unplaced || []).find(t => t.id === 'past_due');
+    expect(un).toBeDefined();
+    expect(un._unplacedReason).toBe('missed');
+    // pinned to the past deadline date (ISO-normalized; TODAY = 2026-04-03)
+    expect(un.date).toBe('2026-04-02');
+    // Unaffected tasks still place normally
+    expect(isPlaced(result, 'normal')).toBe(true);
   });
 
   test('F4: Dependency chain — all members placed in correct order', () => {
@@ -863,16 +883,21 @@ describe('Category F: Slack-Based Ordering', () => {
     }
   });
 
-  test('F6: Past-due deadline task still gets placed', () => {
-    // Task whose deadline was yesterday — should still be placed via overflow
+  test('F6: Past-due deadline task stays visible as unplaced missed (not re-placed)', () => {
+    // Task whose deadline was yesterday. juggy4-era doctrine (999.1440; D-A
+    // one-off overdue unification, juggler 2f20da52): NOT re-placed via an
+    // overflow pass — unplaced with _unplacedReason='missed', date pinned to
+    // the past deadline (NEVER-MISSING: still visible, pinned past-due).
     const yesterday = dateKey(-1);
     const tasks = [
       makeTask({ id: 'overflow', pri: 'P2', dur: 60, date: TODAY, deadline: yesterday }),
     ];
     const result = run(tasks);
-    expect(isPlaced(result, 'overflow')).toBe(true);
-    // Should land on today or later (ASAP after deadline passed)
-    const p = findPlacements(result, 'overflow');
-    expect(p.length).toBeGreaterThan(0);
+    expect(isPlaced(result, 'overflow')).toBe(false);
+    const un = (result.unplaced || []).find(t => t.id === 'overflow');
+    expect(un).toBeDefined();
+    expect(un._unplacedReason).toBe('missed');
+    // pinned to the past deadline date (ISO-normalized; TODAY = 2026-04-03)
+    expect(un.date).toBe('2026-04-02');
   });
 });

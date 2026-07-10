@@ -102,9 +102,15 @@ describe('scheduleQueue.pollOnce — idle-path query short-circuit (999.955)', f
 
     await pollOnce();
 
-    // The primary pending SELECT against schedule_queue is expected exactly once.
+    // Exactly TWO schedule_queue statements on an idle tick (999.1440 pin):
+    //   1. the primary pending SELECT (whereNull claimed_at, created_at < NOW()-2s)
+    //   2. the stuck-claim sweep UPDATE (claimed_at < NOW()-120s → release) —
+    //      added intentionally in juggler 89d314b0 ("sweep stuck schedule_queue
+    //      claims in poll loop") so claims from dead Cloud Run instances are
+    //      recovered on every poll, idle or not. The sweep is a WRITE against
+    //      the queue itself, not one of the 999.955 diagnostic reads.
     var schedQueueCalls = db.__tableCalls.filter(function (t) { return t === 'schedule_queue'; });
-    expect(schedQueueCalls.length).toBe(1);
+    expect(schedQueueCalls.length).toBe(2);
 
     // The diagnostic queries MUST NOT run on the idle path. On the unfixed code
     // these fire unconditionally, so these assertions are RED pre-fix.

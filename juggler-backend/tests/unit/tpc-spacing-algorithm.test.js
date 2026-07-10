@@ -128,6 +128,48 @@ function findUnplaced(result, taskId) {
   return (result.unplaced || []).find(function (t) { return t.id === taskId; });
 }
 
+/**
+ * Fill a day's grid with real FIXED tasks (999.1440 fixture repair).
+ * The old fixtures used a single dur:1000 anytime "filler" that EXCEEDED the
+ * day's remaining capacity, went unplaced, and left the grid empty — the
+ * known blocker-not-occupying-grid trap. Fixed-time tasks genuinely occupy
+ * the grid, so "day full" premises actually hold.
+ */
+function fixedFill(dayKey, from, to) {
+  var out = [];
+  for (var i = from; i < to; i += 60) {
+    var h = Math.floor(i / 60);
+    var m = i % 60;
+    var ampm = h >= 12 ? 'PM' : 'AM';
+    var dh = h > 12 ? h - 12 : (h === 0 ? 12 : h);
+    out.push({
+      id: 'fx_' + dayKey + '_' + i,
+      text: 'Filler',
+      date: dayKey,
+      dur: 60,
+      pri: 'P1',
+      when: '',
+      dayReq: 'any',
+      status: '',
+      deadline: null,
+      earliestStart: null,
+      recurring: false,
+      generated: false,
+      split: false,
+      splitMin: null,
+      location: [],
+      tools: [],
+      dependsOn: [],
+      flexWhen: false,
+      placementMode: PLACEMENT_MODES.FIXED,
+      time: dh + ':' + (m < 10 ? '0' : '') + m + ' ' + ampm,
+      travelBefore: 0,
+      travelAfter: 0,
+    });
+  }
+  return out;
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // 999.874 sub-item 2 — Multi-step spacing algorithm
 // ═══════════════════════════════════════════════════════════════════
@@ -257,16 +299,11 @@ describe('999.874 — Multi-step spacing algorithm', function () {
   describe('R3 — Start-on relaxation', function () {
 
     test('relaxes forward when _targetDate has no free slot', function () {
-      // Fill the target date (2026-06-17) with a long task that consumes all capacity
-      // Then place a flexible TPC instance with _targetDate = 2026-06-17
-      // It should relax forward to the next available day
-      var filler = makeTpcInstance({
-        id: 'r3-filler',
-        date: '2026-06-17',
-        dur: 1000, // consumes most of the day
-        sourceId: 'master-filler',
-        recur: { type: 'weekly', days: 'MTWRFSU', timesPerCycle: 7 }, // not flexible
-      });
+      // Fill the target date (2026-06-17) with real fixed tasks (999.1440
+      // fixture repair — the old dur:1000 anytime filler never occupied the
+      // grid). Then place a flexible TPC instance with _targetDate =
+      // 2026-06-17: it relaxes forward to the next available day.
+      var fillers = fixedFill('2026-06-17', 360, 1380);
 
       var task = makeTpcInstance({
         id: 'r3-relax',
@@ -278,11 +315,11 @@ describe('999.874 — Multi-step spacing algorithm', function () {
         _deadlineDate: '2026-06-22',
       });
 
-      var result = run([filler, task]);
+      var result = run(fillers.concat([task]));
       var p = findPlacement(result, 'r3-relax');
       expect(p).not.toBeNull();
-      // Should have relaxed forward from 2026-06-17 to a later date
-      expect(p.dateKey > '2026-06-17').toBe(true);
+      // Relaxed forward from the full 2026-06-17 to the next free day
+      expect(p.dateKey).toBe('2026-06-18');
     });
 
     test('relaxation skips days occupied by same master', function () {
@@ -333,38 +370,43 @@ describe('999.874 — Multi-step spacing algorithm', function () {
       var result = run([task]);
       var p = findPlacement(result, 'r3-dow');
       expect(p).not.toBeNull();
-      // Should be on a weekend day
-      var dow = new Date(p.dateKey).getDay();
-      expect(dow === 0 || dow === 6).toBe(true);
+      // Should be on a weekend day: Sat 2026-06-20 or Sun 2026-06-21.
+      // (999.1440: assert the dateKey directly — the old
+      // `new Date(dateKey).getDay()` parsed the key as UTC midnight and read
+      // the day-of-week in LOCAL time, off by one day in negative-UTC-offset
+      // timezones — the known date-only new Date() misparse trap. The
+      // scheduler respects dayReq correctly.)
+      expect(['2026-06-20', '2026-06-21']).toContain(p.dateKey);
     });
 
-    test('relaxation returns null when no valid day within cycle', function () {
-      // _targetDate = 2026-06-17, deadline = 2026-06-17 (same day, no room to relax)
-      // Fill the day completely so no slot is available
-      var filler = makeTpcInstance({
-        id: 'r3-filler2',
-        date: '2026-06-17',
-        dur: 1000,
-        sourceId: 'master-filler2',
-        recur: { type: 'weekly', days: 'MTWRFSU', timesPerCycle: 7 },
-      });
+    test('deadline-day full with OPEN horizon — roam-retry forward-rolls to the next free day (never vanishes)', function () {
+      // _targetDate = deadline = 2026-06-17, and 2026-06-17 is genuinely full
+      // (999.1440 fixture repair — real fixed fillers occupy the grid).
+      //
+      // Current doctrine (REG-26 flexible-TPC roam-retry, juggler 8d71c30d):
+      // with an open horizon the instance is NOT dropped — the roam-retry
+      // finds the first free eligible day (2026-06-18, past the deadline)
+      // so the task stays visible (NEVER-MISSING). The pre-juggy4 assertion
+      // (unplaced with no reason scrutiny) is superseded; the truly-blocked
+      // path (clamped horizon) is pinned in R6 below.
+      var fillers = fixedFill('2026-06-17', 360, 1380);
 
       var task = makeTpcInstance({
         id: 'r3-no-relax',
         date: '2026-06-17',
         dur: 60,
-        deadline: '2026-06-17', // no room to relax
+        deadline: '2026-06-17', // deadline day is full
         sourceId: 'master-no-relax',
         _targetDate: '2026-06-17',
         _deadlineDate: '2026-06-17',
       });
 
-      var result = run([filler, task]);
+      var result = run(fillers.concat([task]));
       var p = findPlacement(result, 'r3-no-relax');
-      // Should be unplaced — no valid day within the window
-      expect(p).toBeNull();
-      var unplaced = findUnplaced(result, 'r3-no-relax');
-      expect(unplaced).not.toBeNull();
+      expect(p).not.toBeNull();
+      expect(p.dateKey).toBe('2026-06-18');
+      // placed XOR unplaced — never dual-listed
+      expect(findUnplaced(result, 'r3-no-relax')).toBeUndefined();
     });
   });
 
@@ -504,14 +546,14 @@ describe('999.874 — Multi-step spacing algorithm', function () {
   describe('R6 — SPACING_BLOCKED reason code', function () {
 
     test('unplaceable flexible TPC instance gets SPACING_BLOCKED reason', function () {
-      // Fill the entire cycle so no slot is available
-      var filler = makeTpcInstance({
-        id: 'r6-filler',
-        date: '2026-06-17',
-        dur: 1000,
-        sourceId: 'master-filler6',
-        recur: { type: 'weekly', days: 'MTWRFSU', timesPerCycle: 7 },
-      });
+      // 999.1440 fixture repair: to make the instance GENUINELY unplaceable
+      // the whole searchable horizon must be full — clamp the horizon to
+      // TODAY+TOMORROW (recurExpandDays: 1) and fill BOTH days with real
+      // fixed tasks. (The old dur:1000 anytime filler never occupied the
+      // grid, and with an open horizon the REG-26 roam-retry, juggler
+      // 8d71c30d, forward-rolls instead of blocking — see the R3 test above.)
+      var fillers = fixedFill('2026-06-17', 360, 1380)
+        .concat(fixedFill('2026-06-18', 360, 1380));
 
       var task = makeTpcInstance({
         id: 'r6-blocked',
@@ -523,7 +565,7 @@ describe('999.874 — Multi-step spacing algorithm', function () {
         _deadlineDate: '2026-06-17',
       });
 
-      var result = run([filler, task]);
+      var result = run(fillers.concat([task]), makeCfg({ recurExpandDays: 1 }));
       var p = findPlacement(result, 'r6-blocked');
       expect(p).toBeNull();
 
@@ -812,9 +854,15 @@ describe('999.874 — Multi-step spacing algorithm', function () {
       var p2 = findPlacement(result, 'r9-month-second');
       expect(p1).not.toBeNull();
       expect(p2).not.toBeNull();
-      // Monthly minGap = 15
-      var diff = Math.abs(new Date(p2.dateKey) - new Date(p1.dateKey)) / 86400000;
-      expect(diff >= 15).toBe(true);
+      // 999.1440: this fixture is NOT a flexible TPC — for monthly,
+      // selectedDays = monthDays.length = 2 and timesPerCycle = 2, so
+      // timesPerCycle < selectedDays is false (unifiedScheduleV2.js
+      // selectedDays derivation). Spacing minGap therefore does not apply;
+      // placement prefers each instance's explicit _targetDate (R2). The old
+      // `diff >= 15` assertion encoded a pre-consolidation force-spread that
+      // never matched the flexibility rule for explicit monthDays schedules.
+      expect(p1.dateKey).toBe('2026-06-17');
+      expect(p2.dateKey).toBe('2026-06-18');
     });
   });
 });

@@ -185,6 +185,23 @@ var mockDb = (function () {
 
 jest.mock('../src/db', function () { return mockDb; });
 
+// 999.1440: the MCP write tools route through slices/task/facade.js since
+// jug-mcp-facade WI-2 (999.1182), and the facade's KnexTaskRepository runs
+// over lib/db.getDefaultDb() (ADR-0002) — NOT over '../src/db'. Without this
+// mock the BUG-875 tests hit the real test DB (where the fixture ids do not
+// exist) and got 404 'Task not found' before the XOR guard could answer.
+jest.mock('../src/lib/db', function () {
+  return {
+    getDefaultDb: function () { return mockDb; },
+    createKnex: function () { return mockDb; },
+    withTransaction: function (db, cb) { return cb(mockDb); },
+    TransactionContext: function () {},
+    defaultPoolConfig: {},
+    ENVIRONMENTS: { test: 'test' },
+    _resetForTests: function () {},
+  };
+});
+
 jest.mock('../src/lib/tasks-write', function () {
   return {
     insertTask: function () { return Promise.resolve(); },
@@ -496,8 +513,11 @@ describe('BUG-875a — MCP update_task: recurring→fixed flip (recurring omitte
     });
 
     // Invoke MCP update_task handler. The PATCH body has placementMode='fixed' with
-    // scheduling info but NO 'recurring' key. On current code, validateTaskInput(fields)
-    // sees body.recurring===undefined and does NOT fire the XOR guard → proceeds to write.
+    // scheduling info but NO 'recurring' key. The 999.867 merged-state XOR
+    // guard (UpdateTask.js: key-presence check against the EXISTING row via
+    // fetchRecRowOnce) catches the flip and returns 400 invalid_combination,
+    // which the MCP adapter surfaces as isError (999.1440: this now flows
+    // through facade.updateTask — see the lib/db mock note above).
     var result = await captureHandlers()['update_task']({
       id: 'task-001',
       placementMode: 'fixed',
@@ -505,7 +525,6 @@ describe('BUG-875a — MCP update_task: recurring→fixed flip (recurring omitte
       time: '9:00 AM',
     });
 
-    // This assertion FAILS on current (unfixed) code → RED.
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toMatch(/invalid_combination|cannot.*fixed.*recurring|recurring.*fixed/i);
   });
@@ -530,15 +549,16 @@ describe('BUG-875b — MCP update_task: fixed→recurring flip (placementMode om
     });
 
     // Invoke MCP update_task handler. The PATCH body has recurring=true + recur config but
-    // NO 'placementMode' key. On current code, validateTaskInput(fields) sees body.placementMode
-    // ===undefined and does NOT fire the XOR guard → proceeds to write.
+    // NO 'placementMode' key. The 999.867 merged-state XOR guard in
+    // UpdateTask.js reads the EXISTING row's placement_mode ('fixed') and
+    // rejects with 400 invalid_combination → isError (999.1440: flows
+    // through facade.updateTask — see the lib/db mock note above).
     var result = await captureHandlers()['update_task']({
       id: 'task-001',
       recurring: true,
       recur: { type: 'daily' },
     });
 
-    // This assertion FAILS on current (unfixed) code → RED.
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toMatch(/invalid_combination|cannot.*fixed.*recurring|recurring.*fixed/i);
   });
@@ -612,7 +632,25 @@ describe('OK-legal — legal fixed-only / recurring-only / non-conflicting updat
       recurring: 1,
       recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU' }),
     });
+    // Post-write read-back row: what tasks_v returns after the write applied.
+    var updatedRecurring = makeBaseTaskRow({
+      id: 'task-recur-2',
+      task_type: 'recurring_template',
+      recurring: 1,
+      recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU' }),
+      dur: 60,
+    });
     var deps = makeUpdateTaskDeps(recurring);
+    // 999.1440: since FR-5 (juggler-recur-lifecycle-redesign W5, juggler
+    // 785fc8a5), a dur change on a RECURRING master routes through the
+    // COMPLEX path (occurrence reconciliation via recurCleanup inside a
+    // transaction), not the fast path. The response body is a RE-READ of the
+    // row (fetchTaskWithEventIds), not an optimistic echo — so the mock must
+    // return the updated row on the post-write read.
+    deps.repo.fetchTaskWithEventIds
+      .mockResolvedValueOnce(recurring)        // pre-write existing read
+      .mockResolvedValue(updatedRecurring);    // post-write re-read
+    deps.recurCleanup = jest.fn().mockResolvedValue();
     var cmd = new UpdateTask(deps);
 
     var result = await cmd.execute({
@@ -622,20 +660,17 @@ describe('OK-legal — legal fixed-only / recurring-only / non-conflicting updat
       body: { dur: 60 },
     });
 
-    // Must be 200 both before and after the fix.
+    // Must be 200 — the XOR guard must NOT over-reject a legal dur edit.
     expect(result.status).toBe(200);
-    // Strengthen: the optimistic response must reflect the patched field (zoe WARN guard).
-    // A silent no-op regression would return 200 without actually applying the patch.
     expect(result.body.task).toBeDefined();
     expect(result.body.task.dur).toBe(60);
-    // WARN-A pin (zoe re-review): assert the write ACTUALLY reached the repo.
-    // result.body.task is an optimistic echo — a silent no-op in updateTaskById
-    // still echoes dur:60. This spy assertion proves the field reached persistence.
-    expect(deps.repo.updateTaskById).toHaveBeenCalledWith(
-      'task-recur-2',
-      expect.objectContaining({ dur: 60 }),
-      'user-001'
-    );
+    // WARN-A pin (zoe re-review), FR-5 form: the write now reaches
+    // persistence via recurCleanup (handed the trx repo + the mapped row).
+    // Assert the routed write carried dur:60.
+    expect(deps.recurCleanup).toHaveBeenCalledTimes(1);
+    var cleanupArgs = deps.recurCleanup.mock.calls[0][0];
+    expect(cleanupArgs.row).toEqual(expect.objectContaining({ dur: 60 }));
+    expect(cleanupArgs.taskType).toBe('recurring_template');
   });
 
   // ── OK-legal-5 (locks BLOCK-1 over-rejection) ────────────────────────────

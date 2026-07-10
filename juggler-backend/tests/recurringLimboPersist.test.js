@@ -32,9 +32,18 @@ var available = false;
 var USER_ID = 'recur-limbo-test-001';
 var TZ = 'America/New_York';
 
-// ── date helpers (UTC-based; the morning home block is 06:00–08:00 local = 10:00–12:00 UTC in EDT) ──
+// ── date helpers ──
+// 999.1441: dayKey must be derived in the SCHEDULER'S timezone (TZ), not UTC.
+// The old UTC form drifted +1 day between 20:00 and 24:00 America/New_York
+// (UTC calendar day is already tomorrow), so the seeded anchor sat one day
+// past the scheduler's todayKey — leaving an extra FREE earlier day inside
+// the cycle that the REG-26 earlier-day relax legally used, placing the
+// instance BEFORE the anchor and turning AC1/AC3's `placedDate > anchorKey`
+// red only in that wall-clock window.
+var { getNowInTimezone } = require('juggler-shared/scheduler/getNowInTimezone');
 function dayKey(offsetDays) {
-  var d = new Date();
+  var todayLocal = getNowInTimezone(TZ).todayKey; // 'YYYY-MM-DD' in TZ
+  var d = new Date(todayLocal + 'T12:00:00Z'); // noon UTC — immune to day rollover under ±offset
   d.setUTCDate(d.getUTCDate() + offsetDays);
   var y = d.getUTCFullYear(), m = d.getUTCMonth() + 1, da = d.getUTCDate();
   return y + '-' + (m < 10 ? '0' : '') + m + '-' + (da < 10 ? '0' : '') + da;
@@ -98,7 +107,7 @@ function blockMorning(dayOffset) {
     text: 'BLOCK morning ' + dayOffset,
     // placement_mode:'fixed' makes isRigid=true → tryPlaceAtTime → reserveWithTravel → dayOcc occupied.
     // when:'fixed' alone is the OLD convention; the scheduler now reads `placement_mode`, not `when`.
-    placement_mode: 'fixed', date_pinned: 1,
+    placement_mode: 'fixed', // date_pinned removed 20260526000000 (999.1440/58d9a12a) — placement_mode is the sole immovability signal
     scheduled_at: utcStr, dur: 120 // fills exactly the morning home block (360–480 min local)
   });
 }
@@ -333,7 +342,7 @@ describe('999.848 AC3 HARD CASE — convergence under a changing blocker (no cum
       pad(scheduledAtUtc.getUTCSeconds());
     return seedTask({
       text: 'BLOCK morning ' + dateStr,
-      placement_mode: 'fixed', date_pinned: 1,
+      placement_mode: 'fixed', // date_pinned removed 20260526000000 (999.1440/58d9a12a) — placement_mode is the sole immovability signal
       scheduled_at: utcStr, dur: 120
     });
   }

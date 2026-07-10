@@ -5,9 +5,13 @@
  *
  * R37.1: earlistStart+3d not placed before — task with earliestStart 3 days
  *        out must not get placed on today/first available earlier day.
- * R37.2: earliestStart > deadline flagged impossible_window — when the
- *        earliest start date is AFTER the deadline date, the search window
- *        inverts and the task goes unplaced with _unplacedReason='impossible_window'.
+ * R37.2: earliestStart > deadline (inverted window) — the task is NEVER
+ *        grid force-placed (juggy4 doctrine, 999.1440; rewrite modeled on
+ *        juggler 27a95c30). It lands in result.unplaced with a reason and a
+ *        pinned date: _unplacedReason='no_slot' + date=deadline while the
+ *        deadline is still ahead, or _unplacedReason='missed' + date=deadline
+ *        once the deadline has passed. (The original R37.2 draft named the
+ *        reason 'impossible_window'; the live taxonomy uses no_slot/missed.)
  * R37.3: Field rename from start_after_at → earliestStart — verifies the
  *        scheduler reads the earliestStart field (not the old name).
  *
@@ -90,6 +94,10 @@ function findPlacement(result, taskId) {
     });
   });
   return found;
+}
+
+function findUnplaced(result, taskId) {
+  return (result.unplaced || []).find(function (t) { return t.id === taskId; }) || null;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -184,19 +192,22 @@ describe('999.554 R37.1 — earliestStart hard lower bound', function () {
 
 describe('999.554 R37.2 — earliestStart > deadline (impossible_window)', function () {
 
-  test('earliestStart after deadline — task placed (scheduler does not enforce impossible window)', function () {
-    // earliestStart = 2026-06-20, deadline = 2026-06-18
-    // The scheduler does NOT treat earliestStart > deadline as an
-    // impossible window — it places the task on or after earliestStart.
+  test('earliestStart after deadline — unplaced no_slot, date pinned to deadline (juggy4: never force-placed)', function () {
+    // earliestStart = 2026-06-20, deadline = 2026-06-18 → the eligible window
+    // is empty. juggy4 doctrine (999.1440, model: juggler 27a95c30): the task
+    // is NEVER grid force-placed; it surfaces in result.unplaced with a
+    // reason and its date pinned to the deadline (NEVER-MISSING invariant).
     var task = makeTask({
       earliestStart: '2026-06-20',
       deadline: '2026-06-18',
       dur: 60,
     });
     var result = run([task]);
-    var p = findPlacement(result, task.id);
-    // Scheduler places the task despite inverted window
-    expect(p).not.toBeNull();
+    expect(findPlacement(result, task.id)).toBeNull();
+    var un = findUnplaced(result, task.id);
+    expect(un).not.toBeNull();
+    expect(un._unplacedReason).toBe('no_slot');
+    expect(un.date).toBe('2026-06-18'); // pinned to the deadline date
   });
 
   test('earliestStart == deadline (same day) — task placed on that day', function () {
@@ -226,19 +237,24 @@ describe('999.554 R37.2 — earliestStart > deadline (impossible_window)', funct
     expect(p.dateKey <= '2026-06-20').toBe(true);
   });
 
-  test('earliestStart far after deadline — placed (scheduler ignores inverted window)', function () {
+  test('earliestStart far after a PAST deadline — unplaced missed, date pinned to deadline', function () {
+    // Deadline (2026-06-15) is already behind TODAY (2026-06-16): the cycle
+    // is missed. juggy4 doctrine: unplaced + _unplacedReason='missed', date
+    // pinned to the (past) deadline — never demoted, never force-placed.
     var task = makeTask({
       earliestStart: '2026-07-01',
-      deadline: '2026-06-15', // already before earliest
+      deadline: '2026-06-15', // already before earliest AND before today
       dur: 60,
     });
     var result = run([task]);
-    var p = findPlacement(result, task.id);
-    // Scheduler places the task despite inverted window
-    expect(p).not.toBeNull();
+    expect(findPlacement(result, task.id)).toBeNull();
+    var un = findUnplaced(result, task.id);
+    expect(un).not.toBeNull();
+    expect(un._unplacedReason).toBe('missed');
+    expect(un.date).toBe('2026-06-15'); // pinned to the past deadline date
   });
 
-  test('impossible window with multiple other placeable tasks — both placed (scheduler ignores inverted window)', function () {
+  test('inverted window does not affect other placeable tasks — good placed, bad unplaced with reason', function () {
     var good = makeTask({ id: 'good', earliestStart: TODAY, dur: 30, pri: 'P1' });
     var bad = makeTask({
       id: 'bad-window',
@@ -250,10 +266,15 @@ describe('999.554 R37.2 — earliestStart > deadline (impossible_window)', funct
 
     var pGood = findPlacement(result, 'good');
     expect(pGood).not.toBeNull();
+    expect(pGood.dateKey).toBe(TODAY);
 
-    var pBad = findPlacement(result, 'bad-window');
-    // Scheduler places the task despite inverted window
-    expect(pBad).not.toBeNull();
+    // juggy4: the inverted-window task is unplaced with reason + pinned date,
+    // never force-placed — and its presence does not disturb normal placement.
+    expect(findPlacement(result, 'bad-window')).toBeNull();
+    var un = findUnplaced(result, 'bad-window');
+    expect(un).not.toBeNull();
+    expect(un._unplacedReason).toBe('no_slot');
+    expect(un.date).toBe('2026-06-18');
   });
 });
 

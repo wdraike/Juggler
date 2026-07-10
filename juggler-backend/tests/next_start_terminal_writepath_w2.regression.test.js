@@ -167,20 +167,34 @@ describe('FR-1(a)/AC2 — terminal write advances task_masters.next_start (unifi
     await seedMaster(tmplId, { recur: JSON.stringify({ type: 'rolling', intervalDays: 7 }) });
     await seedInstance(instId, tmplId, '2026-06-01');
 
-    var res = await markStatus(instId, 'done');
+    // 999.1440: freeze the completion-date clock (facade _setAnchorClock,
+    // same pattern as runSchedule _setClock / 999.1427). The old assertion
+    // derived todayKey from `new Date().toISOString()` (UTC) while production
+    // correctly computes "today" in the USER'S timezone — red every day
+    // between 20:00 and 24:00 America/New_York (UTC day is already tomorrow).
+    // Frozen at 2026-07-20 12:00 EDT: UTC and EDT agree on the calendar day,
+    // and the expected value is a constant.
+    var facade = require('../src/slices/task/facade');
+    var FROZEN = new Date('2026-07-20T12:00:00-04:00');
+    var prevClock = facade._setAnchorClock({ now: function () { return FROZEN; } });
+    var res;
+    try {
+      res = await markStatus(instId, 'done');
+    } finally {
+      facade._setAnchorClock(prevClock);
+    }
     expect(res.statusCode).toBe(200);
 
     var master = await db('task_masters').where('id', tmplId).first();
-    var todayKey = new Date().toISOString().slice(0, 10);
     expect(master.next_start).not.toBeNull();
-    expect(String(master.next_start).slice(0, 10)).toBe(todayKey);
+    expect(String(master.next_start).slice(0, 10)).toBe('2026-07-20');
     // AC1 (revised 2026-07-09): the write path DUAL-WRITES for this leg —
     // `next_start` is canonical for READS, but `rolling_anchor` keeps getting
     // its normal, pre-existing computed value too (ceasing the legacy write
     // is a follow-on backlog item, not this leg's AC1). On this first-ever
     // write (no prior anchor), both columns receive the SAME computed value.
     expect(master.rolling_anchor).not.toBeNull();
-    expect(String(master.rolling_anchor).slice(0, 10)).toBe(todayKey);
+    expect(String(master.rolling_anchor).slice(0, 10)).toBe('2026-07-20');
   });
 
   test('non-rolling (weekly) master: marking an instance done advances next_start to the next pattern date, not next_occurrence_anchor', async () => {

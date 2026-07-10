@@ -1,44 +1,31 @@
 /**
- * BUG-812b regression — wip de-anchor guard (unifiedScheduleV2.js:315-327)
+ * BUG-812b regression — scheduledAt anchor guard (successor form)
  *
- * Covers: BUG-812 (de-anchor guard — zoe WARN: guard had zero coverage)
- * Layer: unit (pure — no DB required)
- * Traceability: .planning/kermit/fixy-time/TRACEABILITY.md BUG-812
+ * Covers: BUG-812 lineage. REWRITTEN for 999.1440 — the original wip
+ * de-anchor guard no longer exists:
  *
- * The guard (lines 315-327):
- *   When a wip task's t.time is unparseable (parseTimeToMinutes returns null at
- *   line 308), but the task has a valid t.scheduledAt (ISO-Z) + t.tz, anchorMin
- *   is derived via:
+ *   1. `wip` was removed from the status lifecycle (juggler 450b00b4;
+ *      shared/task-status SSOT — wip is never emitted, only tolerated in
+ *      legacy rows). The scheduler has NO wip-specific anchor path anymore:
+ *      a status:'wip' task schedules exactly like its placementMode says.
  *
- *     utcToLocal(new Date(t.scheduledAt), t.tz) → { time: '2:30 PM', ... }
- *     parseTimeToMinutes('2:30 PM') → 870
+ *   2. The guard's INTENT (a task whose t.time is unparseable must anchor at
+ *      its persisted scheduled_at instead of silently de-anchoring) lives on
+ *      as the W2/Odin DB-single-source fixed-anchor guard
+ *      (unifiedScheduleV2.js ~325): non-recurring FIXED task + anchorMin
+ *      still null + t.scheduledAt + _cfg.timezone → anchorMin derived via
+ *      utcToLocal(new Date(t.scheduledAt), _cfg.timezone). Note it reads the
+ *      DISPLAY timezone from cfg, NOT t.tz (using row.tz would desync from
+ *      the localToUtc writeback — ernie BLOCK-1).
  *
- *   so the wip item is anchored at 870 (2:30 PM local) and placed immovably,
- *   NOT silently de-anchored/re-placed.
+ *   3. The old B812b-5 "raw string → Invalid Date" mutation pin is DEAD:
+ *      utcToLocal's 'ZZ' invalid-date bug was fixed in juggler ae41e05d
+ *      (999.1186 parseDbUtc SSOT) — ISO-Z strings now parse correctly in
+ *      both input forms.
  *
- * Fixture (per bert spec):
- *   t.time = 'not-a-time'      → parseTimeToMinutes returns null (line 308)
+ * Fixture:
  *   t.scheduledAt = '2026-06-22T18:30:00.000Z'
- *   t.tz = 'America/New_York'  → UTC-4 (EDT) → local 2:30 PM = 870 minutes
- *   expected anchorMin = 870
- *
- * Pre-fix mutation (what the guard reverted to):
- *   OLD (broken): dateHelpers.utcToLocal(t.scheduledAt, t.tz)
- *     → t.scheduledAt is already ISO-Z; utcToLocal's string branch does
- *       .replace(' ', 'T') + 'Z' → '2026-06-22T18:30:00.000ZZ' → Invalid Date
- *       → returns { date: null, time: null } → saLocal.time falsy → guard no-ops
- *       → anchorMin stays null → isStartedWithAnchor = false → wip placed freely
- *   NEW (fixed): dateHelpers.utcToLocal(new Date(t.scheduledAt), t.tz)
- *     → Date object branch → valid → returns { time: '2:30 PM' } → anchorMin=870
- *
- * Self-mutation verification (performed during authoring):
- *   Step 1: Backed up unifiedScheduleV2.js to /tmp/usv2-backup.js
- *   Step 2: Patched line 316 to use raw-string form (old bug):
- *             dateHelpers.utcToLocal(t.scheduledAt, t.tz)
- *   Step 3: Ran this test against the mutated file — B812b-1 RED (wip placed
- *             freely at a slot other than 870; isPlacedAtSlot returned false).
- *           B812b-3 also RED (placed at wrong slot).
- *   Step 4: Restored from /tmp/usv2-backup.js — all tests GREEN.
+ *   cfg.timezone  = 'America/New_York' → UTC-4 (EDT) → local 2:30 PM = 870
  */
 
 'use strict';
@@ -67,6 +54,9 @@ function makeCfg() {
     hourLocationOverrides: {},
     scheduleTemplates: null,
     preferences: {},
+    // The successor fixed-anchor guard derives local time from the DISPLAY
+    // timezone on cfg (999.1440 — see header §2), not from t.tz.
+    timezone: 'America/New_York',
   };
 }
 
@@ -126,52 +116,64 @@ function isPlacedAnywhere(result, taskId) {
 
 // ── BUG-812b: de-anchor guard — wip with unparseable t.time + valid scheduledAt ─
 
-describe('BUG-812b: de-anchor guard — wip with unparseable t.time uses scheduledAt', function() {
+describe('BUG-812b: scheduledAt anchor guard — FIXED task with unparseable t.time uses scheduledAt (wip path removed)', function() {
 
-  test('B812b-1: wip with t.time=unparseable + valid scheduledAt is placed at 870 (2:30 PM EDT)', function() {
-    // This is the PRIMARY regression test for the de-anchor guard.
-    //
-    // PRE-FIX (mutant — utcToLocal receives raw string instead of Date):
-    //   utcToLocal(t.scheduledAt, t.tz) where t.scheduledAt is already ISO-Z
-    //   → string branch appends 'Z' again → Invalid Date → { time: null }
-    //   → guard no-ops → anchorMin remains null → isStartedWithAnchor = false
-    //   → wip is queued/re-placed, NOT pinned → placedStartMin !== 870 → RED.
-    //
-    // POST-FIX (production):
-    //   utcToLocal(new Date(t.scheduledAt), t.tz) → { time: '2:30 PM' }
-    //   → parseTimeToMinutes('2:30 PM') → 870
-    //   → anchorMin=870, isStartedWithAnchor=true → tryPlaceAtTime → start=870 → GREEN.
-    var wipTask = makeTask({
-      id: uid('wip_guard'),
+  test('B812b-1: FIXED task with t.time=unparseable + valid scheduledAt anchors at 870 (2:30 PM EDT)', function() {
+    // PRIMARY pin of the successor guard (999.1440 — see header §2).
+    // FIXED non-recurring + unparseable t.time + t.scheduledAt + cfg.timezone
+    // → anchorMin = 870 via utcToLocal(new Date(scheduledAt), cfg.timezone).
+    var fixedTask = makeTask({
+      id: uid('fixed_guard'),
+      status: '',
+      placementMode: 'fixed',
       time: 'not-a-time',          // parseTimeToMinutes → null; forces guard to fire
       scheduledAt: '2026-06-22T18:30:00.000Z', // UTC 18:30 = 2:30 PM EDT (UTC-4)
-      tz: 'America/New_York',
     });
 
-    var result = run([wipTask]);
+    var result = run([fixedTask]);
 
-    // Guard must derive anchorMin=870 and pin the wip at 2:30 PM (870 min since midnight).
-    expect(placedStartMin(result, wipTask.id)).toBe(870);
+    // Guard must derive anchorMin=870 and pin the event at 2:30 PM.
+    expect(placedStartMin(result, fixedTask.id)).toBe(870);
   });
 
-  test('B812b-2: wip with parseable t.time DOES NOT trigger guard (guard is conditional, not default)', function() {
-    // Confirm the guard is gated on anchorMin==null. When t.time is parseable,
-    // line 308 sets anchorMin = parseTimeToMinutes(t.time) = 540 (9:00 AM).
-    // The guard at line 315 checks anchorMin==null → false → guard is bypassed.
-    // The wip is placed at 540, not 870. This proves the guard does not override
-    // a validly-parsed t.time.
-    var wipTask = makeTask({
-      id: uid('wip_parseable'),
-      time: '9:00 AM',              // parseTimeToMinutes → 540; guard must NOT fire
-      scheduledAt: '2026-06-22T18:30:00.000Z', // would yield 870 if guard fired
+  test('B812b-1b: ex-wip status has NO special anchor path — schedules by placementMode (wip removed from lifecycle)', function() {
+    // 999.1440: `wip` was removed from the status lifecycle (juggler
+    // 450b00b4; shared/task-status SSOT). A legacy status:'wip' row with an
+    // unparseable t.time and a scheduledAt is NOT pinned at 870 anymore — as
+    // a default (anytime-mode) task it places at the first free slot
+    // (nowMins = 480), because ANYTIME tasks never anchor on bare
+    // t.time/scheduledAt.
+    var legacyWip = makeTask({
+      id: uid('legacy_wip'),
+      status: 'wip',
+      time: 'not-a-time',
+      scheduledAt: '2026-06-22T18:30:00.000Z',
       tz: 'America/New_York',
     });
 
-    var result = run([wipTask]);
+    var result = run([legacyWip]);
+
+    expect(placedStartMin(result, legacyWip.id)).toBe(480);
+  });
+
+  test('B812b-2: FIXED task with parseable t.time DOES NOT trigger guard (guard is conditional, not default)', function() {
+    // Confirm the guard is gated on anchorMin==null. When t.time is parseable,
+    // anchorMin = parseTimeToMinutes(t.time) = 540 (9:00 AM) and the
+    // scheduledAt fallback is bypassed — a validly-parsed t.time is never
+    // overridden by scheduled_at.
+    var fixedTask = makeTask({
+      id: uid('fixed_parseable'),
+      status: '',
+      placementMode: 'fixed',
+      time: '9:00 AM',              // parseTimeToMinutes → 540; guard must NOT fire
+      scheduledAt: '2026-06-22T18:30:00.000Z', // would yield 870 if guard fired
+    });
+
+    var result = run([fixedTask]);
 
     // Must be placed at 540 (from t.time), NOT 870 (from scheduledAt).
-    expect(placedStartMin(result, wipTask.id)).toBe(540);
-    expect(placedStartMin(result, wipTask.id)).not.toBe(870);
+    expect(placedStartMin(result, fixedTask.id)).toBe(540);
+    expect(placedStartMin(result, fixedTask.id)).not.toBe(870);
   });
 
   test('B812b-3: wip with t.time=unparseable + NO scheduledAt is still placed (guard gracefully no-ops)', function() {
@@ -211,30 +213,25 @@ describe('BUG-812b: de-anchor guard — wip with unparseable t.time uses schedul
     expect(placedStartMin(result, wipTask.id)).not.toBe(870);
   });
 
-  test('B812b-5: mutation-load-bearing — guard fires only via new Date(scheduledAt), not raw string', function() {
-    // Explicit documentation of what the pre-fix mutation breaks.
-    // utcToLocal's string branch appends 'Z': 'YYYY-MM-DDTHH:MM:SS.sssZ' → '+Z' = Invalid Date.
-    // This test uses the dateHelpers directly to confirm the two input forms differ.
-    //
-    // This is an auxiliary guard on the helper behaviour — the primary pin is B812b-1.
+  test('B812b-5: utcToLocal parses BOTH Date and ISO-Z string forms (ZZ bug fixed, 999.1186)', function() {
+    // 999.1440 rewrite: the old pin asserted the raw ISO-Z STRING form
+    // produced Invalid Date ('...000ZZ') — that was utcToLocal's own bug,
+    // fixed in juggler ae41e05d (999.1186): parsing now routes through the
+    // shared parseDbUtc SSOT, which handles explicit-zone ISO strings
+    // correctly instead of blindly appending 'Z'. Both input forms must now
+    // yield the same valid local time — the de-anchor failure mode this
+    // suite was born from is structurally impossible.
     var dateHelpers = require('../../src/scheduler/dateHelpers');
 
     var rawStr = '2026-06-22T18:30:00.000Z';
     var asDate = new Date(rawStr);
     var tz = 'America/New_York';
 
-    // new Date(rawStr) form — what the fix uses — must yield a valid time.
     var viaDate = dateHelpers.utcToLocal(asDate, tz);
-    expect(viaDate.time).not.toBeNull();
     expect(viaDate.time).toMatch(/2:30 PM/i);
 
-    // Raw-string form — what the old (broken) code passed — appends 'Z' to an
-    // already-Z string → '...000ZZ' → Invalid Date → utcToLocal returns null fields.
-    // This is the mutation the guard was authored to fix.
-    var rawBroken = rawStr; // already ISO-Z; utcToLocal string branch: .replace(' ','T')+'Z'
-    var viaBrokenString = dateHelpers.utcToLocal(rawBroken, tz);
-    // The ISO-Z string has no space, so .replace(' ','T') is a no-op, then +'Z' appends:
-    // '2026-06-22T18:30:00.000ZZ' → new Date() → Invalid Date → { time: null }
-    expect(viaBrokenString.time).toBeNull();
+    var viaString = dateHelpers.utcToLocal(rawStr, tz);
+    expect(viaString.time).toMatch(/2:30 PM/i);
+    expect(viaString.date).toBe('2026-06-22');
   });
 });

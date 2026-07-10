@@ -22,7 +22,24 @@ function createChainMock() {
     return resolveQueue.length > 0 ? resolveQueue.shift() : fallback;
   }
 
-  chain.select = jest.fn(() => Promise.resolve(nextResolve([])));
+  // 999.1441: .select(...) consumes its queue slot immediately (unchanged
+  // convention), but production may keep CHAINING after it — e.g.
+  // facade.findCalLockedSeriesInstance builds `...select('l.provider',...)`
+  // and then applies domain/calLockedPredicate's applyCalLockedLedgerFilter
+  // (qb.where(...).where(...)) plus a .first() (W2-ARCH-W3 shared-predicate
+  // rework). A bare Promise has no .where → TypeError → the route 500s. So
+  // return a promise HYBRID: filter methods return the same hybrid, and
+  // .first() resolves to the first row of the already-consumed value.
+  chain.select = jest.fn(() => {
+    const v = nextResolve([]);
+    const p = Promise.resolve(v);
+    ['where', 'whereRaw', 'whereNotNull', 'whereNull', 'whereNot', 'whereNotIn',
+     'whereIn', 'orWhere', 'orWhereNot', 'orderBy', 'limit', 'offset', 'join',
+     'leftJoin', 'groupBy', 'having'
+    ].forEach(m => { p[m] = () => p; });
+    p.first = () => Promise.resolve(Array.isArray(v) ? (v.length > 0 ? v[0] : null) : v);
+    return p;
+  });
   chain.first = jest.fn(() => Promise.resolve(nextResolve(null)));
   chain.insert = jest.fn(() => Promise.resolve());
   chain.update = jest.fn(() => Promise.resolve(1));
@@ -176,6 +193,10 @@ describe('Mutation guards for disabled items', () => {
     // fetchTaskWithEventIds: tasks_v.first() then ledger.select()
     resolveQueue.push({ id: 'ht01', user_id: 'user-123', status: 'disabled', task_type: 'recurring_template' });
     resolveQueue.push([]); // ledger rows (none)
+    // 999.1441: findCalLockedSeriesInstance (DeleteTask R55 rework) queries
+    // cal_sync_ledger⋈tasks_with_sync_v for a cal-locked series instance
+    // BEFORE the cascade transaction — no cal-locked rows here.
+    resolveQueue.push([]);
     // Instances query (tasks_with_sync_v.select inside transaction)
     resolveQueue.push([
       { id: 'hi01', status: 'disabled', gcal_event_id: null, msft_event_id: null },

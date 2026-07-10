@@ -164,16 +164,17 @@ describe('TS-63: Fixed → Anytime mode transition', () => {
     expect(persistedMaster.when).toBe('morning');
   });
 
-  it('SUB-63a: Fixed→Anytime preserves date_pinned if set', async () => {
+  it('SUB-63a: Fixed→Anytime keeps the instance schedule; date_pinned column is GONE (placement_mode is the sole immovability signal)', async () => {
     mockClock('2026-06-15T08:00:00-04:00');
     mockTimezone('America/New_York');
 
-    // Real model: `date_pinned`/`scheduled_at` are task_instances columns, not
-    // task_masters columns. A fixed task is a master with placement_mode='fixed';
-    // its placed occurrence is an instance row that may carry date_pinned=1. The
-    // transition flips the MASTER mode; the pinned instance keeps date_pinned.
-    // Build a real master and a pinned instance under it (master_id satisfies the
-    // FK), then drive the master fixed→anytime and assert both halves of reality.
+    // 999.1440 pin of the When-mode redesign (juggler 58d9a12a + migration
+    // 20260526000000_drop_pinned_and_rigid_columns): the `date_pinned` column
+    // was REMOVED from task_instances/tasks_v — placement_mode='fixed' is the
+    // SOLE immovability signal. The original SUB-63a ("preserves date_pinned")
+    // pinned that deleted column. What must still hold across a fixed→anytime
+    // MASTER transition: the existing instance row's persisted schedule
+    // (scheduled_at) is untouched by the master's mode flip.
     const master = await createTask({
       text: 'Fixed pinned task',
       dur: 30,
@@ -187,8 +188,7 @@ describe('TS-63: Fixed → Anytime mode transition', () => {
       text: 'Fixed pinned task',
       dur: 30,
       scheduled_at: '2026-06-20T09:00:00Z',
-      date: '2026-06-20',
-      date_pinned: true
+      date: '2026-06-20'
     });
 
     // Change the master to anytime mode
@@ -198,10 +198,11 @@ describe('TS-63: Fixed → Anytime mode transition', () => {
     });
     expect(updatedTask.placementMode).toBe('anytime');
 
-    // The pinned instance retains its date_pinned flag (real task_instances col).
+    // The instance keeps its persisted schedule across the master mode flip.
     const persistedInstance = await getTasks({ id: instance.id });
-    expect(persistedInstance.date_pinned).toBe(1); // tinyint flag
     expect(persistedInstance.scheduled_at).toContain('2026-06-20 09:00:00');
+    // And the dropped column stays dropped — no resurrected date_pinned field.
+    expect(persistedInstance.date_pinned).toBeUndefined();
   });
 });
 

@@ -159,7 +159,13 @@ describe('TS-76: Rolling recurrence with horizon', () => {
     const rollingInstances = result.scheduledTasks
       .filter(t => t.text === 'Rolling weekly review');
 
-    expect(rollingInstances.length).toBe(4); // rolling weekly every 7 days
+    // 999.1440 pin: rolling recurrence is SINGLE-ACTIVE (R5, shared
+    // expandRecurring.js "rolling single-active" guard; recurring-task
+    // lifecycle redesign, juggler 785fc8a5). Only ONE active instance exists
+    // at a time — the next one materializes when the active one completes and
+    // rolling_anchor advances. The old `4` expectation encoded the
+    // pre-redesign fill-the-horizon expansion.
+    expect(rollingInstances.length).toBe(1);
   });
 });
 
@@ -365,6 +371,10 @@ describe('TS-84: Rolling recurrence with complex constraints', () => {
     const complexInstances = result.scheduledTasks
       .filter(t => t.text === 'Complex rolling task');
 
-    expect(complexInstances.length).toBe(4); // rolling weekly every 7 days
+    // 999.1440 pin: rolling is SINGLE-ACTIVE (R5 guard in shared
+    // expandRecurring.js; lifecycle redesign, juggler 785fc8a5) — one active
+    // instance regardless of horizon/day constraints; the next materializes
+    // only after the active one reaches a terminal state. See TS-76.
+    expect(complexInstances.length).toBe(1);
   });
 });
