@@ -55,7 +55,7 @@ const cfg = {
   locScheduleOverrides: {},
   hourLocationOverrides: {},
   scheduleTemplates: null,
-  preferences: { pullForwardDampening: true },
+  preferences: {},
 };
 
 // nowMins = 300 (5:00 AM) — well before any schedulable block so today's slots

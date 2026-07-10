@@ -79,7 +79,7 @@ beforeAll(async function() {
     { user_id: userId, config_key: 'tool_matrix', config_value: JSON.stringify(require('./helpers/real-config-fixtures').REAL_TOOL_MATRIX) },
     { user_id: userId, config_key: 'loc_schedules', config_value: JSON.stringify(require('./helpers/real-config-fixtures').REAL_LOC_SCHEDULES) },
     { user_id: userId, config_key: 'loc_schedule_defaults', config_value: JSON.stringify(require('./helpers/real-config-fixtures').REAL_LOC_SCHEDULE_DEFAULTS) },
-    { user_id: userId, config_key: 'preferences', config_value: JSON.stringify({ pullForwardDampening: true, splitDefault: false, splitMinDefault: 15 }) }
+    { user_id: userId, config_key: 'preferences', config_value: JSON.stringify({ splitDefault: false, splitMinDefault: 15 }) }
   ];
   for (var i = 0; i < configs.length; i++) {
     await knex('user_config').insert(configs[i]).onConflict(['user_id', 'config_key']).merge();

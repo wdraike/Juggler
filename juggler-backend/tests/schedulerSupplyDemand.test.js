@@ -34,7 +34,7 @@ function makeCfg(overrides) {
     timeBlocks: DEFAULT_TIME_BLOCKS, toolMatrix: DEFAULT_TOOL_MATRIX,
     splitMinDefault: 15, locSchedules: {}, locScheduleDefaults: {},
     locScheduleOverrides: {}, hourLocationOverrides: {}, scheduleTemplates: null,
-    preferences: { pullForwardDampening: true }, ...overrides
+    preferences: {}, ...overrides
   };
 }
 

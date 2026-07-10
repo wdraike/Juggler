@@ -636,9 +636,32 @@ describe('Zod Validation Boundaries', () => {
         splitMinDefault: 15, // 15-minute minimum chunk
         gridZoom: 60
       };
-      
+
       const result = preferencesSchema.safeParse(validPrefs);
       expect(result.success).toBe(true);
+    });
+
+    test('preferencesSchema accepts a valid schedFloor/schedCeiling pair (999.1223)', () => {
+      const result = preferencesSchema.safeParse({ schedFloor: 480, schedCeiling: 1200 });
+      expect(result.success).toBe(true);
+    });
+
+    test('preferencesSchema rejects an inverted schedFloor/schedCeiling combo at the write boundary (999.1223)', () => {
+      expect(preferencesSchema.safeParse({ schedFloor: 1200, schedCeiling: 480 }).success).toBe(false);
+      expect(preferencesSchema.safeParse({ schedFloor: 600, schedCeiling: 600 }).success).toBe(false);
+      // One knob alone is fine — the other defaults at read time.
+      expect(preferencesSchema.safeParse({ schedFloor: 480 }).success).toBe(true);
+      expect(preferencesSchema.safeParse({ schedCeiling: 1200 }).success).toBe(true);
+    });
+
+    test('preferencesSchema no longer has a pullForwardDampening key (999.1223 — knob dropped; passthrough keeps stored blobs valid)', () => {
+      // Old stored blobs still parse (passthrough), but the schema itself
+      // must not define the key anymore.
+      const shape = preferencesSchema._def.schema
+        ? preferencesSchema._def.schema.shape   // zod v3 ZodEffects wrapper
+        : preferencesSchema.shape;
+      expect(Object.keys(shape)).not.toContain('pullForwardDampening');
+      expect(preferencesSchema.safeParse({ pullForwardDampening: true }).success).toBe(true);
     });
   });
 });

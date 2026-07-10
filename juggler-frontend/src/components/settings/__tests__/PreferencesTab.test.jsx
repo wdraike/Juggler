@@ -3,8 +3,9 @@
  *
  * Two layers:
  *  1. Unit (fake config): every control change calls its optimistic setter AND
- *     config.updatePreferences with the FULL 9-key snapshot (unchanged fields
+ *     config.updatePreferences with the FULL 8-key snapshot (unchanged fields
  *     carry the current config values — the savePrefs merge contract).
+ *     (999.1223: pullForwardDampening dial + key dropped entirely.)
  *  2. Integration (real useConfig + mocked apiClient): a change lands as
  *     PUT /config/preferences { value: {...} }; a rejected save reports through
  *     the onSaveError channel (999.1225 — no silent optimistic-only state).
@@ -39,7 +40,6 @@ const PREF_FIELDS = {
   schedFloor: 480,
   schedCeiling: 1380,
   fontSize: 100,
-  pullForwardDampening: false,
   timezoneOverride: null,
   calCompletedBehavior: 'update',
 };
@@ -54,7 +54,6 @@ function makeConfig(overrides = {}) {
     setSplitMinDefault: jest.fn(),
     setSchedFloor: jest.fn(),
     setSchedCeiling: jest.fn(),
-    setPullForwardDampening: jest.fn(),
     setTimezoneOverride: jest.fn(),
     setCalCompletedBehavior: jest.fn(),
     updatePreferences: jest.fn(),
@@ -108,34 +107,17 @@ describe('PreferencesTab (unit — savePrefs contract)', () => {
     expect(config.updatePreferences).toHaveBeenCalledWith(payload({ gridZoom: 90 }));
   });
 
-  it('split-by-default checkbox persists the toggle', () => {
-    // dampening=true so the split checkbox is the unchecked one (structural
-    // disambiguation between the two checkboxes without relying on copy).
-    const config = makeConfig({ pullForwardDampening: true });
+  it('split-by-default checkbox persists the toggle (999.1223: the ONLY checkbox — dampening dial removed)', () => {
+    const config = makeConfig();
     const { container } = render(<PreferencesTab config={config} theme={theme} />);
-    const splitBox = checkboxes(container).find((cb) => !cb.checked);
+    const boxes = checkboxes(container);
+    expect(boxes).toHaveLength(1); // pins the dampening dial's removal
 
-    fireEvent.click(splitBox);
+    fireEvent.click(boxes[0]);
 
     expect(config.setSplitDefault).toHaveBeenCalledWith(true);
-    expect(config.setPullForwardDampening).not.toHaveBeenCalled();
     expect(config.updatePreferences).toHaveBeenCalledWith(
-      payload({ splitDefault: true, pullForwardDampening: true })
-    );
-  });
-
-  it('pull-forward dampening checkbox persists the toggle', () => {
-    // splitDefault=true so the dampening checkbox is the unchecked one.
-    const config = makeConfig({ splitDefault: true });
-    const { container } = render(<PreferencesTab config={config} theme={theme} />);
-    const dampenBox = checkboxes(container).find((cb) => !cb.checked);
-
-    fireEvent.click(dampenBox);
-
-    expect(config.setPullForwardDampening).toHaveBeenCalledWith(true);
-    expect(config.setSplitDefault).not.toHaveBeenCalled();
-    expect(config.updatePreferences).toHaveBeenCalledWith(
-      payload({ splitDefault: true, pullForwardDampening: true })
+      payload({ splitDefault: true })
     );
   });
 
@@ -254,7 +236,6 @@ describe('PreferencesTab (integration — real useConfig → apiClient)', () => 
         schedFloor: 480,
         schedCeiling: 1380,
         fontSize: 110,
-        pullForwardDampening: false,
         timezoneOverride: null,
         calCompletedBehavior: 'update',
       },

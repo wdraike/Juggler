@@ -8,14 +8,15 @@
 > deleted/renamed test shows up as **STALE** on the next regeneration
 > (`--check` exits 1 on any stale ref).
 >
-> Source: `docs/REQUIREMENTS.md` @ sha256:adf8bf638401
+> Source: `docs/REQUIREMENTS.md` @ sha256:4b6d9abd60c7
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
 | Requirement rows parsed | 263 |
-| — status `implemented` | 214 |
+| — status `implemented` | 213 |
+| — status `implemented (999.1223)` | 1 |
 | — status `partial` | 39 |
 | — status `planned` | 9 |
 | — status `planned (deferred milestone)` | 1 |
@@ -188,7 +189,7 @@
 | R11.14 | implemented | `tests/unifiedSchedule.test.js` | ok |
 | R11.15 | implemented | `tests/unifiedSchedule.test.js` | ok |
 | R11.16 | implemented | `tests/unifiedSchedule.test.js` | ok |
-| R11.17 | implemented | `tests/unifiedSchedule.test.js` | ok |
+| R11.17 | implemented (999.1223) | `tests/schedulerDayBounds.test.js` | ok |
 | R11.18 | implemented | `tests/unifiedSchedule.test.js` | ok |
 | R11.19 | implemented | `tests/unifiedSchedule.test.js` | ok |
 | R11.20 | implemented | `tests/unifiedSchedule.test.js` | ok |

@@ -78,7 +78,6 @@ function makeRealConfig(overrides) {
     scheduleTemplates: null,
     splitMinDefault: 15,
     preferences: {
-      pullForwardDampening: true,
       splitDefault: false,
       splitMinDefault: 15
     }

@@ -43,13 +43,15 @@ describe('loadSchedulerConfig (999.1187)', function() {
       row('time_blocks', TIME_BLOCKS),
       row('tool_matrix', TOOL_MATRIX),
       row('loc_schedules', { home: {} }),
-      row('preferences', { splitMinDefault: 30, splitDefault: true })
+      row('preferences', { splitMinDefault: 30, splitDefault: true, schedFloor: 480, schedCeiling: 1200 })
     ]), []);
     expect(cfg.timeBlocks).toEqual(TIME_BLOCKS);          // NOT the defaults
     expect(cfg.toolMatrix).toEqual(TOOL_MATRIX);          // NOT the defaults
     expect(cfg.locSchedules).toEqual({ home: {} });
     expect(cfg.splitMinDefault).toBe(30);
     expect(cfg.splitDefault).toBe(true);
+    expect(cfg.schedFloor).toBe(480);    // 999.1223 — scheduler day bounds hoist
+    expect(cfg.schedCeiling).toBe(1200);
     expect(cfg.locations).toEqual([]);
   });
 
@@ -61,6 +63,8 @@ describe('loadSchedulerConfig (999.1187)', function() {
     expect(cfg.scheduleTemplates).toBeNull();
     expect(cfg.preferences).toEqual({});
     expect(cfg.splitMinDefault).toBeUndefined();
+    expect(cfg.schedFloor).toBeUndefined();   // 999.1223 — unset = scheduler defaults
+    expect(cfg.schedCeiling).toBeUndefined();
   });
 
   test('regression 999.1187: camelCase keys in user_config do NOT populate the cfg', function() {

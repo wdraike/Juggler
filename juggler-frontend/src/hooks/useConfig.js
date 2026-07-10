@@ -135,7 +135,6 @@ export default function useConfig(onSaveError) {
   var [schedFloor, setSchedFloor] = useState(480);
   var [schedCeiling, setSchedCeiling] = useState(1380);
   var [fontSize, setFontSize] = useState(100);
-  var [pullForwardDampening, setPullForwardDampening] = useState(false);
   var [timezoneOverride, setTimezoneOverride] = useState(null);
   var [userTimezone, setUserTimezone] = useState(null);
   var [calCompletedBehavior, setCalCompletedBehavior] = useState('update');
@@ -170,7 +169,6 @@ export default function useConfig(onSaveError) {
       if (p.schedFloor !== undefined) setSchedFloor(p.schedFloor);
       if (p.schedCeiling !== undefined) setSchedCeiling(p.schedCeiling);
       if (p.fontSize !== undefined) setFontSize(p.fontSize);
-      if (p.pullForwardDampening !== undefined) setPullForwardDampening(p.pullForwardDampening);
       if (p.calCompletedBehavior !== undefined) setCalCompletedBehavior(p.calCompletedBehavior);
       if (p.timezoneOverride !== undefined) {
         setTimezoneOverride(p.timezoneOverride);
@@ -384,13 +382,13 @@ export default function useConfig(onSaveError) {
     locations, tools, toolMatrix, timeBlocks, projects,
     locSchedules, locScheduleDefaults, locScheduleOverrides,
     hourLocationOverrides, splitDefault, splitMinDefault,
-    gridZoom, schedFloor, schedCeiling, fontSize, pullForwardDampening, timezoneOverride, userTimezone, calCompletedBehavior, calSyncSettings,
+    gridZoom, schedFloor, schedCeiling, fontSize, timezoneOverride, userTimezone, calCompletedBehavior, calSyncSettings,
     tempUnitPref,
     scheduleTemplates, templateDefaults, templateOverrides,
     setLocations, setTools, setToolMatrix, setTimeBlocks, setProjects,
     setLocSchedules, setLocScheduleDefaults, setLocScheduleOverrides,
     setHourLocationOverrides, setSplitDefault, setSplitMinDefault,
-    setGridZoom, setSchedFloor, setSchedCeiling, setFontSize, setPullForwardDampening, setTimezoneOverride, setCalCompletedBehavior, setCalSyncSettings,
+    setGridZoom, setSchedFloor, setSchedCeiling, setFontSize, setTimezoneOverride, setCalCompletedBehavior, setCalSyncSettings,
     setTempUnitPref,
     setScheduleTemplates, setTemplateDefaults, setTemplateOverrides,
     initFromConfig,

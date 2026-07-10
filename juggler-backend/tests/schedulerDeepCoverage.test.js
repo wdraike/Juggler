@@ -138,7 +138,7 @@ describe('UC-6: Split Tasks', function() {
 
 describe('UC-11: Pull-Forward & Dampening', function() {
 
-  test('UC-11.1: Deadline task with dampening — not pulled to day 1', function() {
+  test('UC-11.1: Deadline task placed under real config (dampening knob removed 999.1223)', function() {
     var tc = timeControl('4/6/2026'); // Monday
     tc.setTime('8:00 AM');
     var due = tc.dateKey(10);
@@ -148,21 +148,19 @@ describe('UC-11: Pull-Forward & Dampening', function() {
     var result = run(tasks, tc.todayKey, tc.nowMins);
     var p = findPlacement(result, 'dl');
     expect(p).not.toBeNull();
-    // With dampening, should NOT be on today (day 0) — should be closer to due date
   });
 
-  test('UC-11.2: Dampening disabled — task pulled to earliest', function() {
+  test('UC-11.2: default preferences — deadline task still placed (999.1223: pullForwardDampening knob removed)', function() {
     var tc = timeControl('4/6/2026');
     tc.setTime('8:00 AM');
-    var noDampeningCfg = makeRealConfig({ preferences: { pullForwardDampening: false } });
+    var defaultPrefsCfg = makeRealConfig({ preferences: {} });
     var due = tc.dateKey(10);
     var tasks = [
       makeDeadlineTask({ id: 'dl', text: 'Deadline Work', dur: 120, date: tc.dateKey(8), deadline: due, pri: 'P2' })
     ];
-    var result = run(tasks, tc.todayKey, tc.nowMins, noDampeningCfg);
+    var result = run(tasks, tc.todayKey, tc.nowMins, defaultPrefsCfg);
     var p = findPlacement(result, 'dl');
     expect(p).not.toBeNull();
-    // Without dampening, should be pulled closer to today
   });
 
   test('UC-11.4: earliestStart respected even with pull-forward', function() {

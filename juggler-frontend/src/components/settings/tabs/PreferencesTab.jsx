@@ -22,7 +22,7 @@ export default function PreferencesTab({ config, theme }) {
     config.updatePreferences({
       gridZoom: config.gridZoom, splitDefault: config.splitDefault,
       splitMinDefault: config.splitMinDefault, schedFloor: config.schedFloor, schedCeiling: config.schedCeiling,
-      fontSize: config.fontSize, pullForwardDampening: config.pullForwardDampening,
+      fontSize: config.fontSize,
       timezoneOverride: config.timezoneOverride, calCompletedBehavior: config.calCompletedBehavior,
       ...patch
     });
@@ -80,12 +80,6 @@ export default function PreferencesTab({ config, theme }) {
           <select value={config.schedCeiling} onChange={e => { var v = parseInt(e.target.value); config.setSchedCeiling(v); savePrefs({ schedCeiling: v }); }} style={{ padding: '4px 6px', border: `1px solid ${theme.inputBorder}`, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }}>
             {[1080,1140,1200,1260,1320,1380,1440].map(m => (<option key={m} value={m}>{m === 1440 ? '12:00 AM' : formatMinsAmPm(m)}</option>))}
           </select>
-        </label>
-        <label style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <HelpIcon text="When enabled, tasks pull forward less aggressively." theme={theme}>
-            <input type="checkbox" checked={config.pullForwardDampening || false} onChange={e => { var v = e.target.checked; config.setPullForwardDampening(v); savePrefs({ pullForwardDampening: v }); }} />
-            <span>Dampen pull-forward</span>
-          </HelpIcon>
         </label>
         <div style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
           <HelpIcon text="Display unit for weather temperatures." theme={theme}><span style={{ fontWeight: 500 }}>Temperature unit:</span></HelpIcon>

@@ -29,7 +29,6 @@ var CONFIG_KEYS = {
   locScheduleOverrides: {},
   hourLocationOverrides:{},
   preferences: {
-    pullForwardDampening: true,
     splitDefault: false,
     splitMinDefault: 15
   }

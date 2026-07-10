@@ -35,7 +35,7 @@ const cfg = {
   timeBlocks: DEFAULT_TIME_BLOCKS, toolMatrix: DEFAULT_TOOL_MATRIX,
   splitMinDefault: 15, locSchedules: {}, locScheduleDefaults: {},
   locScheduleOverrides: {}, hourLocationOverrides: {},
-  scheduleTemplates: null, preferences: { pullForwardDampening: true },
+  scheduleTemplates: null, preferences: {},
 };
 
 // ── Helpers ──────────────────────────────────────────────────────

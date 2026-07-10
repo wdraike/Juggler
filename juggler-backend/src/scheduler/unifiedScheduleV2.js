@@ -81,6 +81,41 @@ var ConflictResolver = require('../slices/scheduler/domain/logic/ConflictResolve
 var DAY_START = GRID_START * 60;
 var DAY_END = GRID_END * 60 + 59;
 
+// ── Per-user day bounds (999.1223) ────────────────────────────
+// preferences.schedFloor / preferences.schedCeiling (minutes since midnight,
+// range-validated at the write boundary in schemas/config.schema.js) override
+// the hardwired GRID_START/GRID_END grid bounds. Units: GRID_* are HOURS,
+// DAY_*/schedFloor/schedCeiling are MINUTES — the knobs are already minutes,
+// so no hour conversion happens here; the ceiling is only clamped to DAY_END
+// (23:59) so a 1440 ("midnight") ceiling behaves as end-of-grid.
+// An unset knob = the hardwired default (schema-documented config-absence
+// default, not a silent data fallback). A combo that reaches the scheduler
+// inverted (floor >= ceiling — pre-guard rows or import payloads) is ignored
+// WHOLESALE: both knobs revert to defaults, never half-applied.
+function dayBoundsFromCfg(cfg) {
+  var prefs = (cfg && cfg.preferences) || {};
+  var floor = (cfg && cfg.schedFloor != null) ? cfg.schedFloor : prefs.schedFloor;
+  var ceiling = (cfg && cfg.schedCeiling != null) ? cfg.schedCeiling : prefs.schedCeiling;
+  var lo = (typeof floor === 'number' && isFinite(floor)) ? Math.max(0, floor) : DAY_START;
+  var hi = (typeof ceiling === 'number' && isFinite(ceiling)) ? Math.min(ceiling, DAY_END) : DAY_END;
+  if (lo >= hi) return { lo: DAY_START, hi: DAY_END };
+  return { lo: lo, hi: hi };
+}
+
+// Intersect every block-derived window with the user's day bounds; windows
+// that fall entirely outside the bounds are dropped. No-op (same object) for
+// default bounds so unset knobs stay byte-identical to pre-999.1223 behavior.
+function clampWindowsToBounds(windowsMap, lo, hi) {
+  if (lo <= DAY_START && hi >= DAY_END) return windowsMap;
+  var out = {};
+  Object.keys(windowsMap).forEach(function(tag) {
+    out[tag] = windowsMap[tag]
+      .map(function(w) { return [Math.max(w[0], lo), Math.min(w[1], hi)]; })
+      .filter(function(w) { return w[0] < w[1]; });
+  });
+  return out;
+}
+
 // effectiveDuration — MOVED to ConstraintSolver (H6 W1). Local binding preserves
 // every call site unchanged; behavior is byte-identical.
 var effectiveDuration = ConstraintSolver.effectiveDuration;
@@ -185,6 +220,7 @@ function buildDates(todayKey, cfg, allTasks) {
 // doesn't pay for 365 days of window computation upfront.
 function extendDatesTo(targetIdx, dates, dayWindows, dayBlocks, dayOcc, dayOccPrefix, dayPlaced, dayPlacements, timeBlocks, cfg) {
   if (dates.length === 0) return;
+  var dayB = dayBoundsFromCfg(cfg);
   var last = dates[dates.length - 1].date;
   while (dates.length <= targetIdx && dates.length < MAX_SEARCH_DAYS) {
     var next = new Date(last);
@@ -201,7 +237,7 @@ function extendDatesTo(targetIdx, dates, dayWindows, dayBlocks, dayOcc, dayOccPr
     dayPlaced[key] = [];
     dayPlacements[key] = [];
     dayBlocks[key] = getBlocksForDate(key, timeBlocks, cfg);
-    dayWindows[key] = buildWindowsFromBlocks(dayBlocks[key]);
+    dayWindows[key] = clampWindowsToBounds(buildWindowsFromBlocks(dayBlocks[key]), dayB.lo, dayB.hi);
     last = next;
   }
 }
@@ -237,6 +273,9 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, _cfg) {
   // Normalize todayKey to ISO form for consistent comparisons — it may arrive
   // as legacy M/D format from test helpers (e.g. '4/3' instead of '2026-04-03').
   var todayIsoKey = dates.length > 0 ? dates[0].key : toKey(todayKey);
+  // Per-user day bounds (999.1223) — clamp time-window flex and all-day
+  // windows the same way the block-derived dayWindows are clamped.
+  var dayB = dayBoundsFromCfg(_cfg);
   // Drop recurring templates (sources); their instances carry placement.
   var pool = allTasks.filter(function(t) { return t.taskType !== 'recurring_template'; });
 
@@ -376,10 +415,12 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, _cfg) {
     if (isWindowMode) {
       var flex = t.timeFlex != null ? t.timeFlex : DEFAULT_TIME_FLEX;
       if (flex > 0 && flex <= 480) {
-        windowLo = Math.max(DAY_START, t.preferredTimeMins - flex);
-        windowHi = Math.min(DAY_END, t.preferredTimeMins + flex);
-        // Preferred time is entirely outside the schedulable day (before DAY_START
-        // or after DAY_END) — the clamped window is inverted (Lo > Hi).
+        windowLo = Math.max(dayB.lo, t.preferredTimeMins - flex);
+        windowHi = Math.min(dayB.hi, t.preferredTimeMins + flex);
+        // Preferred time is entirely outside the schedulable day (before the
+        // day-start bound or after the day-end bound — per-user schedFloor/
+        // schedCeiling, defaulting to DAY_START/DAY_END) — the clamped window
+        // is inverted (Lo > Hi).
         // Fall back to when-tag placement so the task isn't silently unplaced.
         if (windowHi <= windowLo) isWindowMode = false;
         // Window entirely past on today → mark as missed; routed to unplaced only
@@ -545,6 +586,10 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, _cfg) {
       isMissedPreferredTime: isMissedPreferredTime,
       windowLo: windowLo,
       windowHi: windowHi,
+      // Per-user day bounds (999.1223) — consumed by eligibleWindows for the
+      // all-day grid path; defaults to [DAY_START, DAY_END].
+      dayLo: dayB.lo,
+      dayHi: dayB.hi,
       preferredTimeMins: t.preferredTimeMins != null ? t.preferredTimeMins : null,
       travelBefore: travelBefore,
       travelAfter: travelAfter,
@@ -590,7 +635,10 @@ function eligibleWindows(item, dateKey, dayWindows, dayBlocks, relaxWhen) {
     return [[item.anchorMin, item.anchorMin + item.dur]];
   }
   if (item.isAllDay) {
-    return [[DAY_START, DAY_END]];
+    // Per-user day bounds (999.1223); items built outside buildItems (none
+    // today) fall back to the hardwired grid bounds.
+    return [[item.dayLo != null ? item.dayLo : DAY_START,
+             item.dayHi != null ? item.dayHi : DAY_END]];
   }
   // Time-window mode: preferred time ± flex. Overrides the `when` tag unions
   // because the user chose a narrow target window instead of named blocks.
@@ -1742,6 +1790,11 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   // always pass a populated timeBlocks, so this only matters for smoke tests.
   var timeBlocks = cfg.timeBlocks || constants.DEFAULT_TIME_BLOCKS;
 
+  // Per-user day bounds (999.1223): preferences.schedFloor/schedCeiling
+  // narrow every block-derived placement window; unset = hardwired
+  // GRID_START/GRID_END defaults (see dayBoundsFromCfg).
+  var dayB = dayBoundsFromCfg(cfg);
+
   var dayOcc = {};
   var dayOccPrefix = {};
   var dayWindows = {};
@@ -1754,7 +1807,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     dayPlaced[d.key] = [];
     dayPlacements[d.key] = [];
     dayBlocks[d.key] = getBlocksForDate(d.key, timeBlocks, cfg);
-    dayWindows[d.key] = buildWindowsFromBlocks(dayBlocks[d.key]);
+    dayWindows[d.key] = clampWindowsToBounds(buildWindowsFromBlocks(dayBlocks[d.key]), dayB.lo, dayB.hi);
     if (d.isToday && nowMins != null) {
       var nowSlot = Math.ceil(nowMins / 15) * 15;
       for (var pm = 0; pm < nowSlot; pm++) dayOcc[d.key][pm] = true;
@@ -2820,4 +2873,6 @@ module.exports._testOnly = {
   absoluteMin: absoluteMin,
   weatherOk: weatherOk,
   hasWeatherConstraint: hasWeatherConstraint,
+  dayBoundsFromCfg: dayBoundsFromCfg,
+  clampWindowsToBounds: clampWindowsToBounds,
 };

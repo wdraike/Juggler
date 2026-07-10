@@ -183,7 +183,7 @@ The live placement core is **`src/scheduler/unifiedScheduleV2.js`** (2390 lines)
 - **Status:** IMPLEMENTED
 - **Tests:** `tests/scheduler/preferred-time-placement.test.js`, `tests/scheduler/placementModesTimeWindowToReminder.test.js`
 - **Source:** SCHEDULER.md §4a; SCHEDULER-RULES.md §10
-- **Notes:** `windowLo = max(DAY_START, preferredTimeMins - timeFlex)`; DAY_START clamping can pull `winStart` to 06:00 even when `preferredTimeMins` is later — which is exactly why the search must start from `preferredTimeMins`. `time_window` with `preferred_time_mins` outside `GRID_START..GRID_END` → silent fallback to `when`-tag logic (SCHEDULER-RULES.md:89; flagged as needing validation).
+- **Notes:** `windowLo = max(dayStart, preferredTimeMins - timeFlex)` where `dayStart`/`dayEnd` are the per-user day bounds (999.1223: `preferences.schedFloor`/`schedCeiling` in minutes, defaulting to hardwired `DAY_START`/`DAY_END` = 06:00/23:59; see `dayBoundsFromCfg`). Day-start clamping can pull `winStart` earlier than `preferredTimeMins` — which is exactly why the search must start from `preferredTimeMins`. `time_window` with `preferred_time_mins` outside the day bounds → silent fallback to `when`-tag logic (SCHEDULER-RULES.md:89; flagged as needing validation).
 
 ### [PLACE-MODE-TIME_BLOCKS] `time_blocks` — constrained to user `when`-tag windows
 - **Code:** `eligibleWindows:660-663` → `getWhenWindows(item.when, dayWindows[dateKey])` (from `shared/scheduler/timeBlockHelpers.js`). Uses `flexWhen` for retry (`tryPlaceQueued` ladder pass 3).
@@ -193,7 +193,7 @@ The live placement core is **`src/scheduler/unifiedScheduleV2.js`** (2390 lines)
 - **Notes:** `when` column holds only user-defined tag names (`morning`, `lunch`, `evening`, …) post Phase-9 migration. Orphaned when-tag (no matching block) → reassigned to anytime with a warning (UC-16.11).
 
 ### [PLACE-MODE-ALL_DAY] `all_day` — excluded from the minute grid
-- **Code:** `buildItems:263` (`if (pm===ALL_DAY) return;` early return), `:583` (`isAllDay`), `eligibleWindows:649-650` returns `[[DAY_START, DAY_END]]` for the rare grid path.
+- **Code:** `buildItems:263` (`if (pm===ALL_DAY) return;` early return), `:583` (`isAllDay`), `eligibleWindows` returns `[[item.dayLo, item.dayHi]]` (per-user day bounds, 999.1223 — defaults `[[DAY_START, DAY_END]]`) for the rare grid path.
 - **Status:** IMPLEMENTED
 - **Tests:** `tests/scheduler/placementModes.test.js`; cal-sync adapters `tests/cal-sync/0{1,2,3}-adapter-*.test.js`
 - **Source:** SCHEDULER.md §4a; TASK-CONFIGURATION-MATRIX.md:54

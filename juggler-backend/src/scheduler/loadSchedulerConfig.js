@@ -59,6 +59,10 @@ function assembleSchedulerCfg(config, locations) {
     preferences: config.preferences || {},
     splitDefault: config.preferences ? config.preferences.splitDefault : undefined,
     splitMinDefault: config.preferences ? config.preferences.splitMinDefault : undefined,
+    // Per-user scheduler day bounds (999.1223) — minutes since midnight;
+    // undefined = hardwired GRID_START/GRID_END defaults in unifiedScheduleV2.
+    schedFloor: config.preferences ? config.preferences.schedFloor : undefined,
+    schedCeiling: config.preferences ? config.preferences.schedCeiling : undefined,
     locations: locations
   };
 }

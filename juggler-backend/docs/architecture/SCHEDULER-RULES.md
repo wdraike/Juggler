@@ -96,7 +96,7 @@ The following combinations MUST be rejected or prevented:
 | `fixed` + recurring | **UI blocks** (`WhenSection.jsx` shows "not available") | Recurring instances span multiple days; fixed anchoring contradicts recurrence. |
 | `fixed` without date+time | **Backend 400** on create/update | No anchor for immovable placement. |
 | `all_day` with time set | **Backend clears time** on save | All-day tasks have no time-grid presence. |
-| `time_window` with `preferred_time_mins` outside `GRID_START`–`GRID_END` | **Silent fallback** to `when`-tag logic | Inverted window (`windowLo > windowHi`) produces no valid slots. Needs validation. |
+| `time_window` with `preferred_time_mins` outside the day bounds (per-user `schedFloor`/`schedCeiling`, defaulting to `GRID_START`–`GRID_END` — 999.1223) | **Silent fallback** to `when`-tag logic | Inverted window (`windowLo > windowHi`) produces no valid slots. Needs validation. |
 | `reminder` + any scheduling mode section | **UI hides** scheduling controls | Marker checkbox hides entire mode section. |
 | `split=true` + `marker=true` | **UI hides** split controls | Split and marker are mutually exclusive. |
 | `split=true` + `recurring=true` | **UI exposes** split controls for recurring | Scheduler supports it; UI toggle must be visible. Recurring splits are time-boxed (see §6). |
@@ -548,7 +548,7 @@ tasks that were unscheduled due to weather may now have valid slots.
 
 | `when` Value | Windows | Notes |
 |-------------|---------|-------|
-| `""` or `"anytime"` | All blocks → `[[GRID_START, GRID_END]]` | No constraint |
+| `""` or `"anytime"` | All blocks → `[[GRID_START, GRID_END]]` | No `when` constraint. All windows (this row and the tag rows below) are additionally clamped to the per-user day bounds `schedFloor`/`schedCeiling` when set (999.1223). |
 | `"morning"` | Morning block range | Single tag |
 | `"morning,afternoon"` | Morning + afternoon ranges | Multi-tag, deduplicated |
 | `"biz"` (start ≥ 720) | Business blocks + **afternoon alias** | `biz` blocks starting at noon also match `afternoon` |

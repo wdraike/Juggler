@@ -32,10 +32,10 @@ The `preferences` config key stores a JSON object with these fields:
 | `splitDefault` | boolean | false | Whether new tasks default to split mode | CreateTask, BatchCreateTasks, frontend |
 | `splitMinDefault` | number | 15 | Minimum chunk duration (min) for split tasks | Scheduler `runSchedule`, frontend |
 | `gridZoom` | number | 60 | Calendar grid zoom level (px/15min) | Frontend only |
-| `schedFloor` | number | 480 | Day start boundary (minutes from midnight) | Frontend schedule.routes |
-| `schedCeiling` | number | 1380 | Day end boundary (minutes from midnight) | Frontend schedule.routes |
+| `schedFloor` | number | unset (scheduler default 360 = 06:00) | Scheduler day-start bound (minutes from midnight) | Scheduler `unifiedScheduleV2` via `loadSchedulerConfig` (999.1223), frontend |
+| `schedCeiling` | number | unset (scheduler default 1439 = 23:59) | Scheduler day-end bound (minutes from midnight) | Scheduler `unifiedScheduleV2` via `loadSchedulerConfig` (999.1223), frontend |
 | `fontSize` | number | 100 | UI font size percentage | Frontend only |
-| `pullForwardDampening` | boolean | false | Whether to dampen pull-forward rescheduling | Frontend only |
+| ~~`pullForwardDampening`~~ | — | — | REMOVED 999.1223 (dial + schema key dropped; never had a scheduler read) | none |
 | `calCompletedBehavior` | string | 'update' | How completed Juggler tasks sync to calendars | cal-sync controller |
 | `timezoneOverride` | string | null | User's timezone override | Frontend (→ localStorage TZ_OVERRIDE_KEY) |
 
