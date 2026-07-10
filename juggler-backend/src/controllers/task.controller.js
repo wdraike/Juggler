@@ -256,22 +256,6 @@ async function takeOwnership(req, res) {
   }
 }
 
-/**
- * POST /api/tasks/:id/undo — undo the last action on a task (999.681)
- */
-async function undoTask(req, res) {
-  try {
-    var result = await facade.undoTask({
-      id: req.params.id,
-      userId: req.user.id
-    });
-    return sendEnvelope(res, result);
-  } catch (error) {
-    logger.error('Undo task error:', error);
-    res.status(500).json({ error: 'Failed to undo task action' });
-  }
-}
-
 module.exports = {
   // HTTP handlers (thin — delegate to the facade)
   getAllTasks,
@@ -287,7 +271,6 @@ module.exports = {
   searchTasks,
   reEnableTask,
   takeOwnership,
-  undoTask,
 
   // pure-helper re-exports the external consumers import from this controller
   // (sourced from the slice facade → W2 domain — byte-identical). DB-touching

@@ -43,8 +43,5 @@ module.exports = {
   BatchCreateTasks: require('./commands/BatchCreateTasks'),
   BatchUpdateTasks: require('./commands/BatchUpdateTasks'),
   ReEnableTask: require('./commands/ReEnableTask'),
-  TakeOwnership: require('./commands/TakeOwnership'),
-  // undo (999.681)
-  RecordAction: require('./commands/RecordAction'),
-  UndoTask: require('./commands/UndoTask')
+  TakeOwnership: require('./commands/TakeOwnership')
 };

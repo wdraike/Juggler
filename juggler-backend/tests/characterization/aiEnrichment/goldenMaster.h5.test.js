@@ -139,7 +139,6 @@ jest.mock('../../../src/controllers/task.controller', () => ({
   getVersion: (req, res) => res.json({}),
   getDisabledTasks: (req, res) => res.json([]),
   searchTasks: (req, res) => res.json([]),
-  undoTask: (req, res) => res.json({}),
 }));
 
 // 10. Dual-mock src/db and src/lib/db to the same mockDb.

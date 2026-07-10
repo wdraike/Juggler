@@ -137,6 +137,39 @@ describe('useUndo', () => {
     });
   });
 
+  // 999.1227 — delete-undo: pushUndo accepts an optional server-side revert
+  // callback (e.g. un-cancel a soft-cancelled delete); popUndo runs it AFTER
+  // dispatching the client RESTORE, and only for the entry that carried it.
+  it('runs the revert callback on pop, after the RESTORE dispatch', () => {
+    const calls = [];
+    const dispatchPersist = jest.fn(() => calls.push('restore'));
+    const taskStateRef = { current: STATE_A };
+    const { result } = renderHook(() => useUndo(taskStateRef, jest.fn(), dispatchPersist));
+
+    const revert = jest.fn(() => calls.push('revert'));
+    act(() => { result.current.pushUndo('delete task', revert); });
+    act(() => { result.current.popUndo(); });
+
+    expect(revert).toHaveBeenCalledTimes(1);
+    expect(calls).toEqual(['restore', 'revert']); // client state back FIRST, then server un-cancel
+  });
+
+  it('does not run a revert for entries that did not carry one, and ignores non-function reverts', () => {
+    const { result } = setup(STATE_A);
+    const revert = jest.fn();
+
+    act(() => { result.current.pushUndo('delete task', revert); });
+    act(() => { result.current.pushUndo('status change'); });       // no revert
+    act(() => { result.current.pushUndo('weird', 'not-a-function'); });
+
+    act(() => { result.current.popUndo(); });  // 'weird' — non-function ignored
+    act(() => { result.current.popUndo(); });  // 'status change' — no revert
+    expect(revert).not.toHaveBeenCalled();
+
+    act(() => { result.current.popUndo(); });  // 'delete task'
+    expect(revert).toHaveBeenCalledTimes(1);
+  });
+
   it('caps the stack at 30 snapshots, dropping the oldest', () => {
     const { result, taskStateRef } = setup({ tasks: [], statuses: {} });
 

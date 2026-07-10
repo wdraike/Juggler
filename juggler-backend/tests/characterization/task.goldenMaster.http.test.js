@@ -693,11 +693,8 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
       // For done: rolling-master check, no split siblings.
       resolveQueue.push(existing);   // fetchTaskWithEventIds tasks_v
       resolveQueue.push([]);         // ledger
-      // 999.681 undo recording (recordAction → KnexActionLogRepository.record) runs
-      // BEFORE the write (UpdateTaskStatus.js:214). record() does action_log.del()
-      // then action_log.insert() — two queue shifts.
-      resolveQueue.push(1);          // action_log delete (prior entry, single-undo)
-      resolveQueue.push([1]);        // action_log insert
+      // (999.1227: the 999.681 recordAction/action_log pre-write queries were
+      // removed with the orphaned server-side undo subsystem.)
       // rolling-master check
       resolveQueue.push(null);       // task_masters first() (rolling-master)
       // NO siblings: split_total is null
@@ -726,7 +723,7 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
     // (because !existing.scheduled_at), AND applyRollingAnchor's own getMasterById()
     // fires separately afterward (because the guard's null result is falsy, so it
     // does not reuse `preloadedMaster` — facade.js:526-527) — two master-table
-    // reads, not one. recordAction (999.681 undo log) then runs before the write.
+    // reads, not one. (999.1227: recordAction/action_log queries removed.)
     test('B4 + Surface 4: terminal status without scheduled_at → 200, scheduled_at snapped to ~now', async () => {
       const existing = makeTaskRow({
         id: 'task-st-003',
@@ -736,12 +733,10 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
       resolveQueue.push(existing);   // 1. existing fetchTaskWithEventIds tasks_v first()
       resolveQueue.push([]);         // 2. existing fetchTaskWithEventIds ledger select()
       resolveQueue.push(null);       // 3. guard's own loadMaster() task_masters first() — non-rolling
-      resolveQueue.push(1);          // 4. action_log delete (recordAction, prior entry)
-      resolveQueue.push([1]);        // 5. action_log insert (recordAction)
-      resolveQueue.push(null);       // 6. applyRollingAnchor's own getMasterById() — non-rolling
-      resolveQueue.push({ ...existing, status: 'done' }); // 7. post-update fetchTaskWithEventIds tasks_v first()
-      resolveQueue.push([]);         // 8. post-update fetchTaskWithEventIds ledger select()
-      resolveQueue.push([]);         // 9. srcMap tasks_v select() (getRecurringTemplateRows)
+      resolveQueue.push(null);       // 4. applyRollingAnchor's own getMasterById() — non-rolling
+      resolveQueue.push({ ...existing, status: 'done' }); // 5. post-update fetchTaskWithEventIds tasks_v first()
+      resolveQueue.push([]);         // 6. post-update fetchTaskWithEventIds ledger select()
+      resolveQueue.push([]);         // 7. srcMap tasks_v select() (getRecurringTemplateRows)
 
       const before = Date.now();
       const res = await request(app)
@@ -821,8 +816,6 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
       // done path: no rolling-master check, no siblings
       resolveQueue.push(existing);
       resolveQueue.push([]);
-      resolveQueue.push(1);          // action_log delete
-      resolveQueue.push([1]);        // action_log insert
       resolveQueue.push(null);       // rolling-master check
       resolveQueue.push({ ...existing, status: 'done' });
       resolveQueue.push([]);
@@ -839,6 +832,24 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
         'tasks:changed',
         expect.objectContaining({ source: 'api:updateTaskStatus' })
       );
+    });
+  });
+
+  // ── 999.1227: POST /api/tasks/:id/undo REMOVED ─────────────────────────────
+  // The 999.681 server-side undo endpoint had zero callers (frontend, MCP) and
+  // was deleted per David's 2026-07-06 ruling — client snapshot undo
+  // (frontend useUndo.js) is canonical. Pin the removal: the route must 404
+  // and the controller must not export a handler for it.
+  describe('POST /api/tasks/:id/undo (removed, 999.1227)', () => {
+    test('the endpoint no longer exists (404) and the controller has no undoTask export', async () => {
+      const res = await request(app)
+        .post('/api/tasks/task-any/undo')
+        .set('Authorization', `Bearer ${VALID_TOKEN}`)
+        .send({});
+      expect(res.status).toBe(404);
+
+      const taskController = require('../../src/controllers/task.controller');
+      expect(taskController.undoTask).toBeUndefined();
     });
   });
 
@@ -1283,11 +1294,9 @@ describe('Surface 7 — TASK_* event emissions (ADR-0001 lib-events seam)', () =
       scheduled_at: '2026-06-01 14:00:00',
       status: ''
     });
-    // done path: rolling-master check, no siblings, 7 queue items total
+    // done path: rolling-master check, no siblings
     resolveQueue.push(existing);                         // fetchTaskWithEventIds (existing)
     resolveQueue.push([]);                               // ledger (existing)
-    resolveQueue.push(1);                                // action_log delete
-    resolveQueue.push([1]);                              // action_log insert
     resolveQueue.push(null);                             // rolling-master check
     resolveQueue.push({ ...existing, status: 'done' }); // fetchTaskWithEventIds (updated)
     resolveQueue.push([]);                               // ledger (updated)
@@ -1401,11 +1410,9 @@ describe('Surface 8 + S4/S6 — enqueueScheduleRun call shape and S4/S6 isolatio
       scheduled_at: '2026-06-01 14:00:00',
       status: ''
     });
-    // done path: 8 queue items
+    // done path: 6 queue items
     resolveQueue.push(existing);
     resolveQueue.push([]);
-    resolveQueue.push(1);          // action_log delete
-    resolveQueue.push([1]);        // action_log insert
     resolveQueue.push(null);       // rolling-master check
     resolveQueue.push({ ...existing, status: 'done' });
     resolveQueue.push([]);

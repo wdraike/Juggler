@@ -12,9 +12,22 @@ export function useToast() {
   const [toastHistory, setToastHistory] = useState([]);
   const timerRef = useRef(null);
 
-  const showToast = useCallback((msg, type) => {
+  // 999.1227: optional `action` ({ label, onClick }) renders an inline button
+  // on the toast (e.g. "Task deleted — Undo"). Clicking it runs onClick and
+  // dismisses the toast.
+  const showToast = useCallback((msg, type, action) => {
     if (timerRef.current) clearTimeout(timerRef.current);
     var entry = { msg, type: type || "success", ts: Date.now() };
+    if (action && typeof action.onClick === 'function') {
+      entry.action = {
+        label: action.label,
+        onClick: function () {
+          if (timerRef.current) clearTimeout(timerRef.current);
+          setToast(null);
+          action.onClick();
+        }
+      };
+    }
     setToast(entry);
     setToastHistory(prev => {
       var tenMinAgo = Date.now() - 10 * 60 * 1000;
@@ -64,6 +77,19 @@ export default function ToastNotification({ toast, toastHistory, showHistory, on
           marginBottom: showHistory ? 8 : 0, cursor: 'pointer'
         }} onClick={onToggleHistory}>
           {toast.msg}
+          {toast.action && (
+            <button
+              onClick={function (e) { e.stopPropagation(); toast.action.onClick(); }}
+              style={{
+                marginLeft: 12, padding: '2px 10px', borderRadius: 6,
+                fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                background: 'transparent', color: THEME_DARK.text,
+                border: `1px solid ${THEME_DARK.text}`
+              }}
+            >
+              {toast.action.label}
+            </button>
+          )}
         </div>
       )}
       {showHistory && toastHistory.length > 0 && (

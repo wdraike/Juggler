@@ -64,8 +64,7 @@ function UpdateTaskStatus(deps) {
   var required = ['repo', 'cache', 'events', 'enqueueScheduleRun', 'mappers',
     'statusUpdateSchema', 'safeTimezone', 'dateHelpers', 'isTerminalStatus',
     'materializeRcInstance', 'handleTemplatePause', 'loadMaster', 'isRollingMaster',
-    'applyRollingAnchor', 'loadSplitSiblings', 'triggerCalSync', 'reactivateDoneFrozen',
-    'recordAction'];
+    'applyRollingAnchor', 'loadSplitSiblings', 'triggerCalSync', 'reactivateDoneFrozen'];
   assertDeps('UpdateTaskStatus', deps, required);
   this.repo = deps.repo;
   this.cache = deps.cache;
@@ -84,7 +83,6 @@ function UpdateTaskStatus(deps) {
   this.loadSplitSiblings = deps.loadSplitSiblings;
   this.triggerCalSync = deps.triggerCalSync;
   this.reactivateDoneFrozen = deps.reactivateDoneFrozen;
-  this.recordAction = deps.recordAction;
   this.logger = deps.logger || { error: function () {} };
 }
 
@@ -216,10 +214,12 @@ UpdateTaskStatus.prototype.execute = async function execute(input) {
   // already-settled instance is blocked when the instance's `date` is in the
   // past (< today, in the user's own timezone). Same-day reactivation stays
   // allowed. This gate applies ONLY to this explicit-reactivation code path —
-  // client-snapshot undo (UndoTask.js) writes via repo.updateTaskById directly
-  // and never reaches this branch (verified: UndoTask.js does not call
-  // UpdateTaskStatus.execute), so undo is structurally unaffected by design,
-  // with no special-case bypass needed here.
+  // client-snapshot undo (frontend useUndo.js) restores plain field state via
+  // the batch task-save path, not this endpoint. Delete-undo (999.1227)
+  // un-cancels DELIBERATELY through this explicit reactivation branch, so the
+  // terminal guard + reopen date gate stand unweakened (2026-07-06 ruling 7:
+  // undo/reactivation is an explicit un-terminal action). The server-side
+  // 999.681 UndoTask/action_log subsystem was removed (999.1227 — zero callers).
   if (existing && isTerminalStatus(existing.status) && !isTerminalStatus(status)) {
     var _instanceDateKey = existing.date ? String(existing.date).slice(0, 10) : null;
     if (_instanceDateKey) {
@@ -240,25 +240,6 @@ UpdateTaskStatus.prototype.execute = async function execute(input) {
   if ((status === 'cancel' || status === 'skip') && isFutureScheduled && !isIngested) {
     update.scheduled_at = new Date();
   }
-
-  // ── 999.681: Record action for undo BEFORE persisting the change ──
-  var beforeSnapshot = {
-    status: existing.status || '',
-    completed_at: existing.completed_at || null,
-    time_remaining: existing.time_remaining != null ? existing.time_remaining : null
-  };
-  var afterSnapshot = {
-    status: update.status != null ? update.status : existing.status,
-    completed_at: update.completed_at !== undefined ? update.completed_at : (existing.completed_at || null),
-    time_remaining: update.time_remaining !== undefined ? update.time_remaining : (existing.time_remaining != null ? existing.time_remaining : null)
-  };
-  await this.recordAction.execute({
-    taskId: id,
-    userId: userId,
-    actionType: 'status_change',
-    before: beforeSnapshot,
-    after: afterSnapshot
-  });
 
   await this.repo.updateTaskById(id, update, userId);
 

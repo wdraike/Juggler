@@ -14,22 +14,11 @@
  * terminal instance, regardless of how stale its `date` is, can be reactivated by
  * writing status=''. This test's reactivation-blocked case is expected to RED.
  *
- * IMPORTANT DISCOVERY (verified by direct read, NOT assumed — per dispatch
- * instructions "write the test to reveal the truth"): undo
- * (src/slices/task/application/commands/UndoTask.js) does NOT go through
- * UpdateTaskStatus.execute AT ALL. `UndoTask.prototype._undoStatusChange`
- * calls `this.repo.updateTaskById(id, revertUpdate, userId)` DIRECTLY
- * (UndoTask.js:198) — it never touches UpdateTaskStatus.js's terminal-
- * reactivation branch, the zod schema, the rolling-anchor projection, or (once
- * built) the new FR-2 date gate. This means: wiring the FR-2 gate into
- * UpdateTaskStatus.js's reactivation branch (the natural, minimal-diff
- * implementation site) will NOT need any special-case bypass for undo — they
- * are structurally different code paths already, today, before this leg. The
- * "undo unaffected" test below therefore is NOT expected to RED (it already
- * passes) — it is authored as a REGRESSION GUARD proving this architectural
- * fact stays true once grover adds the gate (a future refactor that
- * accidentally routes reactivation-guard logic through a shared helper BOTH
- * paths call would be caught here if it broke undo).
+ * 999.1227: the server-side 999.681 undo subsystem (UndoTask/RecordAction/
+ * action_log) was DELETED — it had zero callers. Undo is the client snapshot
+ * mechanism (frontend useUndo.js), which restores field state via the batch
+ * task-save path and never reaches this gate. The former "DISCOVERY: undo
+ * bypasses UpdateTaskStatus" regression test was removed with the subsystem.
  *
  * Uses the same `facade` direct-call convention as
  * tests/deletetask-scope-instance-characterization.db.test.js.
@@ -80,7 +69,6 @@ async function seedUser() {
 }
 
 async function clearUserTasks() {
-  await db('action_log').where('user_id', USER_ID).del().catch(function () {});
   await db('cal_sync_ledger').where('user_id', USER_ID).del();
   await db('task_instances').where('user_id', USER_ID).del();
   await db('task_masters').where('user_id', USER_ID).del();
@@ -158,31 +146,27 @@ describe('FR-2/AC3 — reopen date gate (blocks stale reactivation) vs undo (una
     expect(row.status).toBe('');
   });
 
-  test('DISCOVERY: undo of a done status_change on a past-dated instance is UNAFFECTED by the FR-2 gate (undo bypasses UpdateTaskStatus entirely)', async function () {
-    var id = 'fr2-undo-' + Date.now();
-    // Seed as OPEN, then transition to done THROUGH the real use-case so
-    // recordAction (999.681) actually logs a status_change entry with a
-    // legitimate before/after snapshot — undo needs a real log row to revert.
-    var now = new Date();
-    await tasksWrite.insertTask(db, {
-      id: id, user_id: USER_ID, task_type: 'task', text: 'FR-2 undo test task',
-      dur: 30, pri: 'P3', recurring: 0, status: '',
-      scheduled_at: new Date(pastDateKey(3) + 'T10:00:00'),
-      created_at: now, updated_at: now
+  // 999.1227 delete-undo round trip: DELETE soft-cancels (R55 — row kept,
+  // status='cancelled'), and the frontend's "Task deleted — Undo" restores it
+  // through the EXPLICIT reactivation path (PUT status '' → UpdateTaskStatus
+  // terminal → non-terminal branch). Same-day: allowed. This is the server half
+  // of the delete-undo contract; the terminal guard stays unweakened.
+  test('999.1227: delete → soft-cancel → explicit un-cancel round trip restores the task', async function () {
+    var id = 'fr2-delundo-' + Date.now();
+    await seedOneOffTerminalTask(id, todayKey(), '');
+    await db('task_instances').where('id', id).update({ completed_at: null });
+
+    var delResult = await facade.deleteTask({ id: id, userId: USER_ID, scope: 'instance' });
+    expect(delResult.status).toBe(200);
+    var cancelled = await db('task_instances').where('id', id).first();
+    expect(cancelled).toBeTruthy();                  // R55: row kept, not hard-deleted
+    expect(cancelled.status).toBe('cancelled');      // soft-cancel
+
+    var undoResult = await facade.updateTaskStatus({
+      id: id, userId: USER_ID, body: { status: '' }, timezoneHeader: 'America/New_York'
     });
-    await db('task_instances').where('id', id).update({ date: pastDateKey(3) });
-
-    var doneResult = await facade.updateTaskStatus({
-      id: id, userId: USER_ID, body: { status: 'done' }, timezoneHeader: 'America/New_York'
-    });
-    expect(doneResult.status).toBe(200);
-
-    // Undo the done -> reverts to '' via UndoTask.js's OWN direct repo write,
-    // never touching UpdateTaskStatus.js's (future) FR-2 gate at all.
-    var undoResult = await facade.undoTask({ id: id, userId: USER_ID });
-
     expect(undoResult.status).toBe(200);
-    var row = await db('task_instances').where('id', id).first();
-    expect(row.status).toBe('');
+    var restored = await db('task_instances').where('id', id).first();
+    expect(restored.status).toBe('');                // back to open
   });
 });

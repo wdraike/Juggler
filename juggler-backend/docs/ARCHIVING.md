@@ -25,8 +25,9 @@ These are the reconciliation gaps — the feature was started (DB enum) but not 
    in it, so an `archived` instance is neither a recognised terminal status nor an explicitly
    scheduled one — its scheduler treatment is undefined-by-omission.
 2. **No archive / restore use-case command.** There is no `ArchiveTask` / `RestoreTask`
-   application command. `UndoTask` handles undo (clears `completed_at`, restores prior status)
-   but is not an archive feature; `UpdateTaskStatus` gates `disabled` items to a re-enable
+   application command. (The former server-side `UndoTask` command was removed in 999.1227 —
+   undo is the client snapshot mechanism and was never an archive feature.)
+   `UpdateTaskStatus` gates `disabled` items to a re-enable
    endpoint — there is no equivalent archive→restore transition path.
 3. **No way to VIEW archived items in the UI.** The view filter dropdown offers
    Open / Action / All / Done / WIP / Overdue / Fixed / Blocked / Unplaced / Paused / Missed —

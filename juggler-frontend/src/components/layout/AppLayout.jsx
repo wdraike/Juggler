@@ -149,11 +149,12 @@ export default function AppLayout() {
     weatherRefreshedRef.current = true;
     kickScheduleRun();
   }, [weatherRefreshed, kickScheduleRun]);
-  var { pushUndo, popUndo } = useUndo(taskStateRef, dispatch, dispatchPersist);
-  // 999.681: single-step undo affordance — pops the most recent action off the
-  // undo stack (same path as Ctrl/Cmd+Z) and toasts the result. The stack lives
-  // in a ref (non-reactive), so the button is always visible and handles the
-  // empty case here rather than relying on a reactive canUndo().
+  var { pushUndo, popUndo, canUndo } = useUndo(taskStateRef, dispatch, dispatchPersist);
+  // Single-step undo affordance — pops the most recent action off the undo
+  // stack (same path as Ctrl/Cmd+Z) and toasts the result. 999.1227: the
+  // HeaderBar button is disabled via canUndo() evaluated per render (every
+  // pushUndo call site also dispatches state, so a render always follows);
+  // the empty-case toast below stays as the Ctrl/Cmd+Z path's feedback.
   var handleUndo = useCallback(function() {
     var label = popUndo();
     if (label) showToast('Undid: ' + label, 'success');
@@ -1249,6 +1250,7 @@ export default function AppLayout() {
           onShowHelp={() => setShowHelp(true)}
           onAddTask={() => { setShowCreateForm(true); setExpandedTasks([]); }}
           onUndo={handleUndo}
+          canUndo={canUndo()}
           isMobile={isMobile}
           isCompact={isCompact}
           onCompactChange={setHeaderCompact}
@@ -1697,13 +1699,34 @@ export default function AppLayout() {
             onConfirm={function() {
               var id = deleteConfirmTask.id;
               var taskText = deleteConfirmTask.text || 'this task';
+              // 999.1227 delete-undo: the server delete is a SOFT-cancel (R55 —
+              // row kept, status='cancelled'), so it is recoverable. Snapshot
+              // BEFORE the delete (same push-before-action pattern as status
+              // changes) with a server-side revert that un-cancels through the
+              // EXPLICIT reactivation path (PUT /tasks/:id/status — the terminal
+              // guard + reopen date gate stand unweakened, 2026-07-06 ruling 7).
+              // Absence from the statuses map means "open", whose canonical wire
+              // value is '' (taskStatusRouteSchema) — not a fallback.
+              var prevStatus = taskStateRef.current.statuses[id];
+              if (prevStatus === undefined) prevStatus = '';
+              pushUndo('delete task', function() {
+                setStatus(id, prevStatus, {
+                  onError: function(msg) {
+                    showToast(msg || 'Undo failed — the task is still deleted on the server', 'error');
+                  }
+                });
+              });
               // deleteTask rethrows on failure (bird-w6-002 fix). 999.1225:
               // surface the server's rejection body (e.g. the deliberate 403
               // INGEST_DELETE_BLOCKED "Calendar-linked tasks cannot be deleted
               // in ingest-only mode..." / PROVIDER_ORIGIN_DELETE_BLOCKED)
               // instead of swallowing it — the task never leaves local state
               // on a failed delete, so the user needs to know why.
-              deleteTask(id).catch(function(error) {
+              deleteTask(id).then(function() {
+                // 999.1227: undoable delete — toast Undo pops the same stack as
+                // Ctrl/Cmd+Z (mobile parity: no keyboard needed).
+                showToast('Task deleted — Undo', 'success', { label: 'Undo', onClick: handleUndo });
+              }).catch(function(error) {
                 var data = error && error.response && error.response.data;
                 var serverMsg = data && data.error;
                 // 999.1240: the provider-origin wall gets an escape hatch —
