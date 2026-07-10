@@ -24,7 +24,7 @@ function formatStartTime(mins) {
   return formatMinsCompact(mins);
 }
 
-export default React.memo(function ScheduleCard({ item, status, onStatusChange, onDelete, onExpand, darkMode, isBlocked, isMobile, layoutMode, cardHeight, weatherDay }) {
+export default React.memo(function ScheduleCard({ item, status, splitProgress, onStatusChange, onDelete, onExpand, darkMode, isBlocked, isMobile, layoutMode, cardHeight, weatherDay }) {
   var theme = getTheme(darkMode);
   var task = item.task;
   var weatherResult = hasWeatherRestrictions(task) ? checkWeatherMatch(task, weatherDay) : null;
@@ -190,6 +190,15 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
         ) : (
           <>
             {onStatusChange && <StatusToggle value={status} onChange={onStatusChange} onDelete={onDelete} darkMode={darkMode} isMobile={isMobile} disableTerminal={!item.task.scheduledAt} />}
+            {/* 999.1220: merged split card — done is chunk-only, so surface
+                per-chunk progress ("1/3 done"); a done tap advances the next
+                incomplete chunk. */}
+            {splitProgress && splitProgress.total > 1 && (
+              <span title={'Split progress — ' + splitProgress.done + ' of ' + splitProgress.total + ' chunks done; the ✓ button completes the next incomplete chunk'}
+                style={{ fontSize: 9, fontWeight: 700, flexShrink: 0, color: theme.badgeText, background: theme.badgeBg, borderRadius: 3, padding: '0 3px' }}>
+                {splitProgress.done + '/' + splitProgress.total + ' done'}
+              </span>
+            )}
             {timeRange && <span style={{ fontSize: 9, fontWeight: 600, color: theme.textMuted }}>{timeRange}</span>}
             <div style={{ flex: 1 }} />
             {typeBadges.length > 0 && (

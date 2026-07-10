@@ -257,8 +257,16 @@ UpdateTaskStatus.prototype.execute = async function execute(input) {
   }
 
   // split-chunk sibling propagation (handler L1816-1826) — same `update` payload.
+  // 999.1220 (David ruling 2026-07-06): done is CHUNK-ONLY, everywhere — a done
+  // write completes only THIS chunk, for one-time AND recurring splits (TS-126
+  // rewritten; the merged card shows progress instead). Reopening a done chunk
+  // (status '') is equally chunk-only, or a single-chunk undo would silently
+  // reopen independently-completed siblings. Non-done statuses (cancel/skip)
+  // keep propagating across the occurrence's siblings — they express intent
+  // about the whole occurrence; terminal guards stand.
   var siblingIds = [];
-  if (Number(existing.split_total) > 1 && existing.source_id != null && existing.occurrence_ordinal != null) {
+  var _chunkOnlyWrite = status === 'done' || (status === '' && existing.status === 'done');
+  if (!_chunkOnlyWrite && Number(existing.split_total) > 1 && existing.source_id != null && existing.occurrence_ordinal != null) {
     var siblings = await this.loadSplitSiblings({
       userId: userId,
       masterId: existing.source_id,

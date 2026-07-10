@@ -8,7 +8,7 @@
  * time-contiguity silently stopped merging any occurrence with mixed
  * chunk history). Tests below reflect splitGroup as the sole grouping key.
  */
-var { coalesceAdjacentSplitChunks } = require('./coalesceSplits');
+var { coalesceAdjacentSplitChunks, statusChangeTargets, splitProgress, mergedCardStatus } = require('./coalesceSplits');
 
 function chunk(id, src, start, dur, splitTotal, splitGroup) {
   return {
@@ -82,5 +82,55 @@ describe('coalesceAdjacentSplitChunks (R56)', () => {
     expect(out.length).toBe(1);
     expect(out[0]._coalescedIds).toEqual(['c1', 'c2', 'c3']);
     expect(out[0]._isMergedSplit).toBe(true);
+  });
+});
+
+// 999.1220 (David ruling 2026-07-06): done is CHUNK-ONLY. A done tap on the
+// merged card targets the NEXT INCOMPLETE chunk; other statuses keep the R56
+// fan-out to every underlying chunk.
+var TERMINAL = { done: true, skip: true, cancel: true, missed: true };
+function isTerminal(s) { return !!TERMINAL[s]; }
+
+describe('statusChangeTargets (999.1220 chunk-only done)', () => {
+  var ids = ['c1', 'c2', 'c3'];
+
+  test('done targets the FIRST incomplete chunk when none are done', () => {
+    expect(statusChangeTargets('done', ids, {}, isTerminal)).toEqual(['c1']);
+  });
+
+  test('done targets the NEXT incomplete chunk, skipping already-terminal ones', () => {
+    expect(statusChangeTargets('done', ids, { c1: 'done' }, isTerminal)).toEqual(['c2']);
+    expect(statusChangeTargets('done', ids, { c1: 'done', c2: 'skip' }, isTerminal)).toEqual(['c3']);
+  });
+
+  test('done on a fully-terminal group targets NOTHING (no accidental re-write)', () => {
+    expect(statusChangeTargets('done', ids, { c1: 'done', c2: 'done', c3: 'done' }, isTerminal)).toEqual([]);
+  });
+
+  test('non-done statuses still fan out to EVERY chunk (skip/cancel apply to the occurrence)', () => {
+    expect(statusChangeTargets('skip', ids, { c1: 'done' }, isTerminal)).toEqual(['c1', 'c2', 'c3']);
+    expect(statusChangeTargets('cancel', ids, {}, isTerminal)).toEqual(['c1', 'c2', 'c3']);
+    expect(statusChangeTargets('', ids, { c1: 'done' }, isTerminal)).toEqual(['c1', 'c2', 'c3']);
+  });
+});
+
+describe('splitProgress (999.1220 merged-card "1/3 done" label)', () => {
+  test('counts done chunks only', () => {
+    expect(splitProgress(['c1', 'c2', 'c3'], { c1: 'done' })).toEqual({ done: 1, total: 3 });
+    expect(splitProgress(['c1', 'c2', 'c3'], { c1: 'done', c2: 'skip' })).toEqual({ done: 1, total: 3 });
+    expect(splitProgress(['c1', 'c2', 'c3'], {})).toEqual({ done: 0, total: 3 });
+    expect(splitProgress(['c1', 'c2'], { c1: 'done', c2: 'done' })).toEqual({ done: 2, total: 2 });
+  });
+});
+
+describe('mergedCardStatus (999.1220)', () => {
+  test('shows the next incomplete chunk\'s status while any chunk is open — card must not strike through on a partial done', () => {
+    expect(mergedCardStatus(['c1', 'c2', 'c3'], { c1: 'done' }, isTerminal)).toBe('');
+    expect(mergedCardStatus(['c1', 'c2', 'c3'], { c1: 'done', c2: 'wip' }, isTerminal)).toBe('wip');
+  });
+
+  test('shows the last chunk\'s terminal status once ALL chunks are settled', () => {
+    expect(mergedCardStatus(['c1', 'c2'], { c1: 'done', c2: 'done' }, isTerminal)).toBe('done');
+    expect(mergedCardStatus(['c1', 'c2'], { c1: 'done', c2: 'skip' }, isTerminal)).toBe('skip');
   });
 });

@@ -646,7 +646,7 @@ TS-122 Recurring split — cycle-capped (flexible TPC) — within cycle
 TS-123 Recurring split — time-boxed to recurrence interval
 TS-124 Recurring split — recurring_split_overflow when chunks don't fit
 TS-125 Recurring split — drift fix at scheduler start
-TS-126 Split + status change — all chunks in occurrence_ordinal get same status
+TS-126 Split + status change — done is CHUNK-ONLY (completes only the tapped chunk, one-time AND recurring; 999.1220 ruling 2026-07-06); non-done statuses (skip/cancel) propagate to all chunks in occurrence_ordinal; merged card shows progress ("1/3 done") and a done tap targets the next incomplete chunk
 ```
 
 #### 3.4.3 Split × Placement Mode Interaction
@@ -708,7 +708,7 @@ TS-126ae Split + travel + location change → travel time between locations resp
 #### 3.4.8 Split × Status Change Edge Cases
 
 ```
-TS-126af Mark one chunk done → all chunks in same occurrence_ordinal get same status
+TS-126af Mark one chunk done → ONLY that chunk done; siblings untouched (chunk-only, 999.1220 ruling 2026-07-06 — one-time AND recurring; undo of a done chunk is equally chunk-only)
 TS-126ag Mark one chunk skip → all chunks in same occurrence_ordinal get skip
 TS-126ah Mark one chunk cancel → all chunks in same occurrence_ordinal get cancel
 TS-126ai Mixed statuses across different occurrence_ordinals → independent

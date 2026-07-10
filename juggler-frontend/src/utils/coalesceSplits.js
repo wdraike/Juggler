@@ -63,4 +63,41 @@ function coalesceAdjacentSplitChunks(placements) {
   return passthrough.concat(merged).sort(function (a, b) { return a.start - b.start; });
 }
 
-module.exports = { coalesceAdjacentSplitChunks: coalesceAdjacentSplitChunks };
+/**
+ * 999.1220 (2026-07-06 ruling): done is CHUNK-ONLY. Given a merged block's
+ * chunk ids (ordinal order) and the status map, return the ids a status
+ * change on the merged card should hit:
+ *   - 'done' → [next incomplete chunk] (first non-terminal), or [] when every
+ *     chunk is already terminal;
+ *   - anything else → all ids (R56 fan-out unchanged: cancel/skip apply to
+ *     the whole occurrence).
+ */
+function statusChangeTargets(val, ids, statuses, isTerminal) {
+  if (val !== 'done') return ids.slice();
+  var next = ids.find(function (id) { return !isTerminal(statuses[id] || ''); });
+  return next ? [next] : [];
+}
+
+/** Per-chunk progress for the merged card label ("1/3 done"). */
+function splitProgress(ids, statuses) {
+  var done = ids.filter(function (id) { return statuses[id] === 'done'; }).length;
+  return { done: done, total: ids.length };
+}
+
+/**
+ * Status the merged card displays (and its StatusToggle acts on): the next
+ * incomplete chunk's status, or the last chunk's status once every chunk is
+ * terminal — so the card only strikes through when the whole occurrence is
+ * settled, and a done tap always advances the next incomplete chunk.
+ */
+function mergedCardStatus(ids, statuses, isTerminal) {
+  var next = ids.find(function (id) { return !isTerminal(statuses[id] || ''); });
+  return next != null ? (statuses[next] || '') : (statuses[ids[ids.length - 1]] || '');
+}
+
+module.exports = {
+  coalesceAdjacentSplitChunks: coalesceAdjacentSplitChunks,
+  statusChangeTargets: statusChangeTargets,
+  splitProgress: splitProgress,
+  mergedCardStatus: mergedCardStatus
+};

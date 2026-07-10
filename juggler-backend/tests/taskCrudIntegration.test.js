@@ -624,13 +624,18 @@ describe('updateTaskStatus', () => {
     expect(res2.statusCode).toBe(400);
   });
 
-  test('split-chunk siblings receive the same status update', async () => {
+  test('done on one split chunk does NOT touch siblings (chunk-only, 999.1220)', async () => {
     if (!available) return;
     var crypto = require('crypto');
     // Simulate a recurring master with 2 split chunks on the same date. We
     // create the rows directly (bypassing createTask) so the test exercises
-    // updateTaskStatus's sibling-propagation path without going through the
+    // updateTaskStatus's sibling-propagation gate without going through the
     // full recurring expansion pipeline.
+    //
+    // 999.1220 (David ruling 2026-07-06): done = THIS chunk only, everywhere.
+    // The old propagate-to-all expectation (siblingsUpdated 1, chunk 2 done)
+    // is REVERSED — non-done statuses (skip/cancel) still propagate; see
+    // tests/scheduler/splitStatusPropagation.test.js for the full matrix.
     //
     // NOTE: action_log.task_id is VARCHAR(36). Using a full UUID (36 chars)
     // as masterId and appending '-20260416' would exceed that limit (45 chars).
@@ -663,11 +668,11 @@ describe('updateTaskStatus', () => {
     var res = mockRes();
     await controller.updateTaskStatus(req, res);
     expect(res._json.task.status).toBe('done');
-    expect(res._json.siblingsUpdated).toBe(1);
+    expect(res._json.siblingsUpdated).toBe(0); // done is chunk-only
 
-    // Chunk 2 should now also be 'done'.
+    // Chunk 2 must be UNTOUCHED.
     var chunk2Row = await db('task_instances').where({ id: chunk2Id }).first();
-    expect(chunk2Row.status).toBe('done');
+    expect(chunk2Row.status).toBe('');
   });
 });
 

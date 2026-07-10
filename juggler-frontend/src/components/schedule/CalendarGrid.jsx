@@ -20,7 +20,7 @@ import { formatMinsAmPm } from '../../utils/timezone';
 import { getTheme } from '../../theme/colors';
 import { resolveLocationId } from '../../scheduler/locationHelpers';
 import { isAllDayTask } from '../../utils/isAllDayTask';
-import { coalesceAdjacentSplitChunks } from '../../utils/coalesceSplits';
+import { coalesceAdjacentSplitChunks, statusChangeTargets, splitProgress, mergedCardStatus } from '../../utils/coalesceSplits';
 import { getBlocksForDate } from '../../scheduler/timeBlockHelpers';
 import ScheduleCard from './ScheduleCard';
 
@@ -631,11 +631,18 @@ export default function CalendarGrid({
                 }}>
                   <ScheduleCard
                     item={e.item}
-                    status={statuses[e.item.task.id] || ''}
+                    status={(e.item._coalescedIds && e.item._coalescedIds.length > 1)
+                      ? mergedCardStatus(e.item._coalescedIds, statuses, isTerminalStatus)
+                      : (statuses[e.item.task.id] || '')}
+                    splitProgress={(e.item._coalescedIds && e.item._coalescedIds.length > 1)
+                      ? splitProgress(e.item._coalescedIds, statuses) : null}
                     onStatusChange={function(val) {
-                      // R56: a status change on a merged split block fans out to every underlying chunk.
+                      // R56 fan-out, EXCEPT done (999.1220 ruling): done is chunk-only —
+                      // a done tap lands on the NEXT INCOMPLETE chunk of the merged
+                      // block; other statuses still fan out to every underlying chunk.
                       var ids = (e.item._coalescedIds && e.item._coalescedIds.length > 1) ? e.item._coalescedIds : [e.item.task.id];
-                      ids.forEach(function(cid) { onStatusChange(cid, val); });
+                      statusChangeTargets(val, ids, statuses, isTerminalStatus)
+                        .forEach(function(cid) { onStatusChange(cid, val); });
                     }}
                 onDelete={onDelete ? function() {
                       var ids = (e.item._coalescedIds && e.item._coalescedIds.length > 1) ? e.item._coalescedIds : [e.item.task.id];
