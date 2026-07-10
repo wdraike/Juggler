@@ -1,12 +1,12 @@
 ---
 type: design
 service: juggler
-status: active
-last_updated: 2026-06-12
+status: superseded
+last_updated: 2026-07-09
 tags:
   - type/design
   - service/juggler
-  - status/active
+  - status/superseded
   - scheduler
   - task-management
   - recurrence
@@ -14,10 +14,23 @@ tags:
 
 # Scheduler — Design & Test Cases
 
-**Last Updated:** 2026-06-12
+**Last Updated:** 2026-06-12 (marked superseded 2026-07-09, 999.1219)
 
 ## Status
-**Current design.** Single source of truth for the scheduler placement algorithm and its test coverage. Consolidates the earlier `SCHEDULER-PRIORITY-REDESIGN.md`, `SCHEDULER-DEPENDENCY-REDESIGN.md`, and `SCHEDULER-TEST-CASES.md` drafts.
+> ## ⚠️ SUPERSEDED — do not use as a source of truth (999.1219, 2026-07-09)
+> This doc teaches the dead v1 "Phase 0–5" placement model, **including the Phase-5 force-place
+> rescue that the juggy4 ruling removed** (overdue recurring/split tasks are NEVER grid force-placed;
+> they route unplaced → `unscheduled=1`, pinned to deadline date, overdue computed on read). Its §4c-5
+> chain-rollback pass was confirmed dropped-by-design (ruling D8, 2026-06-23).
+>
+> Current sources of truth: `juggler-backend/docs/SCHEDULER-SPEC.md` (authoritative consolidated
+> spec) and `SCHEDULER-RULES.md` §3.1 (7-phase placement). Requirement wording:
+> `juggler/docs/REQUIREMENTS.md`. This file was ruled STALE by SCHEDULER-SPEC.md's reconciliation
+> map; its siblings got `status: superseded` in the sched-audit L1 sweep and this one was missed.
+>
+> Historical content below is retained unedited.
+
+**Former status:** "Current design. Single source of truth" for the scheduler placement algorithm and its test coverage. Consolidates the earlier `SCHEDULER-PRIORITY-REDESIGN.md`, `SCHEDULER-DEPENDENCY-REDESIGN.md`, and `SCHEDULER-TEST-CASES.md` drafts.
 
 ## Code structure (hexagonal slice)
 

@@ -477,14 +477,19 @@ Weather conditions are in the **same tier** as `when` tags and `location`/`tools
 A task with `weather_precip: 'dry_only'` will **never** be placed in a slot where
 `precipitation_probability > 20%`.
 
-### 9.3 Missing Weather Data — Fail-Open
+### 9.3 Missing Weather Data — Fail-CLOSED
+
+> Reconciled 2026-07-09 (999.1080): this section previously described fail-OPEN behavior; the code
+> is fail-CLOSED for weather-constrained tasks (ruling D3, fix 999.546 — `weatherOk` in
+> `unifiedScheduleV2.js` returns `false` on missing per-date and per-hour data; pinned by
+> `tests/scheduler/weatherFailOpen.test.js` and reconciled in SCHEDULER-SPEC.md `[PLACE-WEATHER]`).
 
 | Scenario | Behavior | Rationale |
 |----------|----------|-----------|
-| No weather cache for location (no coordinates) | **Fail-open** — constraint skipped for that slot | Location may be indoors; weather should not block |
-| Cache miss (stale/expired) | **Fail-open** for that slot; fresh fetch triggered for next run | Avoids blocking all placement on a cache miss |
-| Weather API down | **Fail-open** — empty map returned | Degraded mode, not a hard failure |
-| Task has no weather constraints | **Short-circuit** — `hasWeatherConstraint()` returns false | Zero overhead for common case |
+| No weather data for the slot's date | **Fail-closed** — `weatherOk` returns `false`; slot not chosen | A weather-constrained task must never be placed on unverified conditions (R11.10/R38.1) |
+| No weather data for the slot's hour (cache miss/stale) | **Fail-closed** for that slot; a slot with known-good data (or none at all remaining) wins; task held unplaced if no slot qualifies | Same hard-constraint tier as `when`/`location`/`tools` |
+| Weather API down (empty map) | **Fail-closed** — every slot lacks data, so the constrained task is held unplaced with a weather reason | Degraded mode must not silently place a constrained task |
+| Task has no weather constraints | **Short-circuit** — `hasWeatherConstraint()` returns false; weather never consulted | Zero overhead for common case; unconstrained tasks are unaffected by outages |
 
 ### 9.4 Detection Parity Risk
 

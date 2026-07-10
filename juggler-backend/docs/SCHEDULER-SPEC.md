@@ -1,7 +1,17 @@
 # Juggler Scheduler — Authoritative Specification
 
-**Status:** DRAFT for review/lock · **Built:** 2026-06-23 · **Reconciled against:** juggler `main` tip
-`505a09b` + WIP branch `leg/juggler-overdue-reschedule` `60835fe` + brain + the existing doc fragments.
+**Status:** LOCKED · **Built:** 2026-06-23 · **Re-reconciled:** 2026-07-09 against juggler `main`
+`340e7488` (999.1219 docs sweep). Originally reconciled against `505a09b` + WIP branch
+`leg/juggler-overdue-reschedule` `60835fe`; that WIP has since **landed** (forward-roll on main), and
+W2 / juggy4 / M-5 have **shipped** — the "planned/not-built" rows below are annotated accordingly.
+Per-line code cites may lag the code; symbol names are authoritative over line numbers.
+
+**Reconciliation delta (2026-07-09)** — shipped SSOT changes this spec now assumes:
+`parseDbUtc` (scheduler `dateHelpers.js`) is the SSOT for bare DB timestamps; `ANCHOR_PROJECTION_STATUSES`
+(`lib/rolling-anchor.js`) gates rolling-anchor projection (incl. `missed`); `computeRecurringDeadlineKey`
+lives in `shared/scheduler/missedHelpers.js` (the ruled SSOT — consumed by `runSchedule.js`); scheduler
+config loads via `loadSchedulerConfig`; canonical view definitions are the SSOT in `src/db/views/`
+(never hand-copy a view def); backend depends on the `juggler-shared` package.
 
 ## Purpose
 The single source of truth for what the juggler scheduler is supposed to do — placement, recurring
@@ -21,8 +31,8 @@ where a fragment disagrees with the code, the **code + this doc win** and the fr
 | **THIS doc + SECTION A–F** | Authoritative consolidated spec (single source of truth) |
 | `juggler-backend/docs/architecture/SCHEDULER-RULES.md` | Canonical per-rule detail (§3 placement, §5–6 recurring) — current, keep |
 | `juggler-backend/docs/architecture/SCHEDULER-OVERDUE-LADDER.md` | Canonical overdue-ladder detail — keep |
-| `juggler-backend/docs/SCHEDULER.md` | **STALE** — teaches a dead v1 "Phase 0–5" model; superseded by SCHEDULER-RULES.md §3.1 7-phase. Annotate/retire. |
-| `SCHEDULER-TRACEABILITY-REPORT.md`, `MISSING-REQUIREMENTS-AND-TESTS-REPORT.md`, `TRACEABILITY-AUDIT-CURRENT.md` | Requirement IDs (R11/R32/R33/R34/R50…) + test-gap source. No formal `REQUIREMENTS.md` exists — R-numbers live here + in code comments. |
+| `juggler-backend/docs/architecture/SCHEDULER.md` | **SUPERSEDED** (frontmatter marked 2026-07-09, 999.1219) — teaches a dead v1 "Phase 0–5" model incl. the Phase-5 force-place rescue that juggy4 removed; superseded by SCHEDULER-RULES.md §3.1 7-phase. |
+| `SCHEDULER-TRACEABILITY-REPORT.md`, `MISSING-REQUIREMENTS-AND-TESTS-REPORT.md`, `TRACEABILITY-AUDIT-CURRENT.md` | Historical requirement-ID + test-gap sources. **Precedence update (2026-07-09):** the formal register is `juggler/docs/REQUIREMENTS.md` — a full R-number register with per-requirement Code + Tests traceability; it takes precedence for requirement wording, and these reports defer to it. |
 | `RECURRING-SPACING-DESIGN.md`, `TASK-STATE-MATRIX.md`, `TASK-CONFIGURATION-MATRIX.md`, `TASK-PROPERTIES.md` | Supporting design — mostly current; specific drifts flagged in §B. |
 
 ## Status dashboard (reconciled vs code)
@@ -31,19 +41,19 @@ where a fragment disagrees with the code, the **code + this doc win** and the fr
 | A — Placement engine | 23 | 22 | 1 | — | 3 doc-drift gaps (weather fail-open row RESOLVED 2026-07-02 — was already fail-closed in code, doc was stale; see [PLACE-WEATHER]) |
 | B — Recurring lifecycle | 24 | ~20 | ~2 | master/instance UPSERT redesign | 1 (delete-instance) + doc drift (missed-status retired 2026-06-24, docs reconciled) |
 | C — Overdue / forward-roll | 16 | 14 (main — OVD-1/2/3 gated, R50.6-windowclose resolved 999.1085/999.1062) | 2 | 999.801 reconcile | 0 — the prior CONTRADICTION (`R50.6-windowclose`) is RESOLVED (preferred_time_mins fix on main); the prior "3 WIP-ungated + 1 BLOCK on `60835fe`" is CLOSED, see §C SUMMARY |
-| D — Persistence / read model | 21 | 18 | 2 (slack_mins, W4 cache) | W2 partition (NOT built) | 1 (slack_mins dropped) |
+| D — Persistence / read model | 21 | 18 | 2 (slack_mins, W4 cache) | — (W2 partition SHIPPED — juggy4 2026-07-02, see DBSS-20 + `tests/scheduler/w2-partition.test.js`) | 1 (slack_mins dropped) |
 | E — Calendar sync coupling | 19 | 16 | 1 | — | 1 known-bug (split-part) + contention |
-| F — In-flight / gaps | inventory | — | — | W2, W4, L4, 999.801 | ~25 untested sub-reqs |
+| F — In-flight / gaps | inventory | — | — | W4, L4, 999.801 (W2 shipped) | ~25 untested sub-reqs |
 
 ## ✅ LOCKED DECISIONS (David, 2026-06-23)
 | # | Topic | Ruling |
 |---|-------|--------|
-| D4+D5 | Foundation sequencing | **Build W2 foundation FIRST** (overdue↔unscheduled partition + FIXED anchor + preserve-prior-placement), THEN forward-roll/effective-deadline overdue on top (fold in WIP `60835fe`). |
-| D1 | "missed" rule | **RESOLVED (2026-06-24).** `status='missed'` retired entirely — auto-miss removed, `missed` dropped from status enum + terminal set. Legacy `isTaskMissed`/`shouldAutoMarkMissed` in `missedHelpers.js` are dead code (no live caller). Period-boundary `computeRecurringDeadline` remains as the deadline helper. |
+| D4+D5 | Foundation sequencing | **Build W2 foundation FIRST** (overdue↔unscheduled partition + FIXED anchor + preserve-prior-placement), THEN forward-roll/effective-deadline overdue on top (fold in WIP `60835fe`). *(DONE — both shipped on main: W2/juggy4 2026-07-02, forward-roll landed; see DBSS-20 + §C.)* |
+| D1 | "missed" rule | **SUPERSEDED (2026-07-06 ruling).** The 2026-06-24 retirement was reversed: `status='missed'` is REINSTATED as a backend-set terminal status — cancelled + missed are BOTH terminal, reactivation is an explicit un-terminal action (resolves 999.844). Recurring deadline = cycle buckets via `computeRecurringDeadlineKey` in `shared/scheduler/missedHelpers.js` (the ruled SSOT, consumed by `runSchedule.js`); `ANCHOR_PROJECTION_STATUSES` (`lib/rolling-anchor.js`) includes `missed`. Frontend renders `missed` with its own glyph (`state/constants.js` STATUS_DESCRIPTORS, 999.1231). |
 | D2 | Delete one occurrence | **Soft-skip** (`status='skip'`, keep tombstone). Fix `DeleteTask.js` instance scope to match spec+test. |
 | D3 | Weather lookup fails | **Fail-closed** — hold the task unplaced. Fix code to match R11.10/R38.1. |
 | D7 | `slack_mins` | **Persist it** + dampen rewrite-churn (write only on meaningful change). |
-| D6 | Split-part sync + cache | **Fix, HIGH priority** — persist per-split-part rows → cal-sync pushes 1 event/chunk → remove `schedule_cache` write (W4). One leg. |
+| D6 | Split-part sync + cache | **Fix, HIGH priority** — persist per-split-part rows → cal-sync syncs per-chunk → remove `schedule_cache` write (W4). One leg. **Shipped shape (2026-07-09 note):** DB rows stay one-per-chunk (binding split ruling 999.841 — never merged/deleted), but cal-sync's `mergeContiguousSplitChunks` (`cal-sync.controller.js:414`, asserted by test 17-sync-split) merges *contiguous* chunks into one calendar event — the calendar is a display surface, not the persistence model. The original "1 event per chunk" wording describes the pre-merge design, not a violated invariant. |
 | D8 | Chain-rollback pass | **Confirmed dropped** — keep place-what-fits/rest-unplaced; delete the stale rollback doc. |
 
 ### Locked work sequence
@@ -58,7 +68,10 @@ Each step: spec the behavior precisely → encode in tests → run → fix to gr
 These are where code/docs/designs disagree, or where a load-bearing piece is unbuilt. Each needs a
 ruling before the scheduler is internally consistent.
 
-- **D1 — Dual "missed" logic (§B) — RESOLVED 2026-06-24.** `status='missed'` was retired entirely
+- **D1 — Dual "missed" logic (§B) — RESOLVED 2026-06-24; SUPERSEDED 2026-07-06.** The retirement
+  described below was later reversed: David's 2026-07-06 ruling reinstated `missed` as a backend-set
+  terminal status (cancelled + missed BOTH terminal; see the D1 row in LOCKED DECISIONS above for the
+  current state). Historical detail of the 2026-06-24 retirement: `status='missed'` was retired entirely
   (auto-miss removed by David's ruling "there should not be any auto-miss feature"; migration
   `20260628100000_remove_missed_from_status_constraints.js` dropped it from the CHECK constraints).
   `shared/scheduler/missedHelpers.js` still ships the canonical period-boundary
@@ -81,10 +94,10 @@ ruling before the scheduler is internally consistent.
   overdue reconcile — auto-missed component retired 2026-06-24).
   reconcile) and **DB-single-source W2**. → **Decision:** finish + fold into this spec as one coherent
   requirement (recommended), don't ship the partial.
-- **D5 — W2 partition NOT BUILT (§D/§F) — load-bearing.** The deadline-based OVERDUE↔UNSCHEDULED
-  partition + FIXED-anchor + preserve-prior-placement (DB-single-source W2) is the core scheduler change
-  the overdue work depends on, and it is **not built**. → **Decision:** sequence W2 before/with the
-  forward-roll fix.
+- **D5 — W2 partition (§D/§F) — RESOLVED: SHIPPED (juggy4, 2026-07-02).** The deadline-based
+  OVERDUE↔UNSCHEDULED partition + FIXED-anchor + preserve-prior-placement (DB-single-source W2) was
+  built and shipped with the juggy4 leg — see DBSS-20 in §D SUMMARY and
+  `tests/scheduler/w2-partition.test.js`. The "not built" framing below the fold is historical.
 - **D6 — W4 `schedule_cache` + split-part sync (§D/§E).** `schedule_cache` write still has ONE reader
   (cal-sync); full removal blocked on persisting per-split-part placements as first-class rows — the
   same gap that makes **split-part calendar sync a KNOWN-BUG (CAL-16, `reconcileSplitsForUser`
@@ -92,14 +105,17 @@ ruling before the scheduler is internally consistent.
   drop the cache).
 - **D7 — slack_mins dropped on persist (§D).** Materialized + computed + read, but the batched persist
   silently drops it → read consumers see stale/NULL slack. → **Decision:** persist it or stop reading it.
-- **D8 — chain-rollback pass (§A).** SCHEDULER.md §4c-5 documents a reverse-topological chain-rollback
-  pass that does not appear to exist in v2. → **Decision:** confirm dropped-by-design or restore.
+- **D8 — chain-rollback pass (§A) — RESOLVED.** SCHEDULER.md §4c-5 documents a reverse-topological
+  chain-rollback pass that does not exist in v2. → **Decision (D8, 2026-06-23): confirmed
+  dropped-by-design** — keep place-what-fits/rest-unplaced; the stale rollback doc is retired
+  (architecture/SCHEDULER.md is now `status: superseded`). GAP-5's "needs confirmation" note in §A is
+  answered by this ruling.
 
 ## Planned / not-built roadmap (consolidated — so nothing is orphaned)
 | Item | Source | Status | Note |
 |------|--------|--------|------|
-| Recurring forward-roll + effective-deadline overdue | leg `60835fe` (this session) | **WIP, ungated** | finish D4; biggest unmerged payload — don't lose it |
-| DB-single-source **W2** (overdue↔unplaceable partition, FIXED anchor, preserve-prior) | ARCH-DB-SINGLE-SOURCE | **NOT BUILT** | load-bearing (D5) |
+| Recurring forward-roll + effective-deadline overdue | leg `60835fe` (this session) | **LANDED on main** | D4 finished — see §C dashboard row ("3 WIP-ungated + 1 BLOCK" CLOSED); pinned by `roamable-recurring-forward-roll.test.js` + `rolling-past-due-forward-roll.test.js` |
+| DB-single-source **W2** (overdue↔unplaceable partition, FIXED anchor, preserve-prior) | ARCH-DB-SINGLE-SOURCE | **SHIPPED (juggy4, 2026-07-02)** | see DBSS-20 + `w2-partition.test.js` |
 | DB-single-source **W4** (remove `schedule_cache` write) | ARCH-DB-SINGLE-SOURCE | **PARTIAL/blocked** | needs per-split-part persistence (D6) |
 | **999.801** recurrence-period implied-due + R32.4 overdue reconcile (auto-miss retired 2026-06-24) | overdue-lifecycle design | **partial** | overlaps `60835fe` |
 | Split-part calendar sync (`reconcileSplitsForUser` wiring) | §E CAL-16 | **KNOWN-BUG** | couples to W4 (D6) |
@@ -363,13 +379,13 @@ The live placement core is **`src/scheduler/unifiedScheduleV2.js`** (2390 lines)
 
 1. **GAP-1 (CONTRADICTION C2) — two incompatible "phase" models.** `SCHEDULER.md` (architecture) still teaches a v1 "Phase 0–5" model where Phases 3–5 are per-priority free-task fills. The **live v2** code is a single slack-sorted pass whose "phases" (SCHEDULER-RULES.md §3.1, the authoritative table) are **Phase 0 Immovables / 1 Queue / 2 Retry / 3 Missed-preferred-time / 4 Missed-window / 5 Past-anchored / 6 Rigid-forced / 7 Deadline-relaxed** — i.e. post-loop rescue passes, a completely different decomposition. Officially flagged as contradiction C2 ("SCHEDULER.md's phase table is a design reference, not current behavior"), but SCHEDULER.md itself is **not annotated** with that warning at the point of use, so a reader of SCHEDULER.md alone will get the wrong model. **Action: annotate SCHEDULER.md §4 or supersede it.**
 
-2. **GAP-2 — R11.x has no requirement-spec home.** The R11 family (R11.5 7-phase proof, R11.6 4-level ladder, R11.10 weather, R11.16 unplaced-reason, R11.17 floor/ceiling) exists **only** in `SCHEDULER-TRACEABILITY-REPORT.md` and in code comments — there is no `REQUIREMENTS.md` defining them. The spec being authored here is effectively the first consolidated R11 placement spec.
+2. **GAP-2 — R11.x has no requirement-spec home — CLOSED (2026-07-09 sweep).** This gap described the state at authoring time. The R11 family now has a formal home: `juggler/docs/REQUIREMENTS.md` is a full R-number register (R11.1–R11.22 among ~200+ implemented rows, each with Code + Tests traceability) and takes precedence for requirement wording; `SCHEDULER-TRACEABILITY-REPORT.md` is historical.
 
 3. **GAP-3 — the "4-level" ladder is really 5-level in code.** `tryPlaceQueued` (`unifiedScheduleV2.js:1352-1356`) has a 5th `preferLatestSlot + relaxWhen` rescue rung beyond the documented normal→overdue→flexWhen→both. Undocumented in SCHEDULER-RULES.md §3.2.
 
 4. **GAP-4 — pervasive doc line-number drift.** SCHEDULER-RULES.md §3.2 cites `unifiedScheduleV2.js:1037-1079` for `tryPlaceQueued` (actual `:1308-1361`); §3.1 cites `:1172-1778`; SCHEDULER.md cites `computeDepReadyAbs` at `:788`/`:923`/`:1066` (actual `:894`). The file is now 2390 lines; most doc line cites are stale. **Action: re-anchor citations or switch to symbol-based references.**
 
-5. **GAP-5 / GAP-6 — test coverage holes on P1 placement behaviors.** SCHEDULER-TRACEABILITY-REPORT.md lists **no dedicated test** for R11.5 (7-phase proof), R11.6 (4-level ladder), R19.4–R19.7 + R35.3/R35.5/R35.6 (split-chunk rules), R40.1–R40.3 (flexWhen flag/ladder/`_flexWhenRelaxed`), and R11.17 (floor/ceiling). The single-pass algorithm itself is well covered by golden-master + scenario suites, but the **ladder and split paths rely on indirect coverage**. Separately, SCHEDULER.md §4c-5 documents a **chain-rollback (reverse-topological re-place)** routine that is **not clearly present** as a distinct pass in v2 (only the dep-retry pass at `:2131` and deadline-relaxed pass at `:2336` are visible) — needs confirmation whether rollback was dropped in the v1→v2 rewrite.
+5. **GAP-5 / GAP-6 — test coverage holes on P1 placement behaviors.** SCHEDULER-TRACEABILITY-REPORT.md lists **no dedicated test** for R11.5 (7-phase proof), R11.6 (4-level ladder), R19.4–R19.7 + R35.3/R35.5/R35.6 (split-chunk rules), R40.1–R40.3 (flexWhen flag/ladder/`_flexWhenRelaxed`), and R11.17 (floor/ceiling). The single-pass algorithm itself is well covered by golden-master + scenario suites, but the **ladder and split paths rely on indirect coverage**. Separately, SCHEDULER.md §4c-5 documents a **chain-rollback (reverse-topological re-place)** routine that is **not clearly present** as a distinct pass in v2 (only the dep-retry pass at `:2131` and deadline-relaxed pass at `:2336` are visible) — CONFIRMED dropped-by-design per ruling D8 (2026-06-23): keep place-what-fits/rest-unplaced; no rollback pass exists or is planned.
 
 ### Code behaviors NOT documented (or under-documented)
 

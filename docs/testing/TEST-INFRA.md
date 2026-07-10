@@ -229,6 +229,12 @@ REDIS_PORT=6379
 REDIS_URL=redis://redis-test:6379
 ```
 
+> ⚠️ **Container-internal ONLY.** `DB_PORT=3306` is the port *inside* the Docker network
+> (`mysql-test` maps host `127.0.0.1:3407` → container `3306`). A host-run process (direct `jest`,
+> a local `.env`) must use `DB_PORT=3407` (test-bed). Never copy this block into a host `.env`:
+> nothing on the host listens on 3306, and mis-pointing at 3307 (Cloud SQL Proxy) or 3308 (dev-bed)
+> hits a real database — bare jest against 3308 wipes the dev DB.
+
 ## Test Data Management
 
 ### Factory Pattern

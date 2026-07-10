@@ -20,7 +20,7 @@
 - Playwright via `@playwright/test`
 - Config: `juggler/playwright.config.js`
 - Only Chromium project configured; headless, viewport 1280x800
-- Base URL: `http://localhost:3001` (env var `FRONTEND_URL` overrides)
+- Base URL: `https://juggler.test.raike.local:8443` (env vars `PLAYWRIGHT_BASE_URL` / `FRONTEND_URL` override — see `playwright.config.js:15`; nothing serves on localhost:3001 — the juggler frontend dev port is 3002)
 
 **Assertion Library:**
 - Jest built-in `expect` throughout backend

@@ -277,8 +277,9 @@ juggler/                         # Git submodule root
 - Committed: No — worktree metadata only
 
 **`.planning/`:**
-- Purpose: GSD planning documents (phases, codebase maps, quick fixes, debug notes)
-- Generated: By GSD tooling
+- Purpose: Planning documents (codebase maps, quick fixes, debug notes, session handoffs)
+- Generated: By hand / by planning sessions. (Formerly by GSD tooling — GSD was fully uninstalled
+  2026-07-02; do not invoke `gsd-*` skills. The directory remains as plain planning docs.)
 - Committed: Yes
 
 ---

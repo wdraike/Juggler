@@ -82,7 +82,7 @@
 
 **Environment:**
 - Backend reads from `.env` via `dotenv` at startup (`juggler-backend/.env` — gitignored)
-- `.env.test` used for integration test suite (requires test MySQL on port 3307, populated from `juggler-backend/.env.test.example`)
+- `.env.test` used for integration test suite (requires test-bed MySQL on port **3407** — tmpfs, `test-bed/` in the superrepo; populated from `juggler-backend/.env.test.example`. NEVER 3307 — that port is reserved for the GCP Cloud SQL Proxy / production DB)
 - Frontend uses runtime `proxy-config.js` for service URL resolution — detects localhost / `.localdev.raikegroup.com` / `.raikegroup.com` automatically (no REACT_APP_ env vars needed at build time in most cases)
 
 **Key Backend Env Vars:**
@@ -137,12 +137,12 @@ ADMIN_EMAILS                # Comma-separated admin email list
 
 ## Database
 
-**Engine:** MySQL 8 (development: local 127.0.0.1:3306; production: GCP Cloud SQL via Unix socket)
+**Engine:** MySQL 8 (development: dev-bed Docker MySQL on 127.0.0.1:**3308** — `dev-bed/` in the superrepo; production: GCP Cloud SQL via Unix socket / Cloud SQL Proxy on 3307. Nothing local listens on 3306; never run local MySQL on 3307)
 **ORM/Builder:** Knex 3.1
 **Charset:** `utf8mb4`, timezone `+00:00`, `dateStrings: true`
 **Pool:** dev min 2 / max 10; production min 2 / max 20
 **Migration directory:** `juggler-backend/src/db/migrations/` (~60+ migrations from 2026-03 onward)
-**Test database:** separate `juggler_test` DB on port 3308 (Docker Compose: `juggler-backend/docker-compose.test.yml`)
+**Test database:** separate `juggler_test` DB on port **3407** (superrepo `test-bed/docker-compose.test.yml` — tmpfs, wiped on `make down`; 3308 is the persistent dev-bed. Running jest against 3308 wipes the dev DB — use 3407)
 
 **Collation rule:** All new migration tables must specify `COLLATE utf8mb4_unicode_ci` explicitly — MySQL 8 defaults to `utf8mb4_0900_ai_ci` which silently breaks JOINs against older tables.
 
