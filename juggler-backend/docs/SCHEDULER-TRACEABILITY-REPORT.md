@@ -16,7 +16,11 @@ This report is no longer a hand-maintained requirement×test matrix. The live, m
 2. **`juggler-backend/tests/scheduler/`** — the live suite directory (58 suites at regeneration
    time; scheduler-adjacent suites also live outside it, e.g. `tests/rowToTaskOverdue.test.js`,
    `tests/unit/mappers/overdue-pastdue-recurring.test.js`, `tests/db/migrations/*`).
-3. **`.planning/coverage/`** (superrepo) — the requirement/use-case coverage tracking system.
+3. **`juggler/docs/TRACEABILITY-MATRIX.md`** — the generated service-wide requirement→test matrix
+   (999.1213). Regenerate with `node scripts/generate-traceability.js` (from `juggler/`); it verifies
+   every Tests-column reference in REQUIREMENTS.md against the live filesystem and flags stale refs
+   (`--check` exits 1 on rot). Replaces the former superrepo `.planning/coverage/` system, which no
+   longer exists.
 
 Anything load-bearing should be checked against those, not against any generated snapshot.
 

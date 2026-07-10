@@ -153,6 +153,12 @@ jest.mock('../src/lib/tasks-write', function() {
 jest.mock('../src/scheduler/scheduleQueue', function() {
   return { enqueueScheduleRun: jest.fn() };
 });
+// 999.1198 seam: the facade enqueues via scheduleTrigger, which the REAL
+// scheduleQueue self-registers into at load. Mocking scheduleQueue suppresses
+// that registration, so wire the mock into the seam explicitly.
+require('../src/scheduler/scheduleTrigger').registerScheduleTrigger(
+  require('../src/scheduler/scheduleQueue').enqueueScheduleRun
+);
 
 jest.mock('../src/lib/task-write-queue', function() {
   return {

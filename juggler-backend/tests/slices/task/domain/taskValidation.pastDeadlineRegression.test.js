@@ -91,7 +91,12 @@ describe('validateTaskInput — creation-time past-deadline plausibility (BUG-5 
     });
 
     afterEach(() => {
-      process.env.TZ = originalTz;
+      // 999.1206: when TZ was originally UNSET, `process.env.TZ = undefined`
+      // assigns the literal string "undefined" (an invalid TZ) — poisoning
+      // every suite that runs after this one in the same jest worker (Date
+      // formatting silently degrades to UTC/GMT). Delete instead of assign.
+      if (originalTz === undefined) delete process.env.TZ;
+      else process.env.TZ = originalTz;
       jest.useRealTimers();
     });
 

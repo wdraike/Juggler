@@ -25,7 +25,14 @@ jest.mock('../../../src/lib/sync-lock', function() { return {
   withLock: jest.fn(function(_, fn) { return fn(); }),
   isLocked: jest.fn(function() { return false; }),
 }; });
-jest.mock('../../../src/lib/task-write-queue', function() { return { flushQueueInLock: jest.fn() }; });
+// isLocked required since 999.1198 top-leveled the facade's task-write-queue require
+// (facade.js:91 reads it at load to build command deps).
+jest.mock('../../../src/lib/task-write-queue', function() { return {
+  flushQueueInLock: jest.fn(),
+  isLocked: jest.fn(function() { return false; }),
+  enqueueWrite: jest.fn(),
+  splitFields: jest.fn(function() { return { taskFields: {}, templateFields: {} }; })
+}; });
 
 // Mock the DB module so srcDb doesn't try to connect
 jest.mock('../../../src/db', function() {
@@ -55,6 +62,12 @@ jest.mock('../../../src/db', function() {
 
 // Mock task.controller.fetchTasksWithEventIds
 var mockFetchTasks = jest.fn();
+// 999.1192: calendar facade now gets fetchTasksWithEventIds from the task
+// facade (controller is a re-export shim) — route that import to the same mock.
+jest.mock('../../../src/slices/task/facade', function() {
+  var actual = jest.requireActual('../../../src/slices/task/facade');
+  return Object.assign({}, actual, { fetchTasksWithEventIds: mockFetchTasks });
+});
 jest.mock('../../../src/controllers/task.controller', function() {
   return {
     fetchTasksWithEventIds: mockFetchTasks,

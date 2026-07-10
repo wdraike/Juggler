@@ -14,6 +14,16 @@ npm run lint && npm test              # Quality gate
 # Start services individually from juggler-backend/ and juggler-frontend/
 npm run migrate                       # knex migrate:latest (prod-guarded — see below)
 npm run migrate:rollback              # knex migrate:rollback (prod-guarded)
+npm run test:coverage:unit            # (juggler-backend/) coverage on the mock-based no-DB
+                                      # subset — no test-bed needed; emits coverage/lcov.info
+                                      # + coverage-summary.json and prints the baseline %.
+                                      # DB-backed suites are excluded (TEST-FR-001 fail-loud);
+                                      # full-suite coverage still comes from test-bed runs.
+                                      # Selector/denylist: scripts/coverage-unit.js (999.1206)
+node ../scripts/generate-traceability.js   # (from juggler/: scripts/generate-traceability.js)
+                                      # regenerate docs/TRACEABILITY-MATRIX.md from
+                                      # REQUIREMENTS.md Tests columns, verified against the
+                                      # live filesystem; --check exits 1 on stale refs (999.1213)
 ```
 
 **Production migrate guard (999.302):** `migrate` and `migrate:rollback` run through

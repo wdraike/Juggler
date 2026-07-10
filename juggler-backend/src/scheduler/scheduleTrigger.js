@@ -51,7 +51,10 @@ function enqueueScheduleRun(userId, source, options) {
       + '(scheduler/scheduleQueue was never loaded) userId=' + userId + ' source=' + (source || 'unknown'));
     return Promise.resolve();
   }
-  return _enqueueScheduleRun(userId, source, options);
+  // Forward with the caller's exact arity — a fixed 3-arg call would append
+  // `undefined` for callers that pass (userId, source), changing the observable
+  // call shape (and breaking arity-sensitive spies/wrappers).
+  return _enqueueScheduleRun.apply(null, arguments);
 }
 
 module.exports = {
