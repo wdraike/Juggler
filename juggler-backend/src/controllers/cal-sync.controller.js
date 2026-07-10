@@ -10,7 +10,11 @@
 
 var crypto = require('crypto');
 const getDb = () => require('../db');
-var tasksWrite = require('../lib/tasks-write');
+// 999.1199: lib/tasks-write is internal to slices/task/adapters (eslint
+// boundary) now — obtained via the task slice facade's exported
+// KnexTaskRepository class instead of a direct require (see the write-phase
+// transaction below).
+var { KnexTaskRepository } = require('../slices/task/facade');
 var { getConnectedAdapters } = require('../slices/calendar/facade');
 var calendarFacade = require('../slices/calendar/facade');
 var { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
@@ -2087,6 +2091,14 @@ async function sync(req, res) {
 
     await getDb().transaction(async function(trx) {
       var now = getDb().fn.now();
+      // 999.1199: lib/tasks-write is internal to slices/task/adapters (eslint
+      // boundary) now. `taskRepo` is a transaction-token wrapper — a
+      // KnexTaskRepository constructed over this SAME trx — whose `.tasksWrite`
+      // property is the raw passthrough. Kept as raw passthrough (not the
+      // P1-asserting port methods) because `now` here is a Knex `fn.now()` raw
+      // (MySQL server clock), not a JS Date — exactly what the W4 golden
+      // masters pin bit-for-bit; the strict port would reject it outright.
+      var taskRepo = new KnexTaskRepository({ db: trx });
 
       // 1. Task inserts (new tasks from provider events) — bulk insert
       if (taskInserts.length > 0) {
@@ -2094,7 +2106,7 @@ async function sync(req, res) {
           taskInserts[wi].created_at = now;
           taskInserts[wi].updated_at = now;
         }
-        await tasksWrite.insertTasksBatch(trx, taskInserts);
+        await taskRepo.tasksWrite.insertTasksBatch(trx, taskInserts);
       }
 
       // 2. Task updates (event IDs, field changes from provider)
@@ -2110,7 +2122,7 @@ async function sync(req, res) {
       for (var wm = 0; wm < mergedIds.length; wm++) {
         var mid = mergedIds[wm];
         mergedTaskUpdates[mid].updated_at = now;
-        await tasksWrite.updateTaskById(trx, mid, mergedTaskUpdates[mid], userId);
+        await taskRepo.tasksWrite.updateTaskById(trx, mid, mergedTaskUpdates[mid], userId);
       }
 
       // 3. Task deletes (remote-deleted events past miss threshold)
@@ -2119,11 +2131,11 @@ async function sync(req, res) {
         // Transfer dependencies first
         for (var wdt = 0; wdt < del.dependencyTransfers.length; wdt++) {
           var dt = del.dependencyTransfers[wdt];
-          await tasksWrite.updateTaskById(trx, dt.id, {
+          await taskRepo.tasksWrite.updateTaskById(trx, dt.id, {
             depends_on: dt.newDepsJson, updated_at: now
           }, userId);
         }
-        await tasksWrite.deleteTaskById(trx, del.id, userId);
+        await taskRepo.tasksWrite.deleteTaskById(trx, del.id, userId);
       }
 
       // 4. Ledger updates — group rows with identical field sets so they execute as

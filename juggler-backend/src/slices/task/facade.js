@@ -91,7 +91,14 @@ var taskWriteQueue = require('../../lib/task-write-queue');
 var isLocked = taskWriteQueue.isLocked;
 var enqueueWrite = taskWriteQueue.enqueueWrite;
 var splitFields = taskWriteQueue.splitFields;
-var tasksWrite = require('../../lib/tasks-write');
+// 999.1199: lib/tasks-write is now internal to slices/task/adapters (eslint
+// boundary). The two non-transactional write call sites below that used to
+// require() it directly now go through `_repo` (the module's own
+// KnexTaskRepository instance, defined further down) instead. The many
+// in-transaction `ctx.trxRepo.tasksWrite.X(...)` call sites elsewhere in this
+// file are unaffected — they already obtain the module via the repo's own
+// `.tasksWrite` property (not a require()), the documented T-TX pass-through
+// pattern this facade has used since W3/W6.
 var { PLACEMENT_MODES } = require('../../lib/placementModes');
 var { isTerminalStatus } = require('../../lib/task-status');
 var { isRollingMaster, computeRollingAnchor, ANCHOR_PROJECTION_STATUSES } = require('../../lib/rolling-anchor');
@@ -781,7 +788,11 @@ async function handleTemplatePause(ctx) {
 
       // Cascade pause status to the instances (matching the billing downgrade pattern
       // that sets status='disabled' on instances via tasksWrite.updateInstancesWhere).
-      await tasksWrite.updateInstancesWhere(getDb(), userId, function (q) {
+      // 999.1199: raw passthrough via _repo.tasksWrite (NOT the P1-asserting port
+      // method) — preserves the exact no-updated_at-write behavior byte-identical
+      // (the strict port's withTimestamp() would inject a new updated_at write
+      // that this call site never had).
+      await _repo.tasksWrite.updateInstancesWhere(_repo.db, userId, function (q) {
         return q.whereIn('id', pausedIds);
       }, { status: 'pause' });
     }
@@ -801,7 +812,8 @@ async function handleTemplatePause(ctx) {
     var unpausedIds = pausedInstances.map(function (i) { return i.id; });
 
     if (unpausedIds.length > 0) {
-      await tasksWrite.updateInstancesWhere(getDb(), userId, function (q) {
+      // 999.1199: raw passthrough — see the pause-cascade comment above.
+      await _repo.tasksWrite.updateInstancesWhere(_repo.db, userId, function (q) {
         return q.whereIn('id', unpausedIds);
       }, { status: '' });
     }

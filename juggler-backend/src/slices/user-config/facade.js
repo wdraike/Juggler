@@ -78,7 +78,19 @@ var SCHED_KEYS = require('./application/commands/UpdateConfig').SCHED_KEYS;
 // ── infra seams the use-cases inject (the SAME modules the legacy files used) ──
 var libDb = require('../../lib/db');
 var { cache } = require('../../lib/cache');
-var tasksWrite = require('../../lib/tasks-write');
+// 999.1199: lib/tasks-write is internal to slices/task/adapters (eslint
+// boundary) now. The cross-slice task-table collaborators below (renameTasks/
+// importWipeTasks/importInsertTask) get the write module via the task slice
+// facade's exported KnexTaskRepository class instead of requiring the raw
+// module directly. Required at MODULE SCOPE (not lazily inside the functions,
+// unlike the enforceDowngradeLimits seam below) — task/facade.js does not
+// require this file, so there is no load-order cycle to avoid, and a top-level
+// require here keeps these collaborators evaluated at the same load-time point
+// the legacy `require('lib/tasks-write')` was (load-order-sensitive test doubles
+// — e.g. facade.bugfix.regression.test.js's jest.isolateModules — mock the
+// module graph only during that synchronous load; a lazy require deferred to
+// call time would miss the mock).
+var TaskKnexTaskRepository = require('../task/facade').KnexTaskRepository;
 var dateHelpers = require('../../scheduler/dateHelpers');
 var localToUtc = dateHelpers.localToUtc;
 var toDateISO = dateHelpers.toDateISO;
@@ -136,9 +148,18 @@ function reverseGeocode(lat, lon) {
 }
 
 // UpdateProject cross-table task-project rename (config.controller.js:273-277).
-// Runs inside the SAME transaction via trxRepo.db (the knex trx handle).
+// Runs inside the SAME transaction via trxRepo.db (the knex trx handle), wrapped
+// as a task-slice "transaction token" (999.1199 — KnexTaskRepository constructed
+// over the config repo's own trx instead of a raw require('lib/tasks-write')).
+// Raw passthrough via `.tasksWrite` (NOT the P1-asserting port method): this call
+// site is DELIBERATELY pinned to the MySQL SERVER clock (`trxRepo.db.fn.now()`),
+// not the app clock — see the B2 regression test
+// (tests/slices/user-config/adapters/facade.bugfix.regression.test.js) for the
+// prior bugfix this preserves. The strict port's P1 new-Date() stamp would
+// silently revert that fix, so it is intentionally NOT used here.
 function renameTasks(trxRepo, userId, oldName, name) {
-  return tasksWrite.updateTasksWhere(trxRepo.db, userId, function (q) {
+  var taskRepo = new TaskKnexTaskRepository({ db: trxRepo.db });
+  return taskRepo.tasksWrite.updateTasksWhere(trxRepo.db, userId, function (q) {
     return q.where('project', oldName);
   }, { project: name, updated_at: trxRepo.db.fn.now() });
 }
@@ -159,11 +180,14 @@ function exportRowToTask(row, tz) {
 }
 
 // ImportData task collaborators (data.controller.js:75, :128-131, :77-126).
+// 999.1199: same transaction-token + raw-passthrough wrapping as renameTasks above.
 function importWipeTasks(trxRepo, userId) {
-  return tasksWrite.deleteTasksWhere(trxRepo.db, userId, function (q) { return q; });
+  var taskRepo = new TaskKnexTaskRepository({ db: trxRepo.db });
+  return taskRepo.tasksWrite.deleteTasksWhere(trxRepo.db, userId, function (q) { return q; });
 }
 function importInsertTask(trxRepo, row) {
-  return tasksWrite.insertTask(trxRepo.db, row);
+  var taskRepo = new TaskKnexTaskRepository({ db: trxRepo.db });
+  return taskRepo.tasksWrite.insertTask(trxRepo.db, row);
 }
 // MergeImportData task-id read (two-mode import / W2) — the EXISTING task ids for
 // the user, read within the merge transaction. task_masters.id is the canonical id
@@ -465,6 +489,12 @@ var _gateFeature = new app.GateFeature({
 // entity-limits.js gates
 var _enforceEntityLimit = new app.EnforceEntityLimit({ repo: _repo, logger: logger });
 
+// feature-events.routes.js GET / (999.1196) — the route has no other db-mock
+// coupling to preserve (unlike my-plan's entity-limits/db composition-root
+// seam), so this one is wired into the DEFAULT singleton like the rest of the
+// facade's use-cases.
+var _getFeatureEventsReport = new app.GetFeatureEventsReport({ db: getDb() });
+
 // ─────────────────────────────────────────────────────────────────────────────
 // FACADE OPERATIONS — one per handler/gate; each returns { status, body }
 // (or { status: null } for an allow→next gate).
@@ -620,6 +650,9 @@ function enforceLocationLimit(ctx, incomingCount) { return _enforceEntityLimit.c
 function enforceTaskOrRecurringLimit(ctx, taskType) { return _enforceEntityLimit.checkTaskOrRecurring(ctx, taskType); }
 function enforceBatchTaskLimits(ctx, items) { return _enforceEntityLimit.checkBatch(ctx, items); }
 
+// ── feature-events.routes.js (999.1196) ──────────────────────────────────────
+function getFeatureEventsReport(input) { return _getFeatureEventsReport.execute(input); }
+
 // ── entity-limits.js count* passthroughs (999.1188 delta-closure) ────────────
 // Same wired _repo instance the EnforceEntityLimit use-case counts through —
 // ONE query source for plan-limit enforcement and my-plan display. Preserves
@@ -680,6 +713,7 @@ module.exports = {
   countProjects: countProjects,
   countLocations: countLocations,
   countScheduleTemplates: countScheduleTemplates,
+  getFeatureEventsReport: getFeatureEventsReport,
 
   // domain ports + adapter implementations (named exports; mirror task/weather)
   ConfigRepositoryPort: ConfigRepositoryPort,
@@ -693,6 +727,11 @@ module.exports = {
   // root (it wires its own db handle), so it needs the CLASS via the facade —
   // the boundary rule forbids importing slices/user-config/application directly.
   ProvisionUserOnFirstLogin: app.ProvisionUserOnFirstLogin,
+  // same idiom (999.1196): my-plan.routes.js is the composition root — it wires
+  // GetMyPlan with its OWN db/entity-limits/payment-service collaborators so
+  // its existing unit-test mock seams (middleware/entity-limits, lib/db) keep
+  // intercepting the exact same calls.
+  GetMyPlan: app.GetMyPlan,
   PaymentServiceEntitlementAdapter: PaymentServiceEntitlementAdapter,
   MockEntitlementAdapter: MockEntitlementAdapter,
 

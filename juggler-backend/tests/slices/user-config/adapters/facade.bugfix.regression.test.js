@@ -170,11 +170,24 @@ describe('B1 — REGRESSION (real facade): plan-catalog cache split-brain after 
         };
         return { cache: s };
       });
+      // 999.1199: textually IDENTICAL to the B2 block's mock (including the
+      // capturedChanges-recording body, even though this test never asserts on
+      // it) — kept identical across all three describe blocks in this file.
+      // jest's mock factory registration for a given path was observed to be
+      // sticky to the FIRST-registered factory across sequential
+      // jest.isolateModules calls within one test file (a divergent shape in an
+      // earlier block silently wins for later blocks too), so all three must
+      // agree byte-for-byte on every mocked path they share.
       jest.mock('../../../../src/lib/tasks-write', function () {
         return {
-          updateTasksWhere: jest.fn(function () { return Promise.resolve(1); }),
+          updateTasksWhere: jest.fn(function (db, userId, applyWhere, changes) {
+            mockSharedState.capturedChanges = changes;
+            return Promise.resolve(1);
+          }),
           deleteTasksWhere: jest.fn(function () { return Promise.resolve(1); }),
-          insertTask: jest.fn(function () { return Promise.resolve(); })
+          insertTask: jest.fn(function () { return Promise.resolve(); }),
+          updateTaskById: jest.fn(function () { return Promise.resolve(1); }),
+          deleteTaskById: jest.fn(function () { return Promise.resolve(1); })
         };
       });
       jest.mock('../../../../src/lib/usage-reporter', function () {
@@ -216,8 +229,18 @@ describe('B1 — REGRESSION (real facade): plan-catalog cache split-brain after 
       });
       // 999.994: enforceDowngradeLimits now lives in the task slice facade,
       // not controllers/billing-webhooks.controller.
+      // 999.1199: renameTasks now resolves lib/tasks-write via the task slice
+      // facade's exported KnexTaskRepository class. Kept IDENTICAL across all
+      // three describe blocks in this file (B1/B1-downgrade/B2) — jest's mock
+      // factory registration for a given path was observed to be sticky to the
+      // FIRST-registered factory across sequential jest.isolateModules calls
+      // within one test file, so a divergent shape in an earlier block silently
+      // wins for later blocks too.
       jest.mock('../../../../src/slices/task/facade', function () {
-        return { enforceDowngradeLimits: jest.fn(function () { return Promise.resolve(); }) };
+        return {
+          enforceDowngradeLimits: jest.fn(function () { return Promise.resolve(); }),
+          KnexTaskRepository: require('../../../../src/slices/task/adapters/KnexTaskRepository')
+        };
       });
       jest.mock('../../../../src/slices/user-config/domain/featureCatalog', function () {
         // 999.1192: the facade reads CATALOG from its own domain module now.
@@ -301,11 +324,24 @@ describe('B1 — REGRESSION (real facade): plan-catalog cache split-brain after 
         };
         return { cache: s };
       });
+      // 999.1199: textually IDENTICAL to the B2 block's mock (including the
+      // capturedChanges-recording body, even though this test never asserts on
+      // it) — kept identical across all three describe blocks in this file.
+      // jest's mock factory registration for a given path was observed to be
+      // sticky to the FIRST-registered factory across sequential
+      // jest.isolateModules calls within one test file (a divergent shape in an
+      // earlier block silently wins for later blocks too), so all three must
+      // agree byte-for-byte on every mocked path they share.
       jest.mock('../../../../src/lib/tasks-write', function () {
         return {
-          updateTasksWhere: jest.fn(function () { return Promise.resolve(1); }),
+          updateTasksWhere: jest.fn(function (db, userId, applyWhere, changes) {
+            mockSharedState.capturedChanges = changes;
+            return Promise.resolve(1);
+          }),
           deleteTasksWhere: jest.fn(function () { return Promise.resolve(1); }),
-          insertTask: jest.fn(function () { return Promise.resolve(); })
+          insertTask: jest.fn(function () { return Promise.resolve(); }),
+          updateTaskById: jest.fn(function () { return Promise.resolve(1); }),
+          deleteTaskById: jest.fn(function () { return Promise.resolve(1); })
         };
       });
       jest.mock('../../../../src/lib/usage-reporter', function () {
@@ -339,9 +375,13 @@ describe('B1 — REGRESSION (real facade): plan-catalog cache split-brain after 
         return { requireFeature: jest.fn(), requireFeatureIncludes: jest.fn(), checkUsageLimit: jest.fn() };
       });
       // 999.994: enforceDowngradeLimits now lives in the task slice facade,
-      // not controllers/billing-webhooks.controller.
+      // not controllers/billing-webhooks.controller. 999.1199: kept identical
+      // to the B1/B2 blocks' 'slices/task/facade' mock — see the comment there.
       jest.mock('../../../../src/slices/task/facade', function () {
-        return { enforceDowngradeLimits: jest.fn(function () { return Promise.resolve(); }) };
+        return {
+          enforceDowngradeLimits: jest.fn(function () { return Promise.resolve(); }),
+          KnexTaskRepository: require('../../../../src/slices/task/adapters/KnexTaskRepository')
+        };
       });
       jest.mock('../../../../src/slices/user-config/domain/featureCatalog', function () {
         // 999.1192: the facade reads CATALOG from its own domain module now.
@@ -489,8 +529,18 @@ describe('B2 — REGRESSION (real facade): renameTasks passes updated_at as knex
       });
       // 999.994: enforceDowngradeLimits now lives in the task slice facade,
       // not controllers/billing-webhooks.controller.
+      // 999.1199: renameTasks/importWipeTasks/importInsertTask now resolve
+      // lib/tasks-write via the task slice facade's exported KnexTaskRepository
+      // class (not a direct require), so the mock must expose the REAL adapter
+      // class here too — it picks up the already-mocked
+      // '../../../../src/lib/tasks-write' below through its own require() (same
+      // module-registry instance under jest.isolateModules), preserving any spy
+      // on tasksWrite's methods.
       jest.mock('../../../../src/slices/task/facade', function () {
-        return { enforceDowngradeLimits: jest.fn(function () { return Promise.resolve(); }) };
+        return {
+          enforceDowngradeLimits: jest.fn(function () { return Promise.resolve(); }),
+          KnexTaskRepository: require('../../../../src/slices/task/adapters/KnexTaskRepository')
+        };
       });
       jest.mock('../../../../src/slices/user-config/domain/featureCatalog', function () {
         // 999.1192: the facade reads CATALOG from its own domain module now.

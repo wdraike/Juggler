@@ -12,5 +12,8 @@
 'use strict';
 
 module.exports = {
-  RunScheduleCommand: require('./RunScheduleCommand')
+  RunScheduleCommand: require('./RunScheduleCommand'),
+  // 999.1196: route-logic extraction (schedule.routes.js -> scheduler facade).
+  RunSchedulerDebug: require('./RunSchedulerDebug'),
+  GetStepperSessionOwner: require('./GetStepperSessionOwner')
 };

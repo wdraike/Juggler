@@ -5,7 +5,10 @@
 const { z } = require('zod');
 const safeStringify = require('../safeStringify');
 const db = require('../../db');
-const tasksWrite = require('../../lib/tasks-write');
+// 999.1199: lib/tasks-write is internal to slices/task/adapters (eslint
+// boundary). The project-rename cross-table write below gets it via the task
+// slice facade's exported KnexTaskRepository class instead.
+const { KnexTaskRepository } = require('../../slices/task/facade');
 // Single source of truth for schedule-affecting keys and the updateConfig facade
 // operation — imported from the slice facade (the sanctioned public entry point,
 // JUG-HEX-H4/W6) so the MCP tool routes through the same path as the REST
@@ -138,8 +141,14 @@ function registerConfigTools(server, userId) {
       await db.transaction(async (trx) => {
         await trx('projects').where({ id, user_id: userId }).update(updates);
         if (name && existing.name !== name) {
-          // Project is a master-level field; helper routes accordingly
-          await tasksWrite.updateTasksWhere(trx, userId, function(q) {
+          // Project is a master-level field; helper routes accordingly. 999.1199:
+          // routed through the task slice's KnexTaskRepository (constructed over
+          // this same trx as a transaction token) instead of a raw tasksWrite
+          // require. Raw passthrough via `.tasksWrite` (not the P1-asserting port
+          // method) keeps `updated_at: db.fn.now()` byte-identical to the prior
+          // direct-require call.
+          var taskRepo = new KnexTaskRepository({ db: trx });
+          await taskRepo.tasksWrite.updateTasksWhere(trx, userId, function(q) {
             return q.where('project', existing.name);
           }, { project: name, updated_at: db.fn.now() });
           renamed = { from: existing.name, to: name };

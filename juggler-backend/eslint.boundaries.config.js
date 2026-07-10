@@ -50,6 +50,27 @@ function restriction(name, subpath, label, ref, tail) {
 const TAIL_PLAIN = '.';
 const TAIL_PORT = '. Ports are consumed only by adapters and the facade.';
 
+// Non-slice boundary: lib/tasks-write.js (999.1199). The master/instance
+// write module is internal to the task slice's Knex adapter — external
+// writers use the task slice facade's exported KnexTaskRepository class
+// (`require('./slices/task/facade').KnexTaskRepository`), constructed over
+// their own db/trx handle as a lightweight "transaction token", instead of
+// requiring the raw module directly. Not slice-shaped (lib/, not
+// slices/<name>/<subpath>/), so it is a standalone selector rather than a
+// SLICES() entry. Enforced everywhere EXCEPT slices/task/adapters/** (which
+// already gets no-restricted-syntax turned off by the task slice's own
+// adapters exemption below) and every other slice's adapters/** directories
+// (pre-existing broad exemptions, not widened by this rule).
+const TASKS_WRITE_RESTRICTION = {
+  selector:
+    "CallExpression[callee.name='require'] > Literal[value=/(^|\\/)tasks-write$/]",
+  message:
+    'Direct import of lib/tasks-write is forbidden outside slices/task/adapters. ' +
+    "Use the task slice facade's KnexTaskRepository instead: " +
+    "require('./slices/task/facade').KnexTaskRepository (construct with " +
+    '{ db: trxOrDb } as a transaction token). See 999.1199.'
+};
+
 // Map a slice descriptor to its array of selector objects.
 function sliceRules(slice) {
   return slice.restrictions.map((r) =>
@@ -219,7 +240,8 @@ module.exports = [
       // user-config; within each slice the restrictions array order is kept.
       'no-restricted-syntax': [
         'error',
-        ...SLICES.flatMap(sliceRules)
+        ...SLICES.flatMap(sliceRules),
+        TASKS_WRITE_RESTRICTION
       ]
     }
   },

@@ -35,6 +35,8 @@
  *   entity-limits     check* middleware  → commands/EnforceEntityLimit
  *   billing-webhooks  handleWebhook      → commands/HandleBillingWebhook
  *   jwt-auth          resolve-or-provision → commands/ProvisionUserOnFirstLogin (999.1197)
+ *   my-plan.routes    GET /                → queries/GetMyPlan (999.1196)
+ *   feature-events.routes GET /            → queries/GetFeatureEventsReport (999.1196)
  */
 
 'use strict';
@@ -49,6 +51,8 @@ module.exports = {
   ExportData: require('./queries/ExportData'),
   ListImpersonationTargets: require('./queries/ListImpersonationTargets'),
   GetImpersonationLog: require('./queries/GetImpersonationLog'),
+  GetMyPlan: require('./queries/GetMyPlan'),
+  GetFeatureEventsReport: require('./queries/GetFeatureEventsReport'),
   // commands
   UpdateConfig: require('./commands/UpdateConfig'),
   CreateProject: require('./commands/CreateProject'),

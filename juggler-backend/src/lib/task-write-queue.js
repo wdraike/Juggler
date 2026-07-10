@@ -15,7 +15,18 @@
 var db = require('../db');
 var { createLogger } = require('@raike/lib-logger');
 var logger = createLogger('task-write-queue');
-var tasksWrite = require('./tasks-write');
+// 999.1199: lib/tasks-write is internal to slices/task/adapters (eslint
+// boundary) now — obtained via the task slice facade's exported
+// KnexTaskRepository class (getKnexTaskRepository() below), NOT a direct
+// require(). Lazy require (same idiom as getAcquireLock/getSseEmitter/getCache
+// below) because task/facade.js itself requires THIS module at load time
+// (taskWriteQueue.isLocked/enqueueWrite/splitFields) — a top-level require
+// here would close a load-order cycle.
+var _KnexTaskRepository;
+function getKnexTaskRepository() {
+  if (!_KnexTaskRepository) _KnexTaskRepository = require('../slices/task/facade').KnexTaskRepository;
+  return _KnexTaskRepository;
+}
 // 999.1198: the mutation→schedule trigger comes from the dependency-free
 // scheduleTrigger seam (scheduleQueue registers itself there at load), not a
 // lazy require of scheduler/scheduleQueue — that lazy require papered over the
@@ -231,6 +242,12 @@ async function _doFlush(userId) {
   logger.info('[WRITE-QUEUE] flushing ' + entries.length + ' entries → ' + coalesced.length + ' ops for user ' + userId);
 
   await db.transaction(async function(trx) {
+    // 999.1199: raw passthrough via a KnexTaskRepository transaction token
+    // (constructed over this SAME trx) instead of a direct require('./tasks-write').
+    // Kept as raw passthrough (not the P1-asserting port methods) because this
+    // loop stamps created_at/updated_at with `db.fn.now()` (MySQL server clock),
+    // not a JS Date — the strict port would reject that.
+    var tasksWrite = new (getKnexTaskRepository())({ db: trx }).tasksWrite;
     for (var i = 0; i < coalesced.length; i++) {
       var op = coalesced[i];
       var fields = op.fields;

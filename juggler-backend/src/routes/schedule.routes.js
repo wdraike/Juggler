@@ -9,15 +9,16 @@ var { authenticateJWT } = require('../middleware/jwt-auth');
 var authenticateAdmin = require('../middleware/authenticateAdmin');
 // 999.1198: former mid-function lazy requires (unifiedScheduleV2, db,
 // loadSchedulerConfig, rowToTask) top-leveled — no cycle runs through this
-// route module. rowToTask comes from the task slice's pure domain mapper, not
-// the HTTP controller's re-export of the same function (999.1192 class).
-var { runScheduleAndPersist, unifiedScheduleV2 } = require('../slices/scheduler/facade');
+// route module.
+// 999.1196: the admin /debug + stepper /step/:id/stop business logic (the
+// tasks_v load + unifiedSchedule orchestration, and the raw scheduler_sessions
+// ownership read) moved into the scheduler slice facade — runSchedulerDebug /
+// getStepperSessionOwner — so db/loadSchedulerConfig/rowToTask/unifiedScheduleV2
+// are no longer needed directly in this route module.
+var { runScheduleAndPersist, runSchedulerDebug, getStepperSessionOwner } = require('../slices/scheduler/facade');
 var { withSyncLock } = require('../lib/sync-lock');
 var schedulerSession = require('../scheduler/schedulerSession');
 var { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
-var db = require('../db');
-var { loadSchedulerConfig } = require('../scheduler/loadSchedulerConfig');
-var { rowToTask } = require('../slices/task/domain/mappers/taskMappers');
 const { createLogger } = require('@raike/lib-logger');
 const { safeTimezone } = require('juggler-shared/scheduler/dateHelpers');
 const { getNowInTimezone, DEFAULT_TIMEZONE } = require('juggler-shared/scheduler/getNowInTimezone');
@@ -77,57 +78,25 @@ router.post('/nudge', authenticateJWT, schedulerLimiter, async function(req, res
  */
 router.post('/debug', authenticateJWT, authenticateAdmin, debugLimiter, async function(req, res) {
   try {
-    var unifiedSchedule = unifiedScheduleV2; // top-level import (999.1198)
     var TIMEZONE = safeTimezone(req.headers['x-timezone'], DEFAULT_TIMEZONE);
     var userId = req.user.id;
 
     // Resolve date context in user's timezone — 999.1185: shared R50.8
     // contract (was an inline formatToParts copy).
     var nowInfo = getNowInTimezone(TIMEZONE);
-    var dateCtx = { todayKey: nowInfo.todayKey, nowMins: nowInfo.nowMins };
 
-    // Load tasks
-    var tasks = await db('tasks_v').where({ user_id: userId }).whereNot('status', 'disabled');
-
-    // Load config — 999.1187: single scheduler-config loader (reads the real
-    // snake_case user_config keys) shared with runSchedule.js and
-    // schedulerSession.js. The previous inline copy read camelCase keys that
-    // never exist in user_config, so the debug run always used
-    // DEFAULT_TIME_BLOCKS / DEFAULT_TOOL_MATRIX regardless of user settings.
-    var schedCfg = await loadSchedulerConfig(userId);
-    schedCfg.timezone = TIMEZONE;
-    schedCfg._debug = true; // Enable phase snapshots
-
-    var statuses = {};
-    tasks.forEach(function(t) { statuses[t.id] = t.status || ''; });
-
-    // Map DB rows to scheduler format using the same rowToTask as runSchedule
-    // (top-level import from the task slice's domain mappers — 999.1192/1198).
-
-    // Build source map for recurring template inheritance
-    var srcMap = {};
-    tasks.forEach(function(t) {
-      if (t.task_type === 'recurring_template' || (!t.generated && t.recur)) {
-        srcMap[t.id] = t;
-      }
-    });
-
-    var mapped = tasks.map(function(r) { return rowToTask(r, TIMEZONE, srcMap); });
-
-    var result = unifiedSchedule(mapped, statuses, dateCtx.todayKey, dateCtx.nowMins, schedCfg);
-
-    res.json({
-      success: true,
-      todayKey: dateCtx.todayKey,
-      nowMins: dateCtx.nowMins,
+    // 999.1196: tasks_v load + config load + rowToTask mapping + the
+    // unifiedSchedule(_debug:true) call moved to the scheduler slice facade
+    // (RunSchedulerDebug use-case) — this route is now a thin req->input /
+    // result->res mapper.
+    var result = await runSchedulerDebug({
+      userId: userId,
       timezone: TIMEZONE,
-      taskCount: mapped.length,
-      placedCount: result.placedCount,
-      unplacedCount: result.unplaced.length,
-      score: result.score,
-      warnings: result.warnings,
-      phaseSnapshots: result.phaseSnapshots || [],
+      todayKey: nowInfo.todayKey,
+      nowMins: nowInfo.nowMins
     });
+
+    res.json(result);
   } catch (error) {
     logger.error('Schedule debug error:', error);
     res.status(500).json({ error: 'Failed to run debug scheduler' });
@@ -194,8 +163,10 @@ router.post('/step/:sessionId/stop', authenticateJWT, authenticateAdmin, async f
     var sessionId = req.params.sessionId;
     var s = await schedulerSession.getSession(sessionId);
     if (!s) {
-      // Session expired or already gone — check raw DB for ownership
-      var row = await db('scheduler_sessions').where('session_id', sessionId).first();
+      // Session expired or already gone — check raw ownership (999.1196:
+      // scheduler facade's GetStepperSessionOwner use-case, not a direct
+      // db('scheduler_sessions') query in the route).
+      var row = await getStepperSessionOwner(sessionId);
       if (row && row.user_id !== req.user.id) return res.status(403).json({ error: 'Not your session' });
       return res.json({ ok: true }); // already gone — idempotent
     }

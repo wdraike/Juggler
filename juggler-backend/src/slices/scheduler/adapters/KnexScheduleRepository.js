@@ -36,6 +36,16 @@
 
 'use strict';
 
+// 999.1199: lib/tasks-write is internal to slices/task/adapters (eslint
+// boundary) now — this file is grandfathered to keep requiring it directly
+// (it already sits under a pre-existing "**/slices/scheduler/adapters/**"
+// boundary exemption, so the rule doesn't flag it) because writeChanged's
+// batched CASE-expression path passes Knex `trx.raw()` objects for
+// scheduled_at/dur/date/day/time — values the task slice's P1 assertDate
+// guard (TaskRepositoryPort — "new Date()/null, never a raw") would reject
+// outright. That single hot path stays on the raw module (documented below);
+// insertTasksBatch/deleteTasksWhere (P1-clean, no raw() values) route through
+// the task slice's exported KnexTaskRepository instead — see below.
 var tasksWrite = require('../../../lib/tasks-write');
 
 var SCHEDULE_REPOSITORY_PORT_METHODS =
@@ -215,9 +225,16 @@ KnexScheduleRepository.prototype.writeChanged = async function writeChanged(delt
 /**
  * Bulk delete via a where-builder (the legacy merged-out-chunk cleanup,
  * runSchedule.js ~1660). Returns rows removed.
+ *
+ * 999.1199: routed through the task slice's KnexTaskRepository (constructed
+ * over this repo's own db/trx handle as a transaction token) instead of the
+ * raw tasksWrite module — no timestamp columns are touched by a delete, so
+ * the P1-asserting port method is a safe, byte-identical substitution here
+ * (unlike writeChanged's CASE-expression path — see the file header).
  */
 KnexScheduleRepository.prototype.deleteTasksWhere = function deleteTasksWhere(userId, applyWhere) {
-  return this.tasksWrite.deleteTasksWhere(this.db, userId, applyWhere);
+  var KnexTaskRepository = require('../../task/facade').KnexTaskRepository;
+  return new KnexTaskRepository({ db: this.db }).deleteTasksWhere(userId, applyWhere);
 };
 
 /**
@@ -294,12 +311,19 @@ KnexScheduleRepository.prototype.getLocations = function getLocations(userId) {
 };
 
 /**
- * Bulk-insert task rows — delegates to the REAL master/instance write module
- * (`lib/tasks-write.insertTasksBatch`), exactly what the legacy phase-1 chunk
- * pre-insert (runSchedule.js ~1395) called inline. H7 (999.1193).
+ * Bulk-insert task rows — exactly what the legacy phase-1 chunk pre-insert
+ * (runSchedule.js ~1395) called inline. H7 (999.1193).
+ *
+ * 999.1199: routed through the task slice's KnexTaskRepository (constructed
+ * over this repo's own db/trx handle as a transaction token) instead of a raw
+ * `require('lib/tasks-write')`. Safe substitution: every row's created_at/
+ * updated_at is already `_runScheduleCommand.clockNow()` (a JS `new Date()`,
+ * P1) by the time it reaches here (runSchedule.js ~1389-1390), so the task
+ * slice's P1 assertDate guard is a no-op assertion, not a behavior change.
  */
 KnexScheduleRepository.prototype.insertTasksBatch = function insertTasksBatch(rows) {
-  return this.tasksWrite.insertTasksBatch(this.db, rows);
+  var KnexTaskRepository = require('../../task/facade').KnexTaskRepository;
+  return new KnexTaskRepository({ db: this.db }).insertTasksBatch(rows);
 };
 
 module.exports = KnexScheduleRepository;

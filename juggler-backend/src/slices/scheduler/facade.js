@@ -69,6 +69,46 @@ var ScheduleCachePort = require('./domain/ports/ScheduleCachePort');
 var TaskProviderPort = require('./domain/ports/TaskProviderPort');
 var WeatherProviderPort = require('./domain/ports/WeatherProviderPort');
 
+// ── ROUTE-LOGIC EXTRACTION (999.1196) ─────────────────────────────────────────
+// schedule.routes.js's admin /debug and stepper /step/:id/stop handlers had
+// direct db('tasks_v') / db('scheduler_sessions') queries and inline business
+// math. Neither touchpoint is modeled on ScheduleRepositoryPort (that port is
+// the S5 delta-write persist seam, not a general query surface) and
+// schedulerSession.js — which owns every OTHER scheduler_sessions read/write —
+// is a concurrently-owned file this leg does not modify. These two small
+// collaborators are lifted verbatim here, mirroring the user-config facade's
+// "port doesn't model this table" cross-table-collaborator idiom.
+var libDb = require('../../lib/db');
+function getDb() { return libDb.getDefaultDb(); }
+
+// admin /debug's OWN tasks_v load (schedule.routes.js ~L90) — deliberately NOT
+// SchedulerTaskProvider.loadSchedulableRows, which uses a DIFFERENT filter
+// for the live scheduler's working set.
+function loadDebugTasks(userId) {
+  return getDb()('tasks_v').where({ user_id: userId }).whereNot('status', 'disabled');
+}
+
+// stepper /step/:id/stop's raw ownership read (schedule.routes.js ~L198),
+// used only when schedulerSession.getSession() already returned null.
+function findStepperSessionOwner(sessionId) {
+  return getDb()('scheduler_sessions').where('session_id', sessionId).first();
+}
+
+var RunSchedulerDebug = application.RunSchedulerDebug;
+var _runSchedulerDebug = new RunSchedulerDebug({
+  loadTasks: loadDebugTasks,
+  loadConfig: require('../../scheduler/loadSchedulerConfig').loadSchedulerConfig,
+  // Same import path schedule.routes.js used (999.1192 class): the task
+  // slice's pure domain mapper, not the HTTP controller's re-export.
+  rowToTask: require('../task/domain/mappers/taskMappers').rowToTask,
+  unifiedSchedule: unifiedScheduleV2
+});
+function runSchedulerDebug(input) { return _runSchedulerDebug.execute(input); }
+
+var GetStepperSessionOwner = application.GetStepperSessionOwner;
+var _getStepperSessionOwner = new GetStepperSessionOwner({ findOwner: findStepperSessionOwner });
+function getStepperSessionOwner(sessionId) { return _getStepperSessionOwner.execute(sessionId); }
+
 module.exports = {
   // ── public scheduler operations (the caller-imported symbols) ──────────────
   runScheduleAndPersist: runSchedule.runScheduleAndPersist,
@@ -79,6 +119,10 @@ module.exports = {
 
   // ── application orchestrator (the SOLE delta-write persist seam, S5) ────────
   RunScheduleCommand: application.RunScheduleCommand,
+
+  // ── route-logic extraction (999.1196) — schedule.routes.js consumers ────────
+  runSchedulerDebug: runSchedulerDebug,
+  getStepperSessionOwner: getStepperSessionOwner,
 
   // ── pure domain core (solvers + entities + value objects) ──────────────────
   ConstraintSolver: domain.ConstraintSolver,
