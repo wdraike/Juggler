@@ -23,6 +23,11 @@
  * @property {string} key       The environment variable name.
  * @property {'string'|'int'|'bool'} type  Declared type for coercion.
  * @property {string|number|boolean} default  Explicit default when unset.
+ * @property {boolean} [requiredInProduction]  When true, the declared default
+ *   is a DEV-ONLY convenience: in NODE_ENV=production the env var must be set
+ *   explicitly, and reading it while unset throws (fail loud — mirrors
+ *   lib/jwt-secret.js). Prevents dev defaults (e.g. localhost URLs) from
+ *   silently leaking into production.
  */
 
 /**
@@ -36,6 +41,17 @@ const SCHEMA = {
   APP_ID: { key: 'APP_ID', type: 'string', default: 'juggler' },
   PRODUCT_LABEL: { key: 'PRODUCT_LABEL', type: 'string', default: 'juggler' },
   SERVICE_NAME: { key: 'SERVICE_NAME', type: 'string', default: 'strivers' },
+
+  // Auth-service JWKS endpoint (user-token verification, MCP transport path).
+  // The default is the local dev auth-service (port 5010) — a DOCUMENTED dev
+  // default (999.1197), not a silent data fallback. requiredInProduction: in
+  // NODE_ENV=production the var MUST be set (Cloud Run env), else fail loud.
+  AUTH_JWKS_URL: {
+    key: 'AUTH_JWKS_URL',
+    type: 'string',
+    default: 'http://localhost:5010/.well-known/jwks.json',
+    requiredInProduction: true,
+  },
 };
 
 /**
@@ -71,6 +87,16 @@ function resolveRaw(key) {
     : undefined;
   // Empty string is treated as unset to match the legacy `|| default` semantic.
   const raw = present === undefined || present === '' ? undefined : present;
+  if (
+    raw === undefined &&
+    entry.requiredInProduction &&
+    process.env.NODE_ENV === 'production'
+  ) {
+    throw new Error(
+      `lib/config: "${entry.key}" is required in production ` +
+        `(its declared default is dev-only). Set the environment variable.`,
+    );
+  }
   return { raw, entry };
 }
 

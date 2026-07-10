@@ -35,7 +35,12 @@ jest.mock('@raike/lib-logger', () => ({
   createLogger: () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn() })
 }));
 
-jest.mock('../../src/service-identity', () => ({ APP_ID: 'juggler' }));
+// 999.1197: middleware now reaches the user-config slice via its facade, whose
+// module graph constructs PaymentServiceEntitlementAdapter (reads PRODUCT_LABEL
+// from service-identity) — mock the full identity shape, not just APP_ID.
+jest.mock('../../src/service-identity', () => ({
+  APP_ID: 'juggler', PRODUCT_LABEL: 'juggler', SERVICE_NAME: 'strivers'
+}));
 
 // Knex-ish db mock: db('users').where(...).first() pops from mockFirstQueue;
 // insert/update are spies.

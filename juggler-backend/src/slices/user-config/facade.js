@@ -60,9 +60,12 @@ var KnexConfigRepository = require('./adapters/KnexConfigRepository');
 var InMemoryConfigRepository = require('./adapters/InMemoryConfigRepository');
 var PaymentServiceEntitlementAdapter = require('./adapters/PaymentServiceEntitlementAdapter');
 var MockEntitlementAdapter = require('./adapters/MockEntitlementAdapter');
+var KnexUserRepository = require('./adapters/KnexUserRepository');
+var InMemoryUserRepository = require('./adapters/InMemoryUserRepository');
 // ── ports (for the public type surface / named exports) ──────────────────────
 var ConfigRepositoryPort = require('./domain/ports/ConfigRepositoryPort');
 var EntitlementPort = require('./domain/ports/EntitlementPort');
+var UserRepositoryPort = require('./domain/ports/UserRepositoryPort');
 
 // ── application use-cases (W5) ───────────────────────────────────────────────
 var app = require('./application');
@@ -681,8 +684,15 @@ module.exports = {
   // domain ports + adapter implementations (named exports; mirror task/weather)
   ConfigRepositoryPort: ConfigRepositoryPort,
   EntitlementPort: EntitlementPort,
+  UserRepositoryPort: UserRepositoryPort,
   KnexConfigRepository: KnexConfigRepository,
   InMemoryConfigRepository: InMemoryConfigRepository,
+  KnexUserRepository: KnexUserRepository,
+  InMemoryUserRepository: InMemoryUserRepository,
+  // use-case class export (999.1197): the jwt-auth middleware is the composition
+  // root (it wires its own db handle), so it needs the CLASS via the facade —
+  // the boundary rule forbids importing slices/user-config/application directly.
+  ProvisionUserOnFirstLogin: app.ProvisionUserOnFirstLogin,
   PaymentServiceEntitlementAdapter: PaymentServiceEntitlementAdapter,
   MockEntitlementAdapter: MockEntitlementAdapter,
 

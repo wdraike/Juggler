@@ -119,6 +119,29 @@ describe('lib/config', () => {
     });
   });
 
+  describe('requiredInProduction (AUTH_JWKS_URL, 999.1197)', () => {
+    test('unset outside production → documented dev default (localhost auth-service)', () => {
+      delete process.env.AUTH_JWKS_URL;
+      process.env.NODE_ENV = 'test';
+      expect(config.getString('AUTH_JWKS_URL'))
+        .toBe('http://localhost:5010/.well-known/jwks.json');
+    });
+
+    test('unset in production → throws (fail loud, no localhost leak)', () => {
+      delete process.env.AUTH_JWKS_URL;
+      process.env.NODE_ENV = 'production';
+      expect(() => config.getString('AUTH_JWKS_URL'))
+        .toThrow(/required in production/);
+    });
+
+    test('set in production → returns the env value', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.AUTH_JWKS_URL = 'https://auth.example.com/.well-known/jwks.json';
+      expect(config.getString('AUTH_JWKS_URL'))
+        .toBe('https://auth.example.com/.well-known/jwks.json');
+    });
+  });
+
   describe('type mismatch', () => {
     test('getInt throws when key is declared as string', () => {
       expect(() => config.getInt('APP_ID')).toThrow(/not "int"/);

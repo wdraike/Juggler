@@ -34,6 +34,7 @@
  *   feature-gate      requireFeature / requireFeatureIncludes / checkUsageLimit → commands/GateFeature
  *   entity-limits     check* middleware  → commands/EnforceEntityLimit
  *   billing-webhooks  handleWebhook      → commands/HandleBillingWebhook
+ *   jwt-auth          resolve-or-provision → commands/ProvisionUserOnFirstLogin (999.1197)
  */
 
 'use strict';
@@ -63,5 +64,6 @@ module.exports = {
   EnforceEntityLimit: require('./commands/EnforceEntityLimit'),
   HandleBillingWebhook: require('./commands/HandleBillingWebhook'),
   Impersonate: require('./commands/Impersonate'),
-  StopImpersonation: require('./commands/StopImpersonation')
+  StopImpersonation: require('./commands/StopImpersonation'),
+  ProvisionUserOnFirstLogin: require('./commands/ProvisionUserOnFirstLogin')
 };

@@ -12,8 +12,19 @@ const { createRemoteJWKSet, jwtVerify } = require('jose');
 const { createLogger } = require('@raike/lib-logger');
 const db = require('../db');
 const { APP_ID } = require('../service-identity');
+const { getString } = require('../lib/config');
+// Via the slice facade (JUG-HEX boundary — no direct application/adapters imports)
+const { ProvisionUserOnFirstLogin, KnexUserRepository } = require('../slices/user-config');
 
 const logger = createLogger('jwt-auth');
+
+// Composition root for the provisioning use-case (999.1197): wired to the same
+// shared pool the middleware always used. Provisioning rules (999.1222 tz seed,
+// duplicate race, auth-id == local-id invariant) live in the use-case.
+const provisionUser = new ProvisionUserOnFirstLogin({
+  userRepository: new KnexUserRepository({ db }),
+  logger,
+});
 
 // Verify JWT via auth-client, then resolve local user by email
 // (auth-service user IDs may differ from local user IDs)
@@ -29,41 +40,15 @@ const authenticateJWT = async (req, res, next) => {
       return res.status(403).json({ error: 'No access to this application' });
     }
     try {
-      const localUser = await db('users').where('email', req.user.email).first();
-      if (localUser) {
-        req.user = { ...localUser, authServiceId: req.user.id };
-        // 999.1222 RULING (2026-07-06): users.timezone is owned by Settings only.
-        // The former per-request silent overwrite from the X-Timezone header
-        // (999.899 auto-detect) is REMOVED — X-Timezone carries the configured
-        // display tz (TZ-DISPLAY-3) and must never write the stored timezone.
-      } else {
-        // First login — provision user in local DB using auth-service claims
-        const newId = req.user.id; // use auth-service ID as local ID
-        // 999.1222: initial timezone is set ONCE here, from the real browser
-        // IANA zone sent in the dedicated X-Browser-Timezone header. X-Timezone
-        // is the configured/display tz and is deliberately NOT read for this.
-        var detectedTz = req.headers['x-browser-timezone'];
-        if (detectedTz && typeof detectedTz === 'string') {
-          try { Intl.DateTimeFormat(undefined, { timeZone: detectedTz }); }
-          catch (_e) { detectedTz = null; } // invalid IANA name → skip
-        }
-        try {
-          await db('users').insert({
-            id: newId,
-            email: req.user.email,
-            name: req.user.name,
-            picture_url: req.user.picture || null,
-            timezone: detectedTz || 'America/New_York',
-          });
-        } catch (insertErr) {
-          // Concurrent request raced us — duplicate email insert; ignore and fetch below
-          if (!insertErr.message?.includes('Duplicate')) throw insertErr;
-          logger.warn('jwt-auth: concurrent first-login insert race, fetching existing row', { email: req.user.email });
-        }
-        const provisioned = await db('users').where('id', newId).first();
-        if (!provisioned) return next(new Error('User provision failed'));
-        req.user = { ...provisioned, authServiceId: newId };
-      }
+      // Resolve-or-provision is delegated to ProvisionUserOnFirstLogin (999.1197).
+      // 999.1222 RULING (2026-07-06): users.timezone is owned by Settings only —
+      // provisioning seeds it ONCE from X-Browser-Timezone; existing rows are
+      // never written here. See the use-case for the full rules.
+      const localUser = await provisionUser.execute({
+        authUser: req.user,
+        browserTimezone: req.headers['x-browser-timezone'],
+      });
+      req.user = { ...localUser, authServiceId: req.user.id };
     } catch (dbErr) {
       logger.error('jwt-auth: DB error during user lookup/provision', { err: dbErr.message });
       return next(dbErr);
@@ -72,12 +57,14 @@ const authenticateJWT = async (req, res, next) => {
   });
 };
 
-// JWKS fetcher for MCP transport verification
+// JWKS fetcher for MCP transport verification.
+// URL comes from lib/config (AUTH_JWKS_URL): the localhost:5010 value is the
+// DOCUMENTED dev default declared in the schema; in NODE_ENV=production the
+// env var is required and getString throws if unset (no localhost leak).
 let _jwks = null;
 function getJWKS() {
   if (!_jwks) {
-    const jwksUrl = process.env.AUTH_JWKS_URL || 'http://localhost:5010/.well-known/jwks.json';
-    _jwks = createRemoteJWKSet(new URL(jwksUrl));
+    _jwks = createRemoteJWKSet(new URL(getString('AUTH_JWKS_URL')));
   }
   return _jwks;
 }
