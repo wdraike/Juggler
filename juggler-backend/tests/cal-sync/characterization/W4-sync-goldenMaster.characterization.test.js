@@ -18,7 +18,7 @@
  *   B  — pull-only (remote event edit -> task update + fixed promotion)
  *   C  — bidirectional (local edit repush + remote edit pull, one run)
  *   D  — terminal tasks: done (calCompletedBehavior=update) + cancel
- *   D2 — terminal done with calCompletedBehavior=delete
+ *   D2 — terminal done with calCompletedBehavior=delete (event deleted, 999.1455)
  *   E  — remote deletion lifecycle: push, then 3 missing syncs (miss 1,2,3 -> delete)
  *   E2 — missing event + locally-modified task -> re-create decision (never deletes)
  *   F  — sync-window edges: past / in-window / beyond +60d / past-with-ledger cleanup
@@ -258,17 +258,17 @@ test('D — terminal tasks: done (behavior=update) and cancel', async () => {
   H.checkGolden('D-terminal-update-mode', [run1, run2]);
 });
 
-test('D2 — terminal done with calCompletedBehavior=delete: CURRENT behavior repushes (handleTerminalTaskSync is dead code)', async () => {
-  // ⚠ CHARACTERIZATION FINDING (discovered while building this harness):
-  // cal-sync.controller.js:748 passes the isIngestOnly FUNCTION (always truthy)
-  // into handleTerminalTaskSync, whose first guard is
+test('D2 — terminal done with calCompletedBehavior=delete: event is deleted (999.1455 fix)', async () => {
+  // Fixed 999.1455: cal-sync.controller.js call site was passing the
+  // isIngestOnly FUNCTION itself (always truthy) into handleTerminalTaskSync,
+  // whose first guard was
   // `if (!task || !event || ledger.origin !== JUGGLER_ORIGIN || isIngestOnly) return {…empty…}`
-  // (src/lib/cal-sync-helpers.js:26). The helper therefore ALWAYS no-ops, and
-  // calCompletedBehavior='delete' does NOT delete the event for a done task —
-  // the done task is repushed (checkmark path) exactly like behavior='update'.
-  // Terminal deletion for non-done statuses (cancel) happens via a separate
-  // inline branch (see test D). This golden pins the CURRENT (buggy-looking)
-  // behavior; fixing it is an extraction-leg decision, not Phase 1's.
+  // (src/lib/cal-sync-helpers.js:26). The helper therefore ALWAYS no-opped, and
+  // calCompletedBehavior='delete' did NOT delete the event for a done task —
+  // the done task was repushed (checkmark path) exactly like behavior='update'.
+  // Fix: call site now passes isIngestOnly(pid) (the boolean result), so the
+  // guard evaluates correctly and the delete branch is reachable. A done task
+  // now has its calendar event actually deleted when calCompletedBehavior='delete'.
   await seedTestUser(GCAL_ONLY);
   await seedUserConfig('preferences', { calCompletedBehavior: 'delete' });
   await seedTask('w4d2-1', '2026-06-17 14:00:00');
@@ -280,8 +280,8 @@ test('D2 — terminal done with calCompletedBehavior=delete: CURRENT behavior re
 
   var run2 = await run('done with delete behavior');
   var methods = (run2.providerCalls.gcal || []).map(function (c) { return c.method; });
-  expect(methods).not.toContain('deleteEvent'); // pins the dead-code no-op
-  expect(methods).toContain('batchUpdateEvents');
+  expect(methods).toContain('deleteEvent'); // delete branch now reachable
+  expect(methods).not.toContain('batchUpdateEvents'); // no repush — event is gone
   H.checkGolden('D2-terminal-delete-mode', [run1, run2]);
 });
 

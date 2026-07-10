@@ -750,7 +750,7 @@ async function sync(req, res) {
           // --- Terminal status handling (done/cancel/skip/pause) ---
           if (task && event && ledger.origin === JUGGLER_ORIGIN && calCompletedBehavior !== 'keep' && !isIngestOnly(pid)) {
             var terminalResult = await handleTerminalTaskSync(
-              task, event, ledger, pAdapter, pToken, calCompletedBehavior, isIngestOnly, JUGGLER_ORIGIN, throttle
+              task, event, ledger, pAdapter, pToken, calCompletedBehavior, isIngestOnly(pid), JUGGLER_ORIGIN, throttle
             );
             
             if (terminalResult.taskUpdates.length > 0) {

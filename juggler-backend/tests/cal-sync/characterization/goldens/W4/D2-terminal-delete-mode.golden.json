@@ -228,18 +228,18 @@
     "label": "done with delete behavior",
     "statusCode": 200,
     "body": {
-      "pushed": 1,
+      "pushed": 0,
       "pulled": 0,
       "skipped": 0,
-      "deleted_local": 0,
+      "deleted_local": 1,
       "deleted_remote": 0,
       "errors": [],
       "providers": {
         "gcal": {
-          "pushed": 1,
+          "pushed": 0,
           "pulled": 0,
           "skipped": 0,
-          "deleted_local": 0,
+          "deleted_local": 1,
           "deleted_remote": 0,
           "errors": []
         }
@@ -270,22 +270,10 @@
           }
         },
         {
-          "method": "batchUpdateEvents",
+          "method": "deleteEvent",
           "args": {
             "token": "tok-gcal",
-            "updates": [
-              {
-                "eventId": "ev-gcal-w4d2-1",
-                "task": {
-                  "id": "w4d2-1",
-                  "text": "W4 w4d2-1",
-                  "date": "2026-06-02",
-                  "time": "12:00 AM",
-                  "dur": 30,
-                  "status": "done"
-                }
-              }
-            ]
+            "eventId": "ev-gcal-w4d2-1"
           }
         }
       ]
@@ -355,31 +343,38 @@
         "event": "sync:progress",
         "payload": {
           "phase": "done",
-          "detail": "Google Calendar: 1 pushed",
+          "detail": "Google Calendar: 1 removed",
           "pct": 100,
           "provider": null,
           "calendar": null
         }
       }
     ],
-    "enqueues": [],
+    "enqueues": [
+      {
+        "source": "cal-sync",
+        "affectedIds": [
+          "w4d2-1"
+        ]
+      }
+    ],
     "dbDelta": {
       "cal_sync_ledger": {
         "changed": [
           {
             "key": "<L1>",
             "changes": {
-              "last_modified_at": [
-                "2026-06-16 12:00:02.000000",
-                "2026-06-16 12:00:30.000000"
+              "active_task_key": [
+                "cal-sync-test-user-001|gcal|w4d2-1",
+                null
               ],
-              "last_pushed_hash": [
-                "21b310673747b1805e74c894871b4dfb",
-                "ecaaf7fd60c039f8670ce430db9650f8"
+              "provider_event_id": [
+                "ev-gcal-w4d2-1",
+                null
               ],
-              "task_updated_at": [
-                "2026-06-01 00:00:00",
-                "2026-06-02 00:00:00"
+              "status": [
+                "active",
+                "deleted_local"
               ]
             }
           }
