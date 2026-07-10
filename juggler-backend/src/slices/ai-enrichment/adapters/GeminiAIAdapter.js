@@ -44,6 +44,8 @@ function GeminiAIAdapter(deps) {
   const d = deps || {};
   const env = d.env || process.env;
   this._client = d.client || null; // lazily built if not injected
+  this._isInjectedClient = !!d.client; // 999.1444: injected clients are authoritative — never
+                                        // discarded by the B8 live-invalidation check below
   this._cachedApiKey = null;       // B8: snapshot of the key used to build the current client
   this.model = d.model || env.GEMINI_MODEL || 'gemini-2.5-flash';
   this._env = env;
@@ -75,9 +77,20 @@ GeminiAIAdapter.prototype._getDb = function _getDb() {
 // On each call, if GEMINI_API_KEY has changed since the last build, the cached client
 // is discarded and rebuilt with the new key. Vertex AI branch is key-less (project-keyed)
 // and does not apply the live-invalidation logic.
+//
+// 999.1444: a deps-INJECTED client (this._isInjectedClient, set in the constructor) is
+// authoritative and is NEVER subject to B8 live-invalidation — that check only applies to
+// env-BUILT clients. Without this short-circuit, an injected client's _cachedApiKey stays
+// null, so the API-key branch's `this._cachedApiKey === currentKey` reads any real env key
+// as a "rotation" and discards the injected (test) client in favor of a real GoogleGenAI
+// built from env.GEMINI_API_KEY — i.e. unit tests injecting a fake client could silently
+// make real API calls. Both the Vertex and API-key branches return the injected client
+// immediately, before either branch's own cache/rebuild logic runs.
 GeminiAIAdapter.prototype._getClient = function _getClient() {
   const { GoogleGenAI } = require('@google/genai');
   const env = this._env;
+
+  if (this._isInjectedClient) return this._client;
 
   if (env.USE_VERTEX_AI === 'true') {
     // Vertex AI path: keyed by project, not an API key. Cache for the lifetime

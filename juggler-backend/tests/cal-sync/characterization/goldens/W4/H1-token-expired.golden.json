@@ -1,0 +1,66 @@
+[
+  {
+    "label": "token expired",
+    "statusCode": 200,
+    "body": {
+      "pushed": 0,
+      "pulled": 0,
+      "skipped": 0,
+      "deleted_local": 0,
+      "deleted_remote": 0,
+      "errors": [
+        {
+          "phase": "token_validation",
+          "provider": "gcal",
+          "error": "invalid_grant: Token has been expired or revoked.",
+          "tokenExpired": true,
+          "action": "Please reconnect your calendar in Settings"
+        }
+      ],
+      "providers": {
+        "gcal": {
+          "error": "invalid_grant: Token has been expired or revoked.",
+          "tokenExpired": true
+        }
+      }
+    },
+    "providerCalls": {
+      "gcal": [
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        }
+      ]
+    },
+    "sse": [
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "done",
+          "detail": "No valid calendar connections",
+          "pct": 100,
+          "provider": null,
+          "calendar": null
+        }
+      }
+    ],
+    "enqueues": [],
+    "dbDelta": {
+      "users": {
+        "changed": [
+          {
+            "key": "user",
+            "changes": {
+              "gcal_refresh_token": [
+                "w4-fake-gcal-refresh",
+                null
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+]

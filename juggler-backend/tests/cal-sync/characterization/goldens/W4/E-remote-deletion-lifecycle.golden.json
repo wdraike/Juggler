@@ -1,0 +1,757 @@
+[
+  {
+    "label": "initial push",
+    "statusCode": 200,
+    "body": {
+      "pushed": 1,
+      "pulled": 0,
+      "skipped": 0,
+      "deleted_local": 0,
+      "deleted_remote": 0,
+      "errors": [],
+      "providers": {
+        "gcal": {
+          "pushed": 1,
+          "pulled": 0,
+          "skipped": 0,
+          "deleted_local": 0,
+          "deleted_remote": 0,
+          "errors": []
+        }
+      },
+      "syncRunId": "<UUID>",
+      "summary": [
+        {
+          "type": "push",
+          "text": "",
+          "message": "Pushed to Google Calendar"
+        }
+      ]
+    },
+    "providerCalls": {
+      "gcal": [
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        },
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        },
+        {
+          "method": "listEvents",
+          "args": {
+            "token": "tok-gcal",
+            "timeMin": "2026-06-16T04:00:00.000Z",
+            "timeMax": "2026-08-15T12:00:00.000Z"
+          }
+        },
+        {
+          "method": "batchCreateEvents",
+          "args": {
+            "token": "tok-gcal",
+            "tasks": [
+              {
+                "id": "w4e-1",
+                "text": "W4 w4e-1",
+                "date": "2026-06-17",
+                "time": "10:00 AM",
+                "dur": 30,
+                "status": ""
+              }
+            ],
+            "year": 2026,
+            "tz": "America/New_York"
+          }
+        }
+      ]
+    },
+    "sse": [
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "fetch",
+          "detail": "Fetching events...",
+          "pct": 5,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "fetch",
+          "detail": "Fetched 0 events",
+          "pct": 15,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "ledger",
+          "detail": "Checking for changes...",
+          "pct": 20,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "push",
+          "detail": "Syncing tasks...",
+          "pct": 50,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "push",
+          "detail": "Pushing 1 tasks...",
+          "pct": 50,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "finalize",
+          "detail": "Saving changes...",
+          "pct": 85,
+          "provider": null,
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "finalize",
+          "detail": "Finalizing...",
+          "pct": 95,
+          "provider": null,
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "done",
+          "detail": "Google Calendar: 1 pushed",
+          "pct": 100,
+          "provider": null,
+          "calendar": null
+        }
+      }
+    ],
+    "enqueues": [],
+    "dbDelta": {
+      "cal_sync_ledger": {
+        "added": [
+          {
+            "active_task_key": "cal-sync-test-user-001|gcal|w4e-1",
+            "completed_at": null,
+            "created_at": "<TS>",
+            "done_frozen": 0,
+            "error_detail": null,
+            "event_all_day": 0,
+            "event_end": "2026-06-17T14:30:00.000Z",
+            "event_start": "2026-06-17T14:00:00.000Z",
+            "event_status": "pending",
+            "event_summary": "W4 w4e-1",
+            "event_url": null,
+            "id": "<N1>",
+            "last_modified_at": "2026-06-16 12:00:02.000000",
+            "last_pulled_hash": "47e2c8a9dcc5813352a1939f601a5c22a4e9ab8e2195788e8360b7cefee1c558",
+            "last_pushed_at": "<TS>",
+            "last_pushed_hash": "941488cae168bfa456eb2f179da7194c",
+            "last_user_hash": "ff7f6b08f6ec3a867d71082769c6afb1",
+            "miss_count": 0,
+            "origin": "juggler",
+            "provider": "gcal",
+            "provider_etag": null,
+            "provider_event_id": "ev-gcal-w4e-1",
+            "scheduled_at": null,
+            "status": "active",
+            "synced_at": "<TS>",
+            "task_id": "w4e-1",
+            "task_updated_at": "2026-06-01 00:00:00",
+            "updated_at": "<TS>",
+            "user_id": "cal-sync-test-user-001"
+          }
+        ]
+      },
+      "sync_history": {
+        "added": [
+          {
+            "action": "pushed",
+            "calendar_name": null,
+            "created_at": "<TS>",
+            "detail": "Batch pushed 1 tasks to gcal",
+            "error_detail": null,
+            "event_id": null,
+            "new_values": null,
+            "old_values": null,
+            "provider": "gcal",
+            "sync_run_id": "<UUID>",
+            "task_id": null,
+            "task_text": "",
+            "trigger_type": "manual",
+            "user_id": "cal-sync-test-user-001"
+          }
+        ]
+      },
+      "users": {
+        "changed": [
+          {
+            "key": "user",
+            "changes": {
+              "gcal_last_synced_at": [
+                null,
+                "<TS>"
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "label": "miss 1",
+    "statusCode": 200,
+    "body": {
+      "pushed": 0,
+      "pulled": 0,
+      "skipped": 0,
+      "deleted_local": 0,
+      "deleted_remote": 0,
+      "errors": [],
+      "providers": {
+        "gcal": {
+          "pushed": 0,
+          "pulled": 0,
+          "skipped": 0,
+          "deleted_local": 0,
+          "deleted_remote": 0,
+          "errors": []
+        }
+      },
+      "syncRunId": "<UUID>",
+      "summary": []
+    },
+    "providerCalls": {
+      "gcal": [
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        },
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        },
+        {
+          "method": "listEvents",
+          "args": {
+            "token": "tok-gcal",
+            "timeMin": "2026-06-16T04:00:00.000Z",
+            "timeMax": "2026-08-15T12:00:00.000Z"
+          }
+        }
+      ]
+    },
+    "sse": [
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "fetch",
+          "detail": "Fetching events...",
+          "pct": 5,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "fetch",
+          "detail": "Fetched 0 events",
+          "pct": 15,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "ledger",
+          "detail": "Checking for changes...",
+          "pct": 20,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "push",
+          "detail": "Syncing tasks...",
+          "pct": 50,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "finalize",
+          "detail": "Saving changes...",
+          "pct": 85,
+          "provider": null,
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "finalize",
+          "detail": "Finalizing...",
+          "pct": 95,
+          "provider": null,
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "done",
+          "detail": "Sync complete — no changes",
+          "pct": 100,
+          "provider": null,
+          "calendar": null
+        }
+      }
+    ],
+    "enqueues": [],
+    "dbDelta": {
+      "cal_sync_ledger": {
+        "changed": [
+          {
+            "key": "<L1>",
+            "changes": {
+              "miss_count": [
+                0,
+                1
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "label": "miss 2",
+    "statusCode": 200,
+    "body": {
+      "pushed": 0,
+      "pulled": 0,
+      "skipped": 0,
+      "deleted_local": 0,
+      "deleted_remote": 0,
+      "errors": [],
+      "providers": {
+        "gcal": {
+          "pushed": 0,
+          "pulled": 0,
+          "skipped": 0,
+          "deleted_local": 0,
+          "deleted_remote": 0,
+          "errors": []
+        }
+      },
+      "syncRunId": "<UUID>",
+      "summary": []
+    },
+    "providerCalls": {
+      "gcal": [
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        },
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        },
+        {
+          "method": "listEvents",
+          "args": {
+            "token": "tok-gcal",
+            "timeMin": "2026-06-16T04:00:00.000Z",
+            "timeMax": "2026-08-15T12:00:00.000Z"
+          }
+        }
+      ]
+    },
+    "sse": [
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "fetch",
+          "detail": "Fetching events...",
+          "pct": 5,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "fetch",
+          "detail": "Fetched 0 events",
+          "pct": 15,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "ledger",
+          "detail": "Checking for changes...",
+          "pct": 20,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "push",
+          "detail": "Syncing tasks...",
+          "pct": 50,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "finalize",
+          "detail": "Saving changes...",
+          "pct": 85,
+          "provider": null,
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "finalize",
+          "detail": "Finalizing...",
+          "pct": 95,
+          "provider": null,
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "done",
+          "detail": "Sync complete — no changes",
+          "pct": 100,
+          "provider": null,
+          "calendar": null
+        }
+      }
+    ],
+    "enqueues": [],
+    "dbDelta": {
+      "cal_sync_ledger": {
+        "changed": [
+          {
+            "key": "<L1>",
+            "changes": {
+              "miss_count": [
+                1,
+                2
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "label": "miss 3 — threshold",
+    "statusCode": 200,
+    "body": {
+      "pushed": 0,
+      "pulled": 0,
+      "skipped": 0,
+      "deleted_local": 0,
+      "deleted_remote": 1,
+      "errors": [],
+      "providers": {
+        "gcal": {
+          "pushed": 0,
+          "pulled": 0,
+          "skipped": 0,
+          "deleted_local": 0,
+          "deleted_remote": 1,
+          "errors": []
+        }
+      },
+      "syncRunId": "<UUID>",
+      "summary": [
+        {
+          "type": "delete",
+          "text": "W4 w4e-1",
+          "message": "Removed (deleted in Google Calendar)"
+        }
+      ]
+    },
+    "providerCalls": {
+      "gcal": [
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        },
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        },
+        {
+          "method": "listEvents",
+          "args": {
+            "token": "tok-gcal",
+            "timeMin": "2026-06-16T04:00:00.000Z",
+            "timeMax": "2026-08-15T12:00:00.000Z"
+          }
+        }
+      ]
+    },
+    "sse": [
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "fetch",
+          "detail": "Fetching events...",
+          "pct": 5,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "fetch",
+          "detail": "Fetched 0 events",
+          "pct": 15,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "ledger",
+          "detail": "Checking for changes...",
+          "pct": 20,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "push",
+          "detail": "Syncing tasks...",
+          "pct": 50,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "finalize",
+          "detail": "Saving changes...",
+          "pct": 85,
+          "provider": null,
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "finalize",
+          "detail": "Finalizing...",
+          "pct": 95,
+          "provider": null,
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "done",
+          "detail": "Sync complete — no changes",
+          "pct": 100,
+          "provider": null,
+          "calendar": null
+        }
+      }
+    ],
+    "enqueues": [
+      {
+        "source": "cal-sync",
+        "affectedIds": [
+          "w4e-1"
+        ]
+      }
+    ],
+    "dbDelta": {
+      "tasks_v": {
+        "removed": [
+          {
+            "apple_event_id": null,
+            "completed_at": null,
+            "created_at": "<TS>",
+            "date": null,
+            "day": null,
+            "day_req": null,
+            "deadline": null,
+            "depends_on": null,
+            "depends_on_json": null,
+            "desired_at": null,
+            "disabled_at": null,
+            "disabled_reason": null,
+            "dur": 30,
+            "earliest_start": null,
+            "end_date": null,
+            "flex_when": 0,
+            "gcal_event_id": null,
+            "generated": 0,
+            "id": "w4e-1",
+            "implied_deadline": null,
+            "location": null,
+            "marker": 0,
+            "master_id": "w4e-1",
+            "msft_event_id": null,
+            "next_occurrence_anchor": null,
+            "next_start": null,
+            "notes": null,
+            "occurrence_ordinal": 1,
+            "placement_mode": "anytime",
+            "preferred_time_mins": null,
+            "pri": "P3",
+            "project": null,
+            "recur": null,
+            "recur_end": null,
+            "recur_start": null,
+            "recurring": 0,
+            "rolling_anchor": null,
+            "scheduled_at": "2026-06-17 14:00:00",
+            "section": null,
+            "slack_mins": null,
+            "source_id": null,
+            "split": null,
+            "split_group": null,
+            "split_min": null,
+            "split_ordinal": 1,
+            "split_total": 1,
+            "start_after_at": null,
+            "status": "",
+            "task_type": "task",
+            "text": "W4 w4e-1",
+            "time": null,
+            "time_flex": null,
+            "time_remaining": null,
+            "tools": null,
+            "travel_after": null,
+            "travel_before": null,
+            "tz": null,
+            "unplaced_detail": null,
+            "unplaced_reason": null,
+            "unscheduled": null,
+            "updated_at": "<TS>",
+            "url": null,
+            "user_id": "cal-sync-test-user-001",
+            "weather_cloud": "any",
+            "weather_humidity_max": null,
+            "weather_humidity_min": null,
+            "weather_precip": "any",
+            "weather_temp_max": null,
+            "weather_temp_min": null,
+            "weather_temp_unit": null,
+            "when": "morning"
+          }
+        ]
+      },
+      "cal_sync_ledger": {
+        "changed": [
+          {
+            "key": "<L1>",
+            "changes": {
+              "active_task_key": [
+                "cal-sync-test-user-001|gcal|w4e-1",
+                null
+              ],
+              "miss_count": [
+                2,
+                3
+              ],
+              "status": [
+                "active",
+                "deleted_remote"
+              ],
+              "task_id": [
+                "w4e-1",
+                null
+              ]
+            }
+          }
+        ]
+      },
+      "sync_history": {
+        "added": [
+          {
+            "action": "deleted_remote",
+            "calendar_name": null,
+            "created_at": "<TS>",
+            "detail": "Event deleted in gcal — task removed after 3 consecutive syncs",
+            "error_detail": null,
+            "event_id": "ev-gcal-w4e-1",
+            "new_values": null,
+            "old_values": null,
+            "provider": "gcal",
+            "sync_run_id": "<UUID>",
+            "task_id": "w4e-1",
+            "task_text": "W4 w4e-1",
+            "trigger_type": "manual",
+            "user_id": "cal-sync-test-user-001"
+          }
+        ]
+      }
+    }
+  }
+]

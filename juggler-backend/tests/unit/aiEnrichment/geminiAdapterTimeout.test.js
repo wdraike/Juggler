@@ -122,7 +122,7 @@ describe('GeminiAIAdapter timeout (B5)', () => {
     await expect(
       adapter.generate('hi', {}, { useCase: 'task-ai' })
     ).rejects.toMatchObject({ code: 'ETIMEDOUT' });
-  }, 2000); // 2s wall-clock ceiling — adapter fires at 40ms, so 2s is generous
+  }, 10000); // 999.1444: 10s wall-clock ceiling (was 2s, flaked under coverage instrumentation) — adapter fires at 40ms, so 10s is generous
 
   test('a fast call resolves normally (timeout does not fire)', async () => {
     const fastClient = { models: { generateContent: async () => ({ text: '🎯' }) } };
@@ -164,5 +164,5 @@ describe('GeminiAIAdapter timeout (B5)', () => {
     const signal = instrumentedClient.getCapturedSignal();
     expect(signal).not.toBeNull(); // signal was threaded into the SDK call
     expect(signal.aborted).toBe(true); // controller.abort() was called
-  }, 2000); // 2s ceiling — adapter fires at 40ms
+  }, 10000); // 999.1444: 10s ceiling (was 2s, flaked under coverage instrumentation) — adapter fires at 40ms
 });

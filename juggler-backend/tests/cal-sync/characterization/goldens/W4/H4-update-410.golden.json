@@ -1,0 +1,466 @@
+[
+  {
+    "label": "initial push",
+    "statusCode": 200,
+    "body": {
+      "pushed": 1,
+      "pulled": 0,
+      "skipped": 0,
+      "deleted_local": 0,
+      "deleted_remote": 0,
+      "errors": [],
+      "providers": {
+        "gcal": {
+          "pushed": 1,
+          "pulled": 0,
+          "skipped": 0,
+          "deleted_local": 0,
+          "deleted_remote": 0,
+          "errors": []
+        }
+      },
+      "syncRunId": "<UUID>",
+      "summary": [
+        {
+          "type": "push",
+          "text": "",
+          "message": "Pushed to Google Calendar"
+        }
+      ]
+    },
+    "providerCalls": {
+      "gcal": [
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        },
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        },
+        {
+          "method": "listEvents",
+          "args": {
+            "token": "tok-gcal",
+            "timeMin": "2026-06-16T04:00:00.000Z",
+            "timeMax": "2026-08-15T12:00:00.000Z"
+          }
+        },
+        {
+          "method": "batchCreateEvents",
+          "args": {
+            "token": "tok-gcal",
+            "tasks": [
+              {
+                "id": "w4h4-1",
+                "text": "W4 w4h4-1",
+                "date": "2026-06-17",
+                "time": "10:00 AM",
+                "dur": 30,
+                "status": ""
+              }
+            ],
+            "year": 2026,
+            "tz": "America/New_York"
+          }
+        }
+      ]
+    },
+    "sse": [
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "fetch",
+          "detail": "Fetching events...",
+          "pct": 5,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "fetch",
+          "detail": "Fetched 0 events",
+          "pct": 15,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "ledger",
+          "detail": "Checking for changes...",
+          "pct": 20,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "push",
+          "detail": "Syncing tasks...",
+          "pct": 50,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "push",
+          "detail": "Pushing 1 tasks...",
+          "pct": 50,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "finalize",
+          "detail": "Saving changes...",
+          "pct": 85,
+          "provider": null,
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "finalize",
+          "detail": "Finalizing...",
+          "pct": 95,
+          "provider": null,
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "done",
+          "detail": "Google Calendar: 1 pushed",
+          "pct": 100,
+          "provider": null,
+          "calendar": null
+        }
+      }
+    ],
+    "enqueues": [],
+    "dbDelta": {
+      "cal_sync_ledger": {
+        "added": [
+          {
+            "active_task_key": "cal-sync-test-user-001|gcal|w4h4-1",
+            "completed_at": null,
+            "created_at": "<TS>",
+            "done_frozen": 0,
+            "error_detail": null,
+            "event_all_day": 0,
+            "event_end": "2026-06-17T14:30:00.000Z",
+            "event_start": "2026-06-17T14:00:00.000Z",
+            "event_status": "pending",
+            "event_summary": "W4 w4h4-1",
+            "event_url": null,
+            "id": "<N1>",
+            "last_modified_at": "2026-06-16 12:00:02.000000",
+            "last_pulled_hash": "99501ab0c9c1b88a7bff02b5856d3c365e64f30db910269da4313947a9d082e9",
+            "last_pushed_at": "<TS>",
+            "last_pushed_hash": "c77d660e93689e1891ae8837c7ac6eb3",
+            "last_user_hash": "fea4a3c8ea372c0d569e9ed4fd1fd92d",
+            "miss_count": 0,
+            "origin": "juggler",
+            "provider": "gcal",
+            "provider_etag": null,
+            "provider_event_id": "ev-gcal-w4h4-1",
+            "scheduled_at": null,
+            "status": "active",
+            "synced_at": "<TS>",
+            "task_id": "w4h4-1",
+            "task_updated_at": "2026-06-01 00:00:00",
+            "updated_at": "<TS>",
+            "user_id": "cal-sync-test-user-001"
+          }
+        ]
+      },
+      "sync_history": {
+        "added": [
+          {
+            "action": "pushed",
+            "calendar_name": null,
+            "created_at": "<TS>",
+            "detail": "Batch pushed 1 tasks to gcal",
+            "error_detail": null,
+            "event_id": null,
+            "new_values": null,
+            "old_values": null,
+            "provider": "gcal",
+            "sync_run_id": "<UUID>",
+            "task_id": null,
+            "task_text": "",
+            "trigger_type": "manual",
+            "user_id": "cal-sync-test-user-001"
+          }
+        ]
+      },
+      "users": {
+        "changed": [
+          {
+            "key": "user",
+            "changes": {
+              "gcal_last_synced_at": [
+                null,
+                "<TS>"
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "label": "repush hits 410",
+    "statusCode": 200,
+    "body": {
+      "pushed": 1,
+      "pulled": 0,
+      "skipped": 0,
+      "deleted_local": 0,
+      "deleted_remote": 0,
+      "errors": [
+        {
+          "phase": "ledger_update",
+          "provider": "gcal",
+          "eventId": "ev-gcal-w4h4-1",
+          "error": "Calendar API error 410: Resource has been deleted"
+        }
+      ],
+      "providers": {
+        "gcal": {
+          "pushed": 1,
+          "pulled": 0,
+          "skipped": 0,
+          "deleted_local": 0,
+          "deleted_remote": 0,
+          "errors": [
+            {
+              "phase": "ledger_update",
+              "provider": "gcal",
+              "eventId": "ev-gcal-w4h4-1",
+              "error": "Calendar API error 410: Resource has been deleted"
+            }
+          ]
+        }
+      },
+      "syncRunId": "<UUID>",
+      "summary": [
+        {
+          "type": "error",
+          "text": "W4 w4h4-1 EDITED",
+          "message": "Could not update event — Calendar API error 410: Resource has been deleted",
+          "errorDetail": {
+            "summary": "Could not update event — Calendar API error 410: Resource has been deleted",
+            "affectedTasks": [
+              {
+                "id": "w4h4-1",
+                "title": "W4 w4h4-1 EDITED"
+              }
+            ],
+            "provider": "gcal",
+            "calendar": null,
+            "retryable": true
+          },
+          "hasIssue": true
+        }
+      ]
+    },
+    "providerCalls": {
+      "gcal": [
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        },
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        },
+        {
+          "method": "listEvents",
+          "args": {
+            "token": "tok-gcal",
+            "timeMin": "2026-06-16T04:00:00.000Z",
+            "timeMax": "2026-08-15T12:00:00.000Z"
+          }
+        },
+        {
+          "method": "batchUpdateEvents",
+          "args": {
+            "token": "tok-gcal",
+            "updates": [
+              {
+                "eventId": "ev-gcal-w4h4-1",
+                "task": {
+                  "id": "w4h4-1",
+                  "text": "W4 w4h4-1 EDITED",
+                  "date": "2026-06-17",
+                  "time": "10:00 AM",
+                  "dur": 30,
+                  "status": ""
+                }
+              }
+            ]
+          }
+        },
+        {
+          "method": "updateEvent",
+          "args": {
+            "token": "tok-gcal",
+            "eventId": "ev-gcal-w4h4-1",
+            "task": {
+              "id": "w4h4-1",
+              "text": "W4 w4h4-1 EDITED",
+              "date": "2026-06-17",
+              "time": "10:00 AM",
+              "dur": 30,
+              "status": ""
+            }
+          }
+        }
+      ]
+    },
+    "sse": [
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "fetch",
+          "detail": "Fetching events...",
+          "pct": 5,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "fetch",
+          "detail": "Fetched 1 events",
+          "pct": 15,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "ledger",
+          "detail": "Checking for changes...",
+          "pct": 20,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "push",
+          "detail": "Syncing tasks...",
+          "pct": 50,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "finalize",
+          "detail": "Saving changes...",
+          "pct": 85,
+          "provider": null,
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "finalize",
+          "detail": "Finalizing...",
+          "pct": 95,
+          "provider": null,
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "done",
+          "detail": "Google Calendar: 1 pushed",
+          "pct": 100,
+          "provider": null,
+          "calendar": null
+        }
+      }
+    ],
+    "enqueues": [],
+    "dbDelta": {
+      "cal_sync_ledger": {
+        "changed": [
+          {
+            "key": "<L1>",
+            "changes": {
+              "active_task_key": [
+                "cal-sync-test-user-001|gcal|w4h4-1",
+                null
+              ],
+              "last_modified_at": [
+                "2026-06-16 12:00:02.000000",
+                "2026-06-16 12:00:00.000000"
+              ],
+              "provider_event_id": [
+                "ev-gcal-w4h4-1",
+                null
+              ],
+              "status": [
+                "active",
+                "deleted_remote"
+              ],
+              "task_updated_at": [
+                "2026-06-01 00:00:00",
+                "2026-06-02 00:00:00"
+              ]
+            }
+          }
+        ]
+      },
+      "sync_history": {
+        "added": [
+          {
+            "action": "error",
+            "calendar_name": null,
+            "created_at": "<TS>",
+            "detail": "Retry failed: Calendar API error 410: Resource has been deleted",
+            "error_detail": "{\"summary\":\"Could not update event — Calendar API error 410: Resource has been deleted\",\"affectedTasks\":[{\"id\":\"w4h4-1\",\"title\":\"W4 w4h4-1 EDITED\"}],\"provider\":\"gcal\",\"calendar\":null,\"retryable\":true}",
+            "event_id": "ev-gcal-w4h4-1",
+            "new_values": null,
+            "old_values": null,
+            "provider": "gcal",
+            "sync_run_id": "<UUID>",
+            "task_id": "w4h4-1",
+            "task_text": "W4 w4h4-1 EDITED",
+            "trigger_type": "manual",
+            "user_id": "cal-sync-test-user-001"
+          }
+        ]
+      }
+    }
+  }
+]

@@ -1,0 +1,314 @@
+[
+  {
+    "label": "ingest-only run",
+    "statusCode": 200,
+    "body": {
+      "pushed": 0,
+      "pulled": 1,
+      "skipped": 0,
+      "deleted_local": 0,
+      "deleted_remote": 0,
+      "errors": [],
+      "providers": {
+        "gcal": {
+          "pushed": 0,
+          "pulled": 1,
+          "skipped": 0,
+          "deleted_local": 0,
+          "deleted_remote": 0,
+          "errors": []
+        }
+      },
+      "syncRunId": "<UUID>",
+      "summary": [
+        {
+          "type": "create",
+          "text": "Dentist appointment",
+          "message": "New task from Google Calendar"
+        }
+      ]
+    },
+    "providerCalls": {
+      "gcal": [
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        },
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        },
+        {
+          "method": "listEvents",
+          "args": {
+            "token": "tok-gcal",
+            "timeMin": "2026-06-16T04:00:00.000Z",
+            "timeMax": "2026-08-15T12:00:00.000Z"
+          }
+        }
+      ]
+    },
+    "sse": [
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "fetch",
+          "detail": "Fetching events...",
+          "pct": 5,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "fetch",
+          "detail": "Fetched 2 events",
+          "pct": 15,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "ledger",
+          "detail": "Checking for changes...",
+          "pct": 20,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "push",
+          "detail": "Syncing tasks...",
+          "pct": 50,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "finalize",
+          "detail": "Saving changes...",
+          "pct": 85,
+          "provider": null,
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "finalize",
+          "detail": "Finalizing...",
+          "pct": 95,
+          "provider": null,
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "done",
+          "detail": "Google Calendar: 1 pulled",
+          "pct": 100,
+          "provider": null,
+          "calendar": null
+        }
+      }
+    ],
+    "enqueues": [
+      {
+        "source": "cal-sync",
+        "affectedIds": [
+          "<NEW-TASK-1>"
+        ]
+      }
+    ],
+    "dbDelta": {
+      "tasks_v": {
+        "added": [
+          {
+            "apple_event_id": null,
+            "completed_at": null,
+            "created_at": "<TS>",
+            "date": null,
+            "day": null,
+            "day_req": null,
+            "deadline": null,
+            "depends_on": null,
+            "depends_on_json": null,
+            "desired_at": null,
+            "disabled_at": null,
+            "disabled_reason": null,
+            "dur": 60,
+            "earliest_start": null,
+            "end_date": null,
+            "flex_when": 0,
+            "gcal_event_id": null,
+            "generated": 0,
+            "id": "<NEW-TASK-1>",
+            "implied_deadline": null,
+            "location": null,
+            "marker": 0,
+            "master_id": "<NEW-TASK-1>",
+            "msft_event_id": null,
+            "next_occurrence_anchor": null,
+            "next_start": null,
+            "notes": null,
+            "occurrence_ordinal": 1,
+            "placement_mode": "fixed",
+            "preferred_time_mins": null,
+            "pri": "P3",
+            "project": null,
+            "recur": null,
+            "recur_end": null,
+            "recur_start": null,
+            "recurring": 0,
+            "rolling_anchor": null,
+            "scheduled_at": "2026-06-18 14:00:00",
+            "section": null,
+            "slack_mins": null,
+            "source_id": null,
+            "split": null,
+            "split_group": null,
+            "split_min": null,
+            "split_ordinal": 1,
+            "split_total": 1,
+            "start_after_at": null,
+            "status": "",
+            "task_type": "task",
+            "text": "Dentist appointment",
+            "time": null,
+            "time_flex": null,
+            "time_remaining": null,
+            "tools": null,
+            "travel_after": null,
+            "travel_before": null,
+            "tz": null,
+            "unplaced_detail": null,
+            "unplaced_reason": null,
+            "unscheduled": null,
+            "updated_at": "<TS>",
+            "url": null,
+            "user_id": "cal-sync-test-user-001",
+            "weather_cloud": "any",
+            "weather_humidity_max": null,
+            "weather_humidity_min": null,
+            "weather_precip": "any",
+            "weather_temp_max": null,
+            "weather_temp_min": null,
+            "weather_temp_unit": null,
+            "when": ""
+          }
+        ]
+      },
+      "cal_sync_ledger": {
+        "added": [
+          {
+            "active_task_key": "cal-sync-test-user-001|gcal|<NEW-TASK-1>",
+            "completed_at": null,
+            "created_at": "<TS>",
+            "done_frozen": 0,
+            "error_detail": null,
+            "event_all_day": 0,
+            "event_end": "2026-06-18T15:00:00.000Z",
+            "event_start": "2026-06-18T14:00:00.000Z",
+            "event_status": "pending",
+            "event_summary": "Dentist appointment",
+            "event_url": null,
+            "id": "<N1>",
+            "last_modified_at": "2026-06-16 11:00:00.000000",
+            "last_pulled_hash": "5e71985c9ee62808b10f5b0884ad1abfb635e9bf1c00a6790b5bad8718e0d890",
+            "last_pushed_at": null,
+            "last_pushed_hash": "9771e9b274154aec983a9937686a4dcc",
+            "last_user_hash": "0e0b34ff02a88ffe9ac11a41d54557d1",
+            "miss_count": 0,
+            "origin": "gcal",
+            "provider": "gcal",
+            "provider_etag": null,
+            "provider_event_id": "ev-gcal-ingest-future",
+            "scheduled_at": null,
+            "status": "active",
+            "synced_at": "<TS>",
+            "task_id": "<NEW-TASK-1>",
+            "task_updated_at": null,
+            "updated_at": "<TS>",
+            "user_id": "cal-sync-test-user-001"
+          },
+          {
+            "active_task_key": null,
+            "completed_at": null,
+            "created_at": "<TS>",
+            "done_frozen": 0,
+            "error_detail": null,
+            "event_all_day": 0,
+            "event_end": "2026-06-10T15:00:00.000Z",
+            "event_start": "2026-06-10T14:00:00.000Z",
+            "event_status": "pending",
+            "event_summary": "Old meeting",
+            "event_url": null,
+            "id": "<N2>",
+            "last_modified_at": "2026-06-10 14:00:00.000000",
+            "last_pulled_hash": "033640368f57a939d2118a2b35ac970f6ddc6d8368f24d18af1bae3599856ebc",
+            "last_pushed_at": null,
+            "last_pushed_hash": null,
+            "last_user_hash": null,
+            "miss_count": 0,
+            "origin": "gcal",
+            "provider": "gcal",
+            "provider_etag": null,
+            "provider_event_id": "ev-gcal-ingest-past",
+            "scheduled_at": null,
+            "status": "active",
+            "synced_at": "<TS>",
+            "task_id": null,
+            "task_updated_at": null,
+            "updated_at": "<TS>",
+            "user_id": "cal-sync-test-user-001"
+          }
+        ]
+      },
+      "sync_history": {
+        "added": [
+          {
+            "action": "created",
+            "calendar_name": null,
+            "created_at": "<TS>",
+            "detail": "New task from gcal",
+            "error_detail": null,
+            "event_id": "ev-gcal-ingest-future",
+            "new_values": null,
+            "old_values": null,
+            "provider": "gcal",
+            "sync_run_id": "<UUID>",
+            "task_id": "<NEW-TASK-1>",
+            "task_text": "Dentist appointment",
+            "trigger_type": "manual",
+            "user_id": "cal-sync-test-user-001"
+          }
+        ]
+      },
+      "users": {
+        "changed": [
+          {
+            "key": "user",
+            "changes": {
+              "gcal_last_synced_at": [
+                null,
+                "<TS>"
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+]

@@ -1,0 +1,202 @@
+[
+  {
+    "label": "missing events on modified tasks",
+    "statusCode": 200,
+    "body": {
+      "pushed": 0,
+      "pulled": 0,
+      "skipped": 0,
+      "deleted_local": 0,
+      "deleted_remote": 0,
+      "errors": [],
+      "providers": {
+        "gcal": {
+          "pushed": 0,
+          "pulled": 0,
+          "skipped": 0,
+          "deleted_local": 0,
+          "deleted_remote": 0,
+          "errors": []
+        }
+      },
+      "syncRunId": "<UUID>",
+      "summary": [
+        {
+          "type": "info",
+          "text": "W4 w4e-miss3",
+          "message": "gcal event gone but juggler task content changed — will re-create"
+        }
+      ]
+    },
+    "providerCalls": {
+      "gcal": [
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        },
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        },
+        {
+          "method": "listEvents",
+          "args": {
+            "token": "tok-gcal",
+            "timeMin": "2026-06-16T04:00:00.000Z",
+            "timeMax": "2026-08-15T12:00:00.000Z"
+          }
+        }
+      ]
+    },
+    "sse": [
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "fetch",
+          "detail": "Fetching events...",
+          "pct": 5,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "fetch",
+          "detail": "Fetched 0 events",
+          "pct": 15,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "ledger",
+          "detail": "Checking for changes...",
+          "pct": 20,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "push",
+          "detail": "Syncing tasks...",
+          "pct": 50,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "finalize",
+          "detail": "Saving changes...",
+          "pct": 85,
+          "provider": null,
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "finalize",
+          "detail": "Finalizing...",
+          "pct": 95,
+          "provider": null,
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "done",
+          "detail": "Sync complete — no changes",
+          "pct": 100,
+          "provider": null,
+          "calendar": null
+        }
+      }
+    ],
+    "enqueues": [],
+    "dbDelta": {
+      "cal_sync_ledger": {
+        "changed": [
+          {
+            "key": "<L1>",
+            "changes": {
+              "miss_count": [
+                0,
+                1
+              ]
+            }
+          },
+          {
+            "key": "<L2>",
+            "changes": {
+              "active_task_key": [
+                "cal-sync-test-user-001|gcal|w4e-miss3",
+                null
+              ],
+              "miss_count": [
+                2,
+                0
+              ],
+              "provider_event_id": [
+                "ev-gcal-w4e-miss3",
+                null
+              ],
+              "status": [
+                "active",
+                "replaced"
+              ],
+              "task_id": [
+                "w4e-miss3",
+                null
+              ]
+            }
+          }
+        ]
+      },
+      "sync_history": {
+        "added": [
+          {
+            "action": "repush",
+            "calendar_name": null,
+            "created_at": "<TS>",
+            "detail": "gcal event gone but juggler task content changed — will re-create",
+            "error_detail": null,
+            "event_id": "ev-gcal-w4e-miss3",
+            "new_values": null,
+            "old_values": null,
+            "provider": "gcal",
+            "sync_run_id": "<UUID>",
+            "task_id": "w4e-miss3",
+            "task_text": "W4 w4e-miss3",
+            "trigger_type": "manual",
+            "user_id": "cal-sync-test-user-001"
+          }
+        ]
+      },
+      "users": {
+        "changed": [
+          {
+            "key": "user",
+            "changes": {
+              "gcal_last_synced_at": [
+                null,
+                "<TS>"
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+]

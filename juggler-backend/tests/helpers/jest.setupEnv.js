@@ -20,3 +20,11 @@
 'use strict';
 var path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../../.env.test') });
+
+// 999.1444: scrub AI-call env after the .env.test load so NO jest process can
+// lazily build a real GoogleGenAI client regardless of what .env.test or the
+// shell carries. Tests that need a key/Vertex flag set their own fake env
+// (e.g. goldenMaster.h5.test.js sets 'test-api-key-init' when absent;
+// adapterLifecycle.test.js injects its own env objects via deps.env).
+delete process.env.GEMINI_API_KEY;
+delete process.env.USE_VERTEX_AI;

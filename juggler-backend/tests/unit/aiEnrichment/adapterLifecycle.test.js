@@ -429,6 +429,14 @@ describe('B7 — callGemini: null SDK result must produce structured error, not 
     resolveQueue.push({ cnt: 0 });
   });
 
+  afterEach(() => {
+    // 999.1444: B7-guard injects a configured adapter via facade._setAdapters —
+    // reset the singleton so it never leaks into a later test/file (mirrors B6's
+    // afterEach cleanup pattern).
+    const facade = require('../../../src/slices/ai-enrichment/facade');
+    facade._reset();
+  });
+
   test(
     'B7-red [EXPECT-RED]: trackedGeminiCall resolves null → structured "Unexpected Gemini response" error ' +
     '(currently throws TypeError: Cannot read properties of null — raw 500)',
@@ -498,6 +506,39 @@ describe('B7 — callGemini: null SDK result must produce structured error, not 
   test(
     'B7-guard [GUARD-GREEN]: fast valid text response — callGemini succeeds and returns the text',
     async () => {
+      // 999.1444 test-isolation fix (mirrors B6-guard's pattern): this test previously
+      // relied on an ambient real GEMINI_API_KEY leaking into the jest process from the
+      // shell to reach GeminiAIAdapter's "configured" success path (isConfigured() ===
+      // true), rather than injecting its own fake configured adapter. jest.setupEnv.js's
+      // 999.1444 env-scrub (W2) now deletes any such leaked key after dotenv load, which
+      // is CORRECT (that leak is exactly the class of bug 999.1444 closes) — but it
+      // exposed that this test had no explicit key/adapter setup of its own, so it
+      // regressed to the not-configured branch (generate() returns {} → structured
+      // "Unexpected Gemini response structure" 500) once the ambient key was gone.
+      // Fix: inject a configured adapter (client present → isConfigured() is
+      // unconditionally true, same as B6-guard) so the test no longer depends on shell
+      // environment state.
+      const { GeminiAIAdapter } = require('../../../src/slices/ai-enrichment/facade');
+      const configuredAdapter = new GeminiAIAdapter({
+        client: {
+          models: {
+            generateContent: async () => ({ text: JSON.stringify({ ops: [], msg: 'All good.' }) }),
+          },
+        },
+        db: noopDb,
+      });
+      const facade = require('../../../src/slices/ai-enrichment/facade');
+      facade._setAdapters({ aiAdapter: configuredAdapter });
+
+      // mockReset (not just the beforeEach's clearAllMocks): B7-red/B7-guard-2 run
+      // against a NOT-configured adapter (generate() short-circuits to {} without ever
+      // calling trackedGeminiCall — see isConfigured()), so their own
+      // mockResolvedValueOnce(...) queues are left un-consumed. clearAllMocks() does not
+      // drain a mock's queued once-values (only mockReset()/a shift does), so without
+      // this reset THIS test — the first one in the file whose adapter is actually
+      // configured — would shift one of THEIR stale queued values instead of its own.
+      mockTrackedGeminiCall.mockReset();
+
       // Non-regression: a well-formed result.text response should still return 200.
       mockTrackedGeminiCall.mockResolvedValueOnce({
         text: JSON.stringify({ ops: [], msg: 'All good.' }),
