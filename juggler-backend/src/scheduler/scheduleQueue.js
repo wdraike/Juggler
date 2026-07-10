@@ -34,6 +34,7 @@
 
 var db = require('../db');
 var crypto = require('crypto');
+var MysqlClockAdapter = require('../slices/scheduler/adapters/MysqlClockAdapter');
 var { createLogger } = require('@raike/lib-logger');
 var logger = createLogger('scheduleQueue');
 
@@ -110,9 +111,14 @@ var _lastPollTime = 0;
 var _lastError = null;                // { timestamp, message } — last scheduler error, for health checks
 var _rateWindows = new Map();         // user_id → array of enqueue timestamps (within the rate-limit window) (999.591)
 
-// Injectable clock — tests pass a synthetic now() so they never sleep; production
-// uses Date.now. Kept module-private; set via _internal.setClock for tests.
-var _now = function () { return Date.now(); };
+// Injectable clock (999.1195) — every wall-clock read in this module derives
+// from a ClockPort. Production wires MysqlClockAdapter (the same adapter
+// RunScheduleCommand defaults to); tests swap the whole port via
+// _internal.setClockPort(FakeClockAdapter) or override the ms-epoch helper
+// directly via the legacy _internal.setClock(fn) seam. Module-private.
+var _clock = new MysqlClockAdapter();
+var _defaultNow = function () { return _clock.now().getTime(); };
+var _now = _defaultNow;
 
 /**
  * Per-user sliding-window rate-limit check (999.591). Records this enqueue and
@@ -176,7 +182,7 @@ async function enqueueScheduleRun(userId, source, options) {
   var row = {
     user_id: userId,
     source: source || 'unknown',
-    created_at: new Date()
+    created_at: _clock.now()
   };
 
   try {
@@ -266,8 +272,8 @@ async function dequeueScheduleRun(userId) {
  *   { claimed: false, reason: 'row_missing_after_claim' }     — race: row disappeared after update
  */
 async function tryClaim(userId, instanceId) {
-  var claimedAt = new Date();
-  var ttlExpiry = new Date(Date.now() - (CLAIM_TTL_SECONDS * 1000));
+  var claimedAt = _clock.now();
+  var ttlExpiry = new Date(_now() - (CLAIM_TTL_SECONDS * 1000));
 
   // Try to claim this user's row: either unclaimed, or an expired claim.
   // We use user_id as the WHERE to ensure atomicity (single row UPDATE).
@@ -334,7 +340,7 @@ async function claimAndRun(userId) {
     // the health popup shows plain language only). Without this the error went
     // ONLY to the in-memory _lastError and was never recorded anywhere.
     logger.error('scheduler run failed (claimAndRun)', { userId: userId, error: err.message, stack: err.stack });
-    _lastError = { timestamp: Date.now(), message: err.message };
+    _lastError = { timestamp: _now(), message: err.message };
     await releaseClaim(userId, INSTANCE_ID);
     return { claimed: true, success: false, error: err.message };
   } finally {
@@ -364,8 +370,8 @@ async function processUser(userId) {
 
   // Check debounce: minimum quiet period before running
   var last = _lastEnqueueTime.get(userId);
-  if (last && (Date.now() - last) < DEBOUNCE_MS) {
-    return { ran: false, reason: 'debounce', wait: DEBOUNCE_MS - (Date.now() - last) };
+  if (last && (_now() - last) < DEBOUNCE_MS) {
+    return { ran: false, reason: 'debounce', wait: DEBOUNCE_MS - (_now() - last) };
   }
 
   var promise = (async function() {
@@ -403,7 +409,7 @@ function startClaimHeartbeat(userId) {
       await db('schedule_queue')
         .where('user_id', userId)
         .where('claimed_by', INSTANCE_ID)
-        .update({ claimed_at: new Date() });
+        .update({ claimed_at: _clock.now() });
     } catch (e) {
       logger.error('[SCHED-QUEUE] Heartbeat failed for user ' + userId, { error: e });
     }
@@ -435,7 +441,7 @@ async function releaseClaim(userId, instanceId) {
 // ── Poll loop ───────────────────────────────────────────────────────────────
 
 async function pollOnce() {
-  _lastPollTime = Date.now();
+  _lastPollTime = _now();
 
   // DB-only poll: query for unclaimed rows that have been in the queue
   // long enough to avoid racing the enqueue INSERT.
@@ -541,7 +547,8 @@ function _resetForTests() {
   _rateWindows.clear();
   _lastError = null;
   _lastPollTime = 0;
-  _now = function () { return Date.now(); };
+  _clock = new MysqlClockAdapter();
+  _now = _defaultNow;
 }
 
 // ── Constants ──
@@ -583,7 +590,7 @@ async function runScheduleForPush(userId) {
     _running.delete(userId);
     // Record the real error server-side (999.683: detail in logs, not the popup).
     logger.error('scheduler run failed (runScheduleForPush)', { userId: userId, error: e.message, stack: e.stack });
-    _lastError = { timestamp: Date.now(), message: e.message };
+    _lastError = { timestamp: _now(), message: e.message };
     return { claimed: false, reason: 'exception', error: e.message };
   }
 }
@@ -609,9 +616,13 @@ module.exports = {
     tryClaim,
     releaseClaim,
     CLAIM_TTL_SECONDS,
+    DEBOUNCE_MS,
     // Rate-limit test seam (999.591): injectable clock + reset + direct check.
     checkRateLimit,
-    setClock: function (fn) { _now = fn || function () { return Date.now(); }; },
+    setClock: function (fn) { _now = fn || _defaultNow; },
+    // ClockPort test seam (999.1195): swap the WHOLE clock (e.g. FakeClockAdapter)
+    // so claimed_at/created_at stamps AND the ms-epoch helper move together.
+    setClockPort: function (clock) { _clock = clock || new MysqlClockAdapter(); },
     resetRateLimit: function () { _rateWindows.clear(); },
     RATE_LIMIT_MAX,
     RATE_LIMIT_WINDOW_MS,

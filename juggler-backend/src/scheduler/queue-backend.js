@@ -29,6 +29,12 @@
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('scheduler-queue-backend');
 
+// Injectable clock (999.1195): wall-clock reads derive from a ClockPort
+// (MysqlClockAdapter in production — same as RunScheduleCommand); swappable
+// via the _setClock test seam below.
+const MysqlClockAdapter = require('../slices/scheduler/adapters/MysqlClockAdapter');
+let _clock = new MysqlClockAdapter();
+
 const DRIVER = (process.env.JUGGLER_QUEUE_DRIVER || 'db').toLowerCase();
 const SCHEDULER_QUEUE = process.env.JUGGLER_SCHEDULER_QUEUE || 'juggler-scheduler-runs';
 
@@ -59,10 +65,10 @@ async function dispatchScheduleRun(userId, source) {
     // Dedup by user: at most one queued run per user (~1h window). Cloud Tasks
     // rejects a duplicate name, which is the native equivalent of the DB row's
     // per-user onConflict coalescing — bursts collapse to one pending run.
-    const dedupKey = 'sched-' + userId + '-' + Math.floor(Date.now() / 1000);
+    const dedupKey = 'sched-' + userId + '-' + Math.floor(_clock.now().getTime() / 1000);
     const res = await driver.createTask(
       SCHEDULER_QUEUE,
-      { userId: userId, source: source || 'unknown', enqueuedAt: Date.now() },
+      { userId: userId, source: source || 'unknown', enqueuedAt: _clock.now().getTime() },
       { dedupKey }
     );
     logger.info('[queue-backend] cloud-tasks scheduler run enqueued for ' + userId
@@ -81,4 +87,10 @@ module.exports = {
   SCHEDULER_QUEUE,
   isCloudTasks,
   dispatchScheduleRun,
+  // Test-only clock seam (999.1195). Returns the previous clock for restore.
+  _setClock: process.env.NODE_ENV === 'test' ? function _setClock(clock) {
+    const prev = _clock;
+    _clock = clock || new MysqlClockAdapter();
+    return prev;
+  } : undefined,
 };

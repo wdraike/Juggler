@@ -34,6 +34,12 @@
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('scheduler-cloud-tasks-driver');
 
+// Injectable clock (999.1195): wall-clock reads derive from a ClockPort
+// (MysqlClockAdapter in production — same as RunScheduleCommand); swappable
+// via the _setClock test seam below.
+const MysqlClockAdapter = require('../slices/scheduler/adapters/MysqlClockAdapter');
+let _clock = new MysqlClockAdapter();
+
 let _client = null;
 function client() {
   if (_client) { return _client; }
@@ -109,7 +115,7 @@ function buildCreateTaskRequest(queueName, payload, options = {}) {
 
   if (options.delaySeconds) {
     task.scheduleTime = {
-      seconds: Math.floor(Date.now() / 1000) + Number(options.delaySeconds),
+      seconds: Math.floor(_clock.now().getTime() / 1000) + Number(options.delaySeconds),
     };
   }
 
@@ -156,4 +162,10 @@ module.exports = {
   buildCreateTaskRequest,
   safeDedupKey,
   _resetClient,
+  // Test-only clock seam (999.1195). Returns the previous clock for restore.
+  _setClock: process.env.NODE_ENV === 'test' ? function _setClock(clock) {
+    const prev = _clock;
+    _clock = clock || new MysqlClockAdapter();
+    return prev;
+  } : undefined,
 };

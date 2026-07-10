@@ -240,8 +240,41 @@ module.exports = [
   // (src/scheduler/*.js), NOT slices/scheduler/{adapters,domain,application}/** —
   // those keep their inward slice enforcement. Remove this block when the H7B
   // refactor lands and `npm run lint:boundaries` is clean without it.
-  { files: ['**/scheduler/*.js'], rules: { 'no-restricted-syntax': 'off' } }
+  { files: ['**/scheduler/*.js'], rules: { 'no-restricted-syntax': 'off' } },
   // (999.1401) The former grandfather exemption for controllers/cal-sync.controller.js
   // is gone: the controller now imports KnexScheduleRepository via the scheduler
   // facade's named export, so the boundary rule enforces the facade there too.
+  //
+  // Wall-clock boundary for the legacy scheduler path (999.1195). Placed AFTER
+  // the grandfather block so, for src/scheduler/*.js, it REPLACES the 'off'
+  // with ONLY the Date selectors — the slice-boundary selectors stay
+  // grandfathered-off there (999.435 intent preserved), while bare wall-clock
+  // reads become errors: all time in the legacy entry files must derive from
+  // the injected ClockPort (MysqlClockAdapter in production — the same adapter
+  // RunScheduleCommand wires — FakeClockAdapter in tests), so queue
+  // claim/TTL/debounce and overdue boundary math are deterministic under test.
+  //
+  // Exception: unifiedScheduleV2.js — its single Date.now() is the debug-only
+  // captureSnapshot timestamp (cfg._debug step-recorder metadata for the admin
+  // stepper UI; never scheduling math) and the pure core has no clock in scope.
+  // Threading one through the hot scheduler signature for a diagnostic label is
+  // not worth the risk ("scheduler bugs cascade"). Remove the ignore if a clock
+  // is ever threaded into the V2 core.
+  {
+    files: ['**/src/scheduler/*.js'],
+    ignores: ['**/src/scheduler/unifiedScheduleV2.js'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "NewExpression[callee.name='Date'][arguments.length=0]",
+          message: 'Bare new Date() in the legacy scheduler — derive time from the injected ClockPort (clock.now()). See 999.1195.'
+        },
+        {
+          selector: "CallExpression[callee.object.name='Date'][callee.property.name='now']",
+          message: 'Bare Date.now() in the legacy scheduler — derive time from the injected ClockPort (clock.now().getTime()). See 999.1195.'
+        }
+      ]
+    }
+  }
 ];

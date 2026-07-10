@@ -131,6 +131,10 @@ var _computeOverdueForRow = require('../slices/task/facade').computeOverdueForRo
 // deadlock-retry + sync-lock stay here in runScheduleAndPersist / its caller.
 var RunScheduleCommand = require('../slices/scheduler/application/RunScheduleCommand');
 var _runScheduleCommand = new RunScheduleCommand();
+// 999.1195: ms-epoch read derived from the injected ClockPort (perf-stopwatch
+// checkpoints). Under FakeClockAdapter the deltas are 0 — tPerf is diagnostic
+// logging only, never scheduling math.
+function _clockNowMs() { return _runScheduleCommand.clockNow().getTime(); }
 var expandRecurringShared = require('juggler-shared/scheduler/expandRecurring');
 var expandRecurring = expandRecurringShared.expandRecurring;
 var { REASON_CODES } = require('juggler-shared/scheduler/reasonCodes');
@@ -497,7 +501,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // Per-phase timing. Each checkpoint captures cumulative elapsed ms from
   // transaction start; the summary log at the end shows phase-by-phase
   // deltas so we can find where time is going without a profiler.
-  var tPerfStart = Date.now();
+  var tPerfStart = _clockNowMs();
   var tPerf = { loadEnd: 0, expandEnd: 0, reconcileEnd: 0, scheduleEnd: 0, persistEnd: 0 };
 
   // Note: Non-recurring split tasks are now handled by inline expansion in
@@ -513,7 +517,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   //    adding the three queries' latencies on top of each other. Config uses
   //    its own connection (db) while the task rows use the transaction (trx)
   //    so the scheduler still sees a consistent snapshot.
-  var _loadStart = Date.now();
+  var _loadStart = _clockNowMs();
   var _p_taskRows = trx('tasks_v').where('user_id', userId)
     .where(function() {
       this.where('status', '')
@@ -745,7 +749,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   var cfg = _preloadedCfg;
   cfg.timezone = TIMEZONE;
 
-  tPerf.loadEnd = Date.now() - tPerfStart;
+  tPerf.loadEnd = _clockNowMs() - tPerfStart;
 
   // 5b. Unified reconcile — recurring-instance expansion PLUS split chunks
   // in one pass. Each master with split=1 produces K chunks per occurrence
@@ -836,7 +840,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
     logger.warn('[SCHED] expansion capped: ' + desiredOccurrences.length + ' → ' + MAX_EXPANDED);
     desiredOccurrences = desiredOccurrences.slice(0, MAX_EXPANDED);
   }
-  tPerf.expandEnd = Date.now() - tPerfStart;
+  tPerf.expandEnd = _clockNowMs() - tPerfStart;
 
   // R-FR2: id-keyed map storing the forward-roll last-valid-day deadline for each stranded
   // instance. Declared in outer scope so it survives the rowToTask rebuild that happens when
@@ -1541,7 +1545,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (t.when == null || t.when === '') t.when = ALL_WINDOWS;
   });
 
-  tPerf.reconcileEnd = Date.now() - tPerfStart;
+  tPerf.reconcileEnd = _clockNowMs() - tPerfStart;
 
   // Load weather data for weather-constrained tasks (fail-open if no coords/cache).
   // Detection delegates to the canonical hasWeatherConstraint() in
@@ -1567,7 +1571,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   var result = unifiedScheduleV2(
     allTasks, statuses, timeInfo.todayKey, timeInfo.nowMins, cfg, _runScheduleCommand.clock
   );
-  tPerf.scheduleEnd = Date.now() - tPerfStart;
+  tPerf.scheduleEnd = _clockNowMs() - tPerfStart;
 
   // 7. Persist schedule results from dayPlacements
   var updated = 0;
@@ -2389,7 +2393,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   }
 
   logger.info('[SCHED] runScheduleAndPersist: updated ' + updated + ', cleared ' + cleared + ' for user ' + userId);
-  tPerf.persistEnd = Date.now() - tPerfStart;
+  tPerf.persistEnd = _clockNowMs() - tPerfStart;
   logger.info('[SCHED] perf user=' + userId
     + ' load=' + tPerf.loadEnd
     + 'ms expand=' + (tPerf.expandEnd - tPerf.loadEnd)

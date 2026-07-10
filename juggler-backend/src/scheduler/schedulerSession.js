@@ -24,6 +24,12 @@ var { safeTimezone } = require('juggler-shared/scheduler/dateHelpers');
 var { getNowInTimezone, DEFAULT_TIMEZONE } = require('juggler-shared/scheduler/getNowInTimezone');
 var logger = createLogger('schedulerSession');
 
+// Injectable clock (999.1195): every wall-clock read in this module derives from
+// a ClockPort — MysqlClockAdapter in production (same adapter RunScheduleCommand
+// defaults to), swappable via the _setClock test seam below.
+var MysqlClockAdapter = require('../slices/scheduler/adapters/MysqlClockAdapter');
+var _clock = new MysqlClockAdapter();
+
 var SESSION_TTL_MS = 60 * 60 * 1000; // 1h
 var SWEEP_INTERVAL_MS = 5 * 60 * 1000; // 5m
 
@@ -33,7 +39,7 @@ function newSessionId() {
 
 async function sweep() {
   try {
-    await db('scheduler_sessions').where('expires_at', '<', new Date()).delete();
+    await db('scheduler_sessions').where('expires_at', '<', _clock.now()).delete();
   } catch (e) {
     logger.warn('[schedulerSession] sweep error:', { error: e });
   }
@@ -59,7 +65,7 @@ async function startSession(userId, options) {
 
   var TIMEZONE = safeTimezone(opts.timezone, DEFAULT_TIMEZONE);
   // 999.1185: shared R50.8 contract (was an inline formatToParts copy).
-  var nowInfo = getNowInTimezone(TIMEZONE);
+  var nowInfo = getNowInTimezone(TIMEZONE, _clock);
   var todayKey = nowInfo.todayKey;
   var nowMins = nowInfo.nowMins;
 
@@ -121,8 +127,8 @@ async function startSession(userId, options) {
     score: JSON.stringify(result.score || {}),
     warnings: JSON.stringify(result.warnings || []),
     slack_by_task_id: JSON.stringify(result.slackByTaskId || {}),
-    created_at: new Date(),
-    expires_at: new Date(Date.now() + SESSION_TTL_MS)
+    created_at: _clock.now(),
+    expires_at: new Date(_clock.now().getTime() + SESSION_TTL_MS)
   });
 
   return {
@@ -147,14 +153,14 @@ async function startSession(userId, options) {
 async function getSession(sessionId) {
   var row = await db('scheduler_sessions')
     .where('session_id', sessionId)
-    .where('expires_at', '>', new Date())
+    .where('expires_at', '>', _clock.now())
     .first();
   if (!row) return null;
 
   // Extend TTL on access.
   await db('scheduler_sessions')
     .where('session_id', sessionId)
-    .update({ expires_at: new Date(Date.now() + SESSION_TTL_MS) });
+    .update({ expires_at: new Date(_clock.now().getTime() + SESSION_TTL_MS) });
 
   return {
     sessionId: row.session_id,
@@ -264,4 +270,12 @@ module.exports = {
   stopSession: stopSession,
   _computeStep: _computeStep,
   _computeSummary: _computeSummary,
+  // Test-only clock seam (999.1195): swap the ClockPort so session TTL /
+  // expiry boundaries are deterministic under FakeClockAdapter. Returns the
+  // previous clock so callers can restore it in a finally block.
+  _setClock: process.env.NODE_ENV === 'test' ? function _setClock(clock) {
+    var prev = _clock;
+    _clock = clock || new MysqlClockAdapter();
+    return prev;
+  } : undefined,
 };

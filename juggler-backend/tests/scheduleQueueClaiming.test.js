@@ -218,3 +218,86 @@ test('tryClaim returns claimed:false reason:no_row when no schedule_queue row ex
 
   // No cleanup needed — no row was inserted
 });
+
+// ── Test 5: ClockPort-driven TTL expiry (999.1195) ─────────────────────────
+//
+// Same crashed-instance recovery contract as Test 2, but driven ENTIRELY by an
+// injected FakeClockAdapter on the legacy path — no raw-SQL timestamp
+// backdating, no real waiting, no global-Date monkeypatching. Before 999.1195
+// tryClaim read new Date() / Date.now() directly, so this scenario could only
+// be simulated by hand-editing rows (Test 2) or patching the global Date
+// (the false-green trap).
+
+test('FakeClockAdapter drives claim TTL expiry deterministically (no SQL backdating)', async function() {
+  var FakeClockAdapter = require('../src/slices/scheduler/adapters/FakeClockAdapter');
+  var setClockPort = (scheduleQueue._internal || {}).setClockPort;
+  expect(typeof setClockPort).toBe('function');
+
+  var userId = '__claim_test_user__';
+  var fake = new FakeClockAdapter({ startTime: '2026-01-15T12:00:00Z' });
+  setClockPort(fake);
+  try {
+    await db.raw('DELETE FROM schedule_queue WHERE user_id = ?', [userId]);
+    await db('schedule_queue').insert({ user_id: userId, source: 'test-fake-clock' });
+
+    // instance-A claims at fake T0 — claimed_at is stamped FROM the fake clock.
+    var claimA = await tryClaim(userId, 'instance-A');
+    expect(claimA.claimed).toBe(true);
+
+    // 1s inside the TTL: a second instance must lose, deterministically.
+    fake.advance((CLAIM_TTL_SECONDS - 1) * 1000);
+    var early = await tryClaim(userId, 'instance-B');
+    expect(early.claimed).toBe(false);
+    expect(early.reason).toBe('already_claimed');
+
+    // Cross the TTL boundary (fake clock only — no sleep): now reclaimable.
+    fake.advance(2 * 1000); // T0 + CLAIM_TTL + 1s
+    var late = await tryClaim(userId, 'instance-B');
+    expect(late.claimed).toBe(true);
+
+    var after = await db('schedule_queue').where('user_id', userId).first();
+    expect(after.claimed_by).toBe('instance-B');
+  } finally {
+    setClockPort(null); // restore the production MysqlClockAdapter
+    await db.raw('DELETE FROM schedule_queue WHERE user_id = ?', [userId]);
+  }
+});
+
+// ── Test 6: ClockPort-driven debounce boundary (999.1195) ──────────────────
+//
+// The processUser quiet-period gate previously mixed the injectable _now()
+// (enqueue stamps) with bare Date.now() (the debounce comparison), so the
+// boundary could only be tested with real sleeps or Date monkeypatching. With
+// both sides on the ClockPort the remaining-wait math is EXACT under a fake
+// clock.
+
+test('FakeClockAdapter drives the debounce quiet-period boundary math exactly', async function() {
+  var FakeClockAdapter = require('../src/slices/scheduler/adapters/FakeClockAdapter');
+  var internals = scheduleQueue._internal || {};
+  expect(typeof internals.setClockPort).toBe('function');
+  expect(typeof internals.DEBOUNCE_MS).toBe('number');
+
+  var userId = '__claim_test_user__';
+  var fake = new FakeClockAdapter({ startTime: '2026-01-15T12:00:00Z' });
+  internals.setClockPort(fake);
+  try {
+    await db.raw('DELETE FROM schedule_queue WHERE user_id = ?', [userId]);
+    // Simulate an enqueue at fake T0 (production stamps this map via _now()).
+    scheduleQueue._lastEnqueueTime.set(userId, fake.now().getTime());
+
+    // 500ms into the quiet period: refused, with the EXACT remaining wait.
+    fake.advance(500);
+    var r1 = await scheduleQueue.processUser(userId);
+    expect(r1).toEqual({ ran: false, reason: 'debounce', wait: internals.DEBOUNCE_MS - 500 });
+
+    // Cross the boundary: the debounce gate opens and processUser proceeds to
+    // the claim path; no queue row exists, so no_row proves the gate passed.
+    fake.advance(internals.DEBOUNCE_MS); // T0 + DEBOUNCE_MS + 500
+    var r2 = await scheduleQueue.processUser(userId);
+    expect(r2.ran).toBe(false);
+    expect(r2.reason).toBe('no_row');
+  } finally {
+    internals.setClockPort(null); // restore the production MysqlClockAdapter
+    scheduleQueue._lastEnqueueTime.delete(userId);
+  }
+});
