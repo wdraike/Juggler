@@ -75,7 +75,7 @@ export default function TaskDetailHeader({
         )}
         <div style={{ flex: 1 }} />
         {deleteSlot}
-        <button onClick={onClose} style={{
+        <button onClick={onClose} aria-label="Close" style={{
           border: 'none', background: 'transparent', color: TH.textMuted,
           fontSize: isMobile ? 24 : 16, cursor: 'pointer', padding: '2px 6px',
           minWidth: isMobile ? 44 : undefined, minHeight: isMobile ? 44 : undefined
@@ -195,6 +195,7 @@ export default function TaskDetailHeader({
           )}
           <button
             title={marker ? 'Reminder event — does not block time' : 'Make this a non-blocking reminder event'}
+            aria-pressed={marker}
             onClick={() => onMarkerChange && onMarkerChange(!marker)}
             style={{
               fontSize: 10, height: 24, boxSizing: 'border-box',

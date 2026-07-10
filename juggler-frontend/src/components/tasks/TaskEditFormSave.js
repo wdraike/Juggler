@@ -6,11 +6,16 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { toTime24, toDateISO, fromDateISO, parseDate, fromTime24 } from '../../scheduler/dateHelpers';
 import { applyDefaults } from '../../state/constants';
 
+// 999.1241: legacy `rigid` (column dropped 20260526000000) and `marker`
+// (superseded by placementMode='reminder', 999.1000) are no longer sent in the
+// save payload — backend toRow accepts neither. `exactTime` stays local UI
+// state in TaskEditForm/WhenSection (drives the timeFlex select), and `marker`
+// stays a derived placementMode view; neither belongs on the wire.
 export function useTaskEditFormSave({
   isCreate, task, text, project, pri, date, time, dur, timeRemaining,
-  deadline, earliestStart, notes, url, when, dayReq, recurring, exactTime,
+  deadline, earliestStart, notes, url, when, dayReq, recurring,
   timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools,
-  marker, flexWhen, recurType, recurDays, recurTimesPerCycle, recurFillPolicy,
+  flexWhen, recurType, recurDays, recurTimesPerCycle, recurFillPolicy,
   recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, nextStart,
   placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax,
   weatherHumidityMin, weatherHumidityMax, activeTimezone, onUpdate, onRecurDayConflict,
@@ -31,12 +36,12 @@ export function useTaskEditFormSave({
       dur: t.dur || 30, timeRemaining: t.timeRemaining != null ? t.timeRemaining : '',
       deadline: toDateISO(t.deadline) || '', earliestStart: toDateISO(t.earliestStart) || '',
       notes: t.notes || '', url: t.url || '', when: t.when || '', dayReq: t.dayReq || 'any',
-      recurring: !!t.recurring, rigid: !!t.rigid,
+      recurring: !!t.recurring,
       timeFlex: t.timeFlex != null ? t.timeFlex : null,
       split: t.split !== undefined ? !!t.split : false, splitMin: t.splitMin || 15,
       location: t.location || [], tools: t.tools || [],
       travelBefore: t.travelBefore || 0, travelAfter: t.travelAfter || 0,
-      marker: !!t.marker, flexWhen: !!t.flexWhen,
+      flexWhen: !!t.flexWhen,
       recurType: t.recur?.type || 'none', recurDays: t.recur?.days || 'MTWRF',
       recurTimesPerCycle: t.recur?.timesPerCycle || 0,
       recurFillPolicy: t.recur?.fillPolicy || 'keep',
@@ -81,12 +86,12 @@ export function useTaskEditFormSave({
       notes, url: (url && url.trim()) ? url.trim() : null,
       placementMode: placementMode,
       when: when, dayReq: recurring ? 'any' : dayReq,
-      recurring, rigid: exactTime,
+      recurring,
       timeFlex: placementMode === 'time_window' && time ? (timeFlex || 60) : (placementMode === 'time_window' ? null : undefined),
       split: !!split, splitMin: split ? (parseInt(splitMin) || 15) : null,
       location: taskLoc, tools: taskTools,
       travelBefore: parseInt(travelBefore) || 0, travelAfter: parseInt(travelAfter) || 0,
-      marker: marker, flexWhen: flexWhen,
+      flexWhen: flexWhen,
       recur: recurType === 'none' ? null : {
         type: recurType,
         days: recurType === 'weekly' || recurType === 'biweekly' ? recurDays : undefined,
@@ -110,7 +115,7 @@ export function useTaskEditFormSave({
       weatherHumidityMin: weatherHumidityMin !== '' && weatherHumidityMin !== null ? parseInt(weatherHumidityMin) : null,
       weatherHumidityMax: weatherHumidityMax !== '' && weatherHumidityMax !== null ? parseInt(weatherHumidityMax) : null
     };
-  }, [text, project, pri, date, time, dur, timeRemaining, deadline, earliestStart, notes, url, when, dayReq, recurring, exactTime, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, nextStart, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
+  }, [text, project, pri, date, time, dur, timeRemaining, deadline, earliestStart, notes, url, when, dayReq, recurring, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, flexWhen, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, nextStart, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
 
   var buildChangedFields = useCallback(function() {
     var all = buildFields();
@@ -127,13 +132,11 @@ export function useTaskEditFormSave({
     if (placementMode !== snapPlacementMode) changed.placementMode = all.placementMode;
     if (dayReq !== snap.dayReq) changed.dayReq = all.dayReq;
     if (recurring !== snap.recurring) changed.recurring = all.recurring;
-    if (exactTime !== snap.rigid) changed.rigid = all.rigid;
     if (parseInt(dur) !== snap.dur) changed.dur = all.dur;
     if (all.timeFlex !== snap.timeFlex && !(all.timeFlex == null && snap.timeFlex == null)) changed.timeFlex = all.timeFlex;
     if (all.preferredTimeMins !== snap.preferredTimeMins && !(all.preferredTimeMins == null && snap.preferredTimeMins == null)) changed.preferredTimeMins = all.preferredTimeMins;
     if (!!split !== snap.split) changed.split = all.split;
     if (parseInt(splitMin) !== snap.splitMin) changed.splitMin = all.splitMin;
-    if (!!marker !== snap.marker) changed.marker = all.marker;
     if (!!flexWhen !== snap.flexWhen) changed.flexWhen = all.flexWhen;
     if (parseInt(travelBefore) !== snap.travelBefore) changed.travelBefore = all.travelBefore;
     if (parseInt(travelAfter) !== snap.travelAfter) changed.travelAfter = all.travelAfter;
@@ -171,7 +174,7 @@ export function useTaskEditFormSave({
       changed._timezone = all._timezone;
     }
     return Object.keys(changed).length > 0 ? changed : null;
-  }, [buildFields, text, project, pri, notes, url, when, dayReq, recurring, exactTime, dur, timeRemaining, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, date, time, deadline, earliestStart, taskLoc, taskTools, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, recurStart, recurEnd, nextStart, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
+  }, [buildFields, text, project, pri, notes, url, when, dayReq, recurring, dur, timeRemaining, timeFlex, split, splitMin, travelBefore, travelAfter, flexWhen, date, time, deadline, earliestStart, taskLoc, taskTools, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, recurStart, recurEnd, nextStart, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
 
   var [isDirty, setIsDirty] = useState(false);
   useEffect(function() {
@@ -180,7 +183,7 @@ export function useTaskEditFormSave({
     userDirtyRef.current = true;
     var changed = buildChangedFields();
     setIsDirty(!!changed);
-  }, [text, project, pri, date, time, dur, timeRemaining, deadline, earliestStart, notes, url, when, dayReq, recurring, exactTime, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, nextStart, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
+  }, [text, project, pri, date, time, dur, timeRemaining, deadline, earliestStart, notes, url, when, dayReq, recurring, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, flexWhen, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, nextStart, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
 
   function commitSave(changed) {
     var willRegenerateInstances = changed.recur !== undefined;

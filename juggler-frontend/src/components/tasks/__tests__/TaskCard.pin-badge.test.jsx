@@ -55,16 +55,10 @@ it('Renders 📌 pin badge for task with placement_mode=fixed (snake_case)', () 
   expect(row2.textContent).toContain('\uD83D\uDCCC'); // 📌 emoji
 });
 
-it('Renders 📌 pin badge for task with fixed=true', () => {
-  renderCard({ fixed: true });
+it('Does NOT render pin badge for legacy fixed/rigid fields (999.1241: pruned — never truthy from the API)', () => {
+  renderCard({ fixed: true, rigid: true });
   var row2 = screen.getByTestId('task-card-row2');
-  expect(row2.textContent).toContain('📌'); // 📌 emoji
-});
-
-it('Renders 📌 pin badge for task with rigid=true', () => {
-  renderCard({ rigid: true });
-  var row2 = screen.getByTestId('task-card-row2');
-  expect(row2.textContent).toContain('📌'); // 📌 emoji
+  expect(row2.textContent).not.toContain('📌'); // legacy fields no longer drive the badge
 });
 
 it('Does NOT render pin badge when placementMode is undefined', () => {

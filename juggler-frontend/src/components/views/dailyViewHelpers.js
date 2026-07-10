@@ -82,8 +82,8 @@ export function tileBg(task, darkMode, hover, theme) {
     if (darkMode) return hover ? '#4338CA30' : '#4338CA1C';
     return hover ? '#EEF2FF20' : '#EEF2FF12';
   }
-  // Fixed/rigid tasks — subtle amber/orange
-  if (task.fixed || task.rigid || task.placementMode === 'fixed' || task.placement_mode === 'fixed') {
+  // Fixed tasks — subtle amber/orange (999.1241: legacy fixed/rigid pruned)
+  if (task.placementMode === 'fixed' || task.placement_mode === 'fixed') {
     if (darkMode) return hover ? '#9E6B3B30' : '#9E6B3B1C';
     return hover ? '#FEF3C720' : '#FEF3C712';
   }

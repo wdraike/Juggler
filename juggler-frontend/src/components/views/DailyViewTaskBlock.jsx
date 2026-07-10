@@ -44,7 +44,7 @@ export default function TaskBlock({ item, status, top, height, col, totalCols, o
     : gutterW;
 
   var locIcons = (t.location || []).map(function (l) { return locIcon(l); }).filter(Boolean);
-  var isFixed = t.fixed || t.rigid || t.placementMode === 'fixed' || t.placement_mode === 'fixed';
+  var isFixed = t.placementMode === 'fixed' || t.placement_mode === 'fixed'; // 999.1241: legacy fixed/rigid pruned
   var isMarker = !!t.marker;
   // sched-audit REG-44/F3 (calLocked, David's Q8) — calendar-born tasks show a lock
   // glyph and can't be dragged; WhenSection.jsx:251 is the precedent for the flag.

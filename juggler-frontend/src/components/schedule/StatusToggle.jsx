@@ -32,14 +32,14 @@ var TERMINAL_REQUIRES_SCHEDULE = TERMINAL_STATUSES;
 export default React.memo(function StatusToggle({ value, onChange, onDelete, darkMode, compact, isMobile, taskType, disableTerminal, hitSlop, instanceDate }) {
   var size = compact ? 16 : (isMobile ? 28 : 22);
   var fontSize = compact ? 8 : (isMobile ? 14 : 12);
-  // sched-audit L3 bird WARN-4 — the compact (16px) button is below WCAG 2.2
-  // SC 2.5.8's 24x24 CSS px minimum target size. `hitSlop` is opt-in per call
-  // site (currently only DailyViewUnschedEntry's lane row, newly made a live
-  // interactive target by F1) — it wraps each button in an invisible ≥24x24
-  // hit-area without changing the button's own visual size, so every OTHER
-  // StatusToggle call site (grid tile, TaskDetailHeader, etc.) renders
-  // pixel-identical to before.
+  // sched-audit L3 bird WARN-4 / 999.1230 — the compact (16px) and desktop
+  // (22px) buttons are below WCAG 2.2 SC 2.5.8's 24x24 CSS px minimum target
+  // size. The invisible ≥24x24 hit-area wrapper is now OPT-OUT (999.1230): all
+  // call sites get it by default; pass hitSlop={false} to render the bare
+  // button (no caller currently does). The wrapper does not change the
+  // button's own visual size.
   var slopSize = 24;
+  var useHitSlop = hitSlop !== false;
 
   // Filter statuses based on task type
   var statuses = ALL_STATUSES;
@@ -91,6 +91,8 @@ export default React.memo(function StatusToggle({ value, onChange, onDelete, dar
             onClick={function(e) { e.stopPropagation(); if (!isDisabled) onChange(s.value); }}
             disabled={isDisabled}
             title={isCurrent ? 'Current status' : needsSchedule ? 'Schedule task before resolving' : s.label}
+            aria-label={s.label}
+            aria-pressed={active}
             style={{
               width: size, height: size,
               borderRadius: 4,
@@ -112,7 +114,7 @@ export default React.memo(function StatusToggle({ value, onChange, onDelete, dar
             {s.icon}
           </button>
         );
-        if (!hitSlop) return React.cloneElement(button, { key: s.value || 'open' });
+        if (!useHitSlop) return React.cloneElement(button, { key: s.value || 'open' });
         return (
           <span
             key={s.value || 'open'}

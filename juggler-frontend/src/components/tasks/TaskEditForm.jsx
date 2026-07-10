@@ -132,7 +132,10 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
 
   var [dayReq, setDayReq] = useState(isCreate ? 'any' : (task.dayReq || 'any'));
   var [recurring, setRecurring] = useState(isCreate ? false : !!task.recurring);
-  var [exactTime, setExactTime] = useState(isCreate ? false : !!task.rigid);
+  // 999.1241: `task.rigid` never arrives from the API (column dropped
+  // 20260526000000) — exactTime is purely local UI state for WhenSection's
+  // time-flex select and is not sent in the save payload.
+  var [exactTime, setExactTime] = useState(false);
   var [timeFlex, setTimeFlex] = useState(isCreate ? 60 : (task.timeFlex != null ? task.timeFlex : 60));
   var [split, setSplit] = useState(isCreate ? false : (task.split !== undefined ? task.split : false));
   var [splitMin, setSplitMin] = useState(isCreate ? 15 : (task.splitMin || 15));
@@ -283,7 +286,9 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     setUrl(newSnap.url || '');
     setWhen(newSnap.when); setDayReq(newSnap.dayReq);
     setRecurringHasPreferredTime(newSnap.placementMode === 'time_window');
-    setRecurring(newSnap.recurring); setExactTime(newSnap.rigid); setTimeFlex(newSnap.timeFlex);
+    // 999.1241: `rigid` was dropped from the snapshot (dead column) — reset the
+    // local exact-time UI state instead of reading a field that no longer exists.
+    setRecurring(newSnap.recurring); setExactTime(false); setTimeFlex(newSnap.timeFlex);
     setSplit(newSnap.split); setSplitMin(newSnap.splitMin);
     setTaskLoc(newSnap.location); setTaskTools(newSnap.tools);
     setTravelBefore(newSnap.travelBefore); setTravelAfter(newSnap.travelAfter);
@@ -305,9 +310,9 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
 
   var save = useTaskEditFormSave({
     isCreate, task, text, project, pri, date, time, dur, timeRemaining,
-    deadline, earliestStart, notes, url, when, dayReq, recurring, exactTime,
+    deadline, earliestStart, notes, url, when, dayReq, recurring,
     timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools,
-    marker, flexWhen, recurType, recurDays, recurTimesPerCycle, recurFillPolicy,
+    flexWhen, recurType, recurDays, recurTimesPerCycle, recurFillPolicy,
     recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, nextStart,
     placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax,
     weatherHumidityMin, weatherHumidityMax, activeTimezone, onUpdate,

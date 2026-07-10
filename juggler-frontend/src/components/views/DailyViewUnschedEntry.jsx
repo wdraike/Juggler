@@ -70,7 +70,7 @@ export default function UnschedEntry({ task, status, onExpand, onStatusChange, o
           opacity: (isDone && ueIsPast) ? PAST_OPACITY : (isDone ? 0.5 : 1)
         }}
       >
-        {(task.fixed || task.rigid || task.placementMode === 'fixed' || task.placement_mode === 'fixed') && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\uD83D\uDCCC'}</span>}
+        {(task.placementMode === 'fixed' || task.placement_mode === 'fixed') && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\uD83D\uDCCC'}</span>}
         {task.recurring && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\uD83D\uDD01'}</span>}
         {status === 'done' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u2713'}</span>}
         {status === 'skip' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u23ED'}</span>}
