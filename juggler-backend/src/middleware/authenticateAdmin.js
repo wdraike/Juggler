@@ -9,8 +9,10 @@
  * Stack: authenticateJWT → authenticateAdmin → handler.
  */
 
+var config = require('../lib/config');
+
 function getAdminEmails() {
-  var raw = process.env.ADMIN_EMAILS || '';
+  var raw = config.getString('ADMIN_EMAILS'); // 999.1473 (schema default '' matches legacy `|| ''`)
   return raw.split(',').map(function(s) { return s.trim().toLowerCase(); }).filter(Boolean);
 }
 

@@ -216,6 +216,133 @@ describe('lib/config', () => {
     );
   });
 
+  describe('requiredInProduction (999.1473 — INTERNAL_SERVICE_KEY + OAuth app credentials)', () => {
+    test.each([
+      'INTERNAL_SERVICE_KEY',
+      'MICROSOFT_CLIENT_ID',
+      'MICROSOFT_CLIENT_SECRET',
+      'GOOGLE_CLIENT_ID',
+      'GOOGLE_CLIENT_SECRET',
+    ])('%s: unset outside production → documented dev default (empty string)', (key) => {
+      delete process.env[key];
+      process.env.NODE_ENV = 'test';
+      expect(config.getString(key)).toBe('');
+    });
+
+    test.each([
+      'INTERNAL_SERVICE_KEY',
+      'MICROSOFT_CLIENT_ID',
+      'MICROSOFT_CLIENT_SECRET',
+      'GOOGLE_CLIENT_ID',
+      'GOOGLE_CLIENT_SECRET',
+    ])('%s: unset in production → throws (fail loud, no silent empty-string leak)', (key) => {
+      delete process.env[key];
+      process.env.NODE_ENV = 'production';
+      expect(() => config.getString(key)).toThrow(/required in production/);
+    });
+
+    test.each([
+      ['INTERNAL_SERVICE_KEY', 'shared-secret-value'],
+      ['MICROSOFT_CLIENT_ID', 'ms-client-id-value'],
+      ['MICROSOFT_CLIENT_SECRET', 'ms-client-secret-value'],
+      ['GOOGLE_CLIENT_ID', 'google-client-id-value'],
+      ['GOOGLE_CLIENT_SECRET', 'google-client-secret-value'],
+    ])('%s: set in production → returns the env value', (key, prodValue) => {
+      process.env.NODE_ENV = 'production';
+      process.env[key] = prodValue;
+      expect(config.getString(key)).toBe(prodValue);
+    });
+  });
+
+  describe('operational defaults (999.1473 — remaining direct process.env migration)', () => {
+    test('NODE_ENV: returns declared default when absent', () => {
+      delete process.env.NODE_ENV;
+      expect(config.getString('NODE_ENV')).toBe('development');
+    });
+
+    test('VAPID_SUBJECT: returns declared default when absent', () => {
+      delete process.env.VAPID_SUBJECT;
+      expect(config.getString('VAPID_SUBJECT')).toBe('mailto:support@raikeandsons.com');
+    });
+
+    test('AI_CALL_TIMEOUT_MS: returns declared default when absent', () => {
+      delete process.env.AI_CALL_TIMEOUT_MS;
+      expect(config.getInt('AI_CALL_TIMEOUT_MS')).toBe(45000);
+    });
+
+    test('AI_CALL_TIMEOUT_MS: coerces a numeric env value', () => {
+      process.env.AI_CALL_TIMEOUT_MS = '5000';
+      expect(config.getInt('AI_CALL_TIMEOUT_MS')).toBe(5000);
+    });
+
+    test.each([
+      ['CREDENTIAL_ENCRYPTION_KEY', ''],
+      ['PUBLIC_URL', ''],
+      ['MCP_ISSUER_URL', ''],
+      ['MCP_DEV_NO_AUTH', ''],
+      ['LOG_LEVEL', ''],
+      ['CI', ''],
+      ['NO_COLOR', ''],
+      ['TERM', ''],
+      ['VAPID_PUBLIC_KEY', ''],
+      ['VAPID_PRIVATE_KEY', ''],
+      ['REDIS_URL', ''],
+      ['GIT_COMMIT', ''],
+      ['BUILD_DATE', ''],
+      ['ADMIN_EMAILS', ''],
+      ['FEATURE_CATALOG_KEY', ''],
+      ['CLOUD_TASKS_EMULATOR_HOST', ''],
+      ['GCP_PROJECT', ''],
+      ['GOOGLE_CLOUD_PROJECT', ''],
+      ['JUGGLER_WORKER_BASE_URL', ''],
+      ['CLOUD_TASKS_INVOKER_SA', ''],
+      ['SKIP_SCHEDULER_TASK_AUTH', ''],
+      ['JUGGLER_TASK_SECRET', ''],
+      ['BILLING_WEBHOOK_SECRET', ''],
+    ])('%s: returns declared default (%j) when absent', (key, expected) => {
+      delete process.env[key];
+      expect(config.getString(key)).toBe(expected);
+    });
+
+    test.each([
+      'NODE_ENV',
+      'CREDENTIAL_ENCRYPTION_KEY',
+      'PUBLIC_URL',
+      'MCP_ISSUER_URL',
+      'MCP_DEV_NO_AUTH',
+      'LOG_LEVEL',
+      'CI',
+      'NO_COLOR',
+      'TERM',
+      'VAPID_PUBLIC_KEY',
+      'VAPID_PRIVATE_KEY',
+      'VAPID_SUBJECT',
+      'REDIS_URL',
+      'GIT_COMMIT',
+      'BUILD_DATE',
+      'ADMIN_EMAILS',
+      'FEATURE_CATALOG_KEY',
+      'CLOUD_TASKS_EMULATOR_HOST',
+      'GCP_PROJECT',
+      'GOOGLE_CLOUD_PROJECT',
+      'JUGGLER_WORKER_BASE_URL',
+      'CLOUD_TASKS_INVOKER_SA',
+      'SKIP_SCHEDULER_TASK_AUTH',
+      'JUGGLER_TASK_SECRET',
+      'BILLING_WEBHOOK_SECRET',
+    ])('%s: unset in production does NOT throw (not requiredInProduction)', (key) => {
+      delete process.env[key];
+      process.env.NODE_ENV = 'production';
+      expect(() => config.getString(key)).not.toThrow();
+    });
+
+    test('AI_CALL_TIMEOUT_MS: unset in production does NOT throw (not requiredInProduction)', () => {
+      delete process.env.AI_CALL_TIMEOUT_MS;
+      process.env.NODE_ENV = 'production';
+      expect(() => config.getInt('AI_CALL_TIMEOUT_MS')).not.toThrow();
+    });
+  });
+
   describe('type mismatch', () => {
     test('getInt throws when key is declared as string', () => {
       expect(() => config.getInt('APP_ID')).toThrow(/not "int"/);

@@ -9,6 +9,7 @@
 
 // Re-export from the unified lib-db package
 const { createKnex, withTransaction, TransactionContext } = require('@raike/lib-db');
+const config = require('../config');
 
 /**
  * Default pool configuration with connection health validation
@@ -51,7 +52,7 @@ function getDefaultDb() {
   if (!defaultDbCached) {
     const knex = require('knex');
     const defaultKnexfile = require('../../../knexfile.js');
-    const env = process.env.NODE_ENV || 'development';
+    const env = config.getString('NODE_ENV'); // 999.1473 (schema default is 'development')
     const knexConfig = defaultKnexfile[env];
     
     if (!knexConfig) {

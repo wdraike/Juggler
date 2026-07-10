@@ -26,9 +26,10 @@
 
 var RedisStore = require('rate-limit-redis').RedisStore;
 var redisLib = require('./redis');
+var config = require('./config');
 
 function maybeRedisStore(prefix) {
-  if (!process.env.REDIS_URL) return undefined;
+  if (!config.getString('REDIS_URL')) return undefined; // 999.1473
 
   var client = redisLib.getClient();
   if (!client) return undefined;

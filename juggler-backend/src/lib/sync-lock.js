@@ -18,6 +18,7 @@
 var crypto = require('crypto');
 var db = require('../db');
 const { createLogger } = require('@raike/lib-logger');
+var config = require('./config');
 const logger = createLogger('sync-lock');
 
 var LOCK_TTL_SECONDS = 30;           // short TTL — heartbeat keeps it alive
@@ -179,7 +180,7 @@ async function withLock(userId, fn, opts) {
 // Disabled in test environment — integration tests manage their own DB state
 
 var sweepTimer;
-if (process.env.NODE_ENV !== 'test') {
+if (config.getString('NODE_ENV') !== 'test') { // 999.1473
   sweepTimer = setInterval(function() {
     db.raw('DELETE FROM sync_locks WHERE expires_at <= NOW()')
       .then(function(result) {

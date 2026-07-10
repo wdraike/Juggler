@@ -17,6 +17,7 @@
 'use strict';
 
 const { createLogger } = require('@raike/lib-logger');
+const config = require('../lib/config');
 const logger = createLogger('health.diagnostics');
 
 // 999.683 / leg fixy-health-copy: the health popup is user-facing — plain
@@ -247,10 +248,10 @@ async function runDetailedHealthCheck(deps) {
     status: 'OK',
     timestamp: new Date().toISOString(),
     uptime: Math.round(process.uptime()),
-    environment: process.env.NODE_ENV || 'development',
+    environment: config.getString('NODE_ENV'), // 999.1473 (schema default is 'development')
     version: {
-      gitCommit: process.env.GIT_COMMIT || null,
-      buildDate: process.env.BUILD_DATE || null
+      gitCommit: config.getString('GIT_COMMIT') || null, // 999.1473
+      buildDate: config.getString('BUILD_DATE') || null // 999.1473
     },
     services: {
       server: 'operational',

@@ -24,6 +24,7 @@
 
 const webpush = require('web-push');
 const { createLogger } = require('@raike/lib-logger');
+const config = require('./config');
 const logger = createLogger('push-service');
 
 let _configured = null; // null = not yet checked; true/false after first check
@@ -35,12 +36,13 @@ let _configured = null; // null = not yet checked; true/false after first check
 function ensureConfigured() {
   if (_configured !== null) { return _configured; }
 
-  const publicKey = process.env.VAPID_PUBLIC_KEY;
-  const privateKey = process.env.VAPID_PRIVATE_KEY;
+  const publicKey = config.getString('VAPID_PUBLIC_KEY'); // 999.1473 ('' when unset, same falsy check below)
+  const privateKey = config.getString('VAPID_PRIVATE_KEY'); // 999.1473
   // The VAPID `subject` is a contact URI (mailto: or https:) the push service
   // may use to reach the app operator. It is required by the spec but is not a
-  // secret. Default to a mailto so a missing subject alone never disables push.
-  const subject = process.env.VAPID_SUBJECT || 'mailto:support@raikeandsons.com';
+  // secret. The schema default IS the mailto fallback (999.1473) so a missing
+  // subject alone never disables push.
+  const subject = config.getString('VAPID_SUBJECT');
 
   if (!publicKey || !privateKey) {
     logger.warn(
@@ -73,7 +75,7 @@ function _resetConfigForTests() {
 /** Returns the public VAPID key, or null if push is not configured. */
 function getPublicKey() {
   ensureConfigured();
-  return process.env.VAPID_PUBLIC_KEY || null;
+  return config.getString('VAPID_PUBLIC_KEY') || null; // 999.1473
 }
 
 /** Returns true if web-push is configured and can deliver. */

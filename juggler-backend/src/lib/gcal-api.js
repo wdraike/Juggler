@@ -15,8 +15,8 @@ const CALENDAR_BASE = 'https://www.googleapis.com/calendar/v3';
 
 function createOAuth2Client() {
   return new OAuth2Client(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
+    config.getString('GOOGLE_CLIENT_ID'), // 999.1473
+    config.getString('GOOGLE_CLIENT_SECRET'), // 999.1473
     // 999.1202: routed through lib/config (requiredInProduction — fails loud
     // at the read site instead of silently masking a missing prod redirect URI).
     config.getString('GCAL_REDIRECT_URI')

@@ -12,6 +12,7 @@
 
 const Redis = require('ioredis');
 const { loggers } = require('./logger');
+const config = require('./config');
 const libRedisLogger = loggers.libRedis;
 
 const KEY_PREFIX = 'strivers:';
@@ -21,8 +22,8 @@ let connected = false;
 
 function ensureClient() {
   if (client) return client;
-  if (!process.env.REDIS_URL) return null;  // no-op when Redis not configured
-  client = new Redis(process.env.REDIS_URL, {
+  if (!config.getString('REDIS_URL')) return null;  // no-op when Redis not configured (999.1473)
+  client = new Redis(config.getString('REDIS_URL'), {
     keyPrefix: KEY_PREFIX,
     maxRetriesPerRequest: 1,
     enableOfflineQueue: false,
@@ -34,7 +35,7 @@ function ensureClient() {
 
   client.on('connect', () => {
     connected = true;
-    libRedisLogger.info('Redis connected', { url: process.env.REDIS_URL });
+    libRedisLogger.info('Redis connected', { url: config.getString('REDIS_URL') }); // 999.1473
   });
 
   client.on('error', (err) => {

@@ -16,6 +16,7 @@ var { computeChunks } = require('../lib/reconcile-splits');
 var unifiedScheduleV2 = require('./unifiedScheduleV2');
 var constants = require('./constants');
 var { TERMINAL_STATUSES } = require('../lib/task-status');
+var config = require('../lib/config');
 
 /**
  * Validate that all pending tasks have required scheduled_at values.
@@ -2630,15 +2631,15 @@ module.exports = {
   getWeatherProvider,
   // Test-only exports — pure-function seams for unit tests.
   // Never call from production code.
-  _placementMatchesDbRow: process.env.NODE_ENV === 'test' ? placementMatchesDbRow : undefined,
-  _computeNoLimboUpdates: process.env.NODE_ENV === 'test' ? computeNoLimboUpdates : undefined,
-  _ordinalSuffixOf: process.env.NODE_ENV === 'test' ? ordinalSuffixOf : undefined,
+  _placementMatchesDbRow: config.getString('NODE_ENV') === 'test' ? placementMatchesDbRow : undefined, // 999.1473
+  _computeNoLimboUpdates: config.getString('NODE_ENV') === 'test' ? computeNoLimboUpdates : undefined, // 999.1473
+  _ordinalSuffixOf: config.getString('NODE_ENV') === 'test' ? ordinalSuffixOf : undefined, // 999.1473
   // Test-only clock seam (999.1427): swap the ClockPort that drives
   // getNowInTimezone (todayKey/nowMins) and clockNow() stamps, so DB-backed
   // integration tests can freeze the scheduler wall clock deterministically
   // (e.g. with FakeClockAdapter). Returns the previous clock so callers can
   // restore it in a finally block. Never call from production code.
-  _setClock: process.env.NODE_ENV === 'test' ? function _setClock(clock) {
+  _setClock: config.getString('NODE_ENV') === 'test' ? function _setClock(clock) { // 999.1473
     var prev = _runScheduleCommand.clock;
     _runScheduleCommand.clock = clock;
     return prev;

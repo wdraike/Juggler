@@ -1,17 +1,19 @@
 const { enqueue } = require('./ai-usage-queue.service');
+// Named envConfig (not `config`) to avoid shadowing this file's own `config`
+// parameter (the Gemini SDK call config) below (999.1473).
+const envConfig = require('../../../lib/config');
 
 // Default AI call budget: read at call time so process.env overrides in tests
 // take effect without re-requiring the module. Mirrors H1 fetchWithTimeout pattern.
 // Weather keeps its own 8s constant (EXTERNAL_CALL_TIMEOUT_MS); AI calls use this
 // larger budget because model inference is slower than weather HTTP lookups.
-const DEFAULT_AI_CALL_TIMEOUT_MS = 45000; // 45s default; override via AI_CALL_TIMEOUT_MS
+// 45s default lives in lib/config's SCHEMA now; override via AI_CALL_TIMEOUT_MS (999.1473).
 
 async function trackedGeminiCall(db, client, modelName, contents, config, { useCase, userId = null, correlationId = null, timeoutMs } = {}) {
   // Read env at call time (not module load) so tests setting process.env.AI_CALL_TIMEOUT_MS
   // before require() take effect via isolateModules, and runtime env overrides work.
-  const budget = (timeoutMs != null)
-    ? timeoutMs
-    : (process.env.AI_CALL_TIMEOUT_MS ? parseInt(process.env.AI_CALL_TIMEOUT_MS, 10) : DEFAULT_AI_CALL_TIMEOUT_MS);
+  // config.getInt reads process.env fresh on every call (never memoized), same contract.
+  const budget = (timeoutMs != null) ? timeoutMs : envConfig.getInt('AI_CALL_TIMEOUT_MS'); // 999.1473
 
   const controller = new AbortController();
 

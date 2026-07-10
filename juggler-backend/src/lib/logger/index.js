@@ -11,6 +11,10 @@
  * @module lib/logger
  */
 
+// Named envConfig (not `config`) to avoid shadowing the Logger constructor's
+// `config` parameter below (999.1473).
+const envConfig = require('../config');
+
 /**
  * Log levels in order of severity (most severe first)
  * @type {string[]}
@@ -21,8 +25,8 @@ const LOG_LEVELS = ['error', 'warn', 'info', 'debug', 'trace'];
  * Default log level - can be overridden via LOG_LEVEL or NODE_ENV
  * @type {string}
  */
-const DEFAULT_LOG_LEVEL = process.env.LOG_LEVEL || 
-  (process.env.NODE_ENV === 'production' ? 'info' : 'debug');
+const DEFAULT_LOG_LEVEL = envConfig.getString('LOG_LEVEL') || // 999.1473
+  (envConfig.getString('NODE_ENV') === 'production' ? 'info' : 'debug');
 
 /**
  * ANSI color codes for terminal output (production uses plaintext)
@@ -54,9 +58,9 @@ const LEVEL_COLORS = {
  */
 function supportsColors() {
   // No colors in production or when running in a non-TTY environment
-  if (process.env.NODE_ENV === 'production') return false;
+  if (envConfig.getString('NODE_ENV') === 'production') return false;
   // Check for CI environments
-  if (process.env.CI || process.env.NO_COLOR || process.env.TERM === 'dumb') return false;
+  if (envConfig.getString('CI') || envConfig.getString('NO_COLOR') || envConfig.getString('TERM') === 'dumb') return false;
   // Check for TTY
   if (!process.stdout.isTTY) return false;
   return true;
@@ -125,7 +129,7 @@ class Logger {
   constructor(name, config = {}) {
     this.name = name;
     this.level = config.level || DEFAULT_LOG_LEVEL;
-    this.json = config.json !== undefined ? config.json : process.env.NODE_ENV === 'production';
+    this.json = config.json !== undefined ? config.json : envConfig.getString('NODE_ENV') === 'production';
     this.colors = config.colors !== undefined ? config.colors : supportsColors();
     this.output = config.output || console.log;
     this.errorOutput = config.errorOutput || console.error;

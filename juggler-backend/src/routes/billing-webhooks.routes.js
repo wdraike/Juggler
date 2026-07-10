@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const router = express.Router();
 const { handleWebhook } = require('../controllers/billing-webhooks.controller');
 const { createLogger } = require('@raike/lib-logger');
+const config = require('../lib/config');
 const logger = createLogger('billing-webhooks.routes');
 
 // Verify HMAC-SHA256 signature from payment service + reject stale replays.
@@ -16,7 +17,15 @@ function verifySignature(req, res, next) {
   // Approved fallback (juggler/CLAUDE.md §Approved Fallbacks, 999.368): juggler and
   // payment-service share one internal HMAC secret where a dedicated BILLING_WEBHOOK_SECRET
   // isn't separately provisioned. If neither is set the request hard-fails below (500).
-  const secret = process.env.BILLING_WEBHOOK_SECRET || process.env.INTERNAL_SERVICE_KEY;
+  // 999.1473: BILLING_WEBHOOK_SECRET routed through lib/config. INTERNAL_SERVICE_KEY
+  // deliberately stays a raw process.env read HERE (rather than the schema's
+  // requiredInProduction getString): this line runs inside verifySignature, and
+  // INTERNAL_SERVICE_KEY is declared requiredInProduction:true in the schema — if it
+  // were ever unset in production, a schema read would throw and change this
+  // handler's fail-soft "500 not configured" JSON body into whatever the generic
+  // error middleware produces. Keeping the raw read preserves the existing,
+  // deliberate response shape for that edge case.
+  const secret = config.getString('BILLING_WEBHOOK_SECRET') || process.env.INTERNAL_SERVICE_KEY;
 
   if (!secret) {
     logger.error('[billing-webhook] No BILLING_WEBHOOK_SECRET or INTERNAL_SERVICE_KEY configured — cannot verify webhooks');

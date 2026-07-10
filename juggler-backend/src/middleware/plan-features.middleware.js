@@ -17,6 +17,7 @@ const logger = createLogger('plan-features');
 const { PRODUCT_LABEL } = require('../service-identity');
 const { paymentFetch, paymentUrl } = require('../lib/payment-service-client');
 const _proxyConfig = require('../proxy-config');
+const config = require('../lib/config');
 const CATALOG_CACHE_TTL_MS = 5 * 60 * 1000;
 const USER_PLAN_CACHE_TTL_MS = 2 * 60 * 1000;
 
@@ -28,7 +29,7 @@ async function getProductId() {
   if (_productId) return _productId;
   if (_productDiscoveryPromise) return _productDiscoveryPromise;
 
-  const internalKey = process.env.INTERNAL_SERVICE_KEY || '';
+  const internalKey = config.getString('INTERNAL_SERVICE_KEY'); // 999.1473 (requiredInProduction — fails loud instead of masking as '')
   _productDiscoveryPromise = (async () => {
     try {
       const res = await paymentFetch(`/internal/products/${PRODUCT_LABEL}`, {
@@ -57,7 +58,7 @@ let _fetchPromise = null;
 async function fetchPlanFeatures() {
   const productId = await getProductId();
   const filter = productId ? `?product=${productId}` : `?product=${PRODUCT_LABEL}`;
-  const internalKey = process.env.INTERNAL_SERVICE_KEY || '';
+  const internalKey = config.getString('INTERNAL_SERVICE_KEY'); // 999.1473 (requiredInProduction — fails loud instead of masking as '')
   const response = await paymentFetch(`/api/plans${filter}&include_all=true`, {
     headers: { 'X-Internal-Key': internalKey, 'Content-Type': 'application/json' }
   });

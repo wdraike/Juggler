@@ -33,7 +33,7 @@ function generatePkce() {
 
 function getAuthUrl(state, codeChallenge) {
   var params = new URLSearchParams({
-    client_id: process.env.MICROSOFT_CLIENT_ID,
+    client_id: config.getString('MICROSOFT_CLIENT_ID'), // 999.1473
     response_type: 'code',
     redirect_uri: getRedirectUri(),
     scope: SCOPES,
@@ -47,8 +47,8 @@ function getAuthUrl(state, codeChallenge) {
 
 async function getTokensFromCode(code, codeVerifier) {
   var body = new URLSearchParams({
-    client_id: process.env.MICROSOFT_CLIENT_ID,
-    client_secret: process.env.MICROSOFT_CLIENT_SECRET,
+    client_id: config.getString('MICROSOFT_CLIENT_ID'), // 999.1473
+    client_secret: config.getString('MICROSOFT_CLIENT_SECRET'), // 999.1473
     code: code,
     redirect_uri: getRedirectUri(),
     grant_type: 'authorization_code',
@@ -81,8 +81,8 @@ async function getTokensFromCode(code, codeVerifier) {
 
 async function refreshAccessToken(refreshToken) {
   var body = new URLSearchParams({
-    client_id: process.env.MICROSOFT_CLIENT_ID,
-    client_secret: process.env.MICROSOFT_CLIENT_SECRET,
+    client_id: config.getString('MICROSOFT_CLIENT_ID'), // 999.1473
+    client_secret: config.getString('MICROSOFT_CLIENT_SECRET'), // 999.1473
     refresh_token: refreshToken,
     grant_type: 'refresh_token',
     scope: SCOPES

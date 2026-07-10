@@ -89,7 +89,7 @@ module.exports = {
   isCloudTasks,
   dispatchScheduleRun,
   // Test-only clock seam (999.1195). Returns the previous clock for restore.
-  _setClock: process.env.NODE_ENV === 'test' ? function _setClock(clock) {
+  _setClock: config.getString('NODE_ENV') === 'test' ? function _setClock(clock) { // 999.1473
     const prev = _clock;
     _clock = clock || new MysqlClockAdapter();
     return prev;

@@ -48,7 +48,7 @@ function client() {
   // cloud-tasks backend is actually selected (mirrors RO).
   const { CloudTasksClient } = require('@google-cloud/tasks');
 
-  const emulator = process.env.CLOUD_TASKS_EMULATOR_HOST;
+  const emulator = config.getString('CLOUD_TASKS_EMULATOR_HOST'); // 999.1473
   if (emulator) {
     const grpc = require('@grpc/grpc-js');
     const [host, portRaw] = emulator.split(':');
@@ -65,16 +65,16 @@ function client() {
 }
 
 function project() {
-  return process.env.GCP_PROJECT || process.env.GOOGLE_CLOUD_PROJECT;
+  return config.getString('GCP_PROJECT') || config.getString('GOOGLE_CLOUD_PROJECT'); // 999.1473
 }
 function location() {
   return config.getString('GCP_REGION'); // 999.1202
 }
 function workerBaseUrl() {
-  return process.env.JUGGLER_WORKER_BASE_URL;
+  return config.getString('JUGGLER_WORKER_BASE_URL'); // 999.1473
 }
 function invokerSa() {
-  return process.env.CLOUD_TASKS_INVOKER_SA;
+  return config.getString('CLOUD_TASKS_INVOKER_SA'); // 999.1473
 }
 
 /**
@@ -164,7 +164,7 @@ module.exports = {
   safeDedupKey,
   _resetClient,
   // Test-only clock seam (999.1195). Returns the previous clock for restore.
-  _setClock: process.env.NODE_ENV === 'test' ? function _setClock(clock) {
+  _setClock: config.getString('NODE_ENV') === 'test' ? function _setClock(clock) { // 999.1473
     const prev = _clock;
     _clock = clock || new MysqlClockAdapter();
     return prev;

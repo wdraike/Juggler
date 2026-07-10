@@ -22,6 +22,7 @@ var db = require('../db');
 var { createLogger } = require('@raike/lib-logger');
 var { safeTimezone } = require('juggler-shared/scheduler/dateHelpers');
 var { getNowInTimezone, DEFAULT_TIMEZONE } = require('juggler-shared/scheduler/getNowInTimezone');
+var config = require('../lib/config');
 var logger = createLogger('schedulerSession');
 
 // Injectable clock (999.1195): every wall-clock read in this module derives from
@@ -273,7 +274,7 @@ module.exports = {
   // Test-only clock seam (999.1195): swap the ClockPort so session TTL /
   // expiry boundaries are deterministic under FakeClockAdapter. Returns the
   // previous clock so callers can restore it in a finally block.
-  _setClock: process.env.NODE_ENV === 'test' ? function _setClock(clock) {
+  _setClock: config.getString('NODE_ENV') === 'test' ? function _setClock(clock) { // 999.1473
     var prev = _clock;
     _clock = clock || new MysqlClockAdapter();
     return prev;

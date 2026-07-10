@@ -149,6 +149,131 @@ const SCHEMA = {
     type: 'string',
     default: 'juggler-scheduler-runs',
   },
+
+  // ── 999.1473: continuation of 999.1202 — remaining direct process.env reads ──
+  //
+  // NODE_ENV is Node's own runtime-environment var, read pervasively (dev/test/
+  // prod branching, test seams). Deliberately NOT requiredInProduction — it is
+  // the signal THAT determines "are we in production", so gating its own
+  // presence on being in production would be circular. 'development' mirrors
+  // Node's own convention when NODE_ENV is unset.
+  NODE_ENV: { key: 'NODE_ENV', type: 'string', default: 'development' },
+
+  // Shared inter-service auth secret (Phase 60 consolidation). Real secret in
+  // ALL 5 consumer services per deploy/juggler-backend.yaml lines 105-109
+  // (`internal-service-key` in Secret Manager) — requiredInProduction so a
+  // missing deploy secret fails loud at the read site instead of silently
+  // degrading to an empty X-Internal-Key header (confusing downstream 401s).
+  // Cross-file consistency (999.1473 follow-up question): ALL read sites that
+  // treat this as their OWN required secret (PaymentServiceEntitlementAdapter,
+  // plan-features.middleware, user-config/facade, usage-reporter) now read this
+  // ONE schema key. The two sites where INTERNAL_SERVICE_KEY is the FALLBACK
+  // half of an already-approved `SECRET_A || INTERNAL_SERVICE_KEY` composite
+  // (billing-webhooks.routes.js, scheduler-tasks.routes.js) are intentionally
+  // NOT migrated to this schema key — see the comments at those call sites for
+  // the unhandled-rejection / response-shape risk that blocks it.
+  INTERNAL_SERVICE_KEY: {
+    key: 'INTERNAL_SERVICE_KEY',
+    type: 'string',
+    default: '',
+    requiredInProduction: true,
+  },
+
+  // Microsoft Graph OAuth app credentials (src/lib/msft-cal-api.js). Real
+  // secrets in deploy/juggler-backend.yaml lines 46-55.
+  MICROSOFT_CLIENT_ID: { key: 'MICROSOFT_CLIENT_ID', type: 'string', default: '', requiredInProduction: true },
+  MICROSOFT_CLIENT_SECRET: { key: 'MICROSOFT_CLIENT_SECRET', type: 'string', default: '', requiredInProduction: true },
+
+  // Google OAuth app credentials (src/lib/gcal-api.js). Real secrets in
+  // deploy/juggler-backend.yaml lines 31-40.
+  GOOGLE_CLIENT_ID: { key: 'GOOGLE_CLIENT_ID', type: 'string', default: '', requiredInProduction: true },
+  GOOGLE_CLIENT_SECRET: { key: 'GOOGLE_CLIENT_SECRET', type: 'string', default: '', requiredInProduction: true },
+
+  // AES-256-GCM key for stored-credential encryption (src/lib/credential-encrypt.js).
+  // NOT requiredInProduction: the read site already enforces presence + exact
+  // length in EVERY environment (`if (!hex || hex.length !== 64) throw`), a
+  // stricter, pre-existing guard than the prod-only requiredInProduction check.
+  CREDENTIAL_ENCRYPTION_KEY: { key: 'CREDENTIAL_ENCRYPTION_KEY', type: 'string', default: '' },
+
+  // MCP server's own public URL, used as the OAuth issuer / WWW-Authenticate
+  // resource metadata base (src/mcp/transport.js). Two legacy env-var names
+  // for the same value; both ARE set in deploy/juggler-backend.yaml (lines
+  // 85-86, 110-111) as belt-and-suspenders redundancy. Deliberately NOT
+  // requiredInProduction — the `||` fallback chain between the two is the
+  // existing, intentional redundancy, not a masked-missing-var violation.
+  PUBLIC_URL: { key: 'PUBLIC_URL', type: 'string', default: '' },
+  MCP_ISSUER_URL: { key: 'MCP_ISSUER_URL', type: 'string', default: '' },
+
+  // Dev-only MCP auth bypass flag (src/mcp/transport.js) — also gated on
+  // NODE_ENV !== 'production' at the read site, so this can never open the
+  // bypass in prod even if accidentally set. Not requiredInProduction.
+  MCP_DEV_NO_AUTH: { key: 'MCP_DEV_NO_AUTH', type: 'string', default: '' },
+
+  // Logger config (src/lib/logger/index.js). LOG_LEVEL default stays '' so the
+  // existing `getString('LOG_LEVEL') || (NODE_ENV==='production' ? 'info' :
+  // 'debug')` computed-fallback line at the call site is preserved verbatim.
+  LOG_LEVEL: { key: 'LOG_LEVEL', type: 'string', default: '' },
+  CI: { key: 'CI', type: 'string', default: '' },
+  NO_COLOR: { key: 'NO_COLOR', type: 'string', default: '' },
+  TERM: { key: 'TERM', type: 'string', default: '' },
+
+  // Web Push (VAPID) keys (src/lib/push-service.js). Documented, approved
+  // fail-SOFT: absence is a deploy-time misconfig the module logs loudly and
+  // no-ops on (in-app reminders still work) — not requiredInProduction.
+  VAPID_PUBLIC_KEY: { key: 'VAPID_PUBLIC_KEY', type: 'string', default: '' },
+  VAPID_PRIVATE_KEY: { key: 'VAPID_PRIVATE_KEY', type: 'string', default: '' },
+  // Contact URI, not a secret; default matches the pre-existing `||` fallback.
+  VAPID_SUBJECT: { key: 'VAPID_SUBJECT', type: 'string', default: 'mailto:support@raikeandsons.com' },
+
+  // Redis connection string, read by 5 files (redis.js, sse-emitter.js,
+  // cache/index.js, rate-limit-store.js). Fail-open by design across all of
+  // them (in-memory/local-only fallback) except lib/cache/index.js, which
+  // itself throws when REDIS_URL is absent AND NODE_ENV==='production' — that
+  // check stays in the calling code (createCache), not this schema entry, so
+  // REDIS_URL itself is not requiredInProduction.
+  REDIS_URL: { key: 'REDIS_URL', type: 'string', default: '' },
+
+  // Build/deploy metadata surfaced by the health-diagnostics endpoint
+  // (src/routes/health.diagnostics.js). Purely informational; '' default lets
+  // the call site's existing `|| null` produce the same JSON `null` it always
+  // has when unset.
+  GIT_COMMIT: { key: 'GIT_COMMIT', type: 'string', default: '' },
+  BUILD_DATE: { key: 'BUILD_DATE', type: 'string', default: '' },
+
+  // Comma-separated admin allowlist (src/middleware/authenticateAdmin.js).
+  // Default '' matches the pre-existing `|| ''` exactly (empty list -> deny all).
+  ADMIN_EMAILS: { key: 'ADMIN_EMAILS', type: 'string', default: '' },
+
+  // Shared service key protecting the feature-catalog/feature-events internal
+  // routes (src/routes/feature-catalog.routes.js, feature-events.routes.js).
+  // NOT requiredInProduction: both call sites already fail soft with an
+  // explicit 503 when unset ("Feature catalog not configured") — preserving
+  // that deliberate response shape rather than promoting it to a thrown error.
+  FEATURE_CATALOG_KEY: { key: 'FEATURE_CATALOG_KEY', type: 'string', default: '' },
+
+  // Per-call Gemini timeout override (src/slices/ai-enrichment/adapters/gemini-tracked-call.js).
+  // Read fresh at call time via getInt (not memoized) — same call-time-read
+  // contract the file's own comment already documents for test isolation.
+  AI_CALL_TIMEOUT_MS: { key: 'AI_CALL_TIMEOUT_MS', type: 'int', default: 45000 },
+
+  // Cloud Tasks driver config (src/scheduler/cloud-tasks-driver.js,
+  // src/routes/scheduler-tasks.routes.js) — all opt-in, only consulted when
+  // JUGGLER_QUEUE_DRIVER=cloud-tasks. None requiredInProduction: the driver
+  // already throws its own clear errors when a required one of these is unset
+  // AND the cloud-tasks backend is actually selected (see buildCreateTaskRequest).
+  CLOUD_TASKS_EMULATOR_HOST: { key: 'CLOUD_TASKS_EMULATOR_HOST', type: 'string', default: '' },
+  GCP_PROJECT: { key: 'GCP_PROJECT', type: 'string', default: '' },
+  GOOGLE_CLOUD_PROJECT: { key: 'GOOGLE_CLOUD_PROJECT', type: 'string', default: '' },
+  JUGGLER_WORKER_BASE_URL: { key: 'JUGGLER_WORKER_BASE_URL', type: 'string', default: '' },
+  CLOUD_TASKS_INVOKER_SA: { key: 'CLOUD_TASKS_INVOKER_SA', type: 'string', default: '' },
+  SKIP_SCHEDULER_TASK_AUTH: { key: 'SKIP_SCHEDULER_TASK_AUTH', type: 'string', default: '' },
+  JUGGLER_TASK_SECRET: { key: 'JUGGLER_TASK_SECRET', type: 'string', default: '' },
+
+  // Billing-webhook HMAC secret (src/routes/billing-webhooks.routes.js). Not
+  // requiredInProduction: INTERNAL_SERVICE_KEY is the guaranteed fallback
+  // (Approved Fallback, juggler/CLAUDE.md, 999.368) when a dedicated secret
+  // isn't separately provisioned.
+  BILLING_WEBHOOK_SECRET: { key: 'BILLING_WEBHOOK_SECRET', type: 'string', default: '' },
 };
 
 /**

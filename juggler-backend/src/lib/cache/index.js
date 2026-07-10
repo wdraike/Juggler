@@ -23,6 +23,7 @@
 var CachePort = require('./CachePort');
 var RedisCacheAdapter = require('./RedisCacheAdapter');
 var InMemoryCacheAdapter = require('./InMemoryCacheAdapter');
+var config = require('../config');
 
 /**
  * Build a CachePort-conforming cache adapter.
@@ -37,10 +38,10 @@ function createCache(opts) {
   var options = opts === undefined ? {} : opts;
   var driver = options.driver;
   if (driver === undefined) {
-    if (!process.env.REDIS_URL) {
+    if (!config.getString('REDIS_URL')) { // 999.1473
       // Deliberate environment-gated default: in-memory is allowed only outside production;
       // a missing REDIS_URL in production is a misconfiguration, not a graceful fallback.
-      if (process.env.NODE_ENV === 'production') {
+      if (config.getString('NODE_ENV') === 'production') {
         throw new Error('lib/cache: REDIS_URL is required in production');
       }
       driver = 'memory';

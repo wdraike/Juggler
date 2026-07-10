@@ -8,9 +8,10 @@
 const crypto = require('crypto');
 const router = require('express').Router();
 const controller = require('../controllers/feature-catalog.controller');
+const config = require('../lib/config');
 
 function authenticateServiceKey(req, res, next) {
-  const expectedKey = process.env.FEATURE_CATALOG_KEY;
+  const expectedKey = config.getString('FEATURE_CATALOG_KEY'); // 999.1473 ('' when unset, same falsy check below)
   if (!expectedKey) {
     return res.status(503).json({ error: 'Feature catalog not configured (FEATURE_CATALOG_KEY not set)' });
   }

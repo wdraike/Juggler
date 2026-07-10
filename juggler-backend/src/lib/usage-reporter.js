@@ -11,6 +11,7 @@
 const { PRODUCT_LABEL } = require('../service-identity');
 const { paymentFetch } = require('./payment-service-client');
 const { libUsageReporterLogger } = require('./logger');
+const config = require('./config');
 const FLUSH_INTERVAL = 30000;
 const FLUSH_SIZE = 50;
 
@@ -72,7 +73,7 @@ async function flush() {
         body: { productId: await getProductId() || PRODUCT_LABEL, events }
       });
     } else {
-      const INTERNAL_KEY = process.env.INTERNAL_SERVICE_KEY;
+      const INTERNAL_KEY = config.getString('INTERNAL_SERVICE_KEY'); // 999.1473
       if (!INTERNAL_KEY) return;
       await paymentFetch('/api/usage/report', {
         method: 'POST',

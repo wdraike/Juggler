@@ -78,6 +78,7 @@ var SCHED_KEYS = require('./application/commands/UpdateConfig').SCHED_KEYS;
 // ── infra seams the use-cases inject (the SAME modules the legacy files used) ──
 var libDb = require('../../lib/db');
 var { cache } = require('../../lib/cache');
+var config = require('../../lib/config');
 // 999.1199: lib/tasks-write is internal to slices/task/adapters (eslint
 // boundary) now. The cross-slice task-table collaborators below (renameTasks/
 // importWipeTasks/importInsertTask) get the write module via the task slice
@@ -295,7 +296,7 @@ function importBuildTaskRow(t, userId, tz, statuses) {
 // Impersonation auth-service call (impersonation.controller.js:6-26) — verbatim.
 function callAuthServiceImpersonate(adminUserId, targetUserId, reason) {
   var { authServiceUrl } = proxyConfig;
-  var key = process.env.INTERNAL_SERVICE_KEY;
+  var key = config.getString('INTERNAL_SERVICE_KEY'); // 999.1473 (requiredInProduction — throws here too, in prod; local check covers dev/test)
   if (!key) throw new Error('INTERNAL_SERVICE_KEY is not set');
 
   var url = authServiceUrl + '/internal/auth/impersonate';

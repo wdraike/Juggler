@@ -10,13 +10,14 @@
  */
 
 var crypto = require('crypto');
+var config = require('./config');
 
 var ALGORITHM = 'aes-256-gcm';
 var IV_LENGTH = 12;
 var _TAG_LENGTH = 16;
 
 function getKey() {
-  var hex = process.env.CREDENTIAL_ENCRYPTION_KEY;
+  var hex = config.getString('CREDENTIAL_ENCRYPTION_KEY'); // 999.1473 ('' when unset, same falsy check below)
   if (!hex || hex.length !== 64) {
     throw new Error('CREDENTIAL_ENCRYPTION_KEY must be a 64-char hex string (32 bytes). Generate with: node -e "logger.info(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
   }

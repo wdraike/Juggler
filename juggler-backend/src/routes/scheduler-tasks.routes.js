@@ -35,6 +35,7 @@ const crypto = require('crypto');
 const { createLogger } = require('@raike/lib-logger');
 const { validate } = require('../middleware/validate');
 const { pushTaskSchema } = require('../schemas/scheduler-task.schema');
+const config = require('../lib/config');
 const logger = createLogger('scheduler-tasks.routes');
 
 const router = express.Router();
@@ -58,13 +59,20 @@ function timingSafeEqualStr(a, b) {
 async function authenticate(req, res, next) {
   // Dev/test-only bypass — NEVER honored in production (elmo W1, 999.627), so a
   // single prod env-var misconfig cannot open this internal scheduler endpoint.
-  if (process.env.SKIP_SCHEDULER_TASK_AUTH === 'true' && process.env.NODE_ENV !== 'production') {
+  if (config.getString('SKIP_SCHEDULER_TASK_AUTH') === 'true' && config.getString('NODE_ENV') !== 'production') { // 999.1473
     return next();
   }
 
   // 1. Shared-secret header (emulator / internal). Only valid if a secret is
   //    actually configured — an unset secret never authenticates.
-  const sharedSecret = process.env.JUGGLER_TASK_SECRET || process.env.INTERNAL_SERVICE_KEY;
+  // 999.1473: JUGGLER_TASK_SECRET routed through lib/config. INTERNAL_SERVICE_KEY
+  // deliberately stays a raw process.env read HERE: `authenticate` is an ASYNC
+  // Express middleware with no express-async-errors/asyncHandler wrapper in this
+  // app, so a schema-read throw (INTERNAL_SERVICE_KEY is requiredInProduction:true)
+  // would become an unhandled promise rejection instead of the controlled
+  // 401/403/500 responses this function already returns — a strictly worse
+  // failure mode (a hung request) than today's fallback-to-undefined behavior.
+  const sharedSecret = config.getString('JUGGLER_TASK_SECRET') || process.env.INTERNAL_SERVICE_KEY;
   const presented = req.headers['x-scheduler-task-key'];
   if (presented && sharedSecret) {
     try {
@@ -80,14 +88,14 @@ async function authenticate(req, res, next) {
   const header = req.headers.authorization || '';
   if (header.startsWith('Bearer ')) {
     const token = header.slice('Bearer '.length);
-    const audience = process.env.JUGGLER_WORKER_BASE_URL;
+    const audience = config.getString('JUGGLER_WORKER_BASE_URL'); // 999.1473
     if (!audience) {
       return res.status(500).json({ error: 'JUGGLER_WORKER_BASE_URL not configured on this worker' });
     }
     try {
       const ticket = await authClient().verifyIdToken({ idToken: token, audience });
       const payload = ticket.getPayload();
-      const expectedSa = process.env.CLOUD_TASKS_INVOKER_SA;
+      const expectedSa = config.getString('CLOUD_TASKS_INVOKER_SA'); // 999.1473
       if (expectedSa && payload.email !== expectedSa) {
         return res.status(403).json({ error: 'token not issued for expected service account' });
       }

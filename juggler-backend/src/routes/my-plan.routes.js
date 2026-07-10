@@ -17,6 +17,7 @@ const router = require('express').Router();
 const { authenticateJWT } = require('../middleware/jwt-auth');
 const { resolvePlanFeatures, getProductId, PRODUCT_LABEL } = require('../middleware/plan-features.middleware');
 const { paymentFetch } = require('../lib/payment-service-client');
+const config = require('../lib/config');
 // W5 (juggler-hex-h2): route through lib/db's shared singleton (single pool).
 const db = require('../lib/db').getDefaultDb();
 const { countActiveTasks, countRecurringTemplates, countProjects, countLocations, countScheduleTemplates } = require('../middleware/entity-limits');
@@ -45,7 +46,7 @@ async function getPlanName(planId) {
 // Fetch subscription status (trial info) from payment service
 async function getSubscriptionStatus(userId) {
   try {
-    const internalKey = process.env.INTERNAL_SERVICE_KEY || '';
+    const internalKey = config.getString('INTERNAL_SERVICE_KEY'); // 999.1473 (requiredInProduction — fails loud instead of masking as '')
     const productId = await getProductId() || PRODUCT_LABEL;
     const subRes = await paymentFetch(`/internal/users/${userId}/subscriptions?product=${productId}`, {
       headers: { 'X-Internal-Key': internalKey, 'Content-Type': 'application/json' }

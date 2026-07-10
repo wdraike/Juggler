@@ -316,7 +316,7 @@ PaymentServiceEntitlementAdapter.prototype.resolveProductId = function resolvePr
 PaymentServiceEntitlementAdapter.prototype._discoverProductIdRaw = async function _discoverProductIdRaw() {
   var PRODUCT_LABEL = this._slug();
   var paymentUrl = config.getString('PAYMENT_SERVICE_URL'); // 999.1202
-  var internalKey = process.env.INTERNAL_SERVICE_KEY || '';
+  var internalKey = config.getString('INTERNAL_SERVICE_KEY'); // 999.1473 (requiredInProduction — fails loud instead of masking as '')
   var res = await this._fetch()(paymentUrl + '/internal/products/' + PRODUCT_LABEL, {
     headers: { 'X-Internal-Key': internalKey, 'Content-Type': 'application/json' },
     signal: AbortSignal.timeout(30000)
@@ -379,7 +379,7 @@ PaymentServiceEntitlementAdapter.prototype._fetchPlanCatalogRaw = async function
   }
   var filter = productId ? '?product=' + productId : '?product=' + PRODUCT_LABEL;
 
-  var internalKey = process.env.INTERNAL_SERVICE_KEY || '';
+  var internalKey = config.getString('INTERNAL_SERVICE_KEY'); // 999.1473 (requiredInProduction — fails loud instead of masking as '')
   var response = await this._fetch()(paymentUrl + '/api/plans' + filter + '&include_all=true', {
     headers: { 'X-Internal-Key': internalKey, 'Content-Type': 'application/json' },
     signal: AbortSignal.timeout(30000)
@@ -522,7 +522,7 @@ PaymentServiceEntitlementAdapter.prototype._fetchUserPlanIdViaBreaker = function
  */
 PaymentServiceEntitlementAdapter.prototype._fetchUserPlanIdRaw = async function _fetchUserPlanIdRaw(userId) {
   var paymentUrl = config.getString('PAYMENT_SERVICE_URL'); // 999.1202
-  var internalKey = process.env.INTERNAL_SERVICE_KEY || '';
+  var internalKey = config.getString('INTERNAL_SERVICE_KEY'); // 999.1473 (requiredInProduction — fails loud instead of masking as '')
   var res = await this._fetch()(paymentUrl + '/internal/users/' + userId + '/active-plans', {
     headers: { 'X-Internal-Key': internalKey, 'Content-Type': 'application/json' },
     signal: AbortSignal.timeout(30000)

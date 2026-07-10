@@ -22,6 +22,7 @@ const pushService = require('../lib/push-service');
 const pushSubs = require('../lib/push-subscriptions');
 const { dispatchTaskReminder } = require('../lib/notify-reminder');
 const { createLogger } = require('@raike/lib-logger');
+const config = require('../lib/config');
 const logger = createLogger('push.routes');
 
 router.use(authenticateJWT);
@@ -75,7 +76,7 @@ router.post('/unsubscribe', validate(unsubscribeSchema), async (req, res) => {
 router.post('/test', validate(testSendSchema), async (req, res) => {
   // Dev/QA only — NEVER expose the manual send-to-self vector in production
   // (elmo WARN, 999.252). A real reminder trigger uses dispatchTaskReminder directly.
-  if (process.env.NODE_ENV === 'production') {
+  if (config.getString('NODE_ENV') === 'production') { // 999.1473
     return res.status(404).json({ error: 'not found' });
   }
   try {

@@ -13,8 +13,9 @@ var { authenticateMcpRequest, sendMcpUnauthorized } = require('auth-client/mcp-a
 var { apiKeyValidator } = require('./api-key-auth');
 var db = require('../db');
 
+var config = require('../lib/config');
 var MCP_TIMEOUT = 120000; // 2 minutes max per MCP request
-var PUBLIC_URL = process.env.PUBLIC_URL || process.env.MCP_ISSUER_URL || '';
+var PUBLIC_URL = config.getString('PUBLIC_URL') || config.getString('MCP_ISSUER_URL') || ''; // 999.1473
 var { APP_ID } = require('../service-identity');
 var { createLogger } = require('../lib/logger');
 
@@ -60,7 +61,7 @@ async function handlePost(req, res) {
     var authResult;
 
     if (token) {
-      if (token === 'dev-token' && (process.env.NODE_ENV === 'development' || process.env.MCP_DEV_NO_AUTH === 'true') && process.env.NODE_ENV !== 'production') {
+      if (token === 'dev-token' && (config.getString('NODE_ENV') === 'development' || config.getString('MCP_DEV_NO_AUTH') === 'true') && config.getString('NODE_ENV') !== 'production') {
         authResult = { userId: 'dev-user' };
       } else {
         authResult = await authenticateMcpRequest(token, db, { apiKeyValidator: apiKeyValidator, planCheck: planCheck });
@@ -72,7 +73,7 @@ async function handlePost(req, res) {
           });
         }
       }
-    } else if ((process.env.NODE_ENV === 'development' || process.env.MCP_DEV_NO_AUTH === 'true') && process.env.NODE_ENV !== 'production') {
+    } else if ((config.getString('NODE_ENV') === 'development' || config.getString('MCP_DEV_NO_AUTH') === 'true') && config.getString('NODE_ENV') !== 'production') {
       authResult = { userId: 'dev-user' };
     } else {
       return sendMcpUnauthorized(res, PUBLIC_URL || req.protocol + '://' + req.get('host'));

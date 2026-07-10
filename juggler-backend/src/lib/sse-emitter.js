@@ -12,6 +12,7 @@
 
 const Redis = require('ioredis');
 const { createLogger } = require('@raike/lib-logger');
+const config = require('./config');
 const logger = createLogger('sse-emitter');
 
 const CHANNEL_PREFIX = 'sse:';
@@ -24,8 +25,8 @@ var subscriber = null;
 
 function getSubscriber() {
   if (subscriber) return subscriber;
-  if (!process.env.REDIS_URL) return null;  // no-op when Redis not configured
-  subscriber = new Redis(process.env.REDIS_URL, {
+  if (!config.getString('REDIS_URL')) return null;  // no-op when Redis not configured (999.1473)
+  subscriber = new Redis(config.getString('REDIS_URL'), {
     maxRetriesPerRequest: 1,
     enableOfflineQueue: false,
     retryStrategy: function(times) {
@@ -56,8 +57,8 @@ function getSubscriber() {
 var publisher = null;
 function getPublisher() {
   if (publisher) return publisher;
-  if (!process.env.REDIS_URL) return null;  // no-op when Redis not configured
-  publisher = new Redis(process.env.REDIS_URL, {
+  if (!config.getString('REDIS_URL')) return null;  // no-op when Redis not configured (999.1473)
+  publisher = new Redis(config.getString('REDIS_URL'), {
     maxRetriesPerRequest: 1,
     enableOfflineQueue: false,
     retryStrategy: function(times) {
