@@ -151,12 +151,22 @@ var mockDb = (function() {
     //   db('cal_sync_ledger').where({user_id, task_id, status:'active'}).whereNot('origin','juggler').first()
     // A task is "calendar-born" when it has an active non-juggler ledger row. The
     // fixtures signal this by setting an external event id on the stored task row.
+    // 999.1432: rows must carry the REAL ledger columns `provider` +
+    // `provider_event_id` — KnexTaskRepository.fetchTaskWithEventIds re-derives
+    // gcal/msft/apple_event_id EXCLUSIVELY from those columns (it nulls the
+    // row's own event-id fields first). Without them, every fetched row looked
+    // non-cal-linked and guardFixedCalendarWhen silently no-opped in this
+    // harness, masking the guard under test.
     if (t === 'cal_sync_ledger') {
       var ledgerTaskId = _where.task_id;
       var ledgerTask = ledgerTaskId ? taskStore[ledgerTaskId] : null;
       if (ledgerTask && (ledgerTask.gcal_event_id || ledgerTask.msft_event_id || ledgerTask.apple_event_id)) {
         var origin = ledgerTask.gcal_event_id ? 'gcal' : (ledgerTask.msft_event_id ? 'msft' : 'apple');
-        return [{ task_id: ledgerTaskId, origin: origin, status: 'active' }];
+        var providerEventId = ledgerTask.gcal_event_id || ledgerTask.msft_event_id || ledgerTask.apple_event_id;
+        return [{
+          task_id: ledgerTaskId, origin: origin, status: 'active',
+          provider: origin, provider_event_id: providerEventId, event_url: null
+        }];
       }
       return [];
     }
@@ -593,19 +603,14 @@ describe('update_task — guardFixedCalendarWhen', function() {
     expect(lastWrite('task-001').row.placement_mode).toBe('anytime');
   });
 
-  test('KNOWN GAP 999.1432: fast path writes placement_mode through to a cal-linked template (guard vs template missing)', async function() {
-    // INTENDED behavior (pre-facade adapter + the facade COMPLEX path,
-    // UpdateTask.js:270-274): the instance edit routes TEMPLATE_FIELDS to the
-    // source template and guardFixedCalendarWhen — checked against the
-    // TEMPLATE row — strips a non-fixed placement_mode before the write.
-    //
-    // CURRENT behavior (999.1432, found during the 999.1395 realignment): the
-    // FAST path guards only vs the instance (UpdateTask.js:372) and then copies
-    // TEMPLATE_FIELDS, including placement_mode, to the template
-    // (UpdateTask.js:385-394) with NO guard vs the template row. This test
-    // characterizes the gap so the suite is green at HEAD; when 999.1432 is
-    // fixed, flip the placement_mode assertion back to
-    //   expect('placement_mode' in templateWrite.row).toBe(false);
+  test('999.1432 FIXED: recurring instance with cal-linked source — guardFixedCalendarWhen (vs the TEMPLATE row) strips placement_mode from the template write', async function() {
+    // 999.1432 (fixed): the fast path guards vs the instance (UpdateTask.js:372)
+    // AND — when TEMPLATE_FIELDS carry placement_mode toward the routed template
+    // write — fetches the SOURCE template and runs guardFixedCalendarWhen
+    // against it too, mirroring the complex path (UpdateTask.js:270-274) and
+    // the pre-facade MCP adapter. A {placementMode:'anytime'} edit on an
+    // instance whose source template is cal-linked+fixed must NOT overwrite
+    // the template's placement_mode; other TEMPLATE_FIELDS pass through.
     var SOURCE_ID = 'source-fixed-001';
     taskStore[SOURCE_ID] = makeTask({
       id: SOURCE_ID, task_type: 'recurring_template',
@@ -619,8 +624,8 @@ describe('update_task — guardFixedCalendarWhen', function() {
     // Template write must have happened (when='morning' is a TEMPLATE_FIELD that passes through)
     var templateWrite = findWrite(SOURCE_ID);
     expect(templateWrite).toBeDefined();
-    // 999.1432 KNOWN GAP: placement_mode currently written through unguarded.
-    expect(templateWrite.row.placement_mode).toBe('anytime');
+    // 999.1432: placement_mode stripped by the guard vs the cal-linked template.
+    expect('placement_mode' in templateWrite.row).toBe(false);
     // `when` routes to the template as before
     expect(templateWrite.row.when).toBe('morning');
   });

@@ -22,6 +22,12 @@ function getNestedValue(obj, path) {
 function checkCalendarLimit(provider) {
   return async (req, res, next) => {
     if (!req.planFeatures) {
+      // 999.1428: this fail-open bypasses a REVENUE gate — it must be
+      // observable, like the DB-error fail-open below. If plan-features
+      // resolution breaks upstream, every connect attempt is allowed and this
+      // warn is the only signal.
+      logger.warn('[calendar-limit] req.planFeatures missing — allowing connect without plan check (fail open)',
+        { provider, userId: req.user?.id });
       return next(); // No plan features resolved — allow (fail open)
     }
 

@@ -106,15 +106,49 @@ export default function AppLayout() {
   var isMobile = useIsMobile();
   var isCompact = useIsCompact();
   var { weatherByDate, refreshed: weatherRefreshed } = useWeather(config.locations, config.tempUnitPref);
+  var [headerCompact, setHeaderCompact] = useState(isCompact);
+  var { toast, toastHistory, showToast } = useToast();
+
+  // 999.1242: single-flight guard + non-silent failure for the automatic
+  // schedule-run kicks (initial mount + first weather refresh). Overlapping
+  // auto-kicks used to collide server-side (HTTP 409 'Scheduler is busy') and
+  // every failure was silently swallowed — the user kept looking at a stale
+  // schedule with no indicator or retry.
+  //   - single-flight: only one auto-kick may be in flight at a time;
+  //   - 409 (another run holds the scheduler lock): ONE bounded retry after
+  //     the server-suggested retryAfter delay (same contract CalSyncPanel's
+  //     lock-conflict handler consumes, incl. its `|| 30` default);
+  //   - any other failure: surfaced with the toast pattern CalSyncPanel uses.
+  var scheduleRunInFlightRef = useRef(false);
+  var kickScheduleRun = useCallback(function kick(isRetry) {
+    if (scheduleRunInFlightRef.current) return Promise.resolve(null); // single-flight
+    scheduleRunInFlightRef.current = true;
+    return apiClient.post('/schedule/run').then(function(res) {
+      scheduleRunInFlightRef.current = false;
+      if (res.data?.dayPlacements) {
+        loadPlacements();
+      }
+      return res;
+    }).catch(function(err) {
+      scheduleRunInFlightRef.current = false;
+      var status = err && err.response && err.response.status;
+      if (status === 409 && !isRetry) {
+        var retryAfterSec = (err.response.data && err.response.data.retryAfter) || 30;
+        setTimeout(function() { kick(true); }, retryAfterSec * 1000);
+      } else {
+        showToast('Schedule refresh failed — showing the last saved schedule', 'error');
+      }
+      return null;
+    });
+  }, [loadPlacements, showToast]);
+
   var weatherRefreshedRef = useRef(false);
   useEffect(function() {
     if (!weatherRefreshed) return;
     if (weatherRefreshedRef.current) return; // already triggered once this session
     weatherRefreshedRef.current = true;
-    apiClient.post('/schedule/run').catch(function() { /* fail silently */ });
-  }, [weatherRefreshed]);
-  var [headerCompact, setHeaderCompact] = useState(isCompact);
-  var { toast, toastHistory, showToast } = useToast();
+    kickScheduleRun();
+  }, [weatherRefreshed, kickScheduleRun]);
   var { pushUndo, popUndo } = useUndo(taskStateRef, dispatch, dispatchPersist);
   // 999.681: single-step undo affordance — pops the most recent action off the
   // undo stack (same path as Ctrl/Cmd+Z) and toasts the result. The stack lives
@@ -260,13 +294,11 @@ export default function AppLayout() {
       if (taskResult?.config) {
         config.initFromConfig(taskResult.config);
       }
-      // Background: run scheduler for fresh result (doesn't block initial render)
-      apiClient.post('/schedule/run').then(function(res) {
-        if (res.data?.dayPlacements) {
-          loadPlacements();
-        }
-        setSchedulerReady(true);
-      }).catch(function() {
+      // Background: run scheduler for fresh result (doesn't block initial render).
+      // 999.1242: routed through the single-flight kick — placement refresh,
+      // 409 retry, and failure surfacing live in kickScheduleRun (it never
+      // rejects). schedulerReady flips regardless so the UI never hangs.
+      kickScheduleRun().then(function() {
         setSchedulerReady(true);
       });
     });

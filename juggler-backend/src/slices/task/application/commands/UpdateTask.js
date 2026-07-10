@@ -371,6 +371,19 @@ UpdateTask.prototype._fastPath = async function _fastPath(input) {
 
   this.validation.guardFixedCalendarWhen(fastRow, fastExisting, { allowUnfix: !!body._allowUnfix });
 
+  // 999.1432: TEMPLATE_FIELDS (incl placement_mode) are routed to the SOURCE
+  // template below (the routed write) — so the guard must ALSO run against the
+  // template row, mirroring the complex path (:270-274) and the pre-facade MCP
+  // adapter. Without this, {placementMode:'anytime'} on an instance whose
+  // source template is gcal/msft/apple-linked+fixed overwrites the template's
+  // placement_mode. The template fetch is gated on placement_mode presence so
+  // the fast path stays fetch-free for edits the guard can never act on.
+  if (fastExisting.task_type === 'recurring_instance' && fastExisting.source_id
+      && 'placement_mode' in fastRow) {
+    var fastSrcTmpl = await this.repo.fetchTaskWithEventIds(fastExisting.source_id, userId);
+    this.validation.guardFixedCalendarWhen(fastRow, fastSrcTmpl, { allowUnfix: !!body._allowUnfix });
+  }
+
   // 999.558: cross-field startAfter > deadline check (partial patch merges with existing)
   var crossFieldErr = this.validation.validateStartAfterDeadlineCrossField(body, fastExisting);
   if (crossFieldErr) {

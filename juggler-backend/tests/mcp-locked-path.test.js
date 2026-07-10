@@ -93,6 +93,10 @@ function resetStore(overrides) {
   taskStore['task-001'] = makeTask(overrides);
 }
 
+// 999.1422: mock-prefixed accessor so the tasks-write jest.mock factory can
+// mirror the user-scoped WHERE — an id absent from the store writes 0 rows.
+var mockRowExists = function (id) { return !!taskStore[id]; };
+
 // ── DB mock ───────────────────────────────────────────────────────────────────
 
 var mockDb = (function() {
@@ -204,8 +208,10 @@ jest.mock('../src/lib/tasks-write', function() {
     },
     updateTaskById: function(_db, id, row) {
       mockWriteCalls.push({ id: id, row: Object.assign({}, row) });
-      // 999.1398: batchUpdateTxn reads the affected-row counts off the result
-      return Promise.resolve({ masterUpdated: 1, instanceUpdated: 0 });
+      // 999.1398/999.1422: batchUpdateTxn AND lockedBatchUpdate gate their
+      // updated counts on these affected-row counts — mirror the user-scoped
+      // WHERE: an id absent from the store writes 0 rows.
+      return Promise.resolve({ masterUpdated: mockRowExists(id) ? 1 : 0, instanceUpdated: 0 });
     },
     deleteTaskById: function() { return Promise.resolve(); }
   };
@@ -585,6 +591,29 @@ describe('batch_update_tasks — locked path (isLocked=true)', function() {
     var enqueueIds = mockEnqueueCalls.map(function(e) { return e.taskId; });
     expect(enqueueIds).toContain('task-001');
     expect(enqueueIds).toContain('does-not-exist');
+  });
+
+  test('999.1422: foreign/nonexistent id with NON-scheduling fields → direct write affects 0 rows and does not inflate `updated`', async function() {
+    // 999.1422 (residue of 999.1398): the locked path's DIRECT write branch
+    // (non-scheduling fields) used to increment `updated` per iterated item
+    // unconditionally. It now gates on the { masterUpdated, instanceUpdated }
+    // affected-row counts tasks-write returns — same truthful-count contract
+    // batchUpdateTxn already enforces on the unlocked path.
+    var result = await captureHandlers()['batch_update_tasks']({
+      updates: [
+        { id: 'task-001', notes: 'real row' },
+        { id: 'does-not-exist', notes: 'ghost row' }
+      ]
+    });
+    expect(result.isError).toBeFalsy();
+    // Both writes are ATTEMPTED (existence is resolved by the user-scoped WHERE)…
+    var writeIds = mockWriteCalls.map(function(c) { return c.id; });
+    expect(writeIds).toContain('task-001');
+    expect(writeIds).toContain('does-not-exist');
+    // …but only the row that actually exists is counted.
+    var parsed = parseResult(result);
+    expect(parsed.updated).toBe(1);
+    expect(parsed.queued).toBe(0);
   });
 });
 

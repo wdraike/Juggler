@@ -9,14 +9,15 @@
  *
  * NOTE ON FAIL-OPEN SEMANTICS (documented CURRENT behavior — intentionally pinned,
  * not endorsed): the middleware fails OPEN in five places —
- *   1. `!req.planFeatures`  → allow (L24-26) — if plan-features resolution breaks
- *      upstream, Free users can connect unlimited providers and nothing errors.
+ *   1. `!req.planFeatures`  → allow + logger.warn (999.1428) — if plan-features
+ *      resolution breaks upstream, Free users can connect unlimited providers;
+ *      the warn is the only observable signal of the bypass.
  *   2. `limit === undefined` → treated as unlimited (L31).
  *   3. missing req.user.id  → allow (L36-38).
  *   4. user row not found   → allow (L42).
  *   5. DB error             → allow + logger.error (L67-70).
- * These tests pin that behavior explicitly (and that path 5 is logged) so any
- * change — tightening OR accidental widening — fails a test.
+ * These tests pin that behavior explicitly (and that paths 1 and 5 are logged)
+ * so any change — tightening OR accidental widening — fails a test.
  *
  * Plan context: req.planFeatures is resolved upstream (plan-features.middleware)
  * from the JWT `plans` claim, which is keyed by product SLUG ('juggler'), not
@@ -207,8 +208,9 @@ describe('calendar-limit — unlimited (Pro+) plans', () => {
 
 // ── fail-open paths (CURRENT behavior, pinned explicitly) ────────────────────
 describe('calendar-limit — fail-open paths (pinned current behavior)', () => {
-  test('FAIL-OPEN 1: no req.planFeatures → allowed with no DB query, even for a user at the limit', async () => {
-    // If plan-features resolution breaks upstream, the gate stops gating.
+  test('FAIL-OPEN 1: no req.planFeatures → allowed with no DB query, but logged via logger.warn (999.1428)', async () => {
+    // If plan-features resolution breaks upstream, the gate stops gating —
+    // still allowed (fail open), but no longer silently (999.1428).
     setDbUser({ id: 'u1', gcal_access_token: 'tok', msft_cal_access_token: 'tok' });
     const req = makeReq({ userId: 'u1' }); // planFeatures undefined
     const res = makeRes();
@@ -218,6 +220,11 @@ describe('calendar-limit — fail-open paths (pinned current behavior)', () => {
     expect(next).toHaveBeenCalledTimes(1);
     expect(res.status).not.toHaveBeenCalled();
     expect(mockDb).not.toHaveBeenCalled(); // short-circuits before counting
+    // 999.1428: the revenue-gate bypass is observable.
+    expect(mockLogger.warn).toHaveBeenCalledTimes(1);
+    expect(mockLogger.warn.mock.calls[0][0]).toBe(
+      '[calendar-limit] req.planFeatures missing — allowing connect without plan check (fail open)');
+    expect(mockLogger.warn.mock.calls[0][1]).toEqual({ provider: 'microsoft', userId: 'u1' });
   });
 
   test('FAIL-OPEN 3: no req.user.id → allowed, no DB query', async () => {
@@ -257,15 +264,16 @@ describe('calendar-limit — fail-open paths (pinned current behavior)', () => {
     expect(mockLogger.error.mock.calls[0][1]).toBe('pool exhausted');
   });
 
-  test('FAIL-OPEN 1 vs 5 distinction: only the DB-error path logs; missing planFeatures is silent', async () => {
+  test('FAIL-OPEN 1 vs 5 distinction: missing planFeatures warns (999.1428), only the DB-error path uses logger.error', async () => {
     const req = makeReq({ userId: 'u1' });
     const res = makeRes();
 
     await run('google', req, res);
 
-    // Pinned: the planFeatures fail-open is SILENT (no log at all) — if this
-    // starts logging or blocking, semantics changed and this test must be revisited.
+    // 999.1428: the planFeatures fail-open is a WARN (observable bypass),
+    // never an ERROR — logger.error remains exclusive to the DB-error path
+    // (FAIL-OPEN 5) so log-based alerting can tell the two apart.
     expect(mockLogger.error).not.toHaveBeenCalled();
-    expect(mockLogger.warn).not.toHaveBeenCalled();
+    expect(mockLogger.warn).toHaveBeenCalledTimes(1);
   });
 });
