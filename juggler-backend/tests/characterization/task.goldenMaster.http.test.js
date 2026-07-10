@@ -123,7 +123,11 @@ jest.mock('../../src/lib/tasks-write', () => ({
   insertTask: jest.fn(() => Promise.resolve()),
   deleteTaskById: jest.fn(() => Promise.resolve(1)),
   deleteTasksWhere: jest.fn(() => Promise.resolve()),
-  updateTaskById: jest.fn(() => Promise.resolve(1)),
+  // 999.1430: match the REAL updateTaskById contract — it returns
+  // { masterUpdated, instanceUpdated } affected-row counts (tasks-write.js:235),
+  // not a bare number. batchUpdateTxn's 999.1398 count-gating sums these fields;
+  // the old numeric mock made the sum NaN → { updated: 0 } false-negative.
+  updateTaskById: jest.fn(() => Promise.resolve({ masterUpdated: 1, instanceUpdated: 0 })),
   updateTasksWhere: jest.fn(() => Promise.resolve()),
   updateInstancesWhere: jest.fn(() => Promise.resolve()),
   insertTasksBatch: jest.fn(() => Promise.resolve()),

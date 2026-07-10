@@ -126,11 +126,16 @@ describe('Scheduler weather constraints', () => {
     expect(placedToday).toBeUndefined();
   });
 
-  test('dry_only task IS placed when weatherByDateHour is empty (fail-open — no data = no block)', () => {
-    // Regression guard: when weather cache is absent, constraints must NOT block.
-    // This was the original bug: stale cache → empty map → task unscheduled.
+  test('dry_only task is NOT placed when weatherByDateHour is empty (FAIL-CLOSED — 999.546/999.881 R38 CC6)', () => {
+    // 999.1247 gate triage: doctrine superseded. The original fail-open contract
+    // ("no data = no block") was replaced by FAIL-CLOSED (unifiedScheduleV2.js
+    // weatherOk(): "a weather-constrained task must NOT be placed when the
+    // weather data needed to satisfy its constraint is absent" — 999.546 /
+    // 999.881 / R38 CC6). With an empty weather map the task lands in unplaced
+    // with reason 'weather' instead of being silently placed into unknown
+    // conditions.
     var task = makeTask({
-      id: 'failopen_task',
+      id: 'failclosed_task',
       weatherPrecip: 'dry_only',
       weatherCloud: 'any',
       weatherTempMin: 50,
@@ -138,9 +143,12 @@ describe('Scheduler weather constraints', () => {
       weatherHumidityMin: null,
       weatherHumidityMax: 53
     });
-    var result = unifiedSchedule([task], { failopen_task: '' }, TODAY, NOW_MINS, makeCfg({}));
-    var placed = Object.values(result.dayPlacements).flat().find(p => p.task && p.task.id === 'failopen_task');
-    expect(placed).toBeDefined();
+    var result = unifiedSchedule([task], { failclosed_task: '' }, TODAY, NOW_MINS, makeCfg({}));
+    var placed = Object.values(result.dayPlacements).flat().find(p => p.task && p.task.id === 'failclosed_task');
+    expect(placed).toBeUndefined();
+    var un = (result.unplaced || []).find(function (t) { return t.id === 'failclosed_task'; });
+    expect(un).toBeDefined();
+    expect(un._unplacedReason).toBe('weather');
   });
 });
 

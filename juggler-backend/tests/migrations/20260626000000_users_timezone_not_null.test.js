@@ -45,6 +45,12 @@ process.env.DB_NAME      = 'juggler_sweep_test';
 var knex       = require('knex');
 var knexConfig = require('../../knexfile');
 var { requireDB } = require('../helpers/requireDB');
+// 999.1420 (pattern 6e12b41f / 999.1409): self-provision the isolated DB so this
+// suite RUNS on a fresh test-bed instead of silently skipping via console.warn
+// (juggler_sweep_test doesn't exist until something creates it — globalSetup
+// only provisions juggler_test). ensureIsolatedDbExists creates the DB only;
+// this suite drives migrate.latest()/down() itself.
+var { ensureIsolatedDbExists } = require('../helpers/ensureIsolatedDb');
 
 var db = knex(knexConfig.test);
 
@@ -196,6 +202,9 @@ async function cleanup() {
 // -----------------------------------------------------------------------
 
 beforeAll(async () => {
+  // 999.1420: create juggler_sweep_test if absent (throws TEST-FR-001 if the
+  // test-bed MySQL itself is unreachable — loud failure, not a silent skip).
+  await ensureIsolatedDbExists();
   if (!await isDbAvailable()) return;
   await cleanup();       // remove any rows left from a prior aborted run
   await applyMigration(); // apply the new migration (no-op if file is absent)

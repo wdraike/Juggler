@@ -1995,11 +1995,18 @@ describe('Timezone & DST', () => {
 
   // ─── GROUP 79: Null/missing timezone fallback ───
   describe('Group 79: Missing timezone fallback', () => {
-    test('utcToLocal with null timezone throws (no silent fallback)', () => {
+    test('utcToLocal with null timezone falls back to America/New_York (safeTimezone)', () => {
       var utc = new Date('2026-03-23T18:00:00Z');
-      // Null timezone causes Intl.DateTimeFormat to throw — this is expected
-      // behavior. The caller must provide a valid timezone.
-      expect(function() { utcToLocal(utc, null); }).toThrow();
+      // 999.1247 gate triage: contract changed by the tz-helper consolidation —
+      // utcToLocal now routes the zone through safeTimezone(tz, 'America/New_York')
+      // (shared/scheduler/dateHelpers.js), an explicit documented fallback that
+      // matches the DB guarantee users.timezone NOT NULL DEFAULT 'America/New_York'
+      // (migration 20260626000000). The old throw-on-null doctrine is superseded.
+      var local = utcToLocal(utc, null);
+      // 18:00Z on 2026-03-23 is 14:00 EDT (America/New_York, DST active).
+      expect(local.date).toBe('2026-03-23');
+      expect(local.time).toBe('2:00 PM');
+      expect(local.day).toBe('Mon');
     });
 
     test('utcToLocal with undefined utcDate returns nulls', () => {

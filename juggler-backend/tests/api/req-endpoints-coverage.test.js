@@ -308,17 +308,22 @@ describe('R48.1 — GET /api/tools/', () => {
 // ════════════════════════════════════════════════════════════════════════════
 describe('R48.2 — PUT /api/tools/', () => {
   test('auth user + tool list → 200, replaces inventory, forwards body to replaceTools', async () => {
-    facade.replaceTools.mockResolvedValue({ status: 200, body: { tools: ['phone', 'car'] } });
+    // 999.1247 gate triage: tools are OBJECTS ({ name, icon? } — facade.js
+    // toolsBodySchema), not bare strings. The route-level toolReplaceSchema
+    // (route-schemas.js, BUG-999.1221) enforces the object shape BEFORE the
+    // mocked facade, so the old string-array fixture now 400s at the route.
+    const TOOLS = [{ name: 'phone' }, { name: 'car' }];
+    facade.replaceTools.mockResolvedValue({ status: 200, body: { tools: TOOLS } });
 
     const res = await request(app)
       .put('/api/tools/')
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
-      .send({ tools: ['phone', 'car'] });
+      .send({ tools: TOOLS });
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ tools: ['phone', 'car'] });
+    expect(res.body).toEqual({ tools: TOOLS });
     expect(facade.replaceTools).toHaveBeenCalledTimes(1);
-    expect(facade.replaceTools).toHaveBeenCalledWith({ userId: 'user-123', body: { tools: ['phone', 'car'] } });
+    expect(facade.replaceTools).toHaveBeenCalledWith({ userId: 'user-123', body: { tools: TOOLS } });
   });
 
   test('no token → 401', async () => {

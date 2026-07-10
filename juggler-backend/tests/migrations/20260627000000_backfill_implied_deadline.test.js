@@ -40,6 +40,12 @@ process.env.DB_NAME      = 'juggler_sweep_test';
 var knex       = require('knex');
 var knexConfig = require('../../knexfile');
 var { requireDB } = require('../helpers/requireDB');
+// 999.1420 (pattern 6e12b41f / 999.1409): self-provision the isolated DB so this
+// suite RUNS on a fresh test-bed instead of silently skipping via console.warn
+// (juggler_sweep_test doesn't exist until something creates it — globalSetup
+// only provisions juggler_test). ensureIsolatedDbExists creates the DB only;
+// this suite drives migrate.latest() itself in beforeEach.
+var { ensureIsolatedDbExists } = require('../helpers/ensureIsolatedDb');
 
 var db = knex(knexConfig.test);
 
@@ -58,6 +64,9 @@ async function isDbAvailable() {
 
 var MIGRATION_NAME = '20260627000000_backfill_implied_deadline.js';
 var TEST_ID_PREFIX = 'impl879-';
+// 999.1420: task_instances FKs user_id → users (ON DELETE CASCADE); seed a real
+// user so fixture inserts satisfy the constraint.
+var TEST_USER_ID = 'impl879-user';
 
 var _idCounter = 0;
 function uniqueRowId() {
@@ -68,6 +77,9 @@ function uniqueRowId() {
 describe('Migration 20260627000000 (implied_deadline backfill)', () => {
 
   beforeAll(async () => {
+    // 999.1420: create juggler_sweep_test if absent (throws TEST-FR-001 if the
+    // test-bed MySQL itself is unreachable — loud failure, not a silent skip).
+    await ensureIsolatedDbExists();
     if (!(await isDbAvailable())) {
       console.warn('⚠ DB not available — migration tests will be skipped');
     }
@@ -77,22 +89,29 @@ describe('Migration 20260627000000 (implied_deadline backfill)', () => {
     if (!(await isDbAvailable())) return;
     // Apply all pending migrations so ours is in place
     await db.migrate.latest();
+    // 999.1420: seed the FK-required user (idempotent — cleaned in afterEach)
+    await db.raw(
+      'INSERT IGNORE INTO users (id, email, created_at, updated_at) VALUES (?, ?, NOW(), NOW())',
+      [TEST_USER_ID, TEST_USER_ID + '@impl879.local']
+    );
   });
 
   afterEach(async () => {
     if (!(await isDbAvailable())) return;
-    // Cleanup test rows
+    // Cleanup test rows (instances cascade-delete with the user, but be explicit)
     await db('task_instances').where('id', 'like', TEST_ID_PREFIX + '%').del();
+    await db('users').where('id', TEST_USER_ID).del();
   });
 
   it('backfills implied_deadline = date + 1 day for rows with date but no implied_deadline', async () => {
     if (!(await isDbAvailable())) return;
     var id = uniqueRowId();
+    // 999.1420: fixture aligned to the live master/instance schema —
+    // task_instances has no text/task_type columns (text lives on task_masters;
+    // master_id is nullable so no master row is needed for this backfill test).
     await db('task_instances').insert({
       id: id,
-      user_id: 'test-user',
-      text: 'Test overdue recurring',
-      task_type: 'recurring_instance',
+      user_id: TEST_USER_ID,
       date: '2026-06-24',
       implied_deadline: null,
       dur: 30,
@@ -116,9 +135,7 @@ describe('Migration 20260627000000 (implied_deadline backfill)', () => {
     var id = uniqueRowId();
     await db('task_instances').insert({
       id: id,
-      user_id: 'test-user',
-      text: 'No-date recurring',
-      task_type: 'recurring_instance',
+      user_id: TEST_USER_ID,
       date: null,
       implied_deadline: null,
       dur: 30,
@@ -138,9 +155,7 @@ describe('Migration 20260627000000 (implied_deadline backfill)', () => {
     var id = uniqueRowId();
     await db('task_instances').insert({
       id: id,
-      user_id: 'test-user',
-      text: 'Already has deadline',
-      task_type: 'recurring_instance',
+      user_id: TEST_USER_ID,
       date: '2026-06-30',
       implied_deadline: '2026-07-01',
       dur: 30,

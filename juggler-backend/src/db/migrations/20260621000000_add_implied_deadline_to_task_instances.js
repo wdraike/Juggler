@@ -11,51 +11,99 @@
  * Migration policy (juggler CLAUDE.md 999.733):
  *   - Schema changes that alter tasks_v shape MUST recreate the view in the same
  *     migration (DROP VIEW IF EXISTS → CREATE VIEW) so the read model never lags.
- *   - This migration's UP view body is based on 20260614010000_recreate_tasks_v_with_completed_at.js
- *     (the latest view shape) with implied_deadline added to the instances branch.
- *   - Never edit an already-applied migration — add a new one.
  *   - COLLATE utf8mb4_unicode_ci explicit on all string columns/view where (re)created.
  *   - DDL (CREATE/DROP VIEW) causes MySQL implicit commits → non-transactional.
  *
- * Reversible down(): drops the column AND restores the prior view body exactly
- * (the completed_at view from 20260614010000).
+ * 999.1403/999.1295 REWRITE (2026-07-09): the original up()/down() restated the
+ * FULL June-21 view body as frozen strings (UP_VIEW_SQL / DOWN_VIEW_SQL) — the
+ * exact "hand-copied view body" trap 999.1189 bans. Both snapshots referenced
+ * `i`.`overdue`, which 20260703190000_drop_overdue_column later removed, so any
+ * out-of-sequence down()/up() (the committed round-trip test
+ * tests/db/20260621000000_implied_deadline.test.js drives this migration's own
+ * down()/up() directly against a CURRENT schema) failed at CREATE VIEW and left
+ * `tasks_v` DROPPED — corrupting the shared juggler_test schema for every
+ * subsequent suite in a full-gate run. Rewritten to the 999.733 discipline:
+ * read the LIVE `SHOW CREATE VIEW`, anchor-patch the implied_deadline
+ * projections in/out, never restate the body. Sequence-equivalent: applied at
+ * its own slot the live view IS the 20260614010000 shape, so the patched
+ * result is byte-identical to the old UP_VIEW_SQL / DOWN_VIEW_SQL outputs.
+ * (Editing an applied migration is allowed here because the resulting schema
+ * at every sequence position is unchanged — only out-of-sequence
+ * reversibility, which was BROKEN, changes.)
  */
 exports.config = { transaction: false };
 
-// ---------------------------------------------------------------------------
-// UP — add implied_deadline column + recreate tasks_v exposing it
-// ---------------------------------------------------------------------------
-//
-// instances branch adds:  `i`.`implied_deadline` AS `implied_deadline`
-// templates branch adds:  cast(NULL as date) AS `implied_deadline`
-//
-// The rest of the view body is verbatim from 20260614010000_recreate_tasks_v_with_completed_at.js
-// (UP_VIEW_SQL) with the new column inserted just before `from \`task_masters\`` /
-// `from (\`task_instances\`` in each UNION branch.
+var { portableViewSql } = require('../migration-helpers');
 
-const UP_VIEW_SQL = `CREATE VIEW \`tasks_v\` AS select \`m\`.\`id\` AS \`id\`,\`m\`.\`user_id\` AS \`user_id\`,(convert('recurring_template' using utf8mb4) collate utf8mb4_unicode_ci) AS \`task_type\`,\`m\`.\`text\` AS \`text\`,\`m\`.\`dur\` AS \`dur\`,\`m\`.\`pri\` AS \`pri\`,\`m\`.\`project\` AS \`project\`,\`m\`.\`section\` AS \`section\`,\`m\`.\`notes\` AS \`notes\`,\`m\`.\`url\` AS \`url\`,\`m\`.\`location\` AS \`location\`,\`m\`.\`tools\` AS \`tools\`,\`m\`.\`when\` AS \`when\`,\`m\`.\`day_req\` AS \`day_req\`,\`m\`.\`recurring\` AS \`recurring\`,\`m\`.\`time_flex\` AS \`time_flex\`,\`m\`.\`flex_when\` AS \`flex_when\`,\`m\`.\`split\` AS \`split\`,\`m\`.\`split_min\` AS \`split_min\`,\`m\`.\`recur\` AS \`recur\`,\`m\`.\`recur_start\` AS \`recur_start\`,\`m\`.\`recur_end\` AS \`recur_end\`,(case when (\`m\`.\`placement_mode\` = 'reminder') then 1 else 0 end) AS \`marker\`,\`m\`.\`preferred_time_mins\` AS \`preferred_time_mins\`,\`m\`.\`placement_mode\` AS \`placement_mode\`,\`m\`.\`travel_before\` AS \`travel_before\`,\`m\`.\`travel_after\` AS \`travel_after\`,\`m\`.\`depends_on\` AS \`depends_on\`,\`m\`.\`desired_at\` AS \`desired_at\`,\`m\`.\`disabled_at\` AS \`disabled_at\`,\`m\`.\`disabled_reason\` AS \`disabled_reason\`,\`m\`.\`deadline\` AS \`deadline\`,\`m\`.\`start_after_at\` AS \`start_after_at\`,\`m\`.\`tz\` AS \`tz\`,\`m\`.\`weather_precip\` AS \`weather_precip\`,\`m\`.\`weather_cloud\` AS \`weather_cloud\`,\`m\`.\`weather_temp_min\` AS \`weather_temp_min\`,\`m\`.\`weather_temp_max\` AS \`weather_temp_max\`,\`m\`.\`weather_temp_unit\` AS \`weather_temp_unit\`,\`m\`.\`weather_humidity_min\` AS \`weather_humidity_min\`,\`m\`.\`weather_humidity_max\` AS \`weather_humidity_max\`,(convert(NULL using utf8mb4) collate utf8mb4_unicode_ci) AS \`source_id\`,NULL AS \`scheduled_at\`,cast(NULL as date) AS \`date\`,(cast(NULL as char(3) charset utf8mb4) collate utf8mb4_unicode_ci) AS \`day\`,cast(NULL as time) AS \`time\`,(convert(NULL using utf8mb4) collate utf8mb4_unicode_ci) AS \`status\`,NULL AS \`time_remaining\`,NULL AS \`unscheduled\`,NULL AS \`overdue\`,NULL AS \`slack_mins\`,NULL AS \`occurrence_ordinal\`,NULL AS \`split_ordinal\`,NULL AS \`split_total\`,(convert(NULL using utf8mb4) collate utf8mb4_unicode_ci) AS \`split_group\`,cast(0 as unsigned) AS \`generated\`,(convert(NULL using utf8mb4) collate utf8mb4_unicode_ci) AS \`gcal_event_id\`,\`m\`.\`depends_on\` AS \`depends_on_json\`,\`m\`.\`created_at\` AS \`created_at\`,\`m\`.\`updated_at\` AS \`updated_at\`,(convert(NULL using utf8mb4) collate utf8mb4_unicode_ci) AS \`msft_event_id\`,(convert(NULL using utf8mb4) collate utf8mb4_unicode_ci) AS \`apple_event_id\`,\`m\`.\`id\` AS \`master_id\`,NULL AS \`completed_at\`,cast(NULL as date) AS \`implied_deadline\` from \`task_masters\` \`m\` where (\`m\`.\`recurring\` = 1) union all select \`i\`.\`id\` AS \`id\`,\`i\`.\`user_id\` AS \`user_id\`,(case when (\`m\`.\`recurring\` = 1) then 'recurring_instance' else 'task' end) AS \`task_type\`,\`m\`.\`text\` AS \`text\`,coalesce(\`i\`.\`dur\`,\`m\`.\`dur\`) AS \`dur\`,\`m\`.\`pri\` AS \`pri\`,\`m\`.\`project\` AS \`project\`,\`m\`.\`section\` AS \`section\`,\`m\`.\`notes\` AS \`notes\`,\`m\`.\`url\` AS \`url\`,\`m\`.\`location\` AS \`location\`,\`m\`.\`tools\` AS \`tools\`,\`m\`.\`when\` AS \`when\`,\`m\`.\`day_req\` AS \`day_req\`,\`m\`.\`recurring\` AS \`recurring\`,\`m\`.\`time_flex\` AS \`time_flex\`,\`m\`.\`flex_when\` AS \`flex_when\`,\`m\`.\`split\` AS \`split\`,\`m\`.\`split_min\` AS \`split_min\`,\`m\`.\`recur\` AS \`recur\`,\`m\`.\`recur_start\` AS \`recur_start\`,\`m\`.\`recur_end\` AS \`recur_end\`,(case when (\`m\`.\`placement_mode\` = 'reminder') then 1 else 0 end) AS \`marker\`,\`m\`.\`preferred_time_mins\` AS \`preferred_time_mins\`,\`m\`.\`placement_mode\` AS \`placement_mode\`,\`m\`.\`travel_before\` AS \`travel_before\`,\`m\`.\`travel_after\` AS \`travel_after\`,\`m\`.\`depends_on\` AS \`depends_on\`,\`m\`.\`desired_at\` AS \`desired_at\`,\`m\`.\`disabled_at\` AS \`disabled_at\`,\`m\`.\`disabled_reason\` AS \`disabled_reason\`,\`m\`.\`deadline\` AS \`deadline\`,\`m\`.\`start_after_at\` AS \`start_after_at\`,\`m\`.\`tz\` AS \`tz\`,\`m\`.\`weather_precip\` AS \`weather_precip\`,\`m\`.\`weather_cloud\` AS \`weather_cloud\`,\`m\`.\`weather_temp_min\` AS \`weather_temp_min\`,\`m\`.\`weather_temp_max\` AS \`weather_temp_max\`,\`m\`.\`weather_temp_unit\` AS \`weather_temp_unit\`,\`m\`.\`weather_humidity_min\` AS \`weather_humidity_min\`,\`m\`.\`weather_humidity_max\` AS \`weather_humidity_max\`,(case when (\`m\`.\`recurring\` = 1) then \`m\`.\`id\` else NULL end) AS \`source_id\`,\`i\`.\`scheduled_at\` AS \`scheduled_at\`,\`i\`.\`date\` AS \`date\`,\`i\`.\`day\` AS \`day\`,\`i\`.\`time\` AS \`time\`,\`i\`.\`status\` AS \`status\`,\`i\`.\`time_remaining\` AS \`time_remaining\`,\`i\`.\`unscheduled\` AS \`unscheduled\`,\`i\`.\`overdue\` AS \`overdue\`,\`i\`.\`slack_mins\` AS \`slack_mins\`,\`i\`.\`occurrence_ordinal\` AS \`occurrence_ordinal\`,\`i\`.\`split_ordinal\` AS \`split_ordinal\`,\`i\`.\`split_total\` AS \`split_total\`,\`i\`.\`split_group\` AS \`split_group\`,cast(0 as unsigned) AS \`generated\`,(convert(NULL using utf8mb4) collate utf8mb4_unicode_ci) AS \`gcal_event_id\`,\`m\`.\`depends_on\` AS \`depends_on_json\`,\`m\`.\`created_at\` AS \`created_at\`,\`i\`.\`updated_at\` AS \`updated_at\`,(convert(NULL using utf8mb4) collate utf8mb4_unicode_ci) AS \`msft_event_id\`,(convert(NULL using utf8mb4) collate utf8mb4_unicode_ci) AS \`apple_event_id\`,\`i\`.\`master_id\` AS \`master_id\`,\`i\`.\`completed_at\` AS \`completed_at\`,\`i\`.\`implied_deadline\` AS \`implied_deadline\` from (\`task_instances\` \`i\` join \`task_masters\` \`m\` on((\`m\`.\`id\` = \`i\`.\`master_id\`)))`;
+// Projections this migration owns (leading commas — the completed_at
+// projection they append to is never the first item in either UNION arm).
+var TEMPLATE_PROJ = ',cast(NULL as date) AS `implied_deadline`';
+var INSTANCE_PROJ = ',`i`.`implied_deadline` AS `implied_deadline`';
+// Insert anchors: the completed_at projection of each UNION arm.
+// 'NULL AS `completed_at`' is unique to the template arm;
+// '`i`.`completed_at` AS `completed_at`' is unique to the instance arm.
+var TEMPLATE_ANCHOR = 'NULL AS `completed_at`';
+var INSTANCE_ANCHOR = '`i`.`completed_at` AS `completed_at`';
 
-// ---------------------------------------------------------------------------
-// DOWN — drop implied_deadline column + restore prior view (20260614010000 body)
-// ---------------------------------------------------------------------------
-const DOWN_VIEW_SQL = `CREATE VIEW \`tasks_v\` AS select \`m\`.\`id\` AS \`id\`,\`m\`.\`user_id\` AS \`user_id\`,(convert('recurring_template' using utf8mb4) collate utf8mb4_unicode_ci) AS \`task_type\`,\`m\`.\`text\` AS \`text\`,\`m\`.\`dur\` AS \`dur\`,\`m\`.\`pri\` AS \`pri\`,\`m\`.\`project\` AS \`project\`,\`m\`.\`section\` AS \`section\`,\`m\`.\`notes\` AS \`notes\`,\`m\`.\`url\` AS \`url\`,\`m\`.\`location\` AS \`location\`,\`m\`.\`tools\` AS \`tools\`,\`m\`.\`when\` AS \`when\`,\`m\`.\`day_req\` AS \`day_req\`,\`m\`.\`recurring\` AS \`recurring\`,\`m\`.\`time_flex\` AS \`time_flex\`,\`m\`.\`flex_when\` AS \`flex_when\`,\`m\`.\`split\` AS \`split\`,\`m\`.\`split_min\` AS \`split_min\`,\`m\`.\`recur\` AS \`recur\`,\`m\`.\`recur_start\` AS \`recur_start\`,\`m\`.\`recur_end\` AS \`recur_end\`,(case when (\`m\`.\`placement_mode\` = 'reminder') then 1 else 0 end) AS \`marker\`,\`m\`.\`preferred_time_mins\` AS \`preferred_time_mins\`,\`m\`.\`placement_mode\` AS \`placement_mode\`,\`m\`.\`travel_before\` AS \`travel_before\`,\`m\`.\`travel_after\` AS \`travel_after\`,\`m\`.\`depends_on\` AS \`depends_on\`,\`m\`.\`desired_at\` AS \`desired_at\`,\`m\`.\`disabled_at\` AS \`disabled_at\`,\`m\`.\`disabled_reason\` AS \`disabled_reason\`,\`m\`.\`deadline\` AS \`deadline\`,\`m\`.\`start_after_at\` AS \`start_after_at\`,\`m\`.\`tz\` AS \`tz\`,\`m\`.\`weather_precip\` AS \`weather_precip\`,\`m\`.\`weather_cloud\` AS \`weather_cloud\`,\`m\`.\`weather_temp_min\` AS \`weather_temp_min\`,\`m\`.\`weather_temp_max\` AS \`weather_temp_max\`,\`m\`.\`weather_temp_unit\` AS \`weather_temp_unit\`,\`m\`.\`weather_humidity_min\` AS \`weather_humidity_min\`,\`m\`.\`weather_humidity_max\` AS \`weather_humidity_max\`,(convert(NULL using utf8mb4) collate utf8mb4_unicode_ci) AS \`source_id\`,NULL AS \`scheduled_at\`,cast(NULL as date) AS \`date\`,(cast(NULL as char(3) charset utf8mb4) collate utf8mb4_unicode_ci) AS \`day\`,cast(NULL as time) AS \`time\`,(convert(NULL using utf8mb4) collate utf8mb4_unicode_ci) AS \`status\`,NULL AS \`time_remaining\`,NULL AS \`unscheduled\`,NULL AS \`overdue\`,NULL AS \`slack_mins\`,NULL AS \`occurrence_ordinal\`,NULL AS \`split_ordinal\`,NULL AS \`split_total\`,(convert(NULL using utf8mb4) collate utf8mb4_unicode_ci) AS \`split_group\`,cast(0 as unsigned) AS \`generated\`,(convert(NULL using utf8mb4) collate utf8mb4_unicode_ci) AS \`gcal_event_id\`,\`m\`.\`depends_on\` AS \`depends_on_json\`,\`m\`.\`created_at\` AS \`created_at\`,\`m\`.\`updated_at\` AS \`updated_at\`,(convert(NULL using utf8mb4) collate utf8mb4_unicode_ci) AS \`msft_event_id\`,(convert(NULL using utf8mb4) collate utf8mb4_unicode_ci) AS \`apple_event_id\`,\`m\`.\`id\` AS \`master_id\`,NULL AS \`completed_at\` from \`task_masters\` \`m\` where (\`m\`.\`recurring\` = 1) union all select \`i\`.\`id\` AS \`id\`,\`i\`.\`user_id\` AS \`user_id\`,(case when (\`m\`.\`recurring\` = 1) then 'recurring_instance' else 'task' end) AS \`task_type\`,\`m\`.\`text\` AS \`text\`,coalesce(\`i\`.\`dur\`,\`m\`.\`dur\`) AS \`dur\`,\`m\`.\`pri\` AS \`pri\`,\`m\`.\`project\` AS \`project\`,\`m\`.\`section\` AS \`section\`,\`m\`.\`notes\` AS \`notes\`,\`m\`.\`url\` AS \`url\`,\`m\`.\`location\` AS \`location\`,\`m\`.\`tools\` AS \`tools\`,\`m\`.\`when\` AS \`when\`,\`m\`.\`day_req\` AS \`day_req\`,\`m\`.\`recurring\` AS \`recurring\`,\`m\`.\`time_flex\` AS \`time_flex\`,\`m\`.\`flex_when\` AS \`flex_when\`,\`m\`.\`split\` AS \`split\`,\`m\`.\`split_min\` AS \`split_min\`,\`m\`.\`recur\` AS \`recur\`,\`m\`.\`recur_start\` AS \`recur_start\`,\`m\`.\`recur_end\` AS \`recur_end\`,(case when (\`m\`.\`placement_mode\` = 'reminder') then 1 else 0 end) AS \`marker\`,\`m\`.\`preferred_time_mins\` AS \`preferred_time_mins\`,\`m\`.\`placement_mode\` AS \`placement_mode\`,\`m\`.\`travel_before\` AS \`travel_before\`,\`m\`.\`travel_after\` AS \`travel_after\`,\`m\`.\`depends_on\` AS \`depends_on\`,\`m\`.\`desired_at\` AS \`desired_at\`,\`m\`.\`disabled_at\` AS \`disabled_at\`,\`m\`.\`disabled_reason\` AS \`disabled_reason\`,\`m\`.\`deadline\` AS \`deadline\`,\`m\`.\`start_after_at\` AS \`start_after_at\`,\`m\`.\`tz\` AS \`tz\`,\`m\`.\`weather_precip\` AS \`weather_precip\`,\`m\`.\`weather_cloud\` AS \`weather_cloud\`,\`m\`.\`weather_temp_min\` AS \`weather_temp_min\`,\`m\`.\`weather_temp_max\` AS \`weather_temp_max\`,\`m\`.\`weather_temp_unit\` AS \`weather_temp_unit\`,\`m\`.\`weather_humidity_min\` AS \`weather_humidity_min\`,\`m\`.\`weather_humidity_max\` AS \`weather_humidity_max\`,(case when (\`m\`.\`recurring\` = 1) then \`m\`.\`id\` else NULL end) AS \`source_id\`,\`i\`.\`scheduled_at\` AS \`scheduled_at\`,\`i\`.\`date\` AS \`date\`,\`i\`.\`day\` AS \`day\`,\`i\`.\`time\` AS \`time\`,\`i\`.\`status\` AS \`status\`,\`i\`.\`time_remaining\` AS \`time_remaining\`,\`i\`.\`unscheduled\` AS \`unscheduled\`,\`i\`.\`overdue\` AS \`overdue\`,\`i\`.\`slack_mins\` AS \`slack_mins\`,\`i\`.\`occurrence_ordinal\` AS \`occurrence_ordinal\`,\`i\`.\`split_ordinal\` AS \`split_ordinal\`,\`i\`.\`split_total\` AS \`split_total\`,\`i\`.\`split_group\` AS \`split_group\`,cast(0 as unsigned) AS \`generated\`,(convert(NULL using utf8mb4) collate utf8mb4_unicode_ci) AS \`gcal_event_id\`,\`m\`.\`depends_on\` AS \`depends_on_json\`,\`m\`.\`created_at\` AS \`created_at\`,\`i\`.\`updated_at\` AS \`updated_at\`,(convert(NULL using utf8mb4) collate utf8mb4_unicode_ci) AS \`msft_event_id\`,(convert(NULL using utf8mb4) collate utf8mb4_unicode_ci) AS \`apple_event_id\`,\`i\`.\`master_id\` AS \`master_id\`,\`i\`.\`completed_at\` AS \`completed_at\` from (\`task_instances\` \`i\` join \`task_masters\` \`m\` on((\`m\`.\`id\` = \`i\`.\`master_id\`)))`;
+async function readLiveTasksV(knex) {
+  var rows = await knex.raw('SHOW CREATE VIEW `tasks_v`');
+  return portableViewSql(rows[0][0]['Create View']);
+}
 
 exports.up = async function(knex) {
-  // 1. Add the column
-  await knex.schema.table('task_instances', function(t) {
-    t.date('implied_deadline').nullable().defaultTo(null);
-  });
-  // 2. Recreate the view to expose it
-  await knex.raw('DROP VIEW IF EXISTS `tasks_v`');
-  await knex.raw(UP_VIEW_SQL);
+  // 1. Add the column (skip if a half-completed prior run already added it).
+  var hasCol = await knex.schema.hasColumn('task_instances', 'implied_deadline');
+  if (!hasCol) {
+    await knex.schema.table('task_instances', function(t) {
+      t.date('implied_deadline').nullable().defaultTo(null);
+    });
+  }
+
+  // 2. Patch the LIVE view: expose implied_deadline in both UNION arms,
+  //    anchored directly after each arm's completed_at projection (canonical
+  //    position). Idempotent: skip if the projections are already present.
+  var sql = await readLiveTasksV(knex);
+  if (sql.indexOf(TEMPLATE_PROJ) === -1 && sql.indexOf(INSTANCE_PROJ) === -1) {
+    if (sql.indexOf(TEMPLATE_ANCHOR) === -1 || sql.indexOf(INSTANCE_ANCHOR) === -1) {
+      throw new Error(
+        '20260621000000 up(): completed_at anchors not found in both tasks_v ' +
+        'UNION arms — view shape unexpected; aborting to avoid a malformed view. ' +
+        'Inspect `SHOW CREATE VIEW tasks_v` and update the anchors.'
+      );
+    }
+    sql = sql
+      .replace(TEMPLATE_ANCHOR, TEMPLATE_ANCHOR + TEMPLATE_PROJ)
+      .replace(INSTANCE_ANCHOR, INSTANCE_ANCHOR + INSTANCE_PROJ);
+    await knex.raw('DROP VIEW IF EXISTS `tasks_v`');
+    await knex.raw(sql);
+  }
 };
 
 exports.down = async function(knex) {
-  // 1. Restore view to prior shape (without implied_deadline)
-  await knex.raw('DROP VIEW IF EXISTS `tasks_v`');
-  await knex.raw(DOWN_VIEW_SQL);
-  // 2. Drop the column
-  await knex.schema.table('task_instances', function(t) {
-    t.dropColumn('implied_deadline');
-  });
+  // 1. Patch the LIVE view: strip this migration's implied_deadline projections
+  //    from both UNION arms FIRST (the view must never reference a dropped
+  //    column). Anchor-strip, never restate the body.
+  var sql = await readLiveTasksV(knex);
+  var hasTemplateProj = sql.indexOf(TEMPLATE_PROJ) !== -1;
+  var hasInstanceProj = sql.indexOf(INSTANCE_PROJ) !== -1;
+  if (hasTemplateProj !== hasInstanceProj) {
+    throw new Error(
+      '20260621000000 down(): implied_deadline projection found in only ONE ' +
+      'tasks_v UNION arm — view shape unexpected; aborting to avoid a ' +
+      'malformed view. Inspect `SHOW CREATE VIEW tasks_v`.'
+    );
+  }
+  if (hasTemplateProj && hasInstanceProj) {
+    sql = sql.replace(TEMPLATE_PROJ, '').replace(INSTANCE_PROJ, '');
+    await knex.raw('DROP VIEW IF EXISTS `tasks_v`');
+    await knex.raw(sql);
+  }
+
+  // 2. Drop the column.
+  var hasCol = await knex.schema.hasColumn('task_instances', 'implied_deadline');
+  if (hasCol) {
+    await knex.schema.table('task_instances', function(t) {
+      t.dropColumn('implied_deadline');
+    });
+  }
 };

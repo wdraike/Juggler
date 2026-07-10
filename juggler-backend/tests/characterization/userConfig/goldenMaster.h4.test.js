@@ -1204,7 +1204,11 @@ describe('Surface 5 — impersonation.controller: authz paths (H5)', () => {
         .send({});
 
       expect(res.status).toBe(400);
-      expect(res.body.error).toMatch(/targetUserId is required/);
+      // 999.1247 gate triage: route-level impersonationStartSchema (zod,
+      // route-schemas.js) now rejects the missing targetUserId BEFORE the
+      // Impersonate use-case's own 'targetUserId is required' guard runs.
+      // Semantics preserved: still 400; the body is the zod layer's message.
+      expect(res.body.error).toBe('Validation failed');
     });
 
     test('H5-4: valid admin + targetUserId proxies auth-service 4xx response as-is (hermetic)', async () => {

@@ -97,7 +97,9 @@ beforeAll(async () => {
   await db('users').insert({ id: USER_ID, email: 'splitpart@test.com', timezone: TZ, created_at: db.fn.now(), updated_at: db.fn.now() });
   await db('user_config').insert({ user_id: USER_ID, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) });
   await db('user_config').insert({ user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) });
-}, 20000);
+}, 600000); // 999.1409 (via 999.1247 gate triage): fresh-test-bed provisioning of the
+            // isolated DB runs the full migration set (~6 min measured) — 20s timed out
+            // mid-provision and left a stuck knex_migrations_lock behind.
 
 afterAll(async () => {
   if (dbAvailable) await cleanup();

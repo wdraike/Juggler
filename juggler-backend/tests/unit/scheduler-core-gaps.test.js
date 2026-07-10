@@ -297,7 +297,13 @@ describe('999.555 R11.5 — 7-phase execution progression', function () {
     expect(findPlacement(result, missed.id)).not.toBeNull();
   });
 
-  test('Phase 3: past-anchored recurring forced placement', function () {
+  test('Phase 3: past-anchored recurring is NEVER grid force-placed — goes to unplaced as missed (juggy4 ruling)', function () {
+    // 999.1429: rewritten against the juggy4/D-A rulings (2026-07-02, red since
+    // 91d3e966). Superseded doctrine (999.555-era): force-place on the original
+    // day. Current doctrine: overdue recurring/split are NEVER grid force-placed;
+    // the unplaced bucket with _unplacedReason 'missed' is the CORRECT
+    // destination, date pinned to the past anchor (NEVER-MISSING invariant —
+    // the task is still represented, just not on the grid).
     var pastRecurring = makeTask({
       recurring: true,
       generated: true,
@@ -306,10 +312,13 @@ describe('999.555 R11.5 — 7-phase execution progression', function () {
       when: 'morning',
     });
     var result = run([pastRecurring]);
-    // Past-anchored recurring should be force-placed on its original day
-    var p = findPlacement(result, pastRecurring.id);
-    expect(p).not.toBeNull();
-    expect(p.dateKey).toBe('2026-06-15');
+    // NOT on the grid
+    expect(findPlacement(result, pastRecurring.id)).toBeNull();
+    // IS in unplaced, attributed as missed, still pinned to its past anchor date
+    var entry = (result.unplaced || []).find(function (t) { return t.id === pastRecurring.id; });
+    expect(entry).toBeDefined();
+    expect(entry._unplacedReason).toBe('missed');
+    expect(entry.date).toBe('2026-06-15');
   });
 
   test('Phase 5: fixed rigid items that couldn\'t fit force-placed with _conflict', function () {
@@ -357,16 +366,22 @@ describe('999.555 R11.6 — 4-level fallback ladder', function () {
     // (the scheduler handles these via task-level flags)
   });
 
-  test('Level 2: overdue fallback — deadline past, place at first available slot', function () {
+  test('Level 2: past-deadline task is NOT grid-placed — goes to unplaced as missed (juggy4 ruling)', function () {
+    // 999.1429: rewritten against the juggy4/D-A rulings (red since 91d3e966).
+    // Superseded doctrine (999.555-era): overdue fallback grid-places at the
+    // first available slot with _overdue. Current doctrine: overdue tasks are
+    // never force-placed onto the grid; they land in the unplaced bucket with
+    // _unplacedReason 'missed' (unscheduled-overdue stays pinned/represented —
+    // NEVER-MISSING invariant — rather than being silently rescheduled).
     var task = makeTask({
       deadline: '2026-06-15', // yesterday
       dur: 60,
     });
     var result = run([task]);
-    var p = findPlacement(result, task.id);
-    expect(p).not.toBeNull();
-    // Should be placed — overdue flag may not be set on entry
-    // (the scheduler handles overdue via task._overdue or placement.overdue)
+    expect(findPlacement(result, task.id)).toBeNull();
+    var entry = (result.unplaced || []).find(function (t) { return t.id === task.id; });
+    expect(entry).toBeDefined();
+    expect(entry._unplacedReason).toBe('missed');
   });
 
   test('Level 3: flexWhen fallback — blocked when window, relax to anytime', function () {

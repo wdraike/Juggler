@@ -193,7 +193,11 @@ describe('PUT /api/tasks/:id/status — juggler-cal-history Plan C scheduled_at 
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
       .send({ status: 'missed' });
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/Invalid status/);
+    // 999.1431: route-level taskStatusRouteSchema (zod) now rejects 'missed'
+    // BEFORE UpdateTaskStatus runs (pinned intentional in the 999.1212 suite),
+    // so the 400 body is the zod layer's 'Validation failed', not the use-case's
+    // 'Invalid status'. Semantics preserved: user-supplied missed is still 400.
+    expect(res.body.error).toBe('Validation failed');
   });
 
   test('allows recurring_template pause regardless of scheduled_at', async () => {

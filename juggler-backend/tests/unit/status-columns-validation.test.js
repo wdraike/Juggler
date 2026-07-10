@@ -57,7 +57,9 @@ const backendStatusEnum = require('../../src/constants/status-enum');
 describe('Phase-21: Status columns validation', () => {
 
   describe('1. Zod schema — taskUpdateSchema status validation', () => {
-    const VALID_TASK_STATUSES = ['', 'wip', 'done', 'cancel', 'skip', 'pause', 'missed'];
+    // 999.1421: aligned to task.schema.js VALID_STATUS — 'wip' was never in the
+    // Zod enum, and 'missed' IS settable (terminal-status ruling 2026-07-06).
+    const VALID_TASK_STATUSES = ['', 'done', 'cancel', 'skip', 'pause', 'missed'];
 
     test('accepts each valid task status', () => {
       VALID_TASK_STATUSES.forEach((status) => {
@@ -73,6 +75,7 @@ describe('Phase-21: Status columns validation', () => {
     const INVALID_STATUSES = [
       'invalid',
       'INVALID',
+      'wip',      // 999.1421: not a task status (no WIP in shared TaskStatus or Zod enum)
       'pending',
       'archived',
       'restored',
@@ -158,12 +161,18 @@ describe('Phase-21: Status columns validation', () => {
 
     test('returns true for each individual valid status', () => {
       expect(isValidTaskStatus('')).toBe(true);
-      expect(isValidTaskStatus('wip')).toBe(true);
       expect(isValidTaskStatus('done')).toBe(true);
       expect(isValidTaskStatus('cancel')).toBe(true);
+      expect(isValidTaskStatus('cancelled')).toBe(true);
       expect(isValidTaskStatus('skip')).toBe(true);
       expect(isValidTaskStatus('pause')).toBe(true);
-      expect(isValidTaskStatus('missed')).toBe(true);
+    });
+
+    test("'wip' and 'missed' are NOT in TASK_STATUSES (999.1421: wip never existed in the SSOT; missed is scheduler-set terminal, retired as an enum member by 999.1044)", () => {
+      expect(isValidTaskStatus('wip')).toBe(false);
+      expect(isValidTaskStatus('missed')).toBe(false);
+      // 'missed' is still TERMINAL (ruling 2026-07-06: cancelled AND missed both terminal)
+      expect(isTerminalStatus('missed')).toBe(true);
     });
 
     test('returns false for null', () => {
@@ -177,6 +186,8 @@ describe('Phase-21: Status columns validation', () => {
     test('returns false for invalid status strings', () => {
       const invalidValues = [
         'invalid',
+        'wip',
+        'missed',
         'PENDING',
         'pending',
         'archived',
@@ -259,14 +270,15 @@ describe('Phase-21: Status columns validation', () => {
       });
     });
 
-    test('active statuses are: empty string and wip', () => {
+    test('active statuses are: empty string only (999.1421: no wip in SSOT)', () => {
       expect(isActiveStatus('')).toBe(true);
-      expect(isActiveStatus('wip')).toBe(true);
+      expect(isActiveStatus('wip')).toBe(false);
     });
 
     test('returns false for terminal statuses', () => {
       expect(isActiveStatus('done')).toBe(false);
       expect(isActiveStatus('cancel')).toBe(false);
+      expect(isActiveStatus('cancelled')).toBe(false);
       expect(isActiveStatus('skip')).toBe(false);
       expect(isActiveStatus('pause')).toBe(false);
       expect(isActiveStatus('missed')).toBe(false);
@@ -288,9 +300,8 @@ describe('Phase-21: Status columns validation', () => {
   // ═══════════════════════════════════════════════════════════════════════
 
   describe('5. Shared task-status.js — canTransition', () => {
-    test('EMPTY can transition to: done, wip, skip, cancel, pause', () => {
+    test('EMPTY can transition to: done, skip, cancel, pause', () => {
       expect(canTransition('', 'done')).toBe(true);
-      expect(canTransition('', 'wip')).toBe(true);
       expect(canTransition('', 'skip')).toBe(true);
       expect(canTransition('', 'cancel')).toBe(true);
       expect(canTransition('', 'pause')).toBe(true);
@@ -301,17 +312,13 @@ describe('Phase-21: Status columns validation', () => {
       expect(canTransition('', 'missed')).toBe(false);
     });
 
-    test('WIP can transition to: done, empty (reopen), skip, cancel', () => {
-      expect(canTransition('wip', 'done')).toBe(true);
-      expect(canTransition('wip', '')).toBe(true);
-      expect(canTransition('wip', 'skip')).toBe(true);
-      expect(canTransition('wip', 'cancel')).toBe(true);
-    });
-
-    test('WIP cannot transition to: wip, pause, missed', () => {
-      expect(canTransition('wip', 'wip')).toBe(false);
+    test("'wip' is not a status — canTransition from/to wip is always false (999.1421)", () => {
+      expect(canTransition('wip', 'done')).toBe(false);
+      expect(canTransition('wip', '')).toBe(false);
+      expect(canTransition('wip', 'skip')).toBe(false);
+      expect(canTransition('wip', 'cancel')).toBe(false);
       expect(canTransition('wip', 'pause')).toBe(false);
-      expect(canTransition('wip', 'missed')).toBe(false);
+      expect(canTransition('', 'wip')).toBe(false);
     });
 
     test('terminal statuses cannot transition to anything', () => {
@@ -390,20 +397,21 @@ describe('Phase-21: Status columns validation', () => {
   // ═══════════════════════════════════════════════════════════════════════
 
   describe('8. Shared task-status.js — getTaskStatusDisplayName', () => {
-    test('returns correct display names for all statuses', () => {
+    test('returns correct display names for all enum statuses', () => {
       expect(getTaskStatusDisplayName('')).toBe('Not Started');
-      expect(getTaskStatusDisplayName('wip')).toBe('In Progress');
       expect(getTaskStatusDisplayName('done')).toBe('Completed');
       expect(getTaskStatusDisplayName('cancel')).toBe('Cancelled');
       expect(getTaskStatusDisplayName('skip')).toBe('Skipped');
       expect(getTaskStatusDisplayName('pause')).toBe('Paused');
-      expect(getTaskStatusDisplayName('missed')).toBe('Missed');
     });
 
-    test('returns "Unknown" for invalid status', () => {
+    test('returns "Unknown" for invalid/non-enum status', () => {
       expect(getTaskStatusDisplayName('invalid')).toBe('Unknown');
       expect(getTaskStatusDisplayName('pending')).toBe('Unknown');
       expect(getTaskStatusDisplayName('PENDING')).toBe('Unknown');
+      // 999.1421: wip is not a status; missed is scheduler-internal (no display case)
+      expect(getTaskStatusDisplayName('wip')).toBe('Unknown');
+      expect(getTaskStatusDisplayName('missed')).toBe('Unknown');
     });
   });
 
@@ -412,19 +420,20 @@ describe('Phase-21: Status columns validation', () => {
   // ═══════════════════════════════════════════════════════════════════════
 
   describe('9. Shared task-status.js — getTaskStatusDescription', () => {
-    test('returns correct descriptions for all statuses', () => {
+    test('returns correct descriptions for all enum statuses', () => {
       expect(getTaskStatusDescription('')).toBe('Task created but not yet started');
-      expect(getTaskStatusDescription('wip')).toBe('Task is actively being worked on');
       expect(getTaskStatusDescription('done')).toBe('Task completed successfully');
       expect(getTaskStatusDescription('cancel')).toBe('Task cancelled by user');
       expect(getTaskStatusDescription('skip')).toBe('Task temporarily bypassed');
       expect(getTaskStatusDescription('pause')).toBe('Recurring task paused');
-      expect(getTaskStatusDescription('missed')).toBe('Resolution window passed without action');
     });
 
-    test('returns "Unknown status" for invalid status', () => {
+    test('returns "Unknown status" for invalid/non-enum status', () => {
       expect(getTaskStatusDescription('invalid')).toBe('Unknown status');
       expect(getTaskStatusDescription('pending')).toBe('Unknown status');
+      // 999.1421: wip is not a status; missed is scheduler-internal (no description case)
+      expect(getTaskStatusDescription('wip')).toBe('Unknown status');
+      expect(getTaskStatusDescription('missed')).toBe('Unknown status');
     });
   });
 
@@ -615,12 +624,15 @@ describe('Phase-21: Status columns validation', () => {
 
     test('TaskStatus values are consistent with arrays', () => {
       expect(TaskStatus.EMPTY).toBe('');
-      expect(TaskStatus.WIP).toBe('wip');
       expect(TaskStatus.DONE).toBe('done');
       expect(TaskStatus.CANCEL).toBe('cancel');
+      expect(TaskStatus.CANCELLED).toBe('cancelled');
       expect(TaskStatus.SKIP).toBe('skip');
       expect(TaskStatus.PAUSE).toBe('pause');
-      expect(TaskStatus.MISSED).toBe('missed');
+      // 999.1421: no WIP key (never existed); no MISSED key (999.1044 retired it as
+      // an enum member — 'missed' lives only in TERMINAL_STATUSES).
+      expect(TaskStatus.WIP).toBeUndefined();
+      expect(TaskStatus.MISSED).toBeUndefined();
     });
 
     test('TERMINAL_STATUSES contains exactly the expected values', () => {
@@ -628,7 +640,7 @@ describe('Phase-21: Status columns validation', () => {
     });
 
     test('ACTIVE_STATUSES contains exactly the expected values', () => {
-      expect(ACTIVE_STATUSES).toEqual(['', 'wip']);
+      expect(ACTIVE_STATUSES).toEqual(['']);
     });
 
     // 999.1294: 'cancelled' is a valid, terminal status (like 'missed') but is
@@ -681,10 +693,15 @@ describe('Phase-21: Status columns validation', () => {
       expect(TASK_STATUSES).not.toContain('restored');
     });
 
-    test('Zod VALID_STATUS matches shared TASK_STATUSES exactly', () => {
-      // This verifies the Zod schema and shared enum stay in sync
-      const VALID_STATUS = ['', 'wip', 'done', 'cancel', 'skip', 'pause', 'missed'];
-      expect(VALID_STATUS).toEqual(TASK_STATUSES);
+    test('Zod VALID_STATUS = user-toggleable STATUS_OPTIONS + missed (999.1421)', () => {
+      // task.schema.js VALID_STATUS = ['', 'done', 'cancel', 'skip', 'pause', 'missed'].
+      // Relationship to the SSOT: the API accepts every user-toggleable status
+      // (STATUS_OPTIONS) plus 'missed' (terminal-status ruling 2026-07-06);
+      // 'cancelled' is system-set (tasks-write cancel path) and NOT API-settable.
+      const ZOD_VALID_STATUS = ['', 'done', 'cancel', 'skip', 'pause', 'missed'];
+      expect(ZOD_VALID_STATUS).toEqual([...STATUS_OPTIONS, 'missed']);
+      expect(ZOD_VALID_STATUS).not.toContain('cancelled');
+      expect(ZOD_VALID_STATUS).not.toContain('wip');
     });
 
     test('cal_history DB enum matches backend CalHistoryStatus values', () => {
@@ -732,15 +749,18 @@ describe('Phase-21: Status columns validation', () => {
   // ═══════════════════════════════════════════════════════════════════════
 
   describe('14. Cross-layer consistency', () => {
-    test('every Zod-valid task status is also valid in shared isValidTaskStatus', () => {
-      const zodValidStatuses = ['', 'wip', 'done', 'cancel', 'skip', 'pause', 'missed'];
+    test('every Zod-valid task status except missed is also valid in shared isValidTaskStatus', () => {
+      // 999.1421: 'missed' is API-settable (ruling 2026-07-06) and terminal, but
+      // deliberately NOT a TASK_STATUSES enum member (999.1044 retired it).
+      const zodValidStatuses = ['', 'done', 'cancel', 'skip', 'pause', 'missed'];
       zodValidStatuses.forEach((s) => {
-        expect(isValidTaskStatus(s)).toBe(true);
+        expect(isValidTaskStatus(s)).toBe(s !== 'missed');
       });
+      expect(isTerminalStatus('missed')).toBe(true);
     });
 
-    test('every shared valid task status passes Zod taskUpdateSchema', () => {
-      TASK_STATUSES.forEach((s) => {
+    test('every user-toggleable status (STATUS_OPTIONS) passes Zod taskUpdateSchema; system-set cancelled does not', () => {
+      STATUS_OPTIONS.forEach((s) => {
         const req = { body: { status: s } };
         const res = makeRes();
         let called = false;
@@ -748,6 +768,12 @@ describe('Phase-21: Status columns validation', () => {
         expect(called).toBe(true);
         expect(res._code).toBeUndefined();
       });
+      // 'cancelled' is in TASK_STATUSES (valid, terminal) but system-set only —
+      // the API rejects it (999.1294 / 999.1421).
+      const req = { body: { status: 'cancelled' } };
+      const res = makeRes();
+      validate(taskUpdateSchema)(req, res, () => {});
+      expect(res._code).toBe(400);
     });
 
     test('every backend cal_history valid status is also valid in shared isValidCalHistoryStatus', () => {

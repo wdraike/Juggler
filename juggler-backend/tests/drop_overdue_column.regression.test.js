@@ -76,7 +76,11 @@ var TASKS_WITH_SYNC_V_PRE_FIX_COLUMNS = [
 // not something this migration should have dropped or that this test should treat as drift.
 // Verified via a live merged-schema check (fresh DB, full migrate:latest, SHOW CREATE VIEW) that
 // both migrations' effects coexist correctly with zero clobbering in either direction.
-var COLUMNS_ADDED_BY_OTHER_LEGS_AFTER_THIS_MIGRATION = ['next_occurrence_anchor', 'rolling_anchor'];
+// 999.1247 gate triage (2026-07-09): 'next_start' added — projected into the
+// views by the later next_start unified-anchor migration (see
+// tests/task_masters_next_start_unified_anchor.regression.test.js), same
+// unrelated-later-leg class as the two anchor columns.
+var COLUMNS_ADDED_BY_OTHER_LEGS_AFTER_THIS_MIGRATION = ['next_occurrence_anchor', 'rolling_anchor', 'next_start'];
 
 async function columnsOf(table) {
   var rows = await db('information_schema.COLUMNS')

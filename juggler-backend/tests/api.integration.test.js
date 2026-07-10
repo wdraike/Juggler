@@ -136,8 +136,12 @@ describe('API routes', () => {
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
       .send([]);
 
-    // Entitlement check fires before validation — returns 403
-    expect(res.status).toBe(403);
+    // 999.1247 gate triage: route-level zod validation now fires BEFORE the
+    // entitlement check (old doctrine: entitlement 403 first). A bare array is
+    // also no longer the batch shape ({ tasks: [...] }) — the request is
+    // rejected at the validation layer with 400.
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Validation failed');
   });
 
   test('POST /api/tasks/batch rejects >500', async () => {
@@ -147,8 +151,10 @@ describe('API routes', () => {
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
       .send(tasks);
 
-    // Entitlement check fires before validation — returns 403
-    expect(res.status).toBe(403);
+    // 999.1247 gate triage: same layer-order change as 'rejects empty' above —
+    // route-level zod 400 precedes the entitlement 403.
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Validation failed');
   });
 
   test('PUT /api/tasks/batch rejects >2000', async () => {
