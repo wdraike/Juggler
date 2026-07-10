@@ -25,7 +25,7 @@ import { getTheme } from '../../../theme/colors';
 
 jest.mock('../../../services/apiClient', () => ({
   __esModule: true,
-  default: { get: jest.fn(), put: jest.fn(), post: jest.fn(), delete: jest.fn() },
+  default: { get: jest.fn(), put: jest.fn(), post: jest.fn(), delete: jest.fn(), patch: jest.fn() },
   TZ_OVERRIDE_KEY: 'juggler-tz-override',
   USER_TZ_KEY: 'juggler-user-tz',
 }));
@@ -48,6 +48,7 @@ function makeConfig(overrides = {}) {
   return {
     ...PREF_FIELDS,
     tempUnitPref: 'F',
+    userTimezone: null,
     setFontSize: jest.fn(),
     setGridZoom: jest.fn(),
     setSplitDefault: jest.fn(),
@@ -58,6 +59,7 @@ function makeConfig(overrides = {}) {
     setCalCompletedBehavior: jest.fn(),
     updatePreferences: jest.fn(),
     updateTempUnitPref: jest.fn(),
+    updateUserTimezone: jest.fn(),
     ...overrides,
   };
 }
@@ -209,6 +211,50 @@ describe('PreferencesTab (unit — savePrefs contract)', () => {
   });
 });
 
+// 999.1447 — the "Configured timezone" field (users.timezone writer), distinct
+// from the "Timezone" override field above (display-only, user_config).
+describe('PreferencesTab (unit — configured timezone / 999.1447)', () => {
+  const configuredTzInput = (c) => c.querySelectorAll('input[list="tz-list"]')[0];
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    localStorage.clear();
+  });
+
+  it('shows the current configured timezone and a valid correction saves via updateUserTimezone', () => {
+    const config = makeConfig({ userTimezone: 'America/New_York' });
+    const { container } = render(<PreferencesTab config={config} theme={theme} />);
+
+    const input = configuredTzInput(container);
+    expect(input.value).toBe('America/New_York'.replace(/_/g, ' '));
+    expect(screen.getByText('Currently: America/New_York.')).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: 'Europe/Berlin' } });
+    fireEvent.blur(input);
+
+    expect(config.updateUserTimezone).toHaveBeenCalledWith('Europe/Berlin');
+  });
+
+  it('an invalid configured-timezone entry shows an error and does not call updateUserTimezone', () => {
+    const config = makeConfig({ userTimezone: 'America/New_York' });
+    const { container } = render(<PreferencesTab config={config} theme={theme} />);
+
+    const input = configuredTzInput(container);
+    fireEvent.change(input, { target: { value: 'Not/A Zone' } });
+    fireEvent.blur(input);
+
+    expect(config.updateUserTimezone).not.toHaveBeenCalled();
+    expect(screen.getByText('Not a recognized timezone.')).toBeInTheDocument();
+  });
+
+  it('unset configured timezone shows "Not yet set."', () => {
+    const config = makeConfig({ userTimezone: null });
+    render(<PreferencesTab config={config} theme={theme} />);
+
+    expect(screen.getByText('Not yet set.')).toBeInTheDocument();
+  });
+});
+
 describe('PreferencesTab (integration — real useConfig → apiClient)', () => {
   function Harness({ onSaveError }) {
     const config = useConfig(onSaveError);
@@ -273,6 +319,42 @@ describe('PreferencesTab (integration — real useConfig → apiClient)', () => 
       await act(async () => {});
 
       expect(onSaveError).toHaveBeenCalledWith('quota exceeded', expect.anything());
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it('999.1447: correcting the configured timezone lands as PATCH /config/timezone, not PUT /config/:key', async () => {
+    apiClient.patch.mockResolvedValue({ data: { timezone: 'Europe/Berlin' } });
+
+    const { container } = render(<Harness />);
+    const input = container.querySelectorAll('input[list="tz-list"]')[0];
+    fireEvent.change(input, { target: { value: 'Europe/Berlin' } });
+    fireEvent.blur(input);
+    await act(async () => {});
+
+    expect(apiClient.patch).toHaveBeenCalledWith('/config/timezone', { timezone: 'Europe/Berlin' });
+    expect(apiClient.put).not.toHaveBeenCalled();
+  });
+
+  it('999.1447: a rejected timezone save rolls the input back to the pre-edit value (not the rejected one)', async () => {
+    apiClient.patch.mockRejectedValue(new Error('network down'));
+    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const { container } = render(<Harness />);
+      const input = container.querySelectorAll('input[list="tz-list"]')[0];
+      expect(input.value).toBe(''); // starts unset
+
+      fireEvent.change(input, { target: { value: 'Europe/Berlin' } });
+      fireEvent.blur(input);
+      await act(async () => {});
+
+      // The remounted (key={config.userTimezone}) input reflects the rolled-back
+      // state, not the rejected in-progress edit — the uncontrolled-input/state
+      // desync ernie flagged.
+      const inputAfter = container.querySelectorAll('input[list="tz-list"]')[0];
+      expect(inputAfter.value).toBe('');
     } finally {
       consoleErrorSpy.mockRestore();
     }

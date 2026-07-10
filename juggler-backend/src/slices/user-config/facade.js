@@ -133,6 +133,7 @@ var toolsBodySchema = z.object({ tools: z.array(toolItemSchema).max(50) });
 // ─────────────────────────────────────────────────────────────────────────────
 var _repo = new KnexConfigRepository();            // over lib/db (ADR-0002)
 var _entitlement = new PaymentServiceEntitlementAdapter(); // slug-keyed payment seam (W4)
+var _userRepo = new KnexUserRepository();           // over lib/db — users table (999.1447)
 
 // ── CROSS-TABLE / CROSS-SERVICE COLLABORATORS (lifted VERBATIM) ──────────────
 // These reach tables/services the ConfigRepositoryPort does not model. Inside a
@@ -407,6 +408,7 @@ var _getProjects = new app.GetProjects({ repo: _repo });
 var _getLocations = new app.GetLocations({ repo: _repo });
 var _getTools = new app.GetTools({ repo: _repo });
 var _updateConfig = new app.UpdateConfig({ repo: _repo, cache: cache });
+var _updateUserTimezone = new app.UpdateUserTimezone({ userRepository: _userRepo }); // 999.1447
 var _createProject = new app.CreateProject({ repo: _repo, cache: cache });
 var _updateProject = new app.UpdateProject({ repo: _repo, cache: cache, renameTasks: renameTasks });
 var _deleteProject = new app.DeleteProject({ repo: _repo, cache: cache });
@@ -507,6 +509,7 @@ function getProjects(input) { return _getProjects.execute(input); }
 function getLocations(input) { return _getLocations.execute(input); }
 function getTools(input) { return _getTools.execute(input); }
 function updateConfig(input) { return _updateConfig.execute(input); }
+function updateTimezone(input) { return _updateUserTimezone.execute(input); } // 999.1447
 function createProject(input) { return _createProject.execute(input); }
 function updateProject(input) { return _updateProject.execute(input); }
 function deleteProject(input) { return _deleteProject.execute(input); }
@@ -686,6 +689,7 @@ module.exports = {
   getLocations: getLocations,
   getTools: getTools,
   updateConfig: updateConfig,
+  updateTimezone: updateTimezone,
   createProject: createProject,
   updateProject: updateProject,
   deleteProject: deleteProject,

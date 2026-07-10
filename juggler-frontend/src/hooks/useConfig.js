@@ -349,6 +349,22 @@ export default function useConfig(onSaveError) {
     saveConfig('temp_unit_pref', v);
   }, [saveConfig]);
 
+  // 999.1447 — users.timezone correction. Distinct from saveConfig/timezoneOverride:
+  // this writes the `users` table column (PATCH /config/timezone), not a user_config
+  // key, so it does NOT go through saveConfig/PUT /config/:key. Rollback-on-reject,
+  // same pattern as updateLocations/updateTools.
+  var updateUserTimezone = useCallback(async function(tz) {
+    var prevTz;
+    setUserTimezone(function(cur) { prevTz = cur; return tz; });
+    try {
+      await apiClient.patch('/config/timezone', { timezone: tz });
+    } catch (error) {
+      console.error('Failed to save timezone:', error);
+      setUserTimezone(prevTz);
+      reportSaveError('timezone', error);
+    }
+  }, [reportSaveError]);
+
   var updateLocations = useCallback(async function(locs) {
     // 999.1225 — capture the pre-update value (functional updater) so a server
     // rejection rolls the optimistic state back instead of silently keeping it.
@@ -397,6 +413,6 @@ export default function useConfig(onSaveError) {
     updateLocScheduleOverrides, updateHourLocationOverrides,
     updatePreferences, updateLocations, updateTools,
     updateScheduleTemplates, updateTemplateDefaults, updateTemplateOverrides,
-    updateCalSyncSettings, updateTempUnitPref
+    updateCalSyncSettings, updateTempUnitPref, updateUserTimezone
   };
 }

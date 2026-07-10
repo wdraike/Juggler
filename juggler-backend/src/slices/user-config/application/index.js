@@ -37,6 +37,7 @@
  *   jwt-auth          resolve-or-provision → commands/ProvisionUserOnFirstLogin (999.1197)
  *   my-plan.routes    GET /                → queries/GetMyPlan (999.1196)
  *   feature-events.routes GET /            → queries/GetFeatureEventsReport (999.1196)
+ *   config.controller updateTimezone      → commands/UpdateUserTimezone (999.1447)
  */
 
 'use strict';
@@ -69,5 +70,6 @@ module.exports = {
   HandleBillingWebhook: require('./commands/HandleBillingWebhook'),
   Impersonate: require('./commands/Impersonate'),
   StopImpersonation: require('./commands/StopImpersonation'),
-  ProvisionUserOnFirstLogin: require('./commands/ProvisionUserOnFirstLogin')
+  ProvisionUserOnFirstLogin: require('./commands/ProvisionUserOnFirstLogin'),
+  UpdateUserTimezone: require('./commands/UpdateUserTimezone')
 };

@@ -18,9 +18,10 @@
 'use strict';
 
 var USER_REPOSITORY_PORT_METHODS = Object.freeze([
-  'findByEmail', // (email)  → user row | undefined
-  'findById',    // (id)     → user row | undefined
-  'insertUser'   // (row)    → resolves; rejects with 'Duplicate…' on PK/unique-email collision
+  'findByEmail',     // (email)  → user row | undefined
+  'findById',        // (id)     → user row | undefined
+  'insertUser',      // (row)    → resolves; rejects with 'Duplicate…' on PK/unique-email collision
+  'updateTimezone'   // (id, timezone) → resolves once users.timezone is updated (999.1447)
 ]);
 
 function UserRepositoryPort() {}

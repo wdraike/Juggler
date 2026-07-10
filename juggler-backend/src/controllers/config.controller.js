@@ -70,6 +70,24 @@ async function updateConfig(req, res) {
   }
 }
 
+/**
+ * PATCH /api/config/timezone — correct the auto-detected users.timezone (999.1447).
+ * Distinct from PUT /api/config/:key: users.timezone lives on the `users` table,
+ * not `user_config` — never route it through updateConfig/VALID_KEYS.
+ */
+async function updateTimezone(req, res) {
+  try {
+    const result = await facade.updateTimezone({
+      userId: req.user.id,
+      timezone: req.body.timezone
+    });
+    sendEnvelope(res, result);
+  } catch (error) {
+    logger.error('Update timezone error:', error);
+    res.status(500).json({ error: 'Failed to update timezone' });
+  }
+}
+
 // ── Projects ──
 
 async function getProjects(req, res) {
@@ -178,6 +196,7 @@ async function replaceTools(req, res) {
 module.exports = {
   getAllConfig,
   updateConfig,
+  updateTimezone,
   getProjects,
   createProject,
   updateProject,

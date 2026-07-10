@@ -11,6 +11,9 @@ router.use(authenticateJWT, resolvePlanFeatures);
 
 // Config
 router.get('/', configController.getAllConfig);
+// users.timezone correction (999.1447) — distinct table from user_config,
+// so this is NOT routed through PUT /:key / UserConfig.VALID_KEYS.
+router.patch('/timezone', configController.updateTimezone);
 // Enforce schedule template limit when saving time_blocks
 router.put('/:key', function(req, res, next) {
   if (req.params.key === 'time_blocks') {

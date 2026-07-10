@@ -32,4 +32,9 @@ InMemoryUserRepository.prototype.insertUser = async function (row) {
   this._rows.push(Object.assign({}, row));
 };
 
+InMemoryUserRepository.prototype.updateTimezone = async function (id, timezone) {
+  var row = this._rows.find(function (r) { return r.id === id; });
+  if (row) row.timezone = timezone;
+};
+
 module.exports = InMemoryUserRepository;

@@ -30,4 +30,8 @@ KnexUserRepository.prototype.insertUser = function (row) {
   return this._db('users').insert(row);
 };
 
+KnexUserRepository.prototype.updateTimezone = function (id, timezone) {
+  return this._db('users').where('id', id).update({ timezone: timezone });
+};
+
 module.exports = KnexUserRepository;

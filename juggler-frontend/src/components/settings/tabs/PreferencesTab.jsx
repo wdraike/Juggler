@@ -2,10 +2,16 @@
  * PreferencesTab — extracted from SettingsPanel (999.965).
  * Stub — full implementation was in SettingsPanel.jsx.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { TZ_OVERRIDE_KEY } from '../../../services/apiClient';
 import { formatMinsAmPm } from '../../../utils/timezone';
 import HelpIcon from '../HelpIcon';
+
+function isValidIanaTimezone(tz) {
+  if (!tz) return false;
+  try { Intl.DateTimeFormat(undefined, { timeZone: tz }); return true; }
+  catch (e) { return false; }
+}
 
 var commonTimezones = [
   'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
@@ -18,6 +24,18 @@ var commonTimezones = [
 ];
 
 export default function PreferencesTab({ config, theme }) {
+  var [tzError, setTzError] = useState(null);
+
+  function saveUserTimezone(raw) {
+    var tz = raw.replace(/ /g, '_');
+    if (!isValidIanaTimezone(tz)) {
+      setTzError('Not a recognized timezone.');
+      return;
+    }
+    setTzError(null);
+    config.updateUserTimezone(tz);
+  }
+
   function savePrefs(patch) {
     config.updatePreferences({
       gridZoom: config.gridZoom, splitDefault: config.splitDefault,
@@ -40,6 +58,20 @@ export default function PreferencesTab({ config, theme }) {
         <HelpIcon text="Preferences — font size, grid zoom, task defaults, timezone, and scheduling behavior." theme={theme}><span>Preferences</span></HelpIcon>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ fontSize: 12, color: theme.text }}>
+          <HelpIcon text="Your configured timezone (used for task times and scheduling). Correct this if it was auto-detected wrong at first login." theme={theme}><div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}><span style={{ fontWeight: 500 }}>Configured timezone:</span></div></HelpIcon>
+          <div style={{ flex: 1, position: 'relative' }}>
+            <input key={config.userTimezone || ''} list="tz-list" defaultValue={config.userTimezone ? config.userTimezone.replace(/_/g, ' ') : ''}
+              onBlur={function(e) { if (e.target.value) saveUserTimezone(e.target.value); }}
+              placeholder={config.userTimezone || 'Not set'}
+              style={{ width: '100%', boxSizing: 'border-box', padding: '4px 6px', border: '1px solid ' + (tzError ? theme.error || '#c00' : theme.inputBorder), borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12, fontFamily: 'inherit' }} />
+          </div>
+          {tzError ? (
+            <div style={{ fontSize: 10, color: theme.error || '#c00' }}>{tzError}</div>
+          ) : (
+            <div style={{ fontSize: 10, color: theme.textMuted }}>{config.userTimezone ? 'Currently: ' + config.userTimezone + '.' : 'Not yet set.'}</div>
+          )}
+        </div>
         <div style={{ fontSize: 12, color: theme.text }}>
           <HelpIcon text="Override the auto-detected timezone." theme={theme}><div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}><span style={{ fontWeight: 500 }}>Timezone:</span></div></HelpIcon>
           <div style={{ flex: 1, position: 'relative' }}>
