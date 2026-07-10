@@ -32,23 +32,17 @@ const authenticateJWT = async (req, res, next) => {
       const localUser = await db('users').where('email', req.user.email).first();
       if (localUser) {
         req.user = { ...localUser, authServiceId: req.user.id };
-        // Auto-detect timezone from browser x-timezone header (999.899).
-        // If the browser reports a different valid IANA timezone than what's
-        // stored, update it silently (fire-and-forget — never blocks the request).
-        var browserTz = req.headers['x-timezone'];
-        if (browserTz && typeof browserTz === 'string' && browserTz !== localUser.timezone) {
-          try {
-            Intl.DateTimeFormat(undefined, { timeZone: browserTz });
-            db('users').where('id', localUser.id).update({ timezone: browserTz }).catch(function(err) {
-              logger.warn('jwt-auth: timezone update failed (non-fatal, fire-and-forget)', { userId: localUser.id, browserTz, error: err.message });
-            });
-          } catch (_e) { /* invalid IANA name — skip */ }
-        }
+        // 999.1222 RULING (2026-07-06): users.timezone is owned by Settings only.
+        // The former per-request silent overwrite from the X-Timezone header
+        // (999.899 auto-detect) is REMOVED — X-Timezone carries the configured
+        // display tz (TZ-DISPLAY-3) and must never write the stored timezone.
       } else {
         // First login — provision user in local DB using auth-service claims
         const newId = req.user.id; // use auth-service ID as local ID
-        // Auto-detect timezone from browser x-timezone header (999.899)
-        var detectedTz = req.headers['x-timezone'];
+        // 999.1222: initial timezone is set ONCE here, from the real browser
+        // IANA zone sent in the dedicated X-Browser-Timezone header. X-Timezone
+        // is the configured/display tz and is deliberately NOT read for this.
+        var detectedTz = req.headers['x-browser-timezone'];
         if (detectedTz && typeof detectedTz === 'string') {
           try { Intl.DateTimeFormat(undefined, { timeZone: detectedTz }); }
           catch (_e) { detectedTz = null; } // invalid IANA name → skip

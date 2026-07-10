@@ -37,14 +37,14 @@ row, `timezone` is therefore always non-null. Readers of `users.timezone` do
 NOT need a column-null fallback; the `America/New_York` default is enforced at
 both the schema level (DEFAULT) and the application level.
 
-**Application-layer nuance:** As of 999.899, the user's timezone is auto-detected
-from the browser's `x-timezone` header on every authenticated request. On first
-login the detected timezone is set as the user's timezone immediately; on
-subsequent requests, if the browser reports a different valid IANA timezone, it
-is updated silently (fire-and-forget). The `America/New_York` default is only
-used when the header is absent or contains an invalid IANA name. There is no
-longer an "unconfigured" signal — the timezone is always set to a real value
-based on the user's browser.
+**Application-layer nuance:** As of 999.1222 (ruling 2026-07-06, superseding the
+999.899 auto-detect), `users.timezone` is owned by **Settings only**. It is set
+ONCE at first-login provisioning from the real browser IANA zone sent in the
+dedicated `X-Browser-Timezone` header; the `America/New_York` default is only
+used when that header is absent or contains an invalid IANA name. The
+`X-Timezone` header carries the configured/display timezone (TZ-DISPLAY-3) and
+is **display-only** — jwt-auth never overwrites the stored timezone on
+subsequent requests.
 
 **Rationale:** UTC storage eliminates ambiguity across server locations, DST
 transitions, and multi-timezone teams. Date-only fields are an exception because

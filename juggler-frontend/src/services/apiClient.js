@@ -14,7 +14,7 @@
 // avoids transpiling axios's internal ESM deps, and is verified green across the
 // frontend suite. Do not remove the moduleNameMapper without replacing it.
 import axios from 'axios';
-import { resolveDisplayTimezone } from '../utils/timezone';
+import { resolveDisplayTimezone, getBrowserTimezone } from '../utils/timezone';
 
 import { apiBase, authServiceUrl, appId as _appId } from '../proxy-config';
 const TZ_OVERRIDE_KEY = 'juggler-tz-override';
@@ -75,6 +75,11 @@ apiClient.interceptors.request.use(config => {
     config.headers.Authorization = `Bearer ${accessToken}`;
   }
   config.headers['X-Timezone'] = getActiveTimezone();
+  // 999.1222: the REAL browser IANA zone, on a dedicated header. The backend
+  // reads it ONLY during first-login provisioning to seed users.timezone once;
+  // it never overwrites the stored timezone (Settings-only ownership).
+  var browserTz = getBrowserTimezone();
+  if (browserTz) config.headers['X-Browser-Timezone'] = browserTz;
   return config;
 });
 
