@@ -277,6 +277,31 @@ KnexScheduleRepository.prototype.upsertScheduleCache = async function upsertSche
   }
 };
 
+/**
+ * Read ALL user_config rows for the user (verbatim — the legacy
+ * loadSchedulerConfig.js:79 read). H7 boundary hardening (999.1193).
+ */
+KnexScheduleRepository.prototype.getUserConfigRows = function getUserConfigRows(userId) {
+  return this.db('user_config').where('user_id', userId).select();
+};
+
+/**
+ * Read the user's locations ordered by sort_order (verbatim — the legacy
+ * loadSchedulerConfig.js:80 read). H7 (999.1193).
+ */
+KnexScheduleRepository.prototype.getLocations = function getLocations(userId) {
+  return this.db('locations').where('user_id', userId).orderBy('sort_order');
+};
+
+/**
+ * Bulk-insert task rows — delegates to the REAL master/instance write module
+ * (`lib/tasks-write.insertTasksBatch`), exactly what the legacy phase-1 chunk
+ * pre-insert (runSchedule.js ~1395) called inline. H7 (999.1193).
+ */
+KnexScheduleRepository.prototype.insertTasksBatch = function insertTasksBatch(rows) {
+  return this.tasksWrite.insertTasksBatch(this.db, rows);
+};
+
 module.exports = KnexScheduleRepository;
 module.exports.KnexScheduleRepository = KnexScheduleRepository;
 module.exports.SCHEDULE_REPOSITORY_PORT_METHODS = SCHEDULE_REPOSITORY_PORT_METHODS;

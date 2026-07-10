@@ -137,6 +137,37 @@ ScheduleRepositoryPort.prototype.upsertScheduleCache = function upsertScheduleCa
 };
 
 /**
+ * Read ALL user_config rows for a user (legacy loadSchedulerConfig read,
+ * loadSchedulerConfig.js ~79). Raw rows — parsing/assembly stays in the
+ * pure `buildSchedulerCfg` helper. H7 boundary hardening (999.1193).
+ * @param {string} userId tenant scope.
+ * @returns {Promise<Array<Object>>} raw user_config rows.
+ */
+ScheduleRepositoryPort.prototype.getUserConfigRows = function getUserConfigRows(_userId) {
+  throw new Error('ScheduleRepositoryPort.getUserConfigRows not implemented');
+};
+
+/**
+ * Read the user's locations rows ordered by sort_order (legacy
+ * loadSchedulerConfig read, loadSchedulerConfig.js ~80). H7 (999.1193).
+ * @param {string} userId tenant scope.
+ * @returns {Promise<Array<Object>>} raw locations rows.
+ */
+ScheduleRepositoryPort.prototype.getLocations = function getLocations(_userId) {
+  throw new Error('ScheduleRepositoryPort.getLocations not implemented');
+};
+
+/**
+ * Bulk-insert task rows (legacy phase-1 chunk pre-insert,
+ * runSchedule.js ~1395 via lib/tasks-write.insertTasksBatch). H7 (999.1193).
+ * @param {Array<Object>} rows DB-shape task rows (already owner-scoped).
+ * @returns {Promise<void>}
+ */
+ScheduleRepositoryPort.prototype.insertTasksBatch = function insertTasksBatch(_rows) {
+  throw new Error('ScheduleRepositoryPort.insertTasksBatch not implemented');
+};
+
+/**
  * The exact set of methods an adapter MUST expose to satisfy ScheduleRepositoryPort.
  * @type {ReadonlyArray<string>}
  */
@@ -146,7 +177,10 @@ var SCHEDULE_REPOSITORY_PORT_METHODS = Object.freeze([
   'backfillRollingAnchorIfNull',
   'now',
   'getScheduleCache',
-  'upsertScheduleCache'
+  'upsertScheduleCache',
+  'getUserConfigRows',
+  'getLocations',
+  'insertTasksBatch'
 ]);
 
 module.exports = ScheduleRepositoryPort;

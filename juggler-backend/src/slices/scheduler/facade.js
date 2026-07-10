@@ -40,10 +40,14 @@
  * endpoint — that is the trigger seam, deliberately NOT routed through this
  * facade (it is not a scheduler-core operation).
  *
- * ── H7 (not this wave) ── the legacy `src/scheduler/runSchedule.js` and
+ * ── H7 ── the legacy `src/scheduler/runSchedule.js` and
  * `src/scheduler/unifiedScheduleV2.js` files REMAIN; the facade fronts them.
- * Thinning/deleting those files, the per-slice eslint boundary rule, and closing
- * the remaining inline writes in runSchedule.js are H7 boundary-hardening work.
+ * 999.1193 closed the remaining inline infra I/O in runSchedule.js: the
+ * user_config/locations config reads, the phase-1 chunk pre-insert
+ * (insertTasksBatch), and the dead Redis run-lock now all route through
+ * RunScheduleCommand → ScheduleRepositoryPort (or were deleted as dead code).
+ * Still open H7 work: thinning/deleting the legacy files and the per-slice
+ * eslint boundary rule.
  */
 
 'use strict';

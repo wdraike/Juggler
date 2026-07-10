@@ -79,6 +79,16 @@ async function loadSchedulerConfig(userId) {
     db('user_config').where('user_id', userId).select(),
     db('locations').where('user_id', userId).orderBy('sort_order')
   ]);
+  return buildSchedulerCfg(rows, locRows);
+}
+
+/**
+ * Pure rows→cfg assembly (H7, 999.1193): parse raw user_config rows + map raw
+ * locations rows and assemble the scheduler cfg. No DB access — callers that
+ * fetch the rows through ScheduleRepositoryPort (runSchedule.js) share the
+ * EXACT same parse/map/assembly as the db-backed loadSchedulerConfig above.
+ */
+function buildSchedulerCfg(rows, locRows) {
   var config = parseUserConfigRows(rows);
 
   var locations = locRows.map(function(l) {
@@ -97,6 +107,7 @@ async function loadSchedulerConfig(userId) {
 
 module.exports = {
   loadSchedulerConfig: loadSchedulerConfig,
+  buildSchedulerCfg: buildSchedulerCfg,
   parseUserConfigRows: parseUserConfigRows,
   assembleSchedulerCfg: assembleSchedulerCfg
 };

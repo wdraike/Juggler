@@ -10,7 +10,8 @@ var { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('runSchedule');
 
 var db = require('../db');
-var tasksWrite = require('../lib/tasks-write');
+// H7 (999.1193): lib/tasks-write is no longer required here — the phase-1 chunk
+// pre-insert routes through _runScheduleCommand.insertTasksBatch (port seam).
 var { computeChunks } = require('../lib/reconcile-splits');
 var unifiedScheduleV2 = require('./unifiedScheduleV2');
 var constants = require('./constants');
@@ -300,7 +301,11 @@ var getNowInTimezone = require('juggler-shared/scheduler/getNowInTimezone').getN
  * shared with schedulerSession.js and schedule.routes.js (which previously
  * carried drifted camelCase-key copies).
  */
-var loadConfig = require('./loadSchedulerConfig').loadSchedulerConfig;
+// H7 (999.1193): the user_config/locations reads go through
+// ScheduleRepositoryPort (via _runScheduleCommand); only the PURE rows→cfg
+// assembly is imported here, so cfg semantics stay byte-identical to
+// loadSchedulerConfig(userId) (which schedulerSession/schedule.routes use).
+var buildSchedulerCfg = require('./loadSchedulerConfig').buildSchedulerCfg;
 
 /**
  * Run the scheduler and persist date moves to the DB.
@@ -311,13 +316,10 @@ var loadConfig = require('./loadSchedulerConfig').loadSchedulerConfig;
  *
  * Returns stats: { updated, cleared, tasks: [...] }
  */
-// Per-user mutex to prevent concurrent scheduler runs (Redis-based for multi-process safety)
-var _LOCK_TTL_MS = 30000; // 30s max lock hold time
-async function _acquireSchedulerLock(_userId) { /* unused */ }
-async function _releaseSchedulerLock(userId) {
-  var lockKey = 'sched_lock:' + userId;
-  try { await cache.getClient().del(lockKey); } catch (_e) { /* fail open */ }
-}
+// NOTE (H7, 999.1193): the old Redis per-user scheduler lock
+// (_acquireSchedulerLock/_releaseSchedulerLock, 'sched_lock:<userId>') was dead
+// code — zero call sites repo-wide. Concurrency is owned by the caller's
+// sync-lock claim (lib/sync-lock, see scheduleQueue). Deleted, not ported.
 
 // Weather provider injection - default to the real SchedulerWeatherProvider
 // but allow injection of FakeWeatherProvider for testing
@@ -558,7 +560,13 @@ async function runScheduleAndPersist(userId, _retries, options) {
     .select('master_id')
     .max('date as latest_date')
     .groupBy('master_id');
-  var _p_cfg = loadConfig(userId);
+  // H7 (999.1193): user_config + locations reads via ScheduleRepositoryPort.
+  // On the base connection (db), NOT the trx — same as the legacy
+  // loadConfig(userId), whose reads ran on src/db outside the transaction.
+  var _p_cfg = Promise.all([
+    _runScheduleCommand.getUserConfigRows(db, userId),
+    _runScheduleCommand.getLocations(db, userId)
+  ]).then(function(cfgRows) { return buildSchedulerCfg(cfgRows[0], cfgRows[1]); });
   var _loaded = await Promise.all([_p_taskRows, _p_terminalDedupRows, _p_recurHistory, _p_cfg]);
   var taskRows = _loaded[0];
   var terminalDedupRows = _loaded[1];
@@ -1392,7 +1400,9 @@ async function runScheduleAndPersist(userId, _retries, options) {
       chunkInsertRows = chunkInsertRows.filter(function(r) { return !existingChunkSet[r.id]; });
     }
     if (chunkInsertRows.length > 0) {
-      await tasksWrite.insertTasksBatch(trx, chunkInsertRows);
+      // H7 (999.1193): routed through ScheduleRepositoryPort.insertTasksBatch
+      // (→ lib/tasks-write.insertTasksBatch on the same trx — T-TX preserved).
+      await _runScheduleCommand.insertTasksBatch(trx, chunkInsertRows);
       logger.info('[SCHED] phase1: pre-inserted ' + chunkInsertRows.length + ' chunk rows');
     }
     // Populate for changeset projection — taskRows was loaded before this INSERT

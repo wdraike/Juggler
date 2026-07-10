@@ -188,5 +188,41 @@ RunScheduleCommand.prototype.upsertScheduleCache = function upsertScheduleCache(
   return this._repo(trx).upsertScheduleCache(userId, cacheJson);
 };
 
+/**
+ * Read ALL user_config rows for the user (delegates to the repository's
+ * getUserConfigRows) — the scheduler-config load half of the legacy
+ * loadSchedulerConfig(userId). H7 boundary hardening (999.1193).
+ * @param {Function} dbOrTrx caller's db/trx handle (the legacy read ran on the
+ *   base connection, NOT the trx — pass `db` to preserve that).
+ * @param {string} userId tenant scope.
+ * @returns {Promise<Array<Object>>}
+ */
+RunScheduleCommand.prototype.getUserConfigRows = function getUserConfigRows(dbOrTrx, userId) {
+  return this._repo(dbOrTrx).getUserConfigRows(userId);
+};
+
+/**
+ * Read the user's locations rows ordered by sort_order (delegates to the
+ * repository's getLocations). H7 (999.1193).
+ * @param {Function} dbOrTrx caller's db/trx handle (see getUserConfigRows note).
+ * @param {string} userId tenant scope.
+ * @returns {Promise<Array<Object>>}
+ */
+RunScheduleCommand.prototype.getLocations = function getLocations(dbOrTrx, userId) {
+  return this._repo(dbOrTrx).getLocations(userId);
+};
+
+/**
+ * Bulk-insert task rows (delegates to the repository's insertTasksBatch →
+ * lib/tasks-write.insertTasksBatch) — the legacy phase-1 chunk pre-insert
+ * (runSchedule.js ~1395). H7 (999.1193).
+ * @param {Function} trx caller's transaction handle (T-TX).
+ * @param {Array<Object>} rows DB-shape task rows (owner-scoped).
+ * @returns {Promise<void>}
+ */
+RunScheduleCommand.prototype.insertTasksBatch = function insertTasksBatch(trx, rows) {
+  return this._repo(trx).insertTasksBatch(rows);
+};
+
 module.exports = RunScheduleCommand;
 module.exports.RunScheduleCommand = RunScheduleCommand;

@@ -32,12 +32,16 @@ var P1_DATE_COLUMNS = ['updated_at', 'created_at', 'completed_at', 'scheduled_at
  * @param {Object} [deps]
  * @param {Object} [deps.rows] seed map { id: row } the double starts from.
  * @param {Object} [deps.clock] ClockPort (default: process clock).
+ * @param {Array<Object>} [deps.userConfigRows] seed raw user_config rows (H7).
+ * @param {Array<Object>} [deps.locations] seed raw locations rows (H7).
  */
 function InMemoryScheduleRepository(deps) {
   var d = deps || {};
   this._rows = Object.assign({}, d.rows || {});
   this.clock = d.clock || { now: function () { return new Date(); } };
   this.writes = []; // audit log of applied dbUpdates (for assertions)
+  this._userConfigRows = (d.userConfigRows || []).slice();
+  this._locations = (d.locations || []).slice();
 }
 
 InMemoryScheduleRepository.prototype._assertDates = function _assertDates(dbUpdate) {
@@ -110,6 +114,39 @@ InMemoryScheduleRepository.prototype.getScheduleCache = async function getSchedu
 InMemoryScheduleRepository.prototype.upsertScheduleCache = async function upsertScheduleCache(userId, cacheJson) {
   if (!this._scheduleCache) this._scheduleCache = {};
   this._scheduleCache[userId] = { user_id: userId, config_key: 'schedule_cache', config_value: cacheJson };
+};
+
+/**
+ * Read ALL user_config rows for the user. Seed via deps.userConfigRows
+ * (array of raw user_config rows). H7 (999.1193).
+ */
+InMemoryScheduleRepository.prototype.getUserConfigRows = async function getUserConfigRows(userId) {
+  return this._userConfigRows.filter(function (r) { return r.user_id === userId; });
+};
+
+/**
+ * Read the user's locations rows ordered by sort_order. Seed via
+ * deps.locations (array of raw locations rows). H7 (999.1193).
+ */
+InMemoryScheduleRepository.prototype.getLocations = async function getLocations(userId) {
+  return this._locations
+    .filter(function (r) { return r.user_id === userId; })
+    .sort(function (a, b) { return (a.sort_order || 0) - (b.sort_order || 0); });
+};
+
+/**
+ * Bulk-insert task rows into the in-memory store (P1-asserted), mirroring
+ * lib/tasks-write.insertTasksBatch's early return on empty. H7 (999.1193).
+ */
+InMemoryScheduleRepository.prototype.insertTasksBatch = async function insertTasksBatch(rows) {
+  if (!rows || rows.length === 0) return;
+  var self = this;
+  rows.forEach(function (r) {
+    if (!r.user_id) throw new Error('[InMemoryScheduleRepository] insertTasksBatch: row missing user_id');
+    self._assertDates(r);
+    self._rows[r.id] = Object.assign({}, r);
+    self.writes.push({ id: r.id, dbUpdate: r, inserted: true });
+  });
 };
 
 module.exports = InMemoryScheduleRepository;
