@@ -26,7 +26,7 @@ var { runScheduleAndPersist } = require('../src/scheduler/runSchedule');
 var { DEFAULT_TIME_BLOCKS, DEFAULT_TOOL_MATRIX, DAY_NAMES } = require('../src/scheduler/constants');
 var tasksWrite = require('../src/lib/tasks-write');
 var { assertDbAvailable } = require('./helpers/requireDB');
-var { localToUtc } = require('../src/scheduler/dateHelpers');
+var { localToUtc, formatMinutesToTime } = require('../src/scheduler/dateHelpers');
 
 var available = false;
 var USER_ID = 'recur-limbo-test-001';
@@ -86,14 +86,32 @@ function seedTask(overrides) {
   return tasksWrite.insertTask(db, task).then(function() { return task; });
 }
 
-// Block the WHOLE morning home block (06:00–08:00 local) on a given day with a pinned
-// fixed task. Uses localToUtc — same function the scheduler uses — to produce the correct
+// Block the WHOLE morning home block on a given day with a pinned fixed task.
+// Uses localToUtc — same function the scheduler uses — to produce the correct
 // UTC timestamp. This avoids the dateStrings misparse trap: storing a bare "HH:MM:SS"
 // string is parsed as LOCAL time by `new Date()`, so "10:00:00" stays at 10:00 local
 // (not 06:00 EDT). localToUtc converts "6:00 AM" in TZ → correct UTC datetime object.
+//
+// 999.1451: the morning block is NOT the same size on every day of the week —
+// DEFAULT_WEEKDAY_BLOCKS' morning is 360-480 (06:00-08:00, 120 min) but
+// DEFAULT_WEEKEND_BLOCKS' morning is 420-720 (07:00-12:00, 300 min). A blocker
+// hardcoded to "6:00 AM, dur 120" only fully occupies the WEEKDAY window; on a
+// weekend anchor day (dayKey(1) lands on Sat/Sun roughly 2/7 of the time — e.g.
+// any run where "today" is Friday) it leaves 240 free minutes after 8am, so the
+// flexible-TPC instance places later THE SAME DAY instead of roaming to a new
+// day — AC1/AC3's `placedDate > anchorKey` then goes red although the persist
+// fix (dd27105d, 999.848) is completely intact. Derive the block's actual
+// start/duration from DEFAULT_TIME_BLOCKS for that day's day-of-week so the
+// blocker always fully occupies the morning window, weekday or weekend.
 function blockMorning(dayOffset) {
   var dk = dayKey(dayOffset);
-  var scheduledAtUtc = localToUtc(dk, '6:00 AM', TZ);
+  var dow = DAY_NAMES[new Date(dk + 'T12:00:00Z').getUTCDay()]; // 'Sun'..'Sat'
+  var dayBlocks = DEFAULT_TIME_BLOCKS[dow] || DEFAULT_TIME_BLOCKS.Mon;
+  var morningBlock = dayBlocks.filter(function(b) { return b.tag === 'morning'; })[0];
+  if (!morningBlock) throw new Error('blockMorning: no morning block for ' + dow);
+  var blockDur = morningBlock.end - morningBlock.start; // fully occupy, weekday or weekend
+  var startTimeStr = formatMinutesToTime(morningBlock.start); // e.g. '6:00 AM' / '7:00 AM'
+  var scheduledAtUtc = localToUtc(dk, startTimeStr, TZ);
   if (!scheduledAtUtc) throw new Error('blockMorning: localToUtc returned null for ' + dk);
   // MySQL DATETIME format: "YYYY-MM-DD HH:MM:SS" (UTC stored, UTC interpreted by scheduler)
   function pad(n) { return n < 10 ? '0' + n : String(n); }
@@ -108,7 +126,7 @@ function blockMorning(dayOffset) {
     // placement_mode:'fixed' makes isRigid=true → tryPlaceAtTime → reserveWithTravel → dayOcc occupied.
     // when:'fixed' alone is the OLD convention; the scheduler now reads `placement_mode`, not `when`.
     placement_mode: 'fixed', // date_pinned removed 20260526000000 (999.1440/58d9a12a) — placement_mode is the sole immovability signal
-    scheduled_at: utcStr, dur: 120 // fills exactly the morning home block (360–480 min local)
+    scheduled_at: utcStr, dur: blockDur // fills exactly that day's morning home block
   });
 }
 
@@ -330,8 +348,17 @@ describe('999.848 AC3 HARD CASE — convergence under a changing blocker (no cum
   // DB query, using the same localToUtc + UTC-string approach as blockMorning(dayOffset).
   // This is needed when we must block the specific day the scheduler roamed to — we learn
   // that day from a DB query and cannot express it as a day-offset at authoring time.
+  // 999.1451: same weekday/weekend window-size issue as blockMorning — derive
+  // start/duration from DEFAULT_TIME_BLOCKS for dateStr's day-of-week instead
+  // of hardcoding the weekday-sized (120 min) block.
   function blockMorningByDateKey(dateStr) {
-    var scheduledAtUtc = localToUtc(dateStr, '6:00 AM', TZ);
+    var dow = DAY_NAMES[new Date(dateStr + 'T12:00:00Z').getUTCDay()];
+    var dayBlocks = DEFAULT_TIME_BLOCKS[dow] || DEFAULT_TIME_BLOCKS.Mon;
+    var morningBlock = dayBlocks.filter(function(b) { return b.tag === 'morning'; })[0];
+    if (!morningBlock) throw new Error('blockMorningByDateKey: no morning block for ' + dow);
+    var blockDur = morningBlock.end - morningBlock.start;
+    var startTimeStr = formatMinutesToTime(morningBlock.start);
+    var scheduledAtUtc = localToUtc(dateStr, startTimeStr, TZ);
     if (!scheduledAtUtc) throw new Error('blockMorningByDateKey: localToUtc returned null for ' + dateStr);
     function pad(n) { return n < 10 ? '0' + n : String(n); }
     var utcStr = scheduledAtUtc.getUTCFullYear() + '-' +
@@ -343,7 +370,7 @@ describe('999.848 AC3 HARD CASE — convergence under a changing blocker (no cum
     return seedTask({
       text: 'BLOCK morning ' + dateStr,
       placement_mode: 'fixed', // date_pinned removed 20260526000000 (999.1440/58d9a12a) — placement_mode is the sole immovability signal
-      scheduled_at: utcStr, dur: 120
+      scheduled_at: utcStr, dur: blockDur
     });
   }
 
