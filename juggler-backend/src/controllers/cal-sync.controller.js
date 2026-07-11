@@ -1029,6 +1029,25 @@ async function sync(req, res) {
               } else if (withinCdnGrace(ledger, pid)) {
                 // CDN propagation window — treat as not-yet-visible, not missing
               } else if (ledger.origin === JUGGLER_ORIGIN
+                  && task.taskType === 'recurring_instance'
+                  && (ledger.miss_count || 0) >= 1) {
+                // ponytail: recurring instances are scheduler-owned — the scheduler
+                // moves them to new dates and the sync should follow, not re-create.
+                // A recurring instance whose event goes missing on the provider is
+                // almost always a stale ledger from a date the scheduler has already
+                // moved past. Re-creating spawns duplicate events (observed: 44 ledger
+                // rows, 42 deleted_local for one Cut Grass instance). Clean the ledger
+                // only — the next push phase will create a fresh event at the current
+                // date if the task is still active and in the sync window.
+                ledgerUpdates.push({ id: ledger.id, fields: {
+                  status: 'deleted_local', task_id: null, miss_count: 0
+                }});
+                logSyncAction(pid, 'recurring_ledger_cleanup', {
+                  taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
+                  detail: 'Recurring instance event missing — ledger cleaned (no re-create to avoid dup loop)',
+                  calendarName: calendarLabels[pid] || null
+                });
+              } else if (ledger.origin === JUGGLER_ORIGIN
                   && ledger.last_user_hash !== null
                   && userHash(task) !== ledger.last_user_hash
                   && (ledger.miss_count || 0) >= 1) {
@@ -1036,6 +1055,7 @@ async function sync(req, res) {
                 // the event link is broken. Re-create.
                 // Guarded on last_user_hash !== null: legacy rows (no stored user hash) fall
                 // through to the normal deletion ladder rather than triggering a spurious repush.
+                // NOT reached for recurring_instance — the guard above catches those first.
                 tasksNeedingReCreate.add(task.id);
                 processedTaskIds.delete(task.id);
                 ledgerUpdates.push({ id: ledger.id, fields: {
