@@ -660,7 +660,13 @@ async function reconcileMaterialEdit(ctx) {
       if (k) bookedDates[k] = true;
     });
     var maxOrdRow = await trx('task_instances').where({ master_id: masterId, user_id: userId }).max('occurrence_ordinal as m').first();
-    var nextOrd = (maxOrdRow && maxOrdRow.m) ? Number(maxOrdRow.m) : 0;
+    // 999.1490: guard against date-derived ordinal corruption — a prior run may
+    // have written occurrence_ordinal values in the 20M range (YYYYMMDD dates).
+    // Cap at MAX_PLAUSIBLE_ORDINAL so new fabricated occurrences get sane
+    // sequential ordinals instead of inheriting the corrupted date-like values.
+    var MAX_PLAUSIBLE_ORDINAL = 10000000;
+    var rawMaxOrd = (maxOrdRow && maxOrdRow.m) ? Number(maxOrdRow.m) : 0;
+    var nextOrd = rawMaxOrd > MAX_PLAUSIBLE_ORDINAL ? 0 : rawMaxOrd;
     var dayMap = { U: 0, M: 1, T: 2, W: 3, R: 4, F: 5, S: 6 };
     var cursor = new Date(Math.max(cycleStart.getTime(), today.getTime()));
     var fabricated = 0;

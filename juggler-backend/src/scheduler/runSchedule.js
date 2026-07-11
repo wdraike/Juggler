@@ -789,8 +789,13 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (!r.status || r.status === '') existingPendingIds[r.id] = true;
     var mid = r.master_id || r.source_id;
     if (mid) {
+      // 999.1490: guard against date-derived ordinal corruption. Prior runs
+      // seeded maxOrdByMaster from raw occurrence_ordinal without the
+      // MAX_PLAUSIBLE_ORDINAL gate that ordinalSuffixOf applies — so a
+      // corrupted ordinal like 20260841 (a date in YYYYMMDD form) poisoned
+      // the counter and all new occurrences inherited date-like ordinals.
       var o = Number(r.occurrence_ordinal) || 0;
-      if (o > (maxOrdByMaster[mid] || 0)) maxOrdByMaster[mid] = o;
+      if (o > (maxOrdByMaster[mid] || 0) && o <= MAX_PLAUSIBLE_ORDINAL) maxOrdByMaster[mid] = o;
       // Also track the numeric suffix of the instance ID. IDs from prior runs
       // may have suffixes higher than occurrence_ordinal (they diverge when
       // collision-dropped desired occurrences leave holes in the ordinal space
@@ -816,7 +821,8 @@ async function runScheduleAndPersist(userId, _retries, options) {
     var mid = r.source_id;
     if (!mid) return;
     var o = Number(r.occurrence_ordinal) || 0;
-    if (o > (maxOrdByMaster[mid] || 0)) maxOrdByMaster[mid] = o;
+    // 999.1490: same MAX_PLAUSIBLE_ORDINAL guard as above.
+    if (o > (maxOrdByMaster[mid] || 0) && o <= MAX_PLAUSIBLE_ORDINAL) maxOrdByMaster[mid] = o;
     var idNum = ordinalSuffixOf(r.id);
     if (idNum != null && idNum > (maxOrdByMaster[mid] || 0)) maxOrdByMaster[mid] = idNum;
   });
@@ -1147,7 +1153,18 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // Diff desired vs existing pending.
   var desiredIds = {};
   var desiredById = {};
-  desiredRows.forEach(function(r) { desiredIds[r.id] = true; desiredById[r.id] = r; });
+  // ponytail: desiredDatesByMaster tracks which (masterId, dateKey) pairs have a
+  // desired occurrence. Used to detect duplicate same-day stale occurrences that
+  // must be deleted even when the grandfather clause would otherwise spare them.
+  var desiredDatesByMaster = {};
+  desiredRows.forEach(function(r) {
+    desiredIds[r.id] = true;
+    desiredById[r.id] = r;
+    if (r.sourceId && r.date) {
+      var dk = r.sourceId + '|' + r.date;
+      desiredDatesByMaster[dk] = true;
+    }
+  });
   var toInsert = desiredRows.filter(function(r) { return !existingPendingIds[r.id]; });
   // Grandfather pending instances that fall beyond the expansion horizon.
   // Without this, shrinking RECUR_EXPAND_DAYS would delete legitimate
@@ -1171,7 +1188,16 @@ async function runScheduleAndPersist(userId, _retries, options) {
       // Use <= today (not <) so a today-dated instance whose occurrence is not in
       // desiredIds is also spared — today == today is still "at or past" and must
       // reach Phase-9, not be hard-deleted here.
-      if (rowDate && rowDate <= today && row.task_type === 'recurring_instance') return false;
+      //
+      // EXCEPTION (999.1490): if a desired occurrence EXISTS for this same
+      // (master, date), this row is a stale duplicate from corrupted ordinals
+      // — NOT a genuine past instance needing Phase-9 freeze. Delete it so
+      // duplicate same-day occurrences don't accumulate and overlap on the grid.
+      var mid = row.master_id || row.source_id;
+      if (rowDate && rowDate <= today && row.task_type === 'recurring_instance') {
+        if (mid && desiredDatesByMaster[mid + '|' + row.date]) return true;
+        return false;
+      }
     }
     // PATH-B grandfather: spare past pending recurring instances even when date=NULL
     // (never-placed / unscheduled=1).  The `if (row && row.date)` gate above is
