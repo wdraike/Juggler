@@ -29,6 +29,14 @@ const mockFacadeExportData = jest.fn();
 jest.mock('../../src/slices/user-config/facade', () => ({
   importData: mockFacadeImportData,
   exportData: mockFacadeExportData,
+  // 999.1196: my-plan.routes.js is a composition root that does
+  // `new GetMyPlan(...)` at require-time (module load), independent of this
+  // file's importData/exportData test target. The full-replacement mock
+  // above previously dropped every other facade export, so requiring app.js
+  // (which requires my-plan.routes.js) threw "GetMyPlan is not a
+  // constructor". A constructible jest.fn() satisfies the `new` call; this
+  // suite never exercises my-plan routes so no behavior is asserted on it.
+  GetMyPlan: jest.fn(),
 }));
 
 // ── Standard harness mocks (matching data-export-csv.test.js pattern) ────────

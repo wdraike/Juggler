@@ -9,6 +9,14 @@
  */
 
 process.env.NODE_ENV = 'test';
+// jest.setupEnv.js (999.1025 phase 1, 2026-07-10) now unconditionally deletes
+// GEMINI_API_KEY so GeminiAIAdapter lazily builds a real client only when a
+// test opts in. This suite mocks trackedGeminiCall directly but never opts
+// in, so GeminiAIAdapter.isConfigured() was false and generate() short-
+// circuited to {} before trackedGeminiCall's mock was ever invoked (every
+// request hit the controller's error path → 500). Mirrors the fake-key
+// pattern already used by goldenMaster.h5.test.js.
+if (!process.env.GEMINI_API_KEY) process.env.GEMINI_API_KEY = 'test-api-key-init';
 
 let resolveQueue = [];
 

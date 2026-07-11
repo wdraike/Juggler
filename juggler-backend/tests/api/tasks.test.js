@@ -89,6 +89,14 @@ jest.mock('../../src/scheduler/scheduleQueue', () => ({
   enqueueScheduleRun: mockEnqueueScheduleRun,
   stopPollLoop: jest.fn()
 }));
+// 999.1198 seam: the task facade now enqueues via scheduler/scheduleTrigger,
+// which the REAL scheduleQueue self-registers into at load. Mocking
+// scheduleQueue (above) suppresses that registration, so wire the mock into
+// the seam explicitly — same pattern as mcp-create-tasks.test.js /
+// mcp-update-task.test.js / mcp-locked-path.test.js.
+require('../../src/scheduler/scheduleTrigger').registerScheduleTrigger(
+  require('../../src/scheduler/scheduleQueue').enqueueScheduleRun
+);
 
 jest.mock('../../src/lib/sse-emitter', () => ({
   emit: jest.fn(),
