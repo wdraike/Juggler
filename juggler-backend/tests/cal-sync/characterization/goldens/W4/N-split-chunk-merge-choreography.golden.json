@@ -1,0 +1,485 @@
+[
+  {
+    "label": "non-contiguous split chunks push individually",
+    "statusCode": 200,
+    "body": {
+      "pushed": 2,
+      "pulled": 0,
+      "skipped": 0,
+      "deleted_local": 0,
+      "deleted_remote": 0,
+      "errors": [],
+      "providers": {
+        "gcal": {
+          "pushed": 2,
+          "pulled": 0,
+          "skipped": 0,
+          "deleted_local": 0,
+          "deleted_remote": 0,
+          "errors": []
+        }
+      },
+      "syncRunId": "<UUID>",
+      "summary": [
+        {
+          "type": "push",
+          "text": "",
+          "message": "Pushed to Google Calendar"
+        }
+      ]
+    },
+    "providerCalls": {
+      "gcal": [
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        },
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        },
+        {
+          "method": "listEvents",
+          "args": {
+            "token": "tok-gcal",
+            "timeMin": "2026-06-16T04:00:00.000Z",
+            "timeMax": "2026-08-15T12:00:00.000Z"
+          }
+        },
+        {
+          "method": "batchCreateEvents",
+          "args": {
+            "token": "tok-gcal",
+            "tasks": [
+              {
+                "id": "w4n-c1",
+                "text": "W4N split task (1/2)",
+                "date": "2026-06-17",
+                "time": "10:00 AM",
+                "dur": 30,
+                "status": ""
+              },
+              {
+                "id": "w4n-c2",
+                "text": "W4N split task (2/2)",
+                "date": "2026-06-17",
+                "time": "12:00 PM",
+                "dur": 30,
+                "status": ""
+              }
+            ],
+            "year": 2026,
+            "tz": "America/New_York"
+          }
+        }
+      ]
+    },
+    "sse": [
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "fetch",
+          "detail": "Fetching events...",
+          "pct": 5,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "fetch",
+          "detail": "Fetched 0 events",
+          "pct": 15,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "ledger",
+          "detail": "Checking for changes...",
+          "pct": 20,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "push",
+          "detail": "Syncing tasks...",
+          "pct": 50,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "push",
+          "detail": "Pushing 2 tasks...",
+          "pct": 50,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "finalize",
+          "detail": "Saving changes...",
+          "pct": 85,
+          "provider": null,
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "finalize",
+          "detail": "Finalizing...",
+          "pct": 95,
+          "provider": null,
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "done",
+          "detail": "Google Calendar: 2 pushed",
+          "pct": 100,
+          "provider": null,
+          "calendar": null
+        }
+      }
+    ],
+    "enqueues": [],
+    "dbDelta": {
+      "cal_sync_ledger": {
+        "added": [
+          {
+            "active_task_key": "cal-sync-test-user-001|gcal|w4n-c1",
+            "completed_at": null,
+            "created_at": "<TS>",
+            "done_frozen": 0,
+            "error_detail": null,
+            "event_all_day": 0,
+            "event_end": "2026-06-17T14:30:00.000Z",
+            "event_start": "2026-06-17T14:00:00.000Z",
+            "event_status": "pending",
+            "event_summary": "W4N split task (1/2)",
+            "event_url": null,
+            "id": "<N1>",
+            "last_modified_at": "2026-06-16 12:00:02.000000",
+            "last_pulled_hash": "21e1534f182daabc41c6ab8d4b0b2755a9f591915adec6c7a2c1f18faa8a11a6",
+            "last_pushed_at": "<TS>",
+            "last_pushed_hash": "140fc2f83def8220d29ae8f7d74fd4c1",
+            "last_user_hash": "12ec61a1a685e066def22bff866449aa",
+            "miss_count": 0,
+            "origin": "juggler",
+            "provider": "gcal",
+            "provider_etag": null,
+            "provider_event_id": "ev-gcal-w4n-c1",
+            "scheduled_at": null,
+            "status": "active",
+            "synced_at": "<TS>",
+            "task_id": "w4n-c1",
+            "task_updated_at": "2026-06-01 00:00:00",
+            "updated_at": "<TS>",
+            "user_id": "cal-sync-test-user-001"
+          },
+          {
+            "active_task_key": "cal-sync-test-user-001|gcal|w4n-c2",
+            "completed_at": null,
+            "created_at": "<TS>",
+            "done_frozen": 0,
+            "error_detail": null,
+            "event_all_day": 0,
+            "event_end": "2026-06-17T16:30:00.000Z",
+            "event_start": "2026-06-17T16:00:00.000Z",
+            "event_status": "pending",
+            "event_summary": "W4N split task (2/2)",
+            "event_url": null,
+            "id": "<N2>",
+            "last_modified_at": "2026-06-16 12:00:02.000000",
+            "last_pulled_hash": "f46d596f821d209456137f6c1664a7d50d59e6cc1e4df48d38b522bb514b00a4",
+            "last_pushed_at": "<TS>",
+            "last_pushed_hash": "3594918543440aee0bab41e383d57c17",
+            "last_user_hash": "2deb69e750fdecc7c59cc3d911ba9b3f",
+            "miss_count": 0,
+            "origin": "juggler",
+            "provider": "gcal",
+            "provider_etag": null,
+            "provider_event_id": "ev-gcal-w4n-c2",
+            "scheduled_at": null,
+            "status": "active",
+            "synced_at": "<TS>",
+            "task_id": "w4n-c2",
+            "task_updated_at": "2026-06-01 00:00:00",
+            "updated_at": "<TS>",
+            "user_id": "cal-sync-test-user-001"
+          }
+        ]
+      },
+      "sync_history": {
+        "added": [
+          {
+            "action": "pushed",
+            "calendar_name": null,
+            "created_at": "<TS>",
+            "detail": "Batch pushed 2 tasks to gcal",
+            "error_detail": null,
+            "event_id": null,
+            "new_values": null,
+            "old_values": null,
+            "provider": "gcal",
+            "sync_run_id": "<UUID>",
+            "task_id": null,
+            "task_text": "",
+            "trigger_type": "manual",
+            "user_id": "cal-sync-test-user-001"
+          }
+        ]
+      },
+      "users": {
+        "changed": [
+          {
+            "key": "user",
+            "changes": {
+              "gcal_last_synced_at": [
+                null,
+                "<TS>"
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "label": "chunks become contiguous — merge into one event",
+    "statusCode": 200,
+    "body": {
+      "pushed": 1,
+      "pulled": 0,
+      "skipped": 1,
+      "deleted_local": 0,
+      "deleted_remote": 0,
+      "errors": [],
+      "providers": {
+        "gcal": {
+          "pushed": 1,
+          "pulled": 0,
+          "skipped": 1,
+          "deleted_local": 0,
+          "deleted_remote": 0,
+          "errors": []
+        }
+      },
+      "syncRunId": "<UUID>",
+      "summary": [
+        {
+          "type": "info",
+          "text": "W4N split task",
+          "message": "skipped"
+        }
+      ]
+    },
+    "providerCalls": {
+      "gcal": [
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        },
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        },
+        {
+          "method": "listEvents",
+          "args": {
+            "token": "tok-gcal",
+            "timeMin": "2026-06-16T04:00:00.000Z",
+            "timeMax": "2026-08-15T12:00:00.000Z"
+          }
+        },
+        {
+          "method": "batchUpdateEvents",
+          "args": {
+            "token": "tok-gcal",
+            "updates": [
+              {
+                "eventId": "ev-gcal-w4n-c1",
+                "task": {
+                  "id": "w4n-c1",
+                  "text": "W4N split task",
+                  "date": "2026-06-17",
+                  "time": "10:00 AM",
+                  "dur": 60,
+                  "status": ""
+                }
+              }
+            ]
+          }
+        },
+        {
+          "method": "batchDeleteEvents",
+          "args": {
+            "token": "tok-gcal",
+            "eventIds": [
+              "ev-gcal-w4n-c2"
+            ]
+          }
+        }
+      ]
+    },
+    "sse": [
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "fetch",
+          "detail": "Fetching events...",
+          "pct": 5,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "fetch",
+          "detail": "Fetched 2 events",
+          "pct": 15,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "ledger",
+          "detail": "Checking for changes...",
+          "pct": 20,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "push",
+          "detail": "Syncing tasks...",
+          "pct": 50,
+          "provider": "gcal",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "finalize",
+          "detail": "Saving changes...",
+          "pct": 85,
+          "provider": null,
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "finalize",
+          "detail": "Finalizing...",
+          "pct": 95,
+          "provider": null,
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "done",
+          "detail": "Google Calendar: 1 pushed",
+          "pct": 100,
+          "provider": null,
+          "calendar": null
+        }
+      }
+    ],
+    "enqueues": [],
+    "dbDelta": {
+      "cal_sync_ledger": {
+        "changed": [
+          {
+            "key": "<L1>",
+            "changes": {
+              "last_modified_at": [
+                "2026-06-16 12:00:02.000000",
+                "2026-06-16 12:00:30.000000"
+              ],
+              "last_pushed_hash": [
+                "140fc2f83def8220d29ae8f7d74fd4c1",
+                "5b9b38d218c0295bce27b77dda51bb51"
+              ],
+              "last_user_hash": [
+                "12ec61a1a685e066def22bff866449aa",
+                "2601e7838c7a7c1e5c9ac2e25cf96564"
+              ]
+            }
+          },
+          {
+            "key": "<L2>",
+            "changes": {
+              "active_task_key": [
+                "cal-sync-test-user-001|gcal|w4n-c2",
+                null
+              ],
+              "last_modified_at": [
+                "2026-06-16 12:00:02.000000",
+                "2026-06-16 12:00:00.000000"
+              ],
+              "status": [
+                "active",
+                "deleted_local"
+              ],
+              "task_updated_at": [
+                "2026-06-01 00:00:00",
+                "2026-06-02 00:00:00"
+              ]
+            }
+          }
+        ]
+      },
+      "sync_history": {
+        "added": [
+          {
+            "action": "skipped",
+            "calendar_name": null,
+            "created_at": "<TS>",
+            "detail": null,
+            "error_detail": null,
+            "event_id": "ev-gcal-w4n-c2",
+            "new_values": null,
+            "old_values": null,
+            "provider": "gcal",
+            "sync_run_id": "<UUID>",
+            "task_id": "w4n-c2",
+            "task_text": "W4N split task",
+            "trigger_type": "manual",
+            "user_id": "cal-sync-test-user-001"
+          }
+        ]
+      }
+    }
+  }
+]

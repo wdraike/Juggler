@@ -219,6 +219,13 @@ ProviderSim.prototype._dispatch = function (pid, method, args) {
     case 'getValidAccessToken':
       this._record(pid, method, { userId: args[0] && args[0].id });
       if (script.tokenError) return Promise.reject(new Error(script.tokenError));
+      // Generic clock-advance hook (W4b, 999.1025): Date is fully faked by the
+      // suite's jest.useFakeTimers, so jumping it here deterministically moves
+      // sync() past a wall-clock-elapsed guard (e.g. the 5-minute sync_timeout
+      // check) without any real wait — this is the FIRST network call in
+      // Phase 1, so every later `Date.now()` read in sync() sees the advanced
+      // time. Any scenario can opt in via script.advanceClockMs.
+      if (script.advanceClockMs) jest.setSystemTime(new Date(FIXED_NOW.getTime() + script.advanceClockMs));
       return Promise.resolve('tok-' + pid);
 
     case 'listEvents':

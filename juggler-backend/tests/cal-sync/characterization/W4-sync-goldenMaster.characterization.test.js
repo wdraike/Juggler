@@ -30,21 +30,30 @@
  *   I  — lock contention (foreign sync_locks row -> 409 + sync:lock_conflict, no writes)
  *   J  — multi-provider (gcal+msft): event deleted on gcal only across the miss
  *        threshold while msft stays live (Bug #4 cross-provider guard)
+ *   L  — write-phase lock lost mid-write (another process/timeout invalidates
+ *        it): 503, clean abort before the transaction, zero partial writes
+ *        (W4b follow-up, 999.1025 sub-leg jug-syncharness)
+ *   M  — sync exceeds the 5-minute timeout budget before the write phase:
+ *        clean abort, zero writes (W4b follow-up)
+ *   N  — split-chunk write-phase choreography: non-contiguous chunks push
+ *        individually (with "(N/total)" title suffixes), then merge into one
+ *        combined event once they become contiguous — follower event+ledger
+ *        torn down, follower's task_instances row NEVER deleted (999.841)
+ *        (W4b follow-up — see NOTE at axis N below: this pins the CURRENT
+ *        task_instances-based choreography, not the schedule_cache framing
+ *        the original gap was named for; schedule_cache was removed from
+ *        cal-sync entirely by 29b7fafc, which landed after the gap was filed)
+ *   O  — write-phase optimistic-concurrency conflict-skip (:2051): a task
+ *        concurrently edited (or deleted) between the API-phase snapshot and
+ *        the write-phase transaction has its queued update SKIPPED, so a
+ *        real user/MCP edit made mid-sync is never clobbered by a stale
+ *        provider pull (999.1025 sub-leg jug-syncharness, zoe WARN
+ *        zoe-syncharness-conflictskip-unpinned — see NOTE at axis O below)
  *
  * AXES DELIBERATELY NOT COVERED (documented, with reasons):
  *   - Apple/CalDAV flows (multi-calendar user_calendars model, CDN grace,
  *     ctag): owned by apple-cal-*.test.js unit suites + W0 C1 source pin.
  *     Simulating the CalDAV URL-keyed store is an extraction-phase follow-up.
- *   - Write-phase lock-lost 503: only reachable via the 10s heartbeat losing a
- *     refresh race mid-write — no deterministic seam exists without modifying
- *     the controller (forbidden in Phase 1). Lock behavior is owned by
- *     20-sync-lock / 23-sync-consistency; the 503 branch shape is pinned by
- *     code reading only.
- *   - 5-minute sync_timeout guard: requires Date.now to advance mid-run;
- *     frozen-clock harness cannot reach it without a seam.
- *   - Split-chunk replacement (splitPlacements/schedule_cache choreography) and
- *     recurring ledger self-heal: high-value but needs schedule_cache fixtures;
- *     flagged as W4b follow-up before the Phase-2/3 extraction legs.
  *
  * RUN (test-bed pool; NEVER bare npx jest against a dev .env):
  *   cd test-bed && scripts/run-suite.sh juggler -- --testPathPattern='W4-sync-goldenMaster'
@@ -52,6 +61,30 @@
  *    --testPathPattern run documented in the leg notes is the gate for this file)
  * Regenerate goldens (known-good tree only):
  *   UPDATE_GOLDEN=1 <same command>
+ *
+ * L/M/N determinism notes (999.1025 sub-leg jug-syncharness-999-1025):
+ *   - L drives the REAL sync-lock.js heartbeat/refreshLock mechanism end to
+ *     end: it lets the real write-phase lock get acquired, then (via a
+ *     partial jest.mock of task-write-queue that passes through to the real
+ *     flushQueueInLock by default) deletes the sync_locks row itself —
+ *     simulating "another process invalidates it" — and waits out one real
+ *     10s heartbeat tick so the REAL refreshLock() observes the row gone.
+ *     ~14s of real wall-clock wait against the 10s heartbeat interval
+ *     (timers are NOT faked — see beforeAll) — a deliberate ~4s slack
+ *     margin (widened from an initial 11s/~1s margin per ernie's
+ *     jug-syncharness-999-1025 CODE-REVIEW INFO finding
+ *     jug-syncharness-999-1025-L-heartbeat-margin: a >1s event-loop delay
+ *     of the setInterval callback under CI contention could otherwise let
+ *     the wait expire before refreshLock() observes the deleted row,
+ *     producing a spurious 200-instead-of-503 flake); still comfortably
+ *     << axis I's ~35s.
+ *   - M advances the FAKED clock (jest.setSystemTime, instant, no real wait)
+ *     past the 300000ms budget the moment the first provider network call
+ *     resolves, via the harness's generic script.advanceClockMs hook.
+ *   - O reuses the SAME flushQueueInLock passthrough-mock seam as L (run the
+ *     real flush, then mutate the DB before the write phase's freshRows
+ *     conflict-detection query) to inject a concurrent edit/delete — no real
+ *     wait, no clock manipulation, fully deterministic.
  */
 
 'use strict';
@@ -60,9 +93,20 @@ jest.setTimeout(120000);
 
 jest.mock('../../../src/scheduler/scheduleQueue', () => ({ enqueueScheduleRun: jest.fn() }));
 jest.mock('../../../src/lib/sse-emitter', () => ({ emit: jest.fn() }));
+// Axis L (lock-lost 503): partial mock — every OTHER call (this suite's other
+// 17 scenarios included) passes straight through to the REAL flushQueueInLock;
+// only axis L arms a single mockImplementationOnce override. sync-lock.js and
+// task-write-queue.js themselves are NEVER mocked — the lock/heartbeat/refresh
+// mechanism stays 100% real, matching the harness's "real lock/queue" invariant.
+jest.mock('../../../src/lib/task-write-queue', () => {
+  var actual = jest.requireActual('../../../src/lib/task-write-queue');
+  return Object.assign({}, actual, { flushQueueInLock: jest.fn(actual.flushQueueInLock) });
+});
 
 var scheduleQueue = require('../../../src/scheduler/scheduleQueue');
 var sseEmitter = require('../../../src/lib/sse-emitter');
+var taskWriteQueue = require('../../../src/lib/task-write-queue');
+var actualFlushQueueInLock = jest.requireActual('../../../src/lib/task-write-queue').flushQueueInLock;
 
 var {
   db, TEST_USER_ID, seedTestUser, cleanupTestData, destroyTestUser, mockReq, mockRes
@@ -70,6 +114,7 @@ var {
 var { assertDbAvailable } = require('../../helpers/requireDB');
 var { makeTask, makeLedgerRow } = require('../helpers/test-fixtures');
 var { sync } = require('../../../src/controllers/cal-sync.controller');
+var tasksWrite = require('../../../src/lib/tasks-write');
 
 var H = require('./harness/syncGoldenHarness');
 
@@ -164,6 +209,9 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   sim.reset();
+  // Axis M advances the faked system clock mid-test (jest.setSystemTime) —
+  // reset it here so a clock jump never leaks into a later test.
+  jest.setSystemTime(H.FIXED_NOW);
   await destroyTestUser();
 });
 
@@ -510,4 +558,248 @@ test('J — multi-provider: event deleted on gcal only, msft still live — task
   var run4 = await run('gcal miss 3 — threshold with msft active');
 
   H.checkGolden('J-multi-provider-miss-guard', [run1, run2, run3, run4]);
+});
+
+// ─── L: write-phase lock lost mid-write (503) ────────────────────────────────
+
+test('L — write-phase lock lost mid-write (another process invalidates it): 503, no partial writes (slow: ~14s real heartbeat wait)', async () => {
+  await seedTestUser(GCAL_ONLY);
+  await seedTask('w4l-1', '2026-06-17 14:00:00');
+  await stabilizeTaskTimestamps();
+
+  // Arm ONE flushQueueInLock call (the write phase's very next await after
+  // lock acquisition) to: run the REAL flush first (matches production
+  // ordering), then delete the sync_locks row ourselves — simulating
+  // "another process/timeout invalidates it" — then wait out one real 10s
+  // heartbeat tick (with ~4s of slack — see the L/M/N determinism notes
+  // near the top of this file). lockHeartbeat's setInterval is a REAL
+  // timer (un-faked, see beforeAll) so it fires naturally during the wait
+  // and calls the REAL refreshLock() against the DB, which finds 0
+  // matching rows and sets writePhaseLockLost=true — the exact production
+  // mechanism, not a stub.
+  taskWriteQueue.flushQueueInLock.mockImplementationOnce(async function (userId) {
+    await actualFlushQueueInLock(userId);
+    await db('sync_locks').where('user_id', userId).del();
+    await new Promise(function (r) { setTimeout(r, 14000); });
+  });
+
+  var run1 = await run('lock lost mid-write');
+
+  expect(run1.statusCode).toBe(503);
+  expect(run1.body).toEqual({ error: 'Sync lock lost. Please retry.', retryAfter: 5 });
+  // Clean abort: the write-phase transaction is never entered (the
+  // writePhaseLockLost check returns BEFORE `getDb().transaction(...)`), so
+  // no task/ledger row is touched — no partial-write corruption.
+  expect(run1.dbDelta.tasks_v).toBeUndefined();
+  expect(run1.dbDelta.cal_sync_ledger).toBeUndefined();
+  expect(run1.sse.some(function (e) {
+    return e.event === 'sync:progress' && e.payload && e.payload.phase === 'error';
+  })).toBe(true);
+  H.checkGolden('L-lock-lost-mid-write', [run1]);
+});
+
+// ─── M: sync-timeout guard (>5 min elapsed before the write phase) ──────────
+
+test('M — sync exceeds the 5-minute timeout before the write phase: clean abort, zero writes', async () => {
+  await seedTestUser(GCAL_ONLY);
+  await seedTask('w4m-1', '2026-06-17 14:00:00');
+  await stabilizeTaskTimestamps();
+
+  // Deterministic: Date is fully faked, so jumping it past the 300000ms
+  // budget the instant the first provider call resolves (getValidAccessToken,
+  // top of Phase 1) guarantees sync()'s own Date.now() re-read at its
+  // sync_timeout check (after all of Phase 1-3) sees an elapsed budget — no
+  // real wait needed.
+  sim.script('gcal').advanceClockMs = 300001;
+
+  var run1 = await run('sync exceeds timeout before write phase');
+
+  expect(run1.statusCode).toBe(200);
+  expect(run1.body.error).toBe('sync_timeout');
+  // The timeout check runs BEFORE lock acquisition and BEFORE any DB write —
+  // Phase 1-3 only builds in-memory buffers. Zero writes, clean abort.
+  expect(run1.dbDelta).toEqual({});
+  H.checkGolden('M-sync-timeout', [run1]);
+});
+
+// ─── N: split-chunk write-phase choreography ─────────────────────────────────
+//
+// NOTE on naming: the original 999.1025-phase-1 gap (0e51d0be) named this
+// "split-chunk schedule_cache choreography". That specific codepath (a
+// schedule_cache read driving synthetic per-part task expansion) was REMOVED
+// by 29b7fafc ("finish W4 — remove schedule_cache from cal-sync", 999.1217),
+// which landed AFTER 0e51d0be — schedule_cache is no longer read by sync() at
+// all (see the controller's own 999.1217 comments at the top of the merge
+// pass and inside the push-queue loop). The underlying RISK the gap named is
+// still real and still live: split chunks persist as SEPARATE task_instances
+// rows (999.841) and sync()'s mergeContiguousSplitChunks() pass (merge
+// contiguous chunks into one event; suppress + delete follower events/ledger
+// rows) is exactly the kind of deeply-woven write-phase logic 999.1025's
+// extraction risks breaking. This scenario pins the CURRENT (post-999.1217)
+// task_instances-based choreography instead of the stale schedule_cache
+// framing.
+
+test('N — split-chunk choreography: non-contiguous chunks push individually, then merge into one event on becoming contiguous', async () => {
+  await seedTestUser(GCAL_ONLY);
+
+  var templateId = 'w4n-tmpl';
+  await makeTask({
+    id: templateId, task_type: 'recurring_template', recurring: 1,
+    text: 'W4N split task', dur: 30, status: ''
+  });
+  // Two chunks of the SAME occurrence (shared master_id + occurrence_ordinal,
+  // per mergeContiguousSplitChunks' grouping key) — the real production write
+  // path (runSchedule.js uses the same insertTasksBatch call for split
+  // chunks), not a narrower internal. c2 starts 90 minutes after c1 ends —
+  // NOT contiguous (mergeContiguousSplitChunks' 30s tolerance).
+  await tasksWrite.insertTasksBatch(db, [
+    {
+      id: 'w4n-c1', user_id: TEST_USER_ID, task_type: 'recurring_instance', source_id: templateId,
+      occurrence_ordinal: 1, split_ordinal: 1, split_total: 2,
+      scheduled_at: '2026-06-17 14:00:00', dur: 30, status: ''
+    },
+    {
+      id: 'w4n-c2', user_id: TEST_USER_ID, task_type: 'recurring_instance', source_id: templateId,
+      occurrence_ordinal: 1, split_ordinal: 2, split_total: 2,
+      scheduled_at: '2026-06-17 16:00:00', dur: 30, status: ''
+    }
+  ]);
+  await stabilizeTaskTimestamps();
+
+  var run1 = await run('non-contiguous split chunks push individually');
+  // Hard invariant: BOTH chunks are pushed as separate events (non-contiguous
+  // singleton branch — each gets its own "(N/2)" title suffix, no merge/delete).
+  var run1Ids = [];
+  (run1.providerCalls.gcal || []).forEach(function (c) {
+    if (c.method === 'batchCreateEvents') run1Ids = run1Ids.concat(c.args.tasks.map(function (t) { return t.id; }));
+    if (c.method === 'createEvent') run1Ids.push(c.args.task.id);
+  });
+  expect(run1Ids.sort()).toEqual(['w4n-c1', 'w4n-c2']);
+
+  // Edit c2 to start exactly where c1 ends (14:30) — now contiguous.
+  await stabilizeTaskTimestamps();
+  await editTask('w4n-c2', { scheduled_at: '2026-06-17 14:30:00', updated_at: '2026-06-02 00:00:00' });
+
+  var run2 = await run('chunks become contiguous — merge into one event');
+
+  // Hard invariants: c1 (leader) is repushed with the merged 60-min span;
+  // c2 (follower)'s event is torn down and its ledger row marked
+  // deleted_local — but c2's task_instances ROW itself is NEVER deleted
+  // (999.841 binding ruling: split-chunk rows are never merged/deleted at the
+  // task level — only the calendar event + ledger entry are cleaned up).
+  var run2Methods = (run2.providerCalls.gcal || []).map(function (c) { return c.method; });
+  var hadUpdate = run2Methods.indexOf('updateEvent') !== -1 || run2Methods.indexOf('batchUpdateEvents') !== -1;
+  var hadDelete = run2Methods.indexOf('deleteEvent') !== -1 || run2Methods.indexOf('batchDeleteEvents') !== -1;
+  expect(hadUpdate).toBe(true); // leader repushed (merged dur/title -> hash mismatch)
+  expect(hadDelete).toBe(true); // follower's individually-synced event torn down
+
+  var removedTaskIds = ((run2.dbDelta.tasks_v || {}).removed || []).map(function (r) { return r.id; });
+  expect(removedTaskIds).not.toContain('w4n-c2');
+  var c2Ledger = await db('cal_sync_ledger').where({ user_id: TEST_USER_ID, task_id: 'w4n-c2' }).first();
+  expect(c2Ledger).toBeTruthy();
+  expect(c2Ledger.status).toBe('deleted_local');
+  var c2Instance = await db('task_instances').where({ id: 'w4n-c2', user_id: TEST_USER_ID }).first();
+  expect(c2Instance).toBeTruthy(); // chunk row survives — 999.841
+
+  H.checkGolden('N-split-chunk-merge-choreography', [run1, run2]);
+});
+
+// ─── O: write-phase conflict-skip (concurrent edit / concurrent delete) ─────
+//
+// Pins cal-sync.controller.js:2051 `if (conflictSkipIds.has(upd.id)) continue;`
+// — the write-phase optimistic-concurrency guard that skips a queued task
+// update when the task was concurrently MODIFIED (freshTime > origTime,
+// :2009-2013) or DELETED (:2004-2007) between the API-phase snapshot and the
+// write-phase transaction. Found unpinned by zoe's adversarial coverage probe
+// (999.1025 sub-leg jug-syncharness, WARN zoe-syncharness-conflictskip-unpinned):
+// the exact mutation `if (conflictSkipIds.has(upd.id)) continue;` ->
+// `if (false && ...)` survived all 18 pre-existing scenarios.
+//
+// Injection uses the SAME flushQueueInLock passthrough-mock seam axis L
+// installs (real flush runs first — matching production ordering, since
+// flushQueueInLock is the write phase's very first await, immediately before
+// the freshRows conflict-detection query at :1995 — then we mutate the DB).
+//
+// w4o-edit is set up exactly like axis B (push, then remote move) so run2
+// would normally PULL the remote's new scheduled_at into the task. This is
+// deliberate: gcal_event_id/msft_event_id/apple_event_id are NOT in
+// tasks-write.js's MASTER_UPDATE_FIELDS/INSTANCE_UPDATE_FIELDS allowlists, so
+// a taskUpdates entry containing ONLY the eventIdCol linkage field (the write
+// axis A/H3/H4/N exercise, :662/:1484/:1521/:1580) is silently dropped by
+// splitUpdateFields() regardless of conflictSkipIds — dead code, same class
+// as the axis-N schedule_cache reframe (confirmed by reading tasks-write.js;
+// see TEST-CATALOG.md). Pinning the skip against a LIVE field (scheduled_at,
+// which IS in INSTANCE_UPDATE_FIELDS) is required for this pin to be
+// mutation-sensitive. Mid-write we simulate the user rescheduling w4o-edit
+// (bumping updated_at forward of the FIXED_PAST watermark sync() snapshotted
+// at API-phase start) — conflictSkipIds must populate and the pull must be
+// skipped, so the user's own reschedule survives untouched.
+//
+// w4o-del is set up identically, but mid-write we delete the row entirely
+// (task_instances + task_masters) — simulating the user deleting the task
+// mid-sync, exercising the :2004-2007 detection branch.
+// NOTE (honesty, not a defect — verified by reading tasks-write.js
+// updateTaskById): unlike w4o-edit, the w4o-del sub-case is NOT independently
+// mutation-sensitive at :2051 under the CURRENT updateTaskById, which
+// silently no-ops an UPDATE matching 0 rows (no throw, no dbDelta change)
+// whether or not the skip fires — there is nothing left to "clobber" once a
+// row is gone. The assertions below (200, row stays absent, no crash,
+// nothing resurrected) characterize real CURRENT behavior and exercise the
+// :2004-2007 detection branch, but this test's RED-flip on zoe's exact
+// mutation comes from w4o-edit alone (confirmed in the mutation-verify step).
+async function deleteTaskRow(id) {
+  await db('task_instances').where({ id: id, user_id: TEST_USER_ID }).del();
+  await db('task_masters').where({ id: id, user_id: TEST_USER_ID }).del();
+}
+
+test('O — write-phase conflict-skip: concurrent edit survives untouched, concurrent delete does not crash', async () => {
+  await seedTestUser(GCAL_ONLY);
+  await seedTask('w4o-edit', '2026-06-17 14:00:00');
+  await seedTask('w4o-del', '2026-06-18 15:00:00');
+  await stabilizeTaskTimestamps();
+  var run1 = await run('initial push (both tasks)');
+
+  // Remote move on BOTH events — same trigger axis B uses to force a pull.
+  ['w4o-edit', 'w4o-del'].forEach(function (id) {
+    var ev = sim.store('gcal').find(function (e) { return e.id === 'ev-gcal-' + id; });
+    expect(ev).toBeTruthy();
+    ev.startDateTime = '2026-06-17T16:00:00.000Z';
+    ev.endDateTime = '2026-06-17T16:30:00.000Z';
+    ev.lastModified = '2026-06-16T13:00:00.000Z';
+  });
+  await stabilizeTaskTimestamps();
+
+  // Arm ONE flushQueueInLock call: run the REAL flush first (production
+  // ordering), then inject the two concurrent mutations BEFORE the write
+  // phase's freshRows conflict-detection query runs.
+  taskWriteQueue.flushQueueInLock.mockImplementationOnce(async function (userId) {
+    await actualFlushQueueInLock(userId);
+    // Concurrent user reschedule of w4o-edit.
+    await editTask('w4o-edit', {
+      scheduled_at: '2026-06-17 09:00:00',
+      updated_at: '2026-06-16 11:59:00'
+    });
+    // Concurrent user delete of w4o-del.
+    await deleteTaskRow('w4o-del');
+  });
+
+  var run2 = await run('concurrent edit + concurrent delete mid-write');
+
+  expect(run2.statusCode).toBe(200);
+
+  // w4o-edit: the pull must be SKIPPED — the concurrent edit survives
+  // byte-for-byte. A clobber would show the remote's pulled scheduled_at
+  // (derived from 16:00 UTC) and a fresh (now) updated_at instead.
+  var editedInstance = await db('task_instances').where({ id: 'w4o-edit', user_id: TEST_USER_ID }).first();
+  expect(editedInstance).toBeTruthy();
+  expect(editedInstance.scheduled_at).toBe('2026-06-17 09:00:00');
+  expect(editedInstance.updated_at).toBe('2026-06-16 11:59:00');
+
+  // w4o-del: no crash, row stays deleted, nothing resurrected.
+  var deletedInstance = await db('task_instances').where({ id: 'w4o-del', user_id: TEST_USER_ID }).first();
+  var deletedMaster = await db('task_masters').where({ id: 'w4o-del', user_id: TEST_USER_ID }).first();
+  expect(deletedInstance).toBeUndefined();
+  expect(deletedMaster).toBeUndefined();
+
+  H.checkGolden('O-write-phase-conflict-skip', [run1, run2]);
 });
