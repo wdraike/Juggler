@@ -256,7 +256,7 @@ it('recurrence select has "Rolling (repeats after completion)" option', () => {
 it('rolling mode shows interval input', () => {
   render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
     recurring={true} recurType="rolling" recurEvery={7} recurUnit="days"
-    task={{ rolling_anchor: null }}
+    task={{ nextStart: null }}
     collapse={{ when_recurrence: true, when_constraints: false }}
   />);
   expect(screen.getByText('Repeat every')).toBeInTheDocument();
@@ -266,7 +266,7 @@ it('rolling mode shows interval input', () => {
 it('rolling mode shows unit select with days/weeks/months options', () => {
   render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
     recurring={true} recurType="rolling" recurEvery={7} recurUnit="days"
-    task={{ rolling_anchor: null }}
+    task={{ nextStart: null }}
     collapse={{ when_recurrence: true, when_constraints: false }}
   />);
   expect(screen.getByRole('option', { name: 'days' })).toBeInTheDocument();
@@ -275,25 +275,25 @@ it('rolling mode shows unit select with days/weeks/months options', () => {
   expect(screen.queryByRole('option', { name: 'years' })).not.toBeInTheDocument();
 });
 
-it('rolling mode anchor card shows "not yet set" when rolling_anchor is null', () => {
+it('rolling mode anchor card shows "not yet set" when nextStart is null', () => {
   render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
     recurring={true} recurType="rolling" recurEvery={7} recurUnit="days"
-    task={{ rolling_anchor: null }}
+    task={{ nextStart: null }}
     collapse={{ when_recurrence: true, when_constraints: false }}
   />);
   expect(screen.getByText(/Not yet completed/)).toBeInTheDocument();
 });
 
-it('rolling mode anchor card shows last completed and next due when rolling_anchor set', () => {
+it('rolling mode anchor card shows last completed and next due when nextStart set', () => {
   render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
     recurring={true} recurType="rolling" recurEvery={7} recurUnit="days"
-    task={{ rolling_anchor: '2026-05-19' }}
+    task={{ nextStart: '2026-05-19' }}
     collapse={{ when_recurrence: true, when_constraints: false }}
   />);
   expect(screen.getByText('Completed on')).toBeInTheDocument();
   expect(screen.getByText('Next due')).toBeInTheDocument();
   // ZOE-JUG-038: assert exact computed dates (formatAnchorDate uses en-US short format)
-  // rolling_anchor 2026-05-19 → "May 19, 2026"; +7 days → "May 26, 2026"
+  // nextStart 2026-05-19 → "May 19, 2026"; +7 days → "May 26, 2026"
   expect(screen.getByText('May 19, 2026')).toBeInTheDocument();
   expect(screen.getByText('May 26, 2026')).toBeInTheDocument();
 });
@@ -301,7 +301,7 @@ it('rolling mode anchor card shows last completed and next due when rolling_anch
 it('rolling mode hides day picker', () => {
   render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
     recurring={true} recurType="rolling" recurEvery={7} recurUnit="days"
-    task={{ rolling_anchor: null }}
+    task={{ nextStart: null }}
     collapse={{ when_recurrence: true, when_constraints: false }}
   />);
   expect(screen.queryByText('Eligible days')).not.toBeInTheDocument();
@@ -310,7 +310,7 @@ it('rolling mode hides day picker', () => {
 it('rolling mode hides fill policy', () => {
   render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
     recurring={true} recurType="rolling" recurEvery={7} recurUnit="days"
-    task={{ rolling_anchor: null }}
+    task={{ nextStart: null }}
     collapse={{ when_recurrence: true, when_constraints: false }}
   />);
   expect(screen.queryByText(/Keep the schedule/)).not.toBeInTheDocument();

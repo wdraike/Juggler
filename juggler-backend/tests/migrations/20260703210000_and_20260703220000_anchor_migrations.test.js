@@ -74,7 +74,48 @@ async function viewSelectable(viewName) {
   return true;
 }
 
-describe('migrations 20260703210000 + 20260703220000 — anchor columns/views round-trip (999.1091/999.1094)', function() {
+// RETIRED (juggler-anchor-column-cleanup, W7, 2026-07-11): this suite drives
+// 20260703210000_add_next_occurrence_anchor's and
+// 20260703220000_restore_rolling_anchor_in_tasks_v's up()/down() DIRECTLY
+// against the shared, fully-migrated test-bed DB, asserting both
+// `next_occurrence_anchor` and `rolling_anchor` round-trip through
+// task_masters/tasks_v/tasks_with_sync_v. Migration 20260711200000
+// (drop_legacy_anchor_columns) now ALSO runs in the same chain and drops both
+// columns permanently — once it has run, this suite's premise (these two
+// migrations' schema effect is still live and reversible in isolation) no
+// longer holds: its beforeAll's migrate.latest() runs 20260711200000 first,
+// then test 1 re-adds both columns via migration1.up()/migration2.up()
+// (idempotent add-if-missing), silently reintroducing them onto the SHARED
+// test-bed schema for the rest of the run — the exact SSOT-vs-live-schema
+// drift class tests/migrations/view-column-contract.test.js exists to catch
+// (CAT-A in reviews/TELLY-BASELINE.md), and afterEachFile.js's per-file view
+// restore would then fight this suite's own view mutations.
+//
+// DECISION (grover, count's INTAKE-BRIEF risk_flags #7 + characterization_targets):
+// RETIRE, not isolate-on-scratch-schema. Rationale:
+//   1. Per test-bed/scripts/init-juggler-schema.sh's own docblock, this
+//      project's migration chain CANNOT build a DB from scratch (an early view
+//      migration references a column that predates it) — every real DB
+//      (dev/prod/test) is seeded from a schema snapshot + migration-log
+//      baseline, then only migrations NEWER than the snapshot ever run. Once
+//      the snapshot baseline moves past 20260711200000 (which it already has
+//      in this leg — see the test-bed init above), 20260703210000/220000's
+//      up()/down() will NEVER be exercised again in any real environment —
+//      not just this test-bed instance.
+//   2. Migrations are immutable once applied in a shared environment (juggler
+//      CLAUDE.md "Migrations — transitional views" policy) — these two files
+//      stay on disk verbatim as a permanent historical record; only the TEST
+//      exercising their reversibility is now testing dead ground.
+//   3. Building an isolated scratch-schema harness (a second DB/schema just to
+//      keep re-running two already-proven, now-permanently-superseded
+//      migrations' round-trip) would be meaningfully larger effort than the
+//      value returned — the up()/down() correctness these migrations needed
+//      proving (999.1091/999.1094, ernie's original referral) was already
+//      exercised and shipped; the columns they manage are now gone by design.
+// The suite body is left INTACT (not deleted) as the historical record of
+// what was proven, per the same "never edit an already-applied migration"
+// spirit — it is simply never executed. Skip the whole describe block.
+describe.skip('[RETIRED — see comment above] migrations 20260703210000 + 20260703220000 — anchor columns/views round-trip (999.1091/999.1094)', function() {
 
   beforeAll(async function() {
     await assertDbAvailable();

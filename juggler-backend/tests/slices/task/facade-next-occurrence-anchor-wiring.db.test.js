@@ -27,6 +27,16 @@
  * compute+persist shape) — not separately pinned here (would be a near-
  * duplicate of this file); flagged as a residual WARN in TEST-CATALOG.md rather
  * than authored, to keep this leg's added test surface proportional.
+ *
+ * REWRITTEN (juggler-anchor-column-cleanup W5, 2026-07-11): `next_occurrence_anchor`
+ * (and `rolling_anchor`) have been dropped from task_masters — both
+ * applyRollingAnchor branches (isRollingMaster / isPatternRecurMaster) now write
+ * the single unified `next_start` column. Assertions retargeted; the former
+ * "rolling_anchor branch must NOT have fired" cross-check is dropped — with one
+ * shared write column there is no longer a separate field to prove didn't fire
+ * (test 1's exact expected value, the pattern-recur next-Wednesday date rather
+ * than a rolling completion date, is itself proof the pattern-recur branch, not
+ * the rolling branch, computed the write).
  */
 
 'use strict';
@@ -94,8 +104,7 @@ async function seedWeeklyMasterAndInstance(tmplId, instId, instanceDate, schedul
     status: '',
     recur: JSON.stringify({ type: 'weekly', days: 'W' }),
     recur_start: '2026-01-01',
-    rolling_anchor: null,
-    next_occurrence_anchor: null,
+    next_start: null,
     created_at: now,
     updated_at: now
   });
@@ -143,7 +152,7 @@ describe('facade.updateTaskStatus -> applyRollingAnchor isPatternRecurMaster wir
     await db('users').where('id', USER_ID).del();
   });
 
-  test('marking a weekly (non-rolling) recurring instance done WRITES next_occurrence_anchor via the real controller->facade->applyRollingAnchor path', async () => {
+  test('marking a weekly (non-rolling) recurring instance done WRITES next_start via the real controller->facade->applyRollingAnchor path', async () => {
     var tmplId = 'noa-wiring-tmpl-' + Date.now();
     var instId = tmplId + '-ri1';
     var instanceDate = '2026-07-08'; // Wednesday
@@ -161,13 +170,11 @@ describe('facade.updateTaskStatus -> applyRollingAnchor isPatternRecurMaster wir
     expect(master).toBeTruthy();
     // The actual VALUE assertion (stronger than the sibling rolling-branch
     // Block H test in facade.collaborators.db.test.js, which only checks for
-    // "no 500"): next_occurrence_anchor must advance to the next Wednesday,
-    // proving the real applyRollingAnchor branch read the master, computed via
+    // "no 500"): next_start must advance to the next Wednesday, proving the
+    // real applyRollingAnchor branch read the master, computed via
     // computeNextOccurrenceAnchor, and persisted the result — not just that the
     // request didn't crash.
-    expect(String(master.next_occurrence_anchor).slice(0, 10)).toBe('2026-07-15');
-    // rolling_anchor branch must NOT have fired for a non-rolling master.
-    expect(master.rolling_anchor).toBeNull();
+    expect(String(master.next_start).slice(0, 10)).toBe('2026-07-15');
   });
 
   test('marking a weekly (non-rolling) recurring instance skip advances the anchor the same as done', async () => {
@@ -184,10 +191,10 @@ describe('facade.updateTaskStatus -> applyRollingAnchor isPatternRecurMaster wir
 
     expect(res.statusCode).toBe(200);
     var master = await db('task_masters').where('id', tmplId).first();
-    expect(String(master.next_occurrence_anchor).slice(0, 10)).toBe('2026-07-15');
+    expect(String(master.next_start).slice(0, 10)).toBe('2026-07-15');
   });
 
-  test('marking a weekly (non-rolling) recurring instance cancel does NOT write next_occurrence_anchor', async () => {
+  test('marking a weekly (non-rolling) recurring instance cancel does NOT write next_start', async () => {
     var tmplId = 'noa-wiring-tmpl3-' + Date.now();
     var instId = tmplId + '-ri1';
     var instanceDate = '2026-07-08';
@@ -201,6 +208,6 @@ describe('facade.updateTaskStatus -> applyRollingAnchor isPatternRecurMaster wir
 
     expect(res.statusCode).toBe(200);
     var master = await db('task_masters').where('id', tmplId).first();
-    expect(master.next_occurrence_anchor).toBeNull();
+    expect(master.next_start).toBeNull();
   });
 });

@@ -18,6 +18,10 @@
  * Sibling of mcp-batch-update-tasks-anchor-gap-characterization.db.test.js
  * (same harness shape); this file pins the 'missed' branch plus the
  * LOAD-BEARING negative space of the gate ('cancel'/'pause' must not advance).
+ *
+ * REWRITTEN (juggler-anchor-column-cleanup W5, 2026-07-11): `rolling_anchor` /
+ * `next_occurrence_anchor` dropped from task_masters; both branches now write
+ * the single unified `next_start` column. Seed/assertions retargeted.
  */
 
 'use strict';
@@ -50,7 +54,7 @@ async function seedMasterAndInstance(recur, tmplId, instId, instanceDate, schedu
   await db('task_masters').insert({
     id: tmplId, user_id: USER_ID, text: 'anchor gate test master', dur: 30, pri: 'P3',
     recurring: 1, status: '', recur: JSON.stringify(recur),
-    recur_start: '2026-01-01', rolling_anchor: null, next_occurrence_anchor: null,
+    recur_start: '2026-01-01', next_start: null,
     tz: 'America/New_York', created_at: now, updated_at: now
   });
   await db('task_instances').insert({
@@ -101,7 +105,7 @@ describe('batch write path — missed reanchors (ruling 2026-07-06 / 999.844, wi
     await db('users').where('id', USER_ID).del();
   });
 
-  test('missed on a rolling-master instance reanchors rolling_anchor to the INSTANCE date (not today)', async function () {
+  test('missed on a rolling-master instance reanchors next_start to the INSTANCE date (not today)', async function () {
     var tmplId = 'anchor-miss-roll-' + Date.now();
     var instId = tmplId + '-ri1';
     var instanceDate = '2026-07-01';
@@ -118,11 +122,11 @@ describe('batch write path — missed reanchors (ruling 2026-07-06 / 999.844, wi
     var master = await db('task_masters').where('id', tmplId).first();
     // missed reanchors like skip: instance date, NOT completion day
     // (rollingAnchor.test.js pin: computeRollingAnchor('missed', d, a) === d).
-    expect(master.rolling_anchor).not.toBeNull();
-    expect(String(master.rolling_anchor).slice(0, 10)).toBe(instanceDate);
+    expect(master.next_start).not.toBeNull();
+    expect(String(master.next_start).slice(0, 10)).toBe(instanceDate);
   });
 
-  test('missed on a weekly (pattern-recur) instance advances next_occurrence_anchor to the next pattern date', async function () {
+  test('missed on a weekly (pattern-recur) instance advances next_start to the next pattern date', async function () {
     var tmplId = 'anchor-miss-wk-' + Date.now();
     var instId = tmplId + '-ri1';
     var instanceDate = '2026-07-08'; // a Wednesday
@@ -136,9 +140,8 @@ describe('batch write path — missed reanchors (ruling 2026-07-06 / 999.844, wi
     var master = await db('task_masters').where('id', tmplId).first();
     // next Wednesday after 2026-07-08 is 2026-07-15 (same advance as done/skip —
     // computeNextOccurrenceAnchor treats any projecting terminal the same).
-    expect(master.next_occurrence_anchor).not.toBeNull();
-    expect(String(master.next_occurrence_anchor).slice(0, 10)).toBe('2026-07-15');
-    expect(master.rolling_anchor).toBeNull();
+    expect(master.next_start).not.toBeNull();
+    expect(String(master.next_start).slice(0, 10)).toBe('2026-07-15');
   });
 
   test('cancel on a rolling-master instance does NOT write any anchor (characterization — unchanged)', async function () {
@@ -152,7 +155,6 @@ describe('batch write path — missed reanchors (ruling 2026-07-06 / 999.844, wi
     expect(result.isError).toBeFalsy();
 
     var master = await db('task_masters').where('id', tmplId).first();
-    expect(master.rolling_anchor).toBeNull();
-    expect(master.next_occurrence_anchor).toBeNull();
+    expect(master.next_start).toBeNull();
   });
 });

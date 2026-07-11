@@ -32,7 +32,7 @@ function camelizeMaster(row) {
   for (const key of Object.keys(row)) {
     const camel = toCamel(key);
     let value = row[key];
-    if (key === 'rolling_anchor' || key === 'recur_start' || key === 'recur_end') {
+    if (key === 'rolling_anchor' || key === 'recur_start' || key === 'recur_end' || key === 'next_start') {
       value = normalizeDate(value);
       out[key] = value; // also normalize the snake_case key for DATE columns
     }

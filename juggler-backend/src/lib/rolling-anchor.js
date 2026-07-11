@@ -1,6 +1,9 @@
 /**
  * Shared helpers for the rolling-cadence recurring task anchor update logic.
  * Used by task.controller.js, cal-history-cron.js, and mcp/tools/tasks.js.
+ *
+ * The anchor is stored in task_masters.next_start (the single unified anchor
+ * column). The legacy rolling_anchor column has been dropped.
  */
 
 var { isTerminalStatus } = require('./task-status');
@@ -22,7 +25,8 @@ function isRollingMaster(masterRow) {
 }
 
 /**
- * Compute the new rolling_anchor for a terminal status event.
+ * Compute the new anchor (stored in task_masters.next_start) for a terminal
+ * status event on a rolling master.
  *
  * Rules:
  *   done   → completionDate (the ACTUAL day it was marked done, in the user's tz) so a
@@ -37,7 +41,7 @@ function isRollingMaster(masterRow) {
  *
  * @param {string} status - 'done' | 'skip' | 'cancel'
  * @param {string} instanceDate - ISO date 'YYYY-MM-DD' of the instance (scheduled day)
- * @param {string|null} currentAnchor - current rolling_anchor from task_masters
+ * @param {string|null} currentAnchor - current anchor (task_masters.next_start)
  * @param {string} [completionDate] - ISO date 'YYYY-MM-DD' the task was actually marked
  *        done (today in the user's tz). Used for `done`; ignored for skip/cancel.
  * @returns {string|null} new anchor ISO date, or null if no update needed

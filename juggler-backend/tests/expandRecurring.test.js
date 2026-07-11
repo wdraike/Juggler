@@ -269,18 +269,30 @@ describe('expandRecurring', () => {
     });
   });
 
-  describe('nextOccurrenceAnchor is the anchor for non-rolling types (999.1091 C1)', () => {
-    test('nextOccurrenceAnchor overrides recurStart for a weekly (non-rolling) master', () => {
-      // recurStart = 3/2 (Monday). nextOccurrenceAnchor advances the window to 3/16
+  // REWRITTEN (juggler-anchor-column-cleanup W6, 2026-07-11): getAnchor() used
+  // to branch on two SEPARATE fields (src.rollingAnchor for rolling masters,
+  // src.nextOccurrenceAnchor for every other type) — both dropped in favor of
+  // one unified src.nextStart, read for every recur type. The former "rolling
+  // type ignores nextOccurrenceAnchor (uses rollingAnchor, unaffected)" test's
+  // entire premise — two independent fields where one type must ignore the
+  // other's value — no longer applies with a single shared field; it is
+  // RETIRED, not renamed (its cross-check has no next_start-only equivalent;
+  // rolling-specific anchor behavior stays covered by the 'rolling recurrence'
+  // describe block below). The other two tests port directly: next_start
+  // overriding/falling-back-to recurStart is now type-agnostic (previously
+  // scoped to "non-rolling types" only), so they're generalized accordingly.
+  describe('nextStart is the unified anchor for every recur type (juggler-anchor-column-cleanup)', () => {
+    test('nextStart overrides recurStart for a weekly master', () => {
+      // recurStart = 3/2 (Monday). nextStart advances the window to 3/16
       // (the master's own pattern already fired 3/2 and 3/9; this simulates the
-      // generalized anchor having moved forward past a terminal event) — biweekly
+      // anchor having moved forward past a terminal event) — biweekly
       // parity should now follow 3/16, not the stale recurStart.
       const src = makeSource({
         id: 'noa-bw',
         taskType: 'recurring_template',
         date: '2026-03-01',
         recurStart: '2026-03-02',
-        nextOccurrenceAnchor: '2026-03-16',
+        nextStart: '2026-03-16',
         recur: { type: 'biweekly', days: 'M' }
       });
       const result = expandRecurring([src], new Date(2026, 2, 2), new Date(2026, 3, 6));
@@ -295,29 +307,13 @@ describe('expandRecurring', () => {
       expect(dates).not.toContain('2026-03-23');
     });
 
-    test('rolling type ignores nextOccurrenceAnchor (uses rollingAnchor, unaffected)', () => {
-      const src = makeSource({
-        id: 'noa-roll',
-        taskType: 'recurring_template',
-        date: '2026-03-01',
-        recurStart: '2026-03-01',
-        rollingAnchor: '2026-03-05',
-        nextOccurrenceAnchor: '2026-03-20', // must be ignored for rolling
-        recur: { type: 'rolling', intervalDays: 7 }
-      });
-      const result = expandRecurring([src], new Date(2026, 2, 1), new Date(2026, 3, 1));
-      const dates = result.filter(r => r.sourceId === 'noa-roll').map(r => r.date || r._candidateDate);
-      expect(dates).toContain('2026-03-12'); // 3/5 + 7, via rollingAnchor
-      expect(dates).not.toContain('2026-03-27'); // would be 3/20 + 7 if nextOccurrenceAnchor leaked in
-    });
-
-    test('null nextOccurrenceAnchor falls back to recurStart (pre-existing masters unaffected)', () => {
+    test('null nextStart falls back to recurStart (pre-existing masters unaffected)', () => {
       const src = makeSource({
         id: 'noa-null',
         taskType: 'recurring_template',
         date: '2026-03-01',
         recurStart: '2026-03-02',
-        nextOccurrenceAnchor: null,
+        nextStart: null,
         recur: { type: 'biweekly', days: 'M' }
       });
       const result = expandRecurring([src], new Date(2026, 2, 2), new Date(2026, 3, 6));
@@ -340,7 +336,7 @@ describe('expandRecurring', () => {
   //       same-cycle done/skip instance is invisible to bookedKeys/fulfilledInCycle
   //       even though instanceStatusBySourceDate (built from the FULL unwindowed
   //       allTasks) has the data.
-  //   (2) `anchor = getAnchor(src, startDate)` resolves to `src.nextOccurrenceAnchor`
+  //   (2) `anchor = getAnchor(src, startDate)` resolves to `src.nextStart`
   //       when set (999.1091), which ADVANCES on every terminal event — and this same
   //       advancing anchor is reused as the TPC cycle-boundary epoch
   //       (`cycleStart = anchor + k*cycleDays`), so a terminal event mid-cycle can
@@ -349,11 +345,11 @@ describe('expandRecurring', () => {
   // non-advanced/null-anchor (CASE B, control) reproductions must be fixed.
   describe('jug-weekly-recur-reshow (999.1372): flexible-TPC same-cycle fulfillment must survive both mechanisms', () => {
     // CASE B (control) — exact repro.steps CASE B from INTAKE-BRIEF.json.
-    test('AC1/AC2 CASE B — weekly, nextOccurrenceAnchor NOT advanced (null, falls back to recurStart): a done Monday must fulfill the whole cycle, zero new occurrences for it', () => {
+    test('AC1/AC2 CASE B — weekly, nextStart NOT advanced (null, falls back to recurStart): a done Monday must fulfill the whole cycle, zero new occurrences for it', () => {
       const recur = { type: 'weekly', days: 'WRFM', timesPerCycle: 1, fillPolicy: 'backfill' };
       const master = {
         id: 't1776649350872m2xp', taskType: 'recurring_template', text: 'Submit Weekly UI Claim',
-        recur, recurStart: '2026-06-01', nextOccurrenceAnchor: null, dur: 30
+        recur, recurStart: '2026-06-01', nextStart: null, dur: 30
       };
       const mondayDone = {
         id: 't1776649350872m2xp-32', taskType: 'recurring_instance', sourceId: master.id,
@@ -380,17 +376,17 @@ describe('expandRecurring', () => {
     });
 
     // CASE A (production-matching) — exact repro.steps CASE A from INTAKE-BRIEF.json:
-    // nextOccurrenceAnchor already advanced by the 999.1091 done-event hook.
-    test('AC1/AC2 CASE A — weekly, nextOccurrenceAnchor ALREADY ADVANCED (production match): a done Monday must still fulfill the cycle, zero new occurrences for it', () => {
+    // nextStart already advanced by the 999.1091 done-event hook.
+    test('AC1/AC2 CASE A — weekly, nextStart ALREADY ADVANCED (production match): a done Monday must still fulfill the cycle, zero new occurrences for it', () => {
       const recur = { type: 'weekly', days: 'WRFM', timesPerCycle: 1, fillPolicy: 'backfill' };
-      // The exact live mechanism: marking Monday 'done' advances next_occurrence_anchor
+      // The exact live mechanism: marking Monday 'done' advances next_start
       // via computeNextOccurrenceAnchor (999.1091), landing on the following configured
       // day (Wed 2026-07-08) for this WRFM pattern — reproduced here, not hardcoded.
       const advancedAnchor = computeNextOccurrenceAnchor('done', '2026-07-06', null, recur);
       expect(advancedAnchor).toBe('2026-07-08'); // sanity: matches INTAKE-BRIEF.json repro
       const master = {
         id: 't1776649350872m2xp', taskType: 'recurring_template', text: 'Submit Weekly UI Claim',
-        recur, recurStart: '2026-06-01', nextOccurrenceAnchor: advancedAnchor, dur: 30
+        recur, recurStart: '2026-06-01', nextStart: advancedAnchor, dur: 30
       };
       const mondayDone = {
         id: 't1776649350872m2xp-32', taskType: 'recurring_instance', sourceId: master.id,
@@ -413,7 +409,7 @@ describe('expandRecurring', () => {
       const recur = { type: 'biweekly', days: 'MW', timesPerCycle: 1, fillPolicy: 'backfill' };
       const master = {
         id: 'bwmaster', taskType: 'recurring_template', text: 'Biweekly Report',
-        recur, recurStart: '2026-06-01', nextOccurrenceAnchor: null, dur: 30
+        recur, recurStart: '2026-06-01', nextStart: null, dur: 30
       };
       // Monday 2026-06-01 (cycle start) already done.
       const doneMonday = {
@@ -439,7 +435,7 @@ describe('expandRecurring', () => {
       const recur = { type: 'monthly', monthDays: [1, 15], timesPerCycle: 1, fillPolicy: 'backfill' };
       const master = {
         id: 'monmaster', taskType: 'recurring_template', text: 'Monthly Review',
-        recur, recurStart: '2026-06-01', nextOccurrenceAnchor: null, dur: 30
+        recur, recurStart: '2026-06-01', nextStart: null, dur: 30
       };
       // 2026-06-01 already done.
       const doneJune1 = {
@@ -469,7 +465,7 @@ describe('expandRecurring', () => {
       const recur = { type: 'weekly', days: 'WRFM', timesPerCycle: 1, fillPolicy: 'backfill' };
       const master = {
         id: 't1776649350872m2xp', taskType: 'recurring_template', text: 'Submit Weekly UI Claim',
-        recur, recurStart: '2026-06-01', nextOccurrenceAnchor: null, dur: 30
+        recur, recurStart: '2026-06-01', nextStart: null, dur: 30
       };
       const mondaySkip = {
         id: 't1776649350872m2xp-32', taskType: 'recurring_instance', sourceId: master.id,
@@ -497,7 +493,7 @@ describe('expandRecurring', () => {
       const recur = { type: 'weekly', days: 'MWF', timesPerCycle: 2, fillPolicy: 'backfill' };
       const master = {
         id: 'combomaster', taskType: 'recurring_template', text: 'Combo Check',
-        recur, recurStart: '2026-06-01', nextOccurrenceAnchor: null, dur: 30
+        recur, recurStart: '2026-06-01', nextStart: null, dur: 30
       };
       // Monday 7/6 — earlier-in-cycle, already done.
       const mondayDone = {
@@ -532,16 +528,16 @@ describe('expandRecurring', () => {
     // adds ONE biweekly example to corroborate bert's finding that the fix is
     // type-agnostic (same shared TPC block, no per-type branching) rather than
     // re-deriving full coverage for every type.
-    test('AC1/AC6 — biweekly flexible-TPC, nextOccurrenceAnchor ALREADY ADVANCED (anchor-advanced corroboration): a done earlier day must still fulfill the 14-day cycle', () => {
+    test('AC1/AC6 — biweekly flexible-TPC, nextStart ALREADY ADVANCED (anchor-advanced corroboration): a done earlier day must still fulfill the 14-day cycle', () => {
       const recur = { type: 'biweekly', days: 'MW', timesPerCycle: 1, fillPolicy: 'backfill' };
       // Same mechanism as weekly CASE A: marking Monday 6/1 'done' advances
-      // next_occurrence_anchor via computeNextOccurrenceAnchor (999.1091) to
+      // next_start via computeNextOccurrenceAnchor (999.1091) to
       // the pattern's next own day (Wed 6/3) — reproduced here, not hardcoded.
       const advancedAnchor = computeNextOccurrenceAnchor('done', '2026-06-01', null, recur);
       expect(advancedAnchor).toBe('2026-06-03'); // sanity: matches this master's MW pattern
       const master = {
         id: 'bwmaster-adv', taskType: 'recurring_template', text: 'Biweekly Report',
-        recur, recurStart: '2026-06-01', nextOccurrenceAnchor: advancedAnchor, dur: 30
+        recur, recurStart: '2026-06-01', nextStart: advancedAnchor, dur: 30
       };
       const doneMonday = {
         id: 'bw-adv-1', taskType: 'recurring_instance', sourceId: master.id,
@@ -560,7 +556,7 @@ describe('expandRecurring', () => {
       // Positive-half regression pin (zoe election review, N-candidate: Candidate B
       // vs Candidate A vs baseline, 999.1372 fix-loop iteration 2). This exact
       // scenario — biweekly MW tpc=1, done Monday 2026-06-01 advances
-      // next_occurrence_anchor to Wed 2026-06-03 (an anchor date that is
+      // next_start to Wed 2026-06-03 (an anchor date that is
       // off-parity from stableEpoch=recurStart=2026-06-01 under the naive
       // mutable-anchor biweekly check) — is RED on baseline (pre-any-fix) AND
       // under the REJECTED Candidate A (anchor-based parity revert), because
@@ -588,7 +584,7 @@ describe('expandRecurring', () => {
       const recur = { type: 'weekly', days: 'WRFM', timesPerCycle: 1, fillPolicy: 'backfill' };
       const master = {
         id: 'prevcyclemaster', taskType: 'recurring_template', text: 'Submit Weekly UI Claim',
-        recur, recurStart: '2026-06-01', nextOccurrenceAnchor: null, dur: 30
+        recur, recurStart: '2026-06-01', nextStart: null, dur: 30
       };
       // 2026-06-29 (Monday) is done — but that date falls in the PREVIOUS cycle
       // [06-29,07-06), not the current [07-06,07-13) one.
@@ -618,7 +614,7 @@ describe('expandRecurring', () => {
       const recur = { type: 'weekly', days: 'WRFM', timesPerCycle: 1, fillPolicy: 'keep' };
       const master = {
         id: 'keepmaster', taskType: 'recurring_template', text: 'Submit Weekly UI Claim',
-        recur, recurStart: '2026-06-01', nextOccurrenceAnchor: null, dur: 30
+        recur, recurStart: '2026-06-01', nextStart: null, dur: 30
       };
       // Monday 2026-07-06 is skipped — BEFORE the scheduler run's startDate/'today'
       // (07-07), so only the widened (not window-bound) enumeration sees it.
@@ -656,7 +652,7 @@ describe('expandRecurring', () => {
       const recur = { type: 'weekly', days: 'WRFM', timesPerCycle: 2, fillPolicy: 'keep' };
       const master = {
         id: 'keeptpc2master', taskType: 'recurring_template', text: 'Submit Weekly UI Claim',
-        recur, recurStart: '2026-06-01', nextOccurrenceAnchor: null, dur: 30
+        recur, recurStart: '2026-06-01', nextStart: null, dur: 30
       };
       // Monday 2026-07-06 is skipped — BEFORE the scheduler run's startDate/
       // 'today' (07-07), so only the WIDENED (not window-bound) enumeration
@@ -692,7 +688,7 @@ describe('expandRecurring', () => {
       const recur = { type: 'weekly', days: 'WRFM', timesPerCycle: 1, fillPolicy: 'backfill' };
       const master = {
         id: 'roamedmaster', taskType: 'recurring_template', text: 'Submit Weekly UI Claim',
-        recur, recurStart: '2026-06-01', nextOccurrenceAnchor: null, dur: 30
+        recur, recurStart: '2026-06-01', nextStart: null, dur: 30
       };
       // Tuesday 2026-07-07 is done — NOT a WRFM (Wed/Thu/Fri/Mon) day, e.g. a
       // dragged/roamed instance — but still within the current cycle [07-06,07-13).
@@ -1077,7 +1073,7 @@ describe('expandRecurring', () => {
   describe('rolling recurrence', () => {
     const anchor = '2026-05-18'; // Monday
 
-    function makeRolling(intervalDays, rollingAnchor) {
+    function makeRolling(intervalDays, nextStart) {
       return {
         id: 'r1',
         text: 'Haircut',
@@ -1088,7 +1084,7 @@ describe('expandRecurring', () => {
         recurring: true,
         recur: { type: 'rolling', intervalDays, periodLabel: 'weekly', timesPerPeriod: 1 },
         recurStart: anchor,
-        rollingAnchor: rollingAnchor || null,
+        nextStart: nextStart || null,
         dayReq: 'any'
       };
     }
@@ -1097,7 +1093,7 @@ describe('expandRecurring', () => {
     // "only scheduled at completion of the active instance; when completed, the next is
     // generated." So expandRecurring emits ONLY the next instance (anchor+interval), NOT
     // the whole horizon. Subsequent occurrences appear on later runs after completion
-    // advances rolling_anchor. (Was: anchor+7,+14,+21 all at once — pre-R5 behavior.)
+    // advances next_start. (Was: anchor+7,+14,+21 all at once — pre-R5 behavior.)
     test('7-day interval emits ONLY the next active instance (anchor+7)', () => {
       const src = makeRolling(7, null); // falls back to recurStart
       const result = expandRecurring(
@@ -1122,7 +1118,7 @@ describe('expandRecurring', () => {
       expect(dates).toEqual(['2026-05-22']); // round(3.5) = +4; single active instance only
     });
 
-    test('rollingAnchor overrides recurStart', () => {
+    test('nextStart overrides recurStart', () => {
       const src = makeRolling(7, '2026-05-20'); // completed Wed, next due Wed+7
       const result = expandRecurring(
         [src],
@@ -1150,7 +1146,7 @@ describe('expandRecurring', () => {
       expect(dates).toContain('2026-06-01');     // next slot still generated
     });
 
-    test('null rollingAnchor with null recurStart falls back to startDate', () => {
+    test('null nextStart with null recurStart falls back to startDate', () => {
       const src = { ...makeRolling(7, null), recurStart: null, date: null };
       const result = expandRecurring(
         [src],
@@ -1161,10 +1157,10 @@ describe('expandRecurring', () => {
       expect(dates).toContain('2026-05-25'); // startDate + 7
     });
 
-    test('null rollingAnchor + old recurStart generates wrong date (demonstrates bug pre-backfill)', () => {
-      // 2026-01-01 + 20*7 = 2026-05-21. With no rollingAnchor the scheduler
+    test('null nextStart + old recurStart generates wrong date (demonstrates bug pre-backfill)', () => {
+      // 2026-01-01 + 20*7 = 2026-05-21. With no nextStart the scheduler
       // falls back to recurStart and emits 5/21, violating the 7-day gap from
-      // the 5/18 completion. runSchedule.js backfills rollingAnchor from
+      // the 5/18 completion. runSchedule.js backfills next_start from
       // recurringHistoryByMaster before calling expandRecurring to prevent this.
       const bugSrc = { ...makeRolling(7, null), recurStart: '2026-01-01' };
       const today = new Date(2026, 4, 21); // 5/21
@@ -1172,7 +1168,7 @@ describe('expandRecurring', () => {
       const bugDates = bugResult.filter(r => r.sourceId === 'r1').map(r => r.date || r._candidateDate);
       expect(bugDates).toContain('2026-05-21'); // confirms the bug exists without backfill
 
-      // After backfill: rollingAnchor set to 5/18 (the actual last completion)
+      // After backfill: next_start set to 5/18 (the actual last completion)
       const fixedSrc = { ...makeRolling(7, '2026-05-18'), recurStart: '2026-01-01' };
       const fixResult = expandRecurring([fixedSrc], today, new Date(2026, 4, 28));
       const fixDates = fixResult.filter(r => r.sourceId === 'r1').map(r => r.date || r._candidateDate);

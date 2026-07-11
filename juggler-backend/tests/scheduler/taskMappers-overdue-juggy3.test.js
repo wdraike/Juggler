@@ -145,7 +145,6 @@ function baseRow(overrides) {
     apple_calendar_name: null, cal_sync_origin: null, cal_event_url: null,
     cal_locked: 0,
     end_date: null,
-    rolling_anchor: null,
     unplaced_reason: null,
     unplaced_detail: null
   }, overrides);

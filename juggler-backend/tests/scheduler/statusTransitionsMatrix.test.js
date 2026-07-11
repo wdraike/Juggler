@@ -202,7 +202,7 @@ describe('TS-324: WIP → cancel — rolling anchor NOT updated', () => {
       dur: 30,
       pri: 'P3',
       recur: { type: 'daily' },
-      rolling_anchor: '2026-06-15'
+      next_start: '2026-06-15'
     });
     const instance = await createTask({
       master_id: master.id,
@@ -225,7 +225,7 @@ describe('TS-324: WIP → cancel — rolling anchor NOT updated', () => {
 
     // Master's rolling anchor unchanged (cancel does not advance it).
     const updatedMaster = await getTaskInstances(master.id, true);
-    expect(updatedMaster.rollingAnchor).toBe('2026-06-15');
+    expect(updatedMaster.nextStart).toBe('2026-06-15');
   });
 });
 

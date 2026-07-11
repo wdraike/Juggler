@@ -837,8 +837,8 @@ describe('applyRollingAnchor: updateTaskStatus done on a rolling-master instance
       created_at: now,
       updated_at: now
     });
-    // task_masters rolling_anchor column
-    await db('task_masters').where('id', tmplId).update({ rolling_anchor: null });
+    // task_masters next_start column already defaults to NULL on insert above
+    // (rolling_anchor dropped — juggler-anchor-column-cleanup); no extra update needed.
 
     // The instance row — needs master_id pointing to the rolling template,
     // a date (used by applyRollingAnchor L402) and a scheduled_at (required for
@@ -870,7 +870,7 @@ describe('applyRollingAnchor: updateTaskStatus done on a rolling-master instance
 
     expect(res.statusCode).toBe(200);
 
-    // rolling_anchor on the master should now be set to the instance date
+    // next_start on the master should now be set to the instance date
     // (computeRollingAnchor 'done' → instanceDate).
     var master = await db('task_masters').where('id', tmplId).first();
     expect(master).toBeTruthy();

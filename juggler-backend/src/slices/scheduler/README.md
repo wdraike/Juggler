@@ -134,7 +134,7 @@ shape). Three binding invariants:
 |--------|-------------|
 | `writeChanged(delta, opts?)` | Write ONLY the delta rows (S5). Splits into batched scheduled_at/dur CASE update + per-row status/flag updates. Returns `{ written: number }`. |
 | `deleteTasksWhere(userId, applyWhere)` | Bulk delete via where-builder (merged-out chunk cleanup). Returns rows removed. |
-| `backfillRollingAnchorIfNull(masterId, userId, anchor)` | Set `task_masters.rolling_anchor` ONLY when currently NULL (rolling-anchor backfill). Returns rows updated (0 or 1). |
+| `backfillRollingAnchorIfNull(masterId, userId, anchor)` | Set `task_masters.next_start` ONLY when currently NULL (rolling-anchor backfill). Returns rows updated (0 or 1). |
 | `now()` | DB clock (`SELECT NOW(3)`) for placement-cache `generatedAt`. Returns a JS Date. |
 | `getScheduleCache(userId)` | Read the `user_config.schedule_cache` placement blob (legacy cal-sync read). Returns the raw row or `null`. |
 | `upsertScheduleCache(userId, cacheJson)` | Upsert the `user_config.schedule_cache` placement blob (update if exists, insert if not — legacy runSchedule upsert). Returns void. |

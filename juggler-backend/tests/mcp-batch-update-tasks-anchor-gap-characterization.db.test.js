@@ -21,8 +21,12 @@
  * WI-2) has closed as a side effect of the migration (no adapter code was
  * needed). This file is re-authored below to pin the anchor NOW ADVANCING,
  * mirroring mcp-set-task-status-anchor-wiring.db.test.js's shape (same
- * scenarios: rolling-master-done -> rolling_anchor, weekly-master-skip ->
- * next_occurrence_anchor) — proving acceptance criterion (9) of the leg.
+ * scenarios: rolling-master-done -> next_start, weekly-master-skip ->
+ * next_start) — proving acceptance criterion (9) of the leg.
+ *
+ * REWRITTEN (juggler-anchor-column-cleanup W5, 2026-07-11): `rolling_anchor` /
+ * `next_occurrence_anchor` dropped from task_masters; both branches now write
+ * the single unified `next_start` column. Seed/assertions retargeted.
  */
 
 'use strict';
@@ -54,7 +58,7 @@ async function seedRollingMasterAndInstance(tmplId, instId, instanceDate, schedu
   await db('task_masters').insert({
     id: tmplId, user_id: USER_ID, text: 'rolling master — batch anchor gap test', dur: 30, pri: 'P3',
     recurring: 1, status: '', recur: JSON.stringify({ type: 'rolling', window: 7 }),
-    recur_start: '2026-01-01', rolling_anchor: null, next_occurrence_anchor: null,
+    recur_start: '2026-01-01', next_start: null,
     tz: 'America/New_York', created_at: now, updated_at: now
   });
   await db('task_instances').insert({
@@ -69,7 +73,7 @@ async function seedWeeklyMasterAndInstance(tmplId, instId, instanceDate, schedul
   await db('task_masters').insert({
     id: tmplId, user_id: USER_ID, text: 'weekly master — batch anchor gap test', dur: 30, pri: 'P3',
     recurring: 1, status: '', recur: JSON.stringify({ type: 'weekly', days: 'W' }),
-    recur_start: '2026-01-01', rolling_anchor: null, next_occurrence_anchor: null,
+    recur_start: '2026-01-01', next_start: null,
     tz: 'America/New_York', created_at: now, updated_at: now
   });
   await db('task_instances').insert({
@@ -103,7 +107,7 @@ describe('MCP batch_update_tasks — rolling/next-occurrence anchor projection (
     await db('users').where('id', USER_ID).del();
   });
 
-  test('AFTER: batch-completing a rolling master via batch_update_tasks DOES advance rolling_anchor to today', async function () {
+  test('AFTER: batch-completing a rolling master via batch_update_tasks DOES advance next_start to today', async function () {
     var tmplId = 'mcp-batch-roll-tmpl-' + Date.now();
     var instId = tmplId + '-ri1';
     var instanceDate = '2026-07-08';
@@ -121,17 +125,16 @@ describe('MCP batch_update_tasks — rolling/next-occurrence anchor projection (
     var master = await db('task_masters').where('id', tmplId).first();
     // AFTER migration: identical outcome to single-tool set_task_status for the
     // same scenario (see mcp-set-task-status-anchor-wiring.db.test.js "rolling
-    // master: done writes rolling_anchor = today") — the anchor GAP closed as a
+    // master: done writes next_start = today") — the anchor GAP closed as a
     // side effect of routing through facade's batchUpdateTxn/lockedBatchUpdate,
     // which already call applyRollingAnchor. done -> anchors to completionDate.
     var { getNowInTimezone } = require('../../shared/scheduler/getNowInTimezone');
     var expectedToday = getNowInTimezone('America/New_York').todayKey;
-    expect(master.rolling_anchor).not.toBeNull();
-    expect(String(master.rolling_anchor).slice(0, 10)).toBe(expectedToday);
-    expect(master.next_occurrence_anchor).toBeNull();
+    expect(master.next_start).not.toBeNull();
+    expect(String(master.next_start).slice(0, 10)).toBe(expectedToday);
   });
 
-  test('AFTER: batch-skipping a pattern-recur (weekly) master via batch_update_tasks DOES advance next_occurrence_anchor', async function () {
+  test('AFTER: batch-skipping a pattern-recur (weekly) master via batch_update_tasks DOES advance next_start', async function () {
     var tmplId = 'mcp-batch-wk-tmpl-' + Date.now();
     var instId = tmplId + '-ri1';
     var instanceDate = '2026-07-08'; // Wednesday
@@ -149,10 +152,10 @@ describe('MCP batch_update_tasks — rolling/next-occurrence anchor projection (
     var master = await db('task_masters').where('id', tmplId).first();
     // AFTER migration: identical outcome to single-tool set_task_status for the
     // same scenario (see mcp-set-task-status-anchor-wiring.db.test.js
-    // "pattern-recur master: skip advances next_occurrence_anchor") — next
+    // "pattern-recur master: skip advances next_start") — next
     // Wednesday after 2026-07-08 is 2026-07-15.
-    expect(master.next_occurrence_anchor).not.toBeNull();
-    expect(String(master.next_occurrence_anchor).slice(0, 10)).toBe('2026-07-15');
+    expect(master.next_start).not.toBeNull();
+    expect(String(master.next_start).slice(0, 10)).toBe('2026-07-15');
 
     // Sanity: the instance status DID change (proves the test actually
     // exercised the write path, not a total no-op).

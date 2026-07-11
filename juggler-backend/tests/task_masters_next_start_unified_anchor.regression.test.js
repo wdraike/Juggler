@@ -98,6 +98,24 @@
  * the write-path mechanism (W2, a later wave) does not exist yet and no function
  * name/shape has been confirmed. Filling in a fake API now would risk pinning the
  * WRONG contract. Left as `test.todo` to be filled in once W2 ships.
+ *
+ * RETIRE-OR-NARROW DECISION (grover, juggler-anchor-column-cleanup W5, 2026-07-11):
+ * NARROWED. Migration `20260711200000_drop_legacy_anchor_columns.js` has now
+ * ALSO run in this leg's migration chain, permanently dropping BOTH
+ * `rolling_anchor` and `next_occurrence_anchor` from `task_masters`. Tests
+ * #2/#3/#4/#4a below seed rows via those two columns to exercise the ONE-TIME
+ * W1 backfill's tie-break rule (`runMigrationBackfillUpdate()` re-invoking
+ * `20260709120000_add_next_start_unified_anchor.js`'s up()) — that backfill
+ * ran exactly once, historically, against real data, before either column
+ * existed to be dropped; it can never run again (the columns it reads from no
+ * longer exist), so re-proving its tie-break behavior in a live suite has no
+ * remaining regression value and the seed rows themselves cannot even be
+ * inserted anymore (`Unknown column 'rolling_anchor'`). RETIRED (test.skip,
+ * not deleted — kept as the historical record of the one-time backfill's
+ * tie-break rule, mirroring the "never edit an already-applied migration"
+ * spirit). Tests #1, #5, #6, #7, #8 are UNCHANGED and stay live: they assert
+ * `next_start`'s current existence/exposure/round-trip, none of which depend
+ * on the two dropped columns.
  */
 
 'use strict';
@@ -187,7 +205,9 @@ describe('FR-1/AC1 — task_masters.next_start unified anchor column + backfill'
     expect(row.DATA_TYPE).toBe('date');
   });
 
-  test('2. backfill (one-time migration UPDATE): rolling_anchor-only pre-existing row -> next_start == rolling_anchor', async () => {
+  // RETIRED (see file-header "RETIRE-OR-NARROW DECISION" note) — rolling_anchor
+  // no longer exists on task_masters (dropped by 20260711200000).
+  test.skip('2. [RETIRED — column dropped] backfill (one-time migration UPDATE): rolling_anchor-only pre-existing row -> next_start == rolling_anchor', async () => {
     var masterId = uuidv7();
     // Seed the row the way a PRE-EXISTING row (created before this migration ever
     // ran) would actually look: rolling_anchor set, next_start omitted. With the
@@ -218,7 +238,7 @@ describe('FR-1/AC1 — task_masters.next_start unified anchor column + backfill'
     expect(String(row.next_start)).toMatch(/2026-07-01/);
   });
 
-  test('3. backfill: next_occurrence_anchor-only pre-existing row -> next_start == next_occurrence_anchor', async () => {
+  test.skip('3. [RETIRED — column dropped] backfill: next_occurrence_anchor-only pre-existing row -> next_start == next_occurrence_anchor', async () => {
     var masterId = uuidv7();
     await db('task_masters').insert({
       id: masterId,
@@ -243,7 +263,7 @@ describe('FR-1/AC1 — task_masters.next_start unified anchor column + backfill'
     expect(String(row.next_start)).toMatch(/2026-07-08/);
   });
 
-  test('4. backfill tie-break: pre-existing row with BOTH set -> next_start == rolling_anchor (rolling_anchor wins)', async () => {
+  test.skip('4. [RETIRED — columns dropped] backfill tie-break: pre-existing row with BOTH set -> next_start == rolling_anchor (rolling_anchor wins)', async () => {
     var masterId = uuidv7();
     await db('task_masters').insert({
       id: masterId,
@@ -270,7 +290,7 @@ describe('FR-1/AC1 — task_masters.next_start unified anchor column + backfill'
     expect(String(row.next_start)).not.toMatch(/2026-07-08/);
   });
 
-  test('4a. post-migration NEW row (no backfill re-run): anchors set but no derivation applied yet -> next_start stays NULL (spec-legal per SPEC.md FR-1, not a gap)', async () => {
+  test.skip('4a. [RETIRED — columns dropped] post-migration NEW row (no backfill re-run): anchors set but no derivation applied yet -> next_start stays NULL (spec-legal per SPEC.md FR-1, not a gap)', async () => {
     var masterId = uuidv7();
     // Simulates a task_masters row created in the real W1->W2 window: the
     // (now-removed) trigger no longer auto-derives on INSERT, and W2's

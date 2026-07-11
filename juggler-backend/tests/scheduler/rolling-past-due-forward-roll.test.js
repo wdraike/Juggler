@@ -150,7 +150,7 @@ async function createRollingMaster(text, recur, extra) {
     recurring: true,
     recur: recur,
     recurStart: ANCHOR,
-    rollingAnchor: ANCHOR,
+    nextStart: ANCHOR,
     placementMode: 'anytime',
     dayReq: 'any'
   }, extra || {}));
@@ -412,7 +412,7 @@ describe('AC3 — day-locked daily: day-lock R32.7 holds independent of forward-
       recur: { type: 'daily', days: 'MTWRFSU' },
       recurStart: addDays(TODAY, -10),
       placementMode: 'anytime'
-      // No rollingAnchor (daily tasks are day-locked, not rolling-anchored)
+      // No nextStart (daily tasks are day-locked, not rolling-anchored)
       // No dayReq override (daily uses type-derived day-lock R32.7)
     });
     // Stranded daily instance at 3 days ago with a real scheduled_at placement
@@ -797,7 +797,7 @@ describe('DEFECT-3 — no-slot/unplaceable: overdue=1 not written when §8 PATH 
 //   (c) Cycle boundary is not violated: date < NEXT_CYCLE_A.
 //
 // Co-occurrence trigger mechanism:
-//   Master B: rolling, intervalDays=30, rollingAnchor=TODAY-5.
+//   Master B: rolling, intervalDays=30, nextStart=TODAY-5.
 //   Next anchor grid slot: (TODAY-5)+30 = TODAY+25 > expandEnd (TODAY+14).
 //   expandRecurring generates NO desired occurrence for Master B.
 //   The IIFE finds no stranded past-due instance for Master B (instanceB date=TODAY+2
@@ -835,7 +835,7 @@ describe('ERNIE-WARN-1 — co-occurrence: forwardRollDeadlineById survives recon
       type: 'rolling', intervalDays: 30
     }, {
       recurStart: ANCHOR_B,
-      rollingAnchor: ANCHOR_B
+      nextStart: ANCHOR_B
     });
 
     // instanceB: future pending instance for Master B at TODAY+2.
@@ -930,22 +930,22 @@ describe('ERNIE-WARN-1 — co-occurrence: forwardRollDeadlineById survives recon
 
 // ══════════════════════════════════════════════════════════════════════════════
 // juggy3 / W1 / R-OD1 — AC1a-AC1d
-// Shape C: recur = {type:'rolling', intervalDays:60}, rolling_anchor=NULL
+// Shape C: recur = {type:'rolling', intervalDays:60}, next_start=NULL
 //
 // Live prod repro (INTAKE-BRIEF, 2026-06-30):
 //   master t1776552724322p19k 'Get a Haircut', recur={type:rolling,intervalDays:60},
-//   rolling_anchor=NULL, no completed instance.
+//   next_start=NULL, no completed instance.
 //   Single active instance dated 2026-06-24 (= TODAY-6), stored overdue=1
 //   (set by a prior scheduler run's sweep), updated_at=2026-06-30 11:29
 //   (scheduler DID run today), but date NOT moved forward — still 2026-06-24.
 //   Cycle end = recurringPeriodEndKey(rolling/60, 2026-06-24) = 2026-08-23 > today
 //   → cycle NOT ended → forward-roll SHOULD have fired.
 //
-// Key difference from existing Shape A/B tests: rolling_anchor=NULL.
-// When rolling_anchor is set, the anchor-grid produces an out-of-cycle slot that
+// Key difference from existing Shape A/B tests: next_start=NULL.
+// When next_start is set, the anchor-grid produces an out-of-cycle slot that
 // the IIFE correctly splices out and replaces with a synthetic TODAY occurrence;
 // the reconciler then moves the stranded row forward.
-// When rolling_anchor=NULL, this splice/inject/move path silently no-ops (candidate
+// When next_start=NULL, this splice/inject/move path silently no-ops (candidate
 // drop site: IIFE stranded-search in-cycle gate OR reconcile.matchOccurrences not
 // pairing the synthetic occurrence — see W1-INVESTIGATION.md).
 //
@@ -968,18 +968,18 @@ const PAST_6 = addDays(TODAY, -6);
 // Upper-bound for AC1b: cycle boundary = PAST_6 + 60 = TODAY+54.
 const NEXT_CYCLE_C = addDays(TODAY, 54);
 
-describe('juggy3/W1/R-OD1/AC1a — Shape C {rolling_anchor:null, intervalDays:60}: date must forward-roll (PRIMARY RED pre-fix)', () => {
+describe('juggy3/W1/R-OD1/AC1a — Shape C {next_start:null, intervalDays:60}: date must forward-roll (PRIMARY RED pre-fix)', () => {
   let masterC, instanceC;
 
   beforeAll(async () => {
     await setupTestDB();
-    // rolling_anchor=NULL: replicate the live condition.
-    // Override the createRollingMaster helper's default rollingAnchor=ANCHOR (today-30)
-    // by passing {rollingAnchor: null} in the extra param — Object.assign overwrites it.
+    // next_start=NULL: replicate the live condition.
+    // Override the createRollingMaster helper's default nextStart=ANCHOR (today-30)
+    // by passing {nextStart: null} in the extra param — Object.assign overwrites it.
     // recur_start=ANCHOR provides context for expandRecurring without imposing an anchor.
     masterC = await createRollingMaster('Get a Haircut Repro', {
       type: 'rolling', intervalDays: 60
-    }, { rollingAnchor: null }); // <-- NULL anchor: the critical live condition
+    }, { nextStart: null }); // <-- NULL anchor: the critical live condition
     // Single active instance at PAST_6 (= TODAY-6 = live 2026-06-24 condition).
     // No completed instances (no prior done/skip/missed rows for this master).
     // Seeded with overdue=0 to show the first-run behaviour cleanly; the primary
@@ -993,7 +993,7 @@ describe('juggy3/W1/R-OD1/AC1a — Shape C {rolling_anchor:null, intervalDays:60
    * AC1a PRIMARY: instance date must be moved forward to today or later.
    *
    * The 877d173 forward-roll IIFE fires (cycle-not-ended guard at runSchedule.js:927
-   * passes — PAST_6+60 = TODAY+54 > today). But when rolling_anchor=NULL the
+   * passes — PAST_6+60 = TODAY+54 > today). But when next_start=NULL the
    * synthetic-occurrence injection's reconcile move is silently dropped (candidate
    * drop: buildExistingGroups not pairing the synthetic occurrence to the stranded
    * group, OR the in-cycle gate returning early without injecting).
@@ -1099,7 +1099,7 @@ const { DEFAULT_WEEKDAY_BLOCKS: _DEF_WD } = require('../../src/scheduler/constan
 /**
  * Seed the live-faithful 'Get a Haircut' master:
  * - time_blocks placement, location=['home'], when='morning,lunch,afternoon,evening'
- * - dur=90, rolling/60d, rolling_anchor=NULL, recur_start=RECUR_START_C2
+ * - dur=90, rolling/60d, next_start=NULL, recur_start=RECUR_START_C2
  * - Matches live master: t1776552724322p19k
  */
 async function createC2Master() {
@@ -1110,7 +1110,7 @@ async function createC2Master() {
     recurring: true,
     recur: { type: 'rolling', intervalDays: 60 },
     recurStart: RECUR_START_C2,
-    rollingAnchor: null,         // critical: live condition
+    nextStart: null,         // critical: live condition
     placementMode: 'time_blocks',
     when: 'morning,lunch,afternoon,evening',
     location: JSON.stringify(['home']), // pre-stringify: Knex passes arrays via .toString() → 'home' not '["home"]'

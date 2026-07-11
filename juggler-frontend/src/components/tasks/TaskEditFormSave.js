@@ -49,10 +49,11 @@ export function useTaskEditFormSave({
       recurMonthDays: t.recur?.monthDays || [1, 15],
       tz: t.tz || activeTimezone || 'America/New_York',
       recurStart: t.recurStart || '', recurEnd: t.recurEnd || '',
-      // 999.1110: 'Next Cycle Starts' anchor — unified nextStart (FR-1) with
-      // the dual-write-era per-type columns as read sources.
+      // 999.1110: 'Next Cycle Starts' anchor — next_start is the single unified
+      // anchor column for every recur type (rolling_anchor / next_occurrence_anchor
+      // were dropped — see juggler-anchor-column-cleanup leg).
       nextStart: (function() {
-        var v = t.nextStart || t.rollingAnchor || t.nextOccurrenceAnchor;
+        var v = t.nextStart;
         return v ? String(v).slice(0, 10) : '';
       })(),
       preferredTimeMins: t.preferredTimeMins != null ? t.preferredTimeMins : null,

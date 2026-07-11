@@ -23,12 +23,12 @@ describe('InMemoryTaskRepository recurrence reads (999.354 3/3)', function () {
 
   test('getMasterById returns the raw master row (tenancy-scoped), null otherwise', function () {
     return makeRepo([
-      Object.assign({ id: 'm1', master_id: 'm1', user_id: 'u1', text: 'M', rolling_anchor: '2026-06-18' }, BASE)
+      Object.assign({ id: 'm1', master_id: 'm1', user_id: 'u1', text: 'M', next_start: '2026-06-18' }, BASE)
     ]).then(function (repo) {
       return repo.getMasterById('m1', 'u1').then(function (row) {
         expect(row).not.toBeNull();
         expect(row.id).toBe('m1');
-        expect(row.rolling_anchor).toBe('2026-06-18'); // the column the rolling-anchor path needs
+        expect(row.next_start).toBe('2026-06-18'); // the column the rolling-anchor path reads post-cutover (999.354 3/3; anchor-column-cleanup)
         return repo.getMasterById('m1', 'other-user');
       }).then(function (row) {
         expect(row).toBeNull(); // tenancy-scoped

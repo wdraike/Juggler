@@ -93,7 +93,7 @@ it('recurring task with rolling recur type shows rolling anchor card', function(
   var rollingTask = Object.assign({}, BASE_TASK, {
     recurring: true,
     recur: { type: 'rolling', every: 7, unit: 'days' },
-    rolling_anchor: '2026-05-01',
+    nextStart: '2026-05-01',
   });
   render(<TaskEditForm task={rollingTask} status="todo" onUpdate={function() {}} onStatusChange={function() {}}
     onDelete={function() {}} onClose={function() {}} darkMode={false} isMobile={false}
@@ -261,10 +261,12 @@ it('W4: recurring time_window task keeps ± Window visible after external task-p
 });
 
 // ── 999.1110: editable recurrence anchor — "Next Cycle Starts" (David 2026-07-04) ──
-// The anchor (nextStart / rollingAnchor / nextOccurrenceAnchor) previously had no
-// UI/API path once set — editing 'Recurrence starts' is silently a no-op
-// post-first-completion because getAnchor prefers the anchor. These tests cover
-// the new control: render, save payload, and pattern-snap validation.
+// The anchor (nextStart — the single unified anchor column; rolling_anchor /
+// next_occurrence_anchor were dropped, see juggler-anchor-column-cleanup)
+// previously had no UI/API path once set — editing 'Recurrence starts' is
+// silently a no-op post-first-completion because getAnchor prefers the
+// anchor. These tests cover the new control: render, save payload, and
+// pattern-snap validation.
 
 function openRecurrenceCollapse() {
   localStorage.clear();
@@ -277,7 +279,7 @@ var WEEKLY_MONDAY_TASK = Object.assign({}, BASE_TASK, {
   id: 'trec', text: 'Weekly report',
   recurring: true,
   recur: { type: 'weekly', days: 'M' },
-  nextOccurrenceAnchor: '2026-07-13', // a Monday
+  nextStart: '2026-07-13', // a Monday
 });
 
 function renderAnchorTask(task, onUpdate) {
@@ -339,7 +341,7 @@ it('999.1110: rolling recur type accepts ANY date without snapping (no pattern c
     id: 'troll', text: 'Water plants',
     recurring: true,
     recur: { type: 'rolling', every: 7, unit: 'days' },
-    rollingAnchor: '2026-07-01',
+    nextStart: '2026-07-01',
   });
   renderAnchorTask(rollingTask);
   var input = screen.getByLabelText('Next Cycle Starts');

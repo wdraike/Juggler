@@ -487,8 +487,7 @@ describe('R5-DB: rolling recurrence — active-instance constraint + period dead
       dur: 30,
       recurring: true,
       recur: { type: 'rolling', intervalDays: 7 },
-      recurStart: TODAY,
-      rollingAnchor: TODAY
+      recurStart: TODAY
     });
 
     await runScheduler([], {}, TODAY, 480, { persist: true });
@@ -506,8 +505,7 @@ describe('R5-DB: rolling recurrence — active-instance constraint + period dead
       dur: 30,
       recurring: true,
       recur: { type: 'rolling', intervalDays: 7 },
-      recurStart: TODAY,
-      rollingAnchor: TODAY
+      recurStart: TODAY
     });
 
     await runScheduler([], {}, TODAY, 480, { persist: true });
@@ -578,8 +576,7 @@ describe('R8-DB: implied_deadline recompute-on-move', () => {
       dur: 30,
       recurring: true,
       recur: { type: 'rolling', intervalDays: 7 },
-      recurStart: addDays(TODAY, -10),
-      rollingAnchor: addDays(TODAY, -10)
+      recurStart: addDays(TODAY, -10)
     });
 
     const pastOcc = PAST_3;

@@ -36,7 +36,7 @@
  *   it stamps `updated_at = new Date()` when omitted, and asserts (fail-loud) that
  *   any caller-supplied value in P1_DATE_COLUMNS is a real JS Date.
  *
- *   `synced_at` (cal_sync_ledger) and `rolling_anchor` (task_masters) are
+ *   `synced_at` (cal_sync_ledger) and `next_start` (task_masters) are
  *   intentionally NOT in P1_DATE_COLUMNS: they are written via direct `.update()`
  *   calls in the controller, not routed through `updateTaskById` / `splitUpdateFields`
  *   (this repo's write path), so they are outside this repository's timestamp scope.
@@ -98,8 +98,10 @@ function KnexTaskRepository(deps) {
  * NOT included (out of this repo's write path):
  *   synced_at    — lives on cal_sync_ledger, written via direct .update() in controller,
  *                  not routed through updateTaskById/splitUpdateFields
- *   rolling_anchor — DATE column on task_masters, written via direct .update() in
- *                    controller (L1805), not routed through this repo's write methods
+ *   next_start   — DATE column on task_masters (single unified anchor column;
+ *                  rolling_anchor / next_occurrence_anchor were dropped), written
+ *                  via direct .update() in facade.js's applyRollingAnchor, not
+ *                  routed through this repo's write methods
  */
 var P1_DATE_COLUMNS = ['created_at', 'updated_at', 'completed_at', 'scheduled_at'];
 

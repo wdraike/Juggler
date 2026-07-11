@@ -70,7 +70,15 @@ var COLUMN_ALIASES = {
   userId: 'user_id',
   splitMin: 'split_min',
   dayReq: 'day_req',
-  rollingAnchor: 'rolling_anchor'
+  // next_start is the single unified anchor column (rolling_anchor /
+  // next_occurrence_anchor dropped — juggler-anchor-column-cleanup).
+  // NOTE: no `rollingAnchor` alias — `rolling_anchor` no longer exists on
+  // task_masters. A test that means the new anchor should seed `nextStart`;
+  // a test that still seeds `rollingAnchor` now gets no alias at all, so
+  // buildRow's validCols gate drops the raw key (same fail-loud-by-omission
+  // as any other unknown key) instead of silently mapping it onto a dead
+  // column (zoe-w10-dead-anchor-fixtures — the alias was itself the landmine).
+  nextStart: 'next_start'
 };
 
 // Recur-config keys some tests pass at the TOP LEVEL but that actually live

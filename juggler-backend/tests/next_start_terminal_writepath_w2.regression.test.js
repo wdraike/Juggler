@@ -14,22 +14,18 @@
  * item (a)): `next-occurrence-anchor.js` / `applyRollingAnchor` / `expandRecurring
  * .getAnchor` read `next_start` as the canonical anchor, monotonically.
  *
- * CORRECTED 2026-07-09 (SPEC.md AC1, dual-write revision): `next_start` is the
- * new canonical READ path (`getAnchor()` reads it first), but the WRITE path
- * DUAL-WRITES for this leg — `applyRollingAnchor` keeps writing the legacy
- * `rolling_anchor`/`next_occurrence_anchor` columns too (their normal computed
- * value, unchanged), so the 34 pre-existing test files that pin those columns
- * are undisturbed. Ceasing the legacy writes is an explicit follow-on backlog
- * item, NOT this leg's AC1. Two assertions in this file previously asserted
- * legacy-column CESSATION (`toBeNull()`); corrected to assert dual-write
- * (legacy column gets its normal value, same as `next_start`).
+ * CORRECTED 2026-07-09 (SPEC.md AC1, dual-write revision): `next_start` was the
+ * new canonical READ path (`getAnchor()` reads it first) while the WRITE path
+ * DUAL-WROTE the legacy `rolling_anchor`/`next_occurrence_anchor` columns too,
+ * so the (then-)pre-existing test files pinning those columns stayed undisturbed.
  *
- * Written FIRST (telly step 0, mode=new) against code that does NOT exist yet —
- * every DB-backed test below is expected to RED for the SAME reason: the current
- * `applyRollingAnchor` (facade.js:558-597) still reads/writes the OLD
- * `rolling_anchor` / `next_occurrence_anchor` columns and never touches
- * `next_start` at all. The two pure-unit tests (getAnchor / rowToTask) RED for
- * their own, separately-confirmed reasons (see each test's comment).
+ * REWRITTEN 2026-07-11 (juggler-anchor-column-cleanup, W5): the follow-on leg
+ * that ceases the legacy dual-write and DROPS both columns
+ * (`20260711200000_drop_legacy_anchor_columns.js`) has now shipped —
+ * `applyRollingAnchor` writes `next_start` ONLY. The two dual-write assertions
+ * below (`master.rolling_anchor`/`master.next_occurrence_anchor` after a
+ * terminal write) are removed; `next_start`-only assertions remain and are the
+ * live characterization of this behavior going forward.
  *
  * Mocking convention mirrors facade-next-occurrence-anchor-wiring.db.test.js
  * exactly (isolate scheduler-timer/redis/SSE; drive the REAL DB read/write path).
@@ -99,8 +95,6 @@ async function seedMaster(tmplId, overrides) {
     recurring: 1,
     status: '',
     recur_start: '2026-01-01',
-    rolling_anchor: null,
-    next_occurrence_anchor: null,
     next_start: null,
     created_at: now,
     updated_at: now
@@ -188,13 +182,6 @@ describe('FR-1(a)/AC2 — terminal write advances task_masters.next_start (unifi
     var master = await db('task_masters').where('id', tmplId).first();
     expect(master.next_start).not.toBeNull();
     expect(String(master.next_start).slice(0, 10)).toBe('2026-07-20');
-    // AC1 (revised 2026-07-09): the write path DUAL-WRITES for this leg —
-    // `next_start` is canonical for READS, but `rolling_anchor` keeps getting
-    // its normal, pre-existing computed value too (ceasing the legacy write
-    // is a follow-on backlog item, not this leg's AC1). On this first-ever
-    // write (no prior anchor), both columns receive the SAME computed value.
-    expect(master.rolling_anchor).not.toBeNull();
-    expect(String(master.rolling_anchor).slice(0, 10)).toBe('2026-07-20');
   });
 
   test('non-rolling (weekly) master: marking an instance done advances next_start to the next pattern date, not next_occurrence_anchor', async () => {
@@ -210,11 +197,6 @@ describe('FR-1(a)/AC2 — terminal write advances task_masters.next_start (unifi
     var master = await db('task_masters').where('id', tmplId).first();
     expect(master.next_start).not.toBeNull();
     expect(String(master.next_start).slice(0, 10)).toBe('2026-07-15'); // next Wednesday
-    // AC1 (revised 2026-07-09): dual-write — `next_occurrence_anchor` keeps
-    // getting its normal, pre-existing computed value alongside `next_start`
-    // (not nulled/ceased); on this first-ever write both columns match.
-    expect(master.next_occurrence_anchor).not.toBeNull();
-    expect(String(master.next_occurrence_anchor).slice(0, 10)).toBe('2026-07-15');
   });
 
   test('monotonic guard (FR-1a): next_start never regresses to an earlier computed date, but does advance to a later one', async () => {
@@ -262,12 +244,9 @@ describe('FR-1(a) — pure-unit seams getAnchor()/rowToTask() must read next_sta
       id: 'unit-row-1', task_type: 'recurring_template', text: 't', dur: 30, pri: 'P3',
       recurring: 1, recur: JSON.stringify({ type: 'weekly', days: 'W' }),
       recur_start: '2026-01-01', next_start: '2026-07-15',
-      rolling_anchor: null, next_occurrence_anchor: null,
       created_at: null, updated_at: null, status: '', disabled_at: null, disabled_reason: null
     };
     var task = rowToTask(row, 'America/New_York', null, null, { todayKey: '2026-07-09', nowMins: 600 });
-    // RED (current code): taskMappers.js has no `next_start` mapping at all
-    // (grep confirms zero hits) — task.nextStart comes back undefined.
     expect(task.nextStart).toBe('2026-07-15');
   });
 
@@ -276,14 +255,9 @@ describe('FR-1(a) — pure-unit seams getAnchor()/rowToTask() must read next_sta
       recur: { type: 'weekly', days: 'W' },
       recurStart: '2026-01-01',
       date: null,
-      rollingAnchor: null,
-      nextOccurrenceAnchor: null,
       nextStart: '2026-07-15'
     };
     var anchor = getAnchor(src, new Date('2026-07-01'));
-    // RED (current code): getAnchor() (expandRecurring.js:33-52) only branches on
-    // src.rollingAnchor / src.nextOccurrenceAnchor; src.nextStart is never read,
-    // so this falls through to recurStart (2026-01-01) instead.
     expect(anchor.getFullYear()).toBe(2026);
     expect(anchor.getMonth()).toBe(6); // July (0-indexed)
     expect(anchor.getDate()).toBe(15);

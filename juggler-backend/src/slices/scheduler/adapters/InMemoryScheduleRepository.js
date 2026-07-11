@@ -95,8 +95,8 @@ InMemoryScheduleRepository.prototype.deleteTasksWhere = async function deleteTas
 
 InMemoryScheduleRepository.prototype.backfillRollingAnchorIfNull = async function backfillRollingAnchorIfNull(masterId, userId, anchor) {
   var row = this._rows[masterId];
-  if (row && row.user_id === userId && (row.rolling_anchor === null || row.rolling_anchor === undefined)) {
-    row.rolling_anchor = anchor;
+  if (row && row.user_id === userId && (row.next_start === null || row.next_start === undefined)) {
+    row.next_start = anchor;
     row.updated_at = this.clock.now();
     return 1;
   }

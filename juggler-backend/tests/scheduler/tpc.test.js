@@ -323,7 +323,6 @@ describe('TS-89: TPC spacing guard with rolling anchor', () => {
       recurring: true,
       recur: { type: 'rolling', intervalDays: 5, timesPerCycle: 4 },
       recurStart: '2026-06-15',
-      rollingAnchor: '2026-06-15',
       fillPolicy: 'backfill',
       minGapDays: 2
     });
@@ -357,7 +356,6 @@ describe('TS-89: TPC spacing guard with rolling anchor', () => {
       recurring: true,
       recur: { type: 'rolling', intervalDays: 4, timesPerCycle: 3 },
       recurStart: '2026-06-15',
-      rollingAnchor: '2026-06-15',
       fillPolicy: 'backfill',
       minGapDays: 1
     });

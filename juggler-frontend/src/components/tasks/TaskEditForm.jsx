@@ -165,11 +165,11 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   var [recurStart, setRecurringStart] = useState(isCreate ? '' : (task.recurStart || ''));
   var [recurEnd, setRecurringEnd] = useState(isCreate ? '' : (task.recurEnd || ''));
   // 999.1110 (David 2026-07-04): the recurrence anchor — 'Next Cycle Starts' —
-  // is user-editable. Read side: the unified nextStart (FR-1) with the two
-  // legacy per-type anchor columns as the dual-write-era sources (rollingAnchor
-  // for recur.type='rolling', nextOccurrenceAnchor for pattern types).
+  // is user-editable. next_start is the single unified anchor column for every
+  // recur type (rolling_anchor / next_occurrence_anchor were dropped — see
+  // juggler-anchor-column-cleanup leg).
   var [nextStart, setNextStart] = useState(isCreate ? '' : (function() {
-    var v = task.nextStart || task.rollingAnchor || task.nextOccurrenceAnchor;
+    var v = task.nextStart;
     return v ? String(v).slice(0, 10) : '';
   })());
   var [nextStartNotice, setNextStartNotice] = useState(null);

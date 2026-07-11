@@ -126,8 +126,8 @@ RunScheduleCommand.prototype.deleteTasksWhere = function deleteTasksWhere(trx, u
 };
 
 /**
- * Set `task_masters.rolling_anchor = anchor` (updated_at = new Date(), P1) ONLY
- * when currently NULL — the legacy rolling-anchor backfill (runSchedule.js
+ * Set `task_masters.next_start = anchor` (updated_at = new Date(), P1) ONLY
+ * when currently NULL — the rolling-anchor backfill (runSchedule.js
  * ~490-496, the `trx.fn.now()` at 495 corrected). Delegates to the repository.
  * @returns {Promise<number>} rows updated (0 or 1).
  */

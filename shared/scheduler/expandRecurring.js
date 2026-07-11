@@ -27,43 +27,15 @@ function parseAnchor(val) {
   return parseDate(s);
 }
 
-// Resolve the recurrence anchor for a source. recurStart is the canonical
-// anchor; src.date (scheduled_at-derived) is a legacy fallback; startDate is
-// the final safety net so expansion still produces output for null anchors.
+// Resolve the recurrence anchor for a source. `next_start` is the single
+// unified anchor for ALL recurring types (rolling and pattern). recurStart
+// is the static fallback for masters that haven't had a terminal event yet;
+// src.date (scheduled_at-derived) and startDate are safety nets so expansion
+// still produces output for null anchors.
 function getAnchor(src, startDate) {
-  // FR-1(a)/AC1 (juggler-recur-lifecycle-redesign, W2, revised 2026-07-09):
-  // `next_start` is the unified anchor and the CANONICAL read source — checked
-  // first, ahead of the legacy per-type columns below. The write path
-  // (facade.js applyRollingAnchor) DUAL-WRITES next_start alongside the legacy
-  // columns, so any master that has gone through a terminal-status write (or
-  // the scheduler-run sweep, FR-1(b)) has next_start populated and this branch
-  // wins.
   if (src.nextStart) {
     var ns = parseAnchor(src.nextStart);
     if (ns) return ns;
-  }
-  // Legacy fallback (retained — NOT cut over, per AC1's revision: ceasing the
-  // legacy read/write is an explicit follow-on, out of scope for this leg).
-  // Covers masters/fixtures whose next_start hasn't been populated yet — e.g.
-  // rows predating the W1 migration's one-time backfill, or DB-fixture tests
-  // that seed only rolling_anchor/next_occurrence_anchor directly without also
-  // seeding next_start (the 34 pre-existing test files SPEC.md AC1 names).
-  //
-  // Rolling tasks use the mutable rolling_anchor (updated on each terminal event)
-  // before falling back to the static recur_start.
-  if (src.recur && src.recur.type === 'rolling' && src.rollingAnchor) {
-    var ra = parseAnchor(src.rollingAnchor);
-    if (ra) return ra;
-  }
-  // All other recurring types (daily/weekly/biweekly/monthly/interval) use the
-  // generalized next_occurrence_anchor (999.1091 C1) — advanced on each terminal
-  // (done/skip) event to the next occurrence in the master's OWN pattern (see
-  // nextMatchingDate above + juggler-backend/src/lib/next-occurrence-anchor.js).
-  // Null until the master's first terminal event; falls back to recur_start exactly
-  // as before until then, so pre-existing masters are unaffected.
-  if (src.recur && src.recur.type !== 'rolling' && src.nextOccurrenceAnchor) {
-    var na = parseAnchor(src.nextOccurrenceAnchor);
-    if (na) return na;
   }
   return parseAnchor(src.recurStart) || parseAnchor(src.date) || (function() {
     var d = new Date(startDate); d.setHours(0, 0, 0, 0); return d;
@@ -72,17 +44,19 @@ function getAnchor(src, startDate) {
 
 // Stable, non-advancing cycle epoch for TPC (timesPerCycle) fulfillment-accounting
 // purposes ONLY (999.1372, jug-weekly-recur-reshow). Unlike getAnchor(), this NEVER
-// resolves to src.nextOccurrenceAnchor — that column advances on every terminal
-// (done/skip) event (999.1091 computeNextOccurrenceAnchor), which would otherwise
-// redefine the TPC cycle boundary itself mid-cycle (cycleStart = anchor +
-// k*cycleDays) and re-orphan an earlier-in-cycle day's fulfillment the moment a
-// scheduler run lands on/after the terminal event (root-cause mechanism 2,
-// INTAKE-BRIEF.json). Falls back identically to getAnchor()'s non-anchor chain
-// (recur_start, then src.date, then startDate) so behavior for masters with no
-// live anchor advance — i.e. every pre-existing test/caller — is byte-identical.
-// Only consumed inside expandRecurring's TPC block; getAnchor()/its mutable
-// nextOccurrenceAnchor-aware result is untouched everywhere else (candidate-window
-// filtering, day-match predicate, target-interval pick positioning, rolling).
+// resolves to src.nextStart — that field advances on every terminal (done/skip)
+// event (999.1091 computeNextOccurrenceAnchor / rolling-anchor.js
+// computeRollingAnchor, both now writing the single unified next_start column —
+// see juggler-anchor-column-cleanup), which would otherwise redefine the TPC
+// cycle boundary itself mid-cycle (cycleStart = anchor + k*cycleDays) and
+// re-orphan an earlier-in-cycle day's fulfillment the moment a scheduler run
+// lands on/after the terminal event (root-cause mechanism 2, INTAKE-BRIEF.json).
+// Falls back identically to getAnchor()'s non-anchor chain (recur_start, then
+// src.date, then startDate) so behavior for masters with no live anchor advance
+// — i.e. every pre-existing test/caller — is byte-identical. Only consumed
+// inside expandRecurring's TPC block; getAnchor()/its mutable next_start-aware
+// result is untouched everywhere else (candidate-window filtering, day-match
+// predicate, target-interval pick positioning, rolling).
 function getStableEpoch(src, startDate) {
   return parseAnchor(src.recurStart) || parseAnchor(src.date) || (function() {
     var d = new Date(startDate); d.setHours(0, 0, 0, 0); return d;
@@ -115,7 +89,7 @@ function doesDayMatch(dow, daysSpec, dayMap) {
 // generation gate passes the SAME `stableEpoch` here that the TPC candidate-pool step
 // (below) uses for its own biweekly parity filter, for TPC-filtered biweekly sources ONLY
 // — so pool and gate compute parity from the literal same Date value and can never
-// structurally disagree, regardless of how far the mutable `anchor` (nextOccurrenceAnchor)
+// structurally disagree, regardless of how far the mutable `anchor` (next_start-aware)
 // has advanced. This eliminates the whole deadlock CLASS (not just the probed fixture):
 // there is only one epoch value feeding the modulo-14 parity test on either side of the
 // pool/gate seam, so no drift between two epochs is possible to reintroduce it.
@@ -389,7 +363,7 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
     else cycleDays = 7; // daily and weekly
     var targetInterval = cycleDays / tpc;
     var anchor = getAnchor(src, startDate);
-    // Stable cycle-boundary epoch (999.1372) — decoupled from nextOccurrenceAnchor's
+    // Stable cycle-boundary epoch (999.1372) — decoupled from next_start's
     // terminal-event advancement. Used ONLY for cycleStart/cycleEnd + the widened
     // fulfillment-count enumeration below; `anchor` (mutable) still governs the
     // candidate-window filter just below and target-interval pick positioning.
@@ -417,7 +391,7 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
                 // Parity basis single-sourced onto stableEpoch (999.1372
                 // continued — WARN cookie-jwrr-biweekly-parity-coupling /
                 // ernie-jwrr-biweekly-parity-basis): previously this compared
-                // against the mutable `anchor` (nextOccurrenceAnchor-aware)
+                // against the mutable `anchor` (next_start-aware)
                 // while the fulfillment side's cycle boundaries/parity used
                 // `stableEpoch` — two epochs computing the same "which week is
                 // the biweekly on-week" concept, safe only via an unenforced
@@ -456,7 +430,7 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
     // 2. Pick best tpc dates per cycle using target-interval steering.
     // Cycle boundaries are anchored to `stableEpoch + k*cycleDays` (999.1372 —
     // previously `anchor + k*cycleDays`, which shifted mid-cycle whenever a
-    // terminal event advanced nextOccurrenceAnchor; stableEpoch never shifts) so
+    // terminal event advanced next_start; stableEpoch never shifts) so
     // they are deterministic and independent of window position AND of
     // terminal-event anchor advancement. lastPlaced evolves from picks within
     // this call only — it is not pre-seeded from DB rows.
@@ -704,7 +678,7 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
     if (!r || r.type !== 'rolling') return;
     // R5: only ONE active rolling instance at a time. If the master already has a
     // non-terminal instance, do NOT project the next — it is generated only when the
-    // active one completes (which advances rolling_anchor → this guard clears).
+    // active one completes (which advances next_start → this guard clears).
     if (existingActiveBySource[src.id]) return;
     // 999.1185: SINGLE derivation — module-level rollingIntervalDays (also
     // used by runSchedule.js's period-boundary classifier).

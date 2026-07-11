@@ -93,8 +93,7 @@ function baseTaskRow(overrides) {
     created_at: null,
     updated_at: null,
     completed_at: null,
-    end_date: null,
-    rolling_anchor: null
+    end_date: null
   }, overrides);
 }
 

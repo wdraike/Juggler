@@ -326,7 +326,7 @@ describe('D-C test 3 — overdue FIXED task remains pinned at its own fixed slot
       weather_humidity_max: null, slack_mins: null, unscheduled: 0, created_at: null,
       updated_at: null, completed_at: null, master_id: null, msft_event_id: null,
       apple_event_id: null, apple_calendar_name: null, cal_sync_origin: null,
-      cal_event_url: null, cal_locked: 0, end_date: null, rolling_anchor: null,
+      cal_event_url: null, cal_locked: 0, end_date: null,
       unplaced_reason: null, unplaced_detail: null,
     };
     const task = rowToTask(row, TZ, null, null, NOW_INFO);
@@ -358,7 +358,7 @@ describe('D-C test 3 — overdue FIXED task remains pinned at its own fixed slot
       weather_humidity_max: null, slack_mins: null, unscheduled: 0, created_at: null,
       updated_at: null, completed_at: null, master_id: null, msft_event_id: null,
       apple_event_id: null, apple_calendar_name: null, cal_sync_origin: null,
-      cal_event_url: null, cal_locked: 0, end_date: null, rolling_anchor: null,
+      cal_event_url: null, cal_locked: 0, end_date: null,
       unplaced_reason: null, unplaced_detail: null,
     };
     const task = rowToTask(row, TZ, null, null, NOW_INFO);

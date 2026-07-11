@@ -238,15 +238,14 @@ KnexScheduleRepository.prototype.deleteTasksWhere = function deleteTasksWhere(us
 };
 
 /**
- * Rolling-anchor backfill: set rolling_anchor=anchor ONLY when currently NULL
- * (verbatim — runSchedule.js ~401-405), with updated_at via new Date() (P1 —
- * the legacy Knex now-builder at line 404 corrected). Returns rows updated.
+ * Rolling-anchor backfill: set next_start=anchor ONLY when currently NULL
+ * (verbatim — runSchedule.js), with updated_at via new Date() (P1).
  */
 KnexScheduleRepository.prototype.backfillRollingAnchorIfNull = function backfillRollingAnchorIfNull(masterId, userId, anchor) {
   return this.db('task_masters')
     .where({ id: masterId, user_id: userId })
-    .whereNull('rolling_anchor')
-    .update({ rolling_anchor: anchor, updated_at: this.clock.now() });
+    .whereNull('next_start')
+    .update({ next_start: anchor, updated_at: this.clock.now() });
 };
 
 /**

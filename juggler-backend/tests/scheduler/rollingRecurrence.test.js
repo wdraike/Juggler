@@ -4,7 +4,7 @@
 //
 // 999.872 / 999.873 rewire: these tests originally seeded a terminal instance directly
 // then called runScheduler() (MODE 1, in-memory, persists nothing) and expected the
-// SCHEDULER RUN to advance task_masters.rolling_anchor and to materialize new picks.
+// SCHEDULER RUN to advance task_masters.next_start and to materialize new picks.
 // Per SCHEDULER-SPEC.md that is the wrong entry point:
 //   - R32.1/R32.2/R33.x: reanchor fires at the STATUS-CHANGE moment via
 //     facade.updateTaskStatus -> applyRollingAnchor, NOT in the scheduler (R33.5: the
@@ -57,7 +57,7 @@ function rollingTask(extra) {
     recurring: true,
     recur: { type: 'rolling', intervalDays: 7, timesPerCycle: 3 },
     recurStart: '2026-06-15',
-    rollingAnchor: '2026-06-15'
+    nextStart: '2026-06-15'
   }, extra || {}));
 }
 
@@ -79,7 +79,7 @@ describe('TS-85: Rolling anchor - done updates anchor', () => {
     // R32.1 Option B: anchor advances to the actual completion date (today), not the
     // scheduled day. (The backwards guard in computeRollingAnchor keeps today >= 06-15.)
     const updatedTask = await getTaskInstances(task.id, true);
-    expect(updatedTask.rollingAnchor).toBe(TODAY);
+    expect(updatedTask.nextStart).toBe(TODAY);
   });
 
   it('SUB-85a: Multiple done instances - anchor does not move backwards', async () => {
@@ -91,7 +91,7 @@ describe('TS-85: Rolling anchor - done updates anchor', () => {
     // Both done events anchor to the same completion date (today); the monotonic guard
     // (computeRollingAnchor: never move backwards) keeps the anchor at today.
     const updatedTask = await getTaskInstances(task.id, true);
-    expect(updatedTask.rollingAnchor).toBe(TODAY);
+    expect(updatedTask.nextStart).toBe(TODAY);
   });
 });
 
@@ -106,18 +106,18 @@ describe('TS-86: Rolling anchor - skip fully reanchors', () => {
   it('Main scenario: skip instance fully reanchors to its date', async () => {
     // Skip's instance date must be >= current anchor (monotonic guard), so use a
     // future occurrence date relative to the seeded anchor.
-    const task = await rollingTask({ rollingAnchor: '2026-06-15' });
+    const task = await rollingTask({ nextStart: '2026-06-15' });
 
     const res = await markInstanceStatus(task.id, '2026-06-27', 'skip');
     expect(res.status).toBe(200);
 
     // R32.2: skip re-anchors fully to the skipped instance's own date (not completion).
     const updatedTask = await getTaskInstances(task.id, true);
-    expect(updatedTask.rollingAnchor).toBe('2026-06-27');
+    expect(updatedTask.nextStart).toBe('2026-06-27');
   });
 
   it('SUB-86a: skip then done - each applies its own rule in order', async () => {
-    const task = await rollingTask({ rollingAnchor: '2026-06-15' });
+    const task = await rollingTask({ nextStart: '2026-06-15' });
 
     // skip(FWD1) reanchors to FWD1; a later done anchors to the completion date (today).
     // Today < FWD1, so the monotonic guard keeps the skip anchor.
@@ -125,7 +125,7 @@ describe('TS-86: Rolling anchor - skip fully reanchors', () => {
     await markInstanceStatus(task.id, FWD2, 'done');
 
     const updatedTask = await getTaskInstances(task.id, true);
-    expect(updatedTask.rollingAnchor).toBe(FWD1);
+    expect(updatedTask.nextStart).toBe(FWD1);
   });
 });
 
@@ -148,7 +148,7 @@ describe('TS-87: Rolling anchor - missed is rejected (invalid status)', () => {
     // 'missed' is no longer a valid status; the controller returns 400.
     expect(res.status).toBe(400);
     const updatedTask = await getTaskInstances(task.id, true);
-    expect(updatedTask.rollingAnchor).toBe('2026-06-15');
+    expect(updatedTask.nextStart).toBe('2026-06-15');
   });
 });
 
@@ -161,24 +161,24 @@ describe('TS-88: Rolling anchor - cancel does not update anchor', () => {
   afterAll(async () => { await teardownTestDB(); });
 
   it('Main scenario: cancel instance does not change anchor', async () => {
-    const task = await rollingTask({ rollingAnchor: '2026-06-15' });
+    const task = await rollingTask({ nextStart: '2026-06-15' });
 
     const res = await markInstanceStatus(task.id, '2026-06-27', 'cancel');
     expect(res.status).toBe(200);
 
     // computeRollingAnchor returns null for cancel — anchor unchanged.
     const updatedTask = await getTaskInstances(task.id, true);
-    expect(updatedTask.rollingAnchor).toBe('2026-06-15');
+    expect(updatedTask.nextStart).toBe('2026-06-15');
   });
 
   it('SUB-88a: cancel then done - done re-anchors (to completion date), cancel ignored', async () => {
-    const task = await rollingTask({ rollingAnchor: '2026-06-15' });
+    const task = await rollingTask({ nextStart: '2026-06-15' });
 
     await markInstanceStatus(task.id, '2026-06-27', 'cancel');
     await markInstanceStatus(task.id, '2026-06-17', 'done');
 
     const updatedTask = await getTaskInstances(task.id, true);
-    expect(updatedTask.rollingAnchor).toBe(TODAY);
+    expect(updatedTask.nextStart).toBe(TODAY);
   });
 });
 
@@ -276,7 +276,7 @@ describe('TS-91: Rolling recurrence stale guard (persisting path)', () => {
 
     const task = await rollingTask({
       recurStart: recentAnchor,
-      rollingAnchor: recentAnchor
+      nextStart: recentAnchor
     });
 
     await runScheduler(undefined, undefined, undefined, undefined, { persist: true });
@@ -347,7 +347,7 @@ describe('TS-94: Rolling recurrence target interval steering (NEEDS-RULING)', ()
 
     const updatedTask = await getTaskInstances(task.id, true);
     // Real behavior: done re-anchors to the completion date (today). No steering toward 21d.
-    expect(updatedTask.rollingAnchor).toBe(TODAY);
+    expect(updatedTask.nextStart).toBe(TODAY);
   });
 });
 
@@ -366,7 +366,7 @@ describe('TS-96: Rolling recurrence missed threshold (no live missed path)', () 
     expect(res.status).toBe(400);
 
     const updatedTask = await getTaskInstances(task.id, true);
-    expect(updatedTask.rollingAnchor).toBe('2026-06-15');
+    expect(updatedTask.nextStart).toBe('2026-06-15');
   });
 });
 
@@ -408,7 +408,7 @@ describe('TS-97: Rolling recurrence backfill with mixed status (persisting path)
     // skip(FWD1) is the latest forward anchor move; done(today) < FWD1 so the
     // monotonic guard keeps the anchor at the skip date.
     const updatedTask = await getTaskInstances(task.id, true);
-    expect(updatedTask.rollingAnchor).toBe(FWD1);
+    expect(updatedTask.nextStart).toBe(FWD1);
 
     // New open instances materialize (was impossible under in-memory MODE 1).
     expect((statusCounts[''] || 0)).toBeGreaterThan(0);
@@ -452,13 +452,13 @@ describe('TS-99: Rolling recurrence stale guard with anchor updates', () => {
   afterAll(async () => { await teardownTestDB(); });
 
   it('Main scenario: a recent done re-anchors to the completion date and persists', async () => {
-    const task = await rollingTask({ recurStart: '2026-06-10', rollingAnchor: '2026-06-10' });
+    const task = await rollingTask({ recurStart: '2026-06-10', nextStart: '2026-06-10' });
 
     const res = await markInstanceStatus(task.id, '2026-06-14', 'done');
     expect(res.status).toBe(200);
 
     const updatedTask = await getTaskInstances(task.id, true);
-    expect(updatedTask.rollingAnchor).toBe(TODAY);
+    expect(updatedTask.nextStart).toBe(TODAY);
 
     await runScheduler(undefined, undefined, undefined, undefined, { persist: true });
     const instances = await getTaskInstances(task.id);
@@ -469,14 +469,14 @@ describe('TS-99: Rolling recurrence stale guard with anchor updates', () => {
     const task = await rollingTask({
       recur: { type: 'rolling', intervalDays: 7, timesPerCycle: 2 },
       recurStart: '2026-05-15',
-      rollingAnchor: '2026-05-15'
+      nextStart: '2026-05-15'
     });
 
     const res = await markInstanceStatus(task.id, '2026-06-20', 'done');
     expect(res.status).toBe(200);
 
     const updatedTask = await getTaskInstances(task.id, true);
-    expect(updatedTask.rollingAnchor).toBe(TODAY);
+    expect(updatedTask.nextStart).toBe(TODAY);
   });
 });
 
@@ -505,7 +505,7 @@ describe('TS-100: Rolling recurrence comprehensive integration', () => {
 
     const updatedTask = await getTaskInstances(task.id, true);
     // skip(FWD1) is the furthest-forward anchor move; the monotonic guard holds it.
-    expect(updatedTask.rollingAnchor).toBe(FWD1);
+    expect(updatedTask.nextStart).toBe(FWD1);
 
     await runScheduler(undefined, undefined, undefined, undefined,
       { persist: true, fillPolicy: 'backfill' });
@@ -529,7 +529,7 @@ describe('TS-100: Rolling recurrence comprehensive integration', () => {
  * Kermit's hypothesis: batchUpdateTxn (facade.js ~L889-1136) and lockedBatchUpdate
  * (facade.js ~L817-884) — the two collaborators PUT /tasks/batch (batchUpdateTasks)
  * routes into — never call applyRollingAnchor, so a rolling-type recurring master's
- * `rolling_anchor` never advances when the instance is completed via the BATCH
+ * `next_start` never advances when the instance is completed via the BATCH
  * endpoint (only the single-item PUT /tasks/:id/status path, wired through
  * UpdateTaskStatus.js:236-244, calls applyRollingAnchor).
  *
@@ -542,15 +542,15 @@ describe('TS-100: Rolling recurrence comprehensive integration', () => {
  * false) with the exact single-item call shape
  * `{ updates: [{ id, status: 'done' }] }` used by
  * juggler-frontend/src/hooks/useTaskState.js's updateTask(), and asserts
- * rolling_anchor advances per computeRollingAnchor's done rule (-> completion date)
+ * next_start advances per computeRollingAnchor's done rule (-> completion date)
  * exactly as the single-item TS-85 test above already proves for the non-batch path.
  */
-describe('BUG1 (W1): rolling_anchor never advances via PUT /tasks/batch (facade.batchUpdateTasks)', () => {
+describe('BUG1 (W1): next_start never advances via PUT /tasks/batch (facade.batchUpdateTasks)', () => {
   beforeAll(async () => { await setupTestDB(); });
   afterAll(async () => { await teardownTestDB(); });
 
-  it('done via batchUpdateTasks({updates:[{id,status:"done"}]}) should advance rolling_anchor the same as the single-item path — CURRENTLY FAILS', async () => {
-    const task = await rollingTask({ rollingAnchor: '2026-06-15' });
+  it('done via batchUpdateTasks({updates:[{id,status:"done"}]}) should advance next_start the same as the single-item path — CURRENTLY FAILS', async () => {
+    const task = await rollingTask({ nextStart: '2026-06-15' });
     const instance = await createTask({
       master_id: task.id,
       text: 'batch instance',
@@ -573,16 +573,16 @@ describe('BUG1 (W1): rolling_anchor never advances via PUT /tasks/batch (facade.
     expect(writtenInstance[0].status).toBe('done');
 
     // R32.1 Option B (same rule TS-85 proves for the single-item path): a `done`
-    // instance re-anchors rolling_anchor to the completion date (today).
+    // instance re-anchors next_start to the completion date (today).
     const updatedTask = await getTaskInstances(task.id, true);
-    expect(updatedTask.rollingAnchor).toBe(TODAY);
+    expect(updatedTask.nextStart).toBe(TODAY);
   });
 });
 
 /**
  * BUG1 (W1) — DATA CONSEQUENCE, not directly assertable in this fixture-driven
  * suite: dev-bed rows for "Cut Grass" / "Wash Red Car" (BUG1-DATA row in
- * TRACEABILITY.md) have a stale rolling_anchor from real batch-completions that hit
+ * TRACEABILITY.md) have a stale next_start from real batch-completions that hit
  * exactly the gap proven above. That remediation is a one-off data script gated on
  * the BUG1 fix landing, not a repo test.
  */

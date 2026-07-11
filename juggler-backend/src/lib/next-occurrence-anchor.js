@@ -2,13 +2,10 @@
  * Shared helpers for the GENERALIZED recurrence anchor (999.1091 C1).
  *
  * Sibling to rolling-anchor.js — but for every recur.type EXCEPT 'rolling'
- * (daily/weekly/biweekly/monthly/interval). Rolling keeps its own dedicated
- * `rolling_anchor` column + rolling-anchor.js logic UNCHANGED (anchors to
- * ACTUAL completion date — an arithmetic-projection type with no calendar
- * pattern of its own). This module owns a SEPARATE column,
- * `task_masters.next_occurrence_anchor`, whose semantics are genuinely
- * different: "the next occurrence in the master's OWN configured recurrence
- * pattern, after the just-terminated one" (David's ruling, 2026-07-03):
+ * (daily/weekly/biweekly/monthly/interval). The anchor is stored in
+ * task_masters.next_start (the single unified anchor column). The legacy
+ * next_occurrence_anchor column has been dropped.
+ *
  *   - daily            -> next day
  *   - weekly (1 day)   -> same weekday, next week
  *   - weekly (N days)  -> next day in that master's own day list, wrapping to
@@ -46,8 +43,8 @@ function isPatternRecurMaster(masterRow) {
 }
 
 /**
- * Compute the new next_occurrence_anchor for a terminal status event on a non-rolling
- * recurring master.
+ * Compute the new anchor (stored in task_masters.next_start) for a terminal status
+ * event on a non-rolling recurring master.
  *
  * Rules:
  *   done/skip -> the next date this master's OWN recurrence pattern would fire on,
@@ -63,7 +60,7 @@ function isPatternRecurMaster(masterRow) {
  *
  * @param {string} status - 'done' | 'skip' | 'cancel'
  * @param {string} instanceDate - ISO date 'YYYY-MM-DD' of the instance that terminated
- * @param {string|null} currentAnchor - current next_occurrence_anchor from task_masters
+ * @param {string|null} currentAnchor - current anchor (task_masters.next_start)
  * @param {Object|string} recur - the master's recur config (JSON string or object)
  * @returns {string|null} new anchor ISO date, or null if no update needed
  */

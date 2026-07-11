@@ -183,3 +183,61 @@ describe('H6 W2 — S5: writeChanged writes ONLY the rows passed (delta, no writ
     expect(calls.batched[0].fields.updated_at).toBeInstanceOf(Date);
   });
 });
+
+// juggler-anchor-column-cleanup (behavior_contract B5, TRACEABILITY.md): the
+// rolling-anchor NULL-backfill repairs pre-feature masters (next_start NULL)
+// from computed history, WITHOUT overwriting an anchor that is already set.
+// Neither adapter previously had a dedicated test — this closes that gap.
+describe('B5 — backfillRollingAnchorIfNull: NULL-only backfill, never overwrites a set anchor', () => {
+  test('InMemory: NULL next_start is backfilled to the supplied anchor (1 row written)', async () => {
+    const repo = new InMemoryScheduleRepository({
+      rows: { 'm-1': { id: 'm-1', user_id: 'u-1', next_start: null } }
+    });
+    const n = await repo.backfillRollingAnchorIfNull('m-1', 'u-1', '2026-06-10');
+    expect(n).toBe(1);
+    expect(repo._rows['m-1'].next_start).toBe('2026-06-10');
+    expect(repo._rows['m-1'].updated_at).toBeInstanceOf(Date);
+  });
+
+  test('InMemory: an ALREADY-SET next_start is left untouched (0 rows written) — the B5 no-overwrite guarantee', async () => {
+    const repo = new InMemoryScheduleRepository({
+      rows: { 'm-1': { id: 'm-1', user_id: 'u-1', next_start: '2026-05-01' } }
+    });
+    const n = await repo.backfillRollingAnchorIfNull('m-1', 'u-1', '2026-06-10');
+    expect(n).toBe(0);
+    // The real anchor value must survive unchanged — a value-swap mutation
+    // (dropping the NULL guard) would flip this to '2026-06-10' and fail.
+    expect(repo._rows['m-1'].next_start).toBe('2026-05-01');
+  });
+
+  test('InMemory: a row belonging to a DIFFERENT user is not backfilled (tenancy scoping)', async () => {
+    const repo = new InMemoryScheduleRepository({
+      rows: { 'm-1': { id: 'm-1', user_id: 'u-OTHER', next_start: null } }
+    });
+    const n = await repo.backfillRollingAnchorIfNull('m-1', 'u-1', '2026-06-10');
+    expect(n).toBe(0);
+    expect(repo._rows['m-1'].next_start).toBeNull();
+  });
+
+  test('Knex: scopes the UPDATE with whereNull(next_start) — the mechanism that guarantees no-overwrite', async () => {
+    const calls = { where: null, whereNull: null, update: null };
+    const qb = {
+      where: function (cond) { calls.where = cond; return qb; },
+      whereNull: function (col) { calls.whereNull = col; return qb; },
+      update: function (fields) { calls.update = fields; return Promise.resolve(1); }
+    };
+    const fakeDb = function (table) { calls.table = table; return qb; };
+    const fixedNow = new Date('2026-06-16T12:00:00Z');
+    const repo = new KnexScheduleRepository({ db: fakeDb, clock: { now: () => fixedNow } });
+
+    const result = await repo.backfillRollingAnchorIfNull('m-1', 'u-1', '2026-06-10');
+
+    expect(calls.table).toBe('task_masters');
+    expect(calls.where).toEqual({ id: 'm-1', user_id: 'u-1' });
+    // This whereNull is the ENTIRE no-overwrite guarantee for the real DB path —
+    // a mutation that drops it would let the update run unconditionally.
+    expect(calls.whereNull).toBe('next_start');
+    expect(calls.update).toEqual({ next_start: '2026-06-10', updated_at: fixedNow });
+    expect(result).toBe(1);
+  });
+});

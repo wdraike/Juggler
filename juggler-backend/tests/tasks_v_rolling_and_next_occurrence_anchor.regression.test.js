@@ -22,6 +22,20 @@
  *   3. Projection correctness: a seeded task_masters row's rolling_anchor AND
  *      next_occurrence_anchor both appear correctly in tasks_v.
  *   4. Column-set superset guard: the view still contains every pre-existing column.
+ *
+ * RETIRED (grover, juggler-anchor-column-cleanup W5, 2026-07-11): this suite's
+ * ENTIRE purpose, per its own header above, is asserting that
+ * `rolling_anchor`/`next_occurrence_anchor` project into tasks_v/
+ * tasks_with_sync_v. Migration `20260711200000_drop_legacy_anchor_columns.js`
+ * deliberately removes that guarantee — `next_start` (see the sibling
+ * `task_masters_next_start_unified_anchor.regression.test.js`,
+ * `tests/migrations/view-column-contract.test.js`) is now the single
+ * replacement anchor column and IS covered by those other suites. There is no
+ * "narrow" version of this file that keeps any value: seeding either legacy
+ * column now throws `Unknown column` at insert time (tests #3), and #1/#2/#4
+ * assert the columns' PRESENCE, the exact thing this leg intentionally
+ * reverses. Skipped wholesale (not deleted) as the historical record of the
+ * 999.1091/999.1094 guarantee this leg supersedes.
  */
 
 'use strict';
@@ -93,7 +107,7 @@ beforeEach(async () => {
   await db('task_masters').where('user_id', TEST_USER_ID).del();
 });
 
-describe('999.1091 / 999.1094 — tasks_v must project rolling_anchor + next_occurrence_anchor', () => {
+describe.skip('[RETIRED — see file-header note] 999.1091 / 999.1094 — tasks_v must project rolling_anchor + next_occurrence_anchor', () => {
 
   test('1. tasks_v has both anchor columns (information_schema)', async () => {
     var dbName = db.client.config.connection.database || 'juggler_test';

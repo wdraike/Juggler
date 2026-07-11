@@ -762,18 +762,20 @@ export default function WhenSection(props) {
               </div>
               <div style={{ marginTop: 8 }}>
                 <div style={{ fontSize: 9, color: TH.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>Last completion</div>
-                {(task && (task.rollingAnchor || task.rolling_anchor)) ? (
-                  // 999.1110: the API task shape is camelCase (rowToTask maps
-                  // rolling_anchor → rollingAnchor); the snake_case read only
-                  // ever matched test fixtures. Accept both.
+                {(task && task.nextStart) ? (
+                  // next_start is the single unified anchor column (rolling_anchor /
+                  // next_occurrence_anchor were dropped — juggler-anchor-column-cleanup).
+                  // taskMappers.js's rowToTask maps next_start → task.nextStart (camelCase);
+                  // it holds the same value rollingAnchor used to (the last-completion date
+                  // for a rolling master — see computeRollingAnchor in rolling-anchor.js).
                   <div style={{ display: 'flex', gap: 16, background: TH.bgCard, border: '1px solid ' + TH.inputBorder, borderRadius: 4, padding: '6px 10px', fontSize: 11 }}>
                     <div>
                       <div style={{ fontSize: 9, color: TH.textMuted, marginBottom: 1 }}>Completed on</div>
-                      <div style={{ color: TH.text, fontWeight: 500 }}>{formatAnchorDate(task.rollingAnchor || task.rolling_anchor)}</div>
+                      <div style={{ color: TH.text, fontWeight: 500 }}>{formatAnchorDate(task.nextStart)}</div>
                     </div>
                     <div>
                       <div style={{ fontSize: 9, color: TH.textMuted, marginBottom: 1 }}>Next due</div>
-                      <div style={{ color: TH.accent, fontWeight: 500 }}>{formatAnchorDate(addIntervalToDate(task.rollingAnchor || task.rolling_anchor, recurEvery || 7, recurUnit || 'days'))}</div>
+                      <div style={{ color: TH.accent, fontWeight: 500 }}>{formatAnchorDate(addIntervalToDate(task.nextStart, recurEvery || 7, recurUnit || 'days'))}</div>
                     </div>
                   </div>
                 ) : (

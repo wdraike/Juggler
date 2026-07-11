@@ -92,7 +92,7 @@
  *
  * @property {(masterId: string, userId: string) => Promise<?Object>} getMasterById
  *   The raw `task_masters` row for (masterId, userId), or null. Used by the
- *   updateTaskStatus rolling-anchor projection (needs the `rolling_anchor`
+ *   updateTaskStatus rolling-anchor projection (needs the `next_start`
  *   column off the master, not the tasks_v view). (Legacy: loadMaster ~1727 +
  *   the applyRollingAnchor preload ~1790.) 999.354 (recurrence-read fold).
  *

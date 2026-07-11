@@ -80,8 +80,8 @@
  *   legacy merged-out-chunk cleanup (runSchedule.js ~1660). Returns rows removed.
  *
  * @property {(masterId: string, userId: string, anchor: string) => Promise<number>} backfillRollingAnchorIfNull
- *   Set `task_masters.rolling_anchor = anchor` (P1: `updated_at = new Date()`)
- *   ONLY when it is currently NULL — the legacy rolling-anchor backfill
+ *   Set `task_masters.next_start = anchor` (P1: `updated_at = new Date()`)
+ *   ONLY when it is currently NULL — the rolling-anchor backfill
  *   (runSchedule.js ~401-404, the `trx.fn.now()` at 404 corrected to new Date()).
  *   Returns rows updated (0 or 1).
  */

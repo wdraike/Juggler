@@ -19,7 +19,7 @@
  * "behavior-identical EXCEPT the P1-mandated timestamp-source correction"). That
  * correction is SCOPED to the task-table columns the repo write path stamps. The
  * direct-`.update()` collaborator sites on `cal_sync_ledger.synced_at` and
- * `task_masters.rolling_anchor`'s `updated_at` are OUT of P1 scope (Oscar-gated W3
+ * `task_masters.next_start`'s `updated_at` are OUT of P1 scope (Oscar-gated W3
  * RE-REVIEW decision) and retain the legacy `fn.now()` / `trx.fn.now()` verbatim
  * (ernie W6-1) — they are NOT routed through KnexTaskRepository.
  *
@@ -836,14 +836,17 @@ function loadMaster(masterId, userId) {
 }
 
 // updateTaskStatus rolling-anchor projection (verbatim — controller L1790-1808).
-// Also projects the GENERALIZED next_occurrence_anchor (999.1091 C1) for every OTHER
-// recurring type (daily/weekly/biweekly/monthly/interval) — a separate column with
-// separate semantics (see juggler-backend/src/lib/next-occurrence-anchor.js header).
-// Both branches share the same preloaded master row to avoid a second DB read.
+// Also projects the GENERALIZED anchor (999.1091 C1) for every OTHER recurring
+// type (daily/weekly/biweekly/monthly/interval) via computeNextOccurrenceAnchor
+// (see juggler-backend/src/lib/next-occurrence-anchor.js header) — both branches
+// write the same `next_start` unified anchor column (rolling_anchor /
+// next_occurrence_anchor were dropped — juggler-anchor-column-cleanup), just
+// computed differently per recur type. Both branches share the same preloaded
+// master row to avoid a second DB read.
 //
 // ctx.db (optional): the active knex transaction handle to write through. When the
 // caller runs inside a transaction (batchUpdateTxn), it MUST pass its `trx` here so
-// the rolling_anchor/next_occurrence_anchor UPDATE participates in the same commit/
+// the next_start UPDATE participates in the same commit/
 // rollback boundary as the rest of the batch — otherwise a getDb() write on the base
 // autocommit connection escapes the transaction (WARN ernie-w1-anchor-trx-escape /
 // cookie-C1, 2026-07-04): a later rollback would leave the anchor advanced while the
@@ -868,79 +871,38 @@ async function applyRollingAnchor(ctx) {
     || await _repo.getMasterById(masterId, userId);
   if (_masterForAnchor && isRollingMaster(_masterForAnchor)) {
     var _instanceDate = existing.date ? String(existing.date).slice(0, 10) : null;
-    var _currentAnchor = _masterForAnchor.rolling_anchor
-      ? String(_masterForAnchor.rolling_anchor).slice(0, 10)
+    var _currentAnchor = _masterForAnchor.next_start
+      ? String(_masterForAnchor.next_start).slice(0, 10)
       : null;
     // Option B: anchor `done` to the ACTUAL completion date (today in the user's tz),
     // not the scheduled date, so a late completion pushes the next occurrence out.
     var _completionDate = getNowInTimezone(ctx.tz || _masterForAnchor.tz, _anchorTestClock).todayKey;
     var _newAnchor = computeRollingAnchor(status, _instanceDate, _currentAnchor, _completionDate);
     if (_newAnchor) {
-      // FR-1(a) dual-write (SPEC.md AC1, revised 2026-07-09): `next_start` is
-      // the new unified anchor and becomes the canonical READ path
-      // (expandRecurring.getAnchor / rowToTask), but this leg's write path
-      // DUAL-WRITES — it keeps writing `rolling_anchor` too (ceasing that
-      // legacy write is an explicit follow-on, out of scope here; 34
-      // pre-existing test files still pin it).
-      //
-      // NOTE (cookie ARCH-REVIEW-W2.json W2-ARCH-W2, tracked follow-on — NOT
-      // fixed in this leg): this is ONE of TWO independent next_start writers.
-      // The scheduler-run sweep (runSchedule.js, search "W2-ARCH-W2") advances
-      // the SAME column via a DIFFERENT compute function
-      // (expandRecurring.nextMatchingDate) for the same "first pattern date >=
-      // X" semantics. Both writers MUST keep computing equivalent results for
-      // next_start to stay deterministic regardless of which fires last — see
-      // the ARCH-REVIEW-W2.json finding for the follow-on convergence work.
-      //
-      // Monotonic guard (FIX bert ernie-w2-nextstart-monotonic-race,
-      // 2026-07-09): previously computed in JS from a PRELOADED read of
-      // next_start, then written via a separate .update() — a non-atomic
-      // read-modify-write two concurrent terminal writes to the SAME master
-      // could race (lost update, next_start regresses). GREATEST(COALESCE(...))
-      // computes the max SERVER-SIDE, under the row's write lock, in the SAME
-      // statement that reads next_start's CURRENT value — no window for a
-      // concurrent writer to interleave between read and write.
-      // COALESCE(next_start, ?) makes a NULL current value lose outright (the
-      // new value just wins — nothing yet to be "greater than").
-      // This is belt-and-suspenders alongside computeRollingAnchor's own guard
-      // on rolling_anchor (which already blocks this whole branch from running
-      // when the candidate is stale, see above).
-      //
-      // updated_at: getDb().fn.now() kept literal (not _db.fn.now()) — fn.now()
-      // is a connection-agnostic raw-SQL fragment builder (FIX-4.2 PIN,
-      // facade-fnnow-pin.test.js), unrelated to which knex instance drives the
-      // .update() call below. Atomicity comes from the QUERY executing via
-      // _db (trx when threaded), not from which object built the raw literal.
+      // next_start is the single unified anchor column. The legacy
+      // rolling_anchor / next_occurrence_anchor columns have been dropped.
+      // Monotonic guard: GREATEST(COALESCE(...)) computes the max SERVER-SIDE
+      // to prevent a concurrent terminal write from regressing the anchor.
       await _db('task_masters')
         .where({ id: masterId, user_id: userId })
         .update({
-          rolling_anchor: _newAnchor,
           next_start: getDb().raw('GREATEST(COALESCE(next_start, ?), ?)', [_newAnchor, _newAnchor]),
           updated_at: getDb().fn.now()
         });
     }
   } else if (_masterForAnchor && isPatternRecurMaster(_masterForAnchor)) {
     var _pInstanceDate = existing.date ? String(existing.date).slice(0, 10) : null;
-    var _pCurrentAnchor = _masterForAnchor.next_occurrence_anchor
-      ? String(_masterForAnchor.next_occurrence_anchor).slice(0, 10)
+    var _pCurrentAnchor = _masterForAnchor.next_start
+      ? String(_masterForAnchor.next_start).slice(0, 10)
       : null;
     var _pNewAnchor = computeNextOccurrenceAnchor(status, _pInstanceDate, _pCurrentAnchor, _masterForAnchor.recur);
     if (_pNewAnchor) {
-      // FR-1(a) dual-write — same rationale as the rolling branch above, for
-      // the generalized (non-rolling) next_occurrence_anchor column.
-      //
-      // NOTE (cookie ARCH-REVIEW-W2.json W2-ARCH-W2, tracked follow-on): same
-      // two-writer next_start caveat as the rolling branch above — see that
-      // comment. Both this terminal-write path and the runSchedule.js sweep
-      // must keep computing equivalent "first pattern date >= X" results.
-      //
-      // Monotonic guard: SQL GREATEST(COALESCE(...)) — see the rolling branch
-      // above (FIX bert ernie-w2-nextstart-monotonic-race, 2026-07-09) for the
-      // full rationale; identical fix applied here for the pattern branch.
+      // next_start is the single unified anchor column. The legacy
+      // next_occurrence_anchor column has been dropped.
+      // Monotonic guard: same GREATEST(COALESCE(...)) as the rolling branch.
       await _db('task_masters')
         .where({ id: masterId, user_id: userId })
         .update({
-          next_occurrence_anchor: _pNewAnchor,
           next_start: getDb().raw('GREATEST(COALESCE(next_start, ?), ?)', [_pNewAnchor, _pNewAnchor]),
           updated_at: getDb().fn.now()
         });
@@ -949,9 +911,10 @@ async function applyRollingAnchor(ctx) {
 }
 
 // 999.1098 — SINGLE shared gate + master-id resolution for the terminal-event
-// recurrence-anchor projection (covers BOTH anchor fields: rolling_anchor via
-// computeRollingAnchor and next_occurrence_anchor via
-// computeNextOccurrenceAnchor, both inside applyRollingAnchor above).
+// recurrence-anchor projection (covers BOTH anchor computations, both writing
+// the same `next_start` unified anchor column: computeRollingAnchor for
+// rolling masters and computeNextOccurrenceAnchor for pattern-recur masters,
+// both inside applyRollingAnchor above).
 //
 // Every terminal-status write path must funnel through here instead of
 // hand-copying the status gate: the previous hand-copied ['done','skip']

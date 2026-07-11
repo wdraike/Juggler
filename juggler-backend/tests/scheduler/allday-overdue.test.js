@@ -96,8 +96,7 @@ function baseAllDayRow(overrides) {
     master_id: null,
     msft_event_id: null, apple_event_id: null,
     apple_calendar_name: null, cal_sync_origin: null, cal_event_url: null,
-    cal_locked: 0,
-    rolling_anchor: null
+    cal_locked: 0
   }, overrides);
 }
 

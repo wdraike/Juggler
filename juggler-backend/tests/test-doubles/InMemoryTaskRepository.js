@@ -174,7 +174,9 @@ class InMemoryTaskRepository {
       slack_mins: task.slack_mins || null,
       recur_start: task.recur_start || null,
       recur_end: task.recur_end || null,
-      rolling_anchor: task.rolling_anchor || null,
+      // next_start is the single unified anchor column (rolling_anchor /
+      // next_occurrence_anchor dropped — juggler-anchor-column-cleanup).
+      next_start: task.next_start || null,
       disabled_at: task.disabled_at || null,
       disabled_reason: task.disabled_reason || null,
       occurrence_ordinal: task.occurrence_ordinal || null,

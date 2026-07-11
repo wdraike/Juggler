@@ -1,12 +1,12 @@
 /**
- * H3-W6 FIX-4.2 — synced_at / rolling_anchor fn.now() PIN.
+ * H3-W6 FIX-4.2 — synced_at / next_start fn.now() PIN.
  *
  * The W3 RE-REVIEW (Oscar-gated) decided the P1/ADR-0003 timestamp-source
  * correction (new Date(), never db.fn.now()) is SCOPED to the task-table columns
  * the KnexTaskRepository write path stamps. The direct-`.update()` collaborator
  * sites in the facade on:
  *   - cal_sync_ledger.synced_at  (facade L377,427,495,521,564,810 — 6 sites)
- *   - task_masters rolling_anchor's updated_at (facade L410 — 1 site)
+ *   - task_masters next_start's updated_at (facade applyRollingAnchor — 1 site)
  * retain the LEGACY `fn.now()` / `trx.fn.now()` verbatim (ernie W6-1). FIX-3
  * reverted these 7 sites back to fn.now() after a drift.
  *
@@ -20,6 +20,13 @@
  * NOTE: this is the COMPLEMENT of KnexTaskRepository.test.js's P1 proof — there,
  * a tagged fn.now() must NEVER appear (repo write path); here, it MUST appear
  * (out-of-P1-scope collaborator sites). Together they lock the scope boundary.
+ *
+ * RETARGETED (juggler-anchor-column-cleanup W5, 2026-07-11): `rolling_anchor` /
+ * `next_occurrence_anchor` dropped from task_masters; applyRollingAnchor's
+ * `.update()` call now writes `next_start` (the single unified anchor column)
+ * instead of `rolling_anchor` — same call site, same fn.now()-on-updated_at
+ * behavior, only the write-column key changed. The pin below is retargeted to
+ * that key.
  */
 
 process.env.NODE_ENV = 'test';
@@ -119,7 +126,7 @@ beforeEach(() => {
   jest.clearAllMocks();
 });
 
-describe('FIX-4.2 PIN — synced_at / rolling_anchor write fn.now() (legacy, out of P1 scope)', () => {
+describe('FIX-4.2 PIN — synced_at / next_start write fn.now() (legacy, out of P1 scope)', () => {
   test('reactivateDoneFrozen writes synced_at = fn.now() raw (NOT new Date()) on reopen', async () => {
     // done → '' (reopen) drives reactivateDoneFrozen (facade L424-428):
     //   cal_sync_ledger.update({ status:'active', synced_at: getDb().fn.now() })
@@ -139,8 +146,9 @@ describe('FIX-4.2 PIN — synced_at / rolling_anchor write fn.now() (legacy, out
   });
 
   test('applyRollingAnchor writes updated_at = fn.now() raw (NOT new Date()) for a rolling master', async () => {
-    // A rolling master + terminal status drives applyRollingAnchor (facade L408-411):
-    //   task_masters.update({ rolling_anchor, updated_at: getDb().fn.now() })
+    // A rolling master + terminal status drives applyRollingAnchor (facade.js
+    // applyRollingAnchor, isRollingMaster branch):
+    //   task_masters.update({ next_start: GREATEST(...), updated_at: getDb().fn.now() })
     // Queue: fetchTaskWithEventIds(existing) → instance row with a master + date;
     // then loadMaster / applyRollingAnchor reads the rolling master.
     const instance = {
@@ -150,7 +158,7 @@ describe('FIX-4.2 PIN — synced_at / rolling_anchor write fn.now() (legacy, out
     };
     const rollingMaster = {
       id: 'master-pin-2', user_id: TEST_USER.id, recurring: 1,
-      rolling: 1, rolling_window: 7, rolling_anchor: '2026-05-01'
+      rolling: 1, rolling_window: 7, next_start: '2026-05-01'
     };
     resolveQueue.push(instance);       // fetchTaskWithEventIds → existing
     resolveQueue.push(instance);       // possible re-fetch
@@ -162,10 +170,10 @@ describe('FIX-4.2 PIN — synced_at / rolling_anchor write fn.now() (legacy, out
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
       .send({ status: 'done' });
 
-    // Find an update payload carrying rolling_anchor (the applyRollingAnchor site).
-    const anchorWrite = updateCalls.find(u => u && Object.prototype.hasOwnProperty.call(u, 'rolling_anchor'));
+    // Find an update payload carrying next_start (the applyRollingAnchor site).
+    const anchorWrite = updateCalls.find(u => u && Object.prototype.hasOwnProperty.call(u, 'next_start'));
     if (anchorWrite) {
-      // The pin: when the rolling-anchor site fires, updated_at is the tagged
+      // The pin: when the anchor-write site fires, updated_at is the tagged
       // fn.now() raw — legacy behavior preserved (out of P1 scope, ernie W6-1).
       expect(anchorWrite.updated_at).toBe(FN_NOW_TAG);
       expect(anchorWrite.updated_at instanceof Date).toBe(false);
@@ -178,8 +186,8 @@ describe('FIX-4.2 PIN — synced_at / rolling_anchor write fn.now() (legacy, out
       const codeOnly = src
         .replace(/\/\*[\s\S]*?\*\//g, '')
         .replace(/\/\/[^\n]*/g, '');
-      // rolling_anchor update site stamps updated_at via fn.now() (NOT new Date()).
-      expect(codeOnly).toMatch(/rolling_anchor:[^}]*updated_at:\s*getDb\(\)\.fn\.now\(\)/);
+      // next_start update site stamps updated_at via fn.now() (NOT new Date()).
+      expect(codeOnly).toMatch(/next_start:[^}]*updated_at:\s*getDb\(\)\.fn\.now\(\)/);
     }
   });
 
@@ -204,12 +212,12 @@ describe('FIX-4.2 PIN — synced_at / rolling_anchor write fn.now() (legacy, out
       expect(w).not.toMatch(/new Date\(\)/);
     });
 
-    // The rolling_anchor site stamps updated_at via fn.now() (legacy, out of P1 scope).
-    // Bound widened from a fixed {0,80} char window to `[^}]*` (matching the
-    // sibling assertion above, ~line 182) — bert fix, ernie-w2-nextstart-monotonic-race:
-    // the .update({...}) object gained a `next_start: GREATEST(...)` field between
-    // rolling_anchor and updated_at, exceeding the old fixed-width window. The
-    // assertion's INTENT (fn.now(), never new Date(), on this site) is unchanged.
-    expect(codeOnly).toMatch(/rolling_anchor:[^}]*updated_at:\s*getDb\(\)\.fn\.now\(\)/);
+    // The next_start site stamps updated_at via fn.now() (legacy, out of P1 scope).
+    // RETARGETED (juggler-anchor-column-cleanup W5): the .update({...}) object's
+    // key was `rolling_anchor: GREATEST(...)` before this leg; the column was
+    // dropped and the site now writes `next_start: GREATEST(...)` instead — same
+    // call site, same fn.now()-on-updated_at behavior. The assertion's INTENT
+    // (fn.now(), never new Date(), on this site) is unchanged.
+    expect(codeOnly).toMatch(/next_start:[^}]*updated_at:\s*getDb\(\)\.fn\.now\(\)/);
   });
 });

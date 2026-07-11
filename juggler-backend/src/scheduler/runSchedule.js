@@ -602,8 +602,8 @@ async function runScheduleAndPersist(userId, _retries, options) {
     allTasks.push({ id: '_dedup_' + r.source_id + '_' + dateKey, sourceId: r.source_id, date: dateKey, taskType: 'recurring_instance', text: '', status: 'done' });
   });
 
-  // Backfill: rolling tasks whose rolling_anchor is null because the last
-  // completion happened before the rolling-anchor feature shipped (2026-05-20).
+  // Backfill: rolling tasks whose next_start is null because the last
+  // completion happened before the unified-anchor feature shipped.
   // Without an anchor, getAnchor() falls back to recurStart, and the arithmetic
   // projection can land on a date that violates the spacing guarantee. Use the
   // latest done date from recurringHistoryByMaster as the in-memory anchor, and
@@ -612,10 +612,10 @@ async function runScheduleAndPersist(userId, _retries, options) {
   allTasks.forEach(function(t) {
     if (t.taskType !== 'recurring_template') return;
     if (!t.recur || t.recur.type !== 'rolling') return;
-    if (t.rollingAnchor) return; // already set — normal path
+    if (t.nextStart) return; // already set — normal path
     var latestDone = recurringHistoryByMaster[t.id];
     if (!latestDone) return;
-    t.rollingAnchor = latestDone; // fix in-memory for this run
+    t.nextStart = latestDone; // fix in-memory for this run
     _rollingBackfills.push({ id: t.id, anchor: latestDone });
   });
   if (_rollingBackfills.length > 0) {
@@ -625,7 +625,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       return _runScheduleCommand.backfillRollingAnchor(trx, userId, b.id, b.anchor);
     }));
     var _backfillActual = _backfillCounts.reduce(function(s, n) { return s + (n || 0); }, 0);
-    logger.info('[SCHED] rolling_anchor backfill: ' + _backfillActual + '/' + _rollingBackfills.length + ' written: ' +
+    logger.info('[SCHED] rolling-anchor backfill (next_start): ' + _backfillActual + '/' + _rollingBackfills.length + ' written: ' +
       _rollingBackfills.map(function(b) { return b.id + '→' + b.anchor; }).join(', '));
   }
 
