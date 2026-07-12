@@ -181,7 +181,7 @@
             "last_pulled_hash": "5bfbe96b8b2574ad5989ab7c7f6221aee07be159ea95261ede21f1ca56717448",
             "last_pushed_at": "<TS>",
             "last_pushed_hash": "66adce0b07912f00e0818d1176288da5",
-            "last_user_hash": "f871dc8ca22dc1a7e7e7ad34a750ed72",
+            "last_user_hash": "106bae309e2c4d1e58c66bebe7591f0f",
             "miss_count": 0,
             "origin": "juggler",
             "provider": "gcal",
@@ -212,7 +212,7 @@
             "last_pulled_hash": "b580d3bb26e923e36963e921161afc28409d2ea0452309e89f314d93866508af",
             "last_pushed_at": "<TS>",
             "last_pushed_hash": "a6f4051701c9d1aaf9a91a7bf8f0deca",
-            "last_user_hash": "4794933e832a5c95d6c3e938e08ef7c9",
+            "last_user_hash": "5ac1ff66ea625e2d17867dde907b9c60",
             "miss_count": 0,
             "origin": "juggler",
             "provider": "gcal",
@@ -448,8 +448,8 @@
                 "5019ccc557f76792f3489ae9d25c2daf"
               ],
               "last_user_hash": [
-                "f871dc8ca22dc1a7e7e7ad34a750ed72",
-                "a3590b039817acbb53e54ad77604d8f5"
+                "106bae309e2c4d1e58c66bebe7591f0f",
+                "b99fe80ad89933f7547859e7730b3bc6"
               ],
               "task_updated_at": [
                 "2026-06-01 00:00:00",

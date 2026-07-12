@@ -36,7 +36,6 @@ function userHash(task) {
     task.text || '',
     task.when || '',
     task.project || '',
-    task.marker ? 'marker' : '',
     task.notes || '',
     task.url || '',
     task.pri || '',

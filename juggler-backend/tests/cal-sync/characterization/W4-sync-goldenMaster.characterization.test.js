@@ -33,6 +33,10 @@
  *   I  — lock contention (foreign sync_locks row -> 409 + sync:lock_conflict, no writes)
  *   J  — multi-provider (gcal+msft): event deleted on gcal only across the miss
  *        threshold while msft stays live (Bug #4 cross-provider guard)
+ *   K  — marker-only flip (placement_mode -> 'reminder') while an event is
+ *        already missing (miss_count>=1): userHash is marker-invariant post-fix,
+ *        so the repush branch (cal-sync.controller.js ~743) must NOT fire —
+ *        no spurious re-create (BUG-999.1549 regression, 999.1549-calsync-marker-userhash)
  *   L  — write-phase lock lost mid-write (another process/timeout invalidates
  *        it): 503, clean abort before the transaction, zero partial writes
  *        (W4b follow-up, 999.1025 sub-leg jug-syncharness)
@@ -118,6 +122,7 @@ var { assertDbAvailable } = require('../../helpers/requireDB');
 var { makeTask, makeLedgerRow } = require('../helpers/test-fixtures');
 var { sync } = require('../../../src/controllers/cal-sync.controller');
 var tasksWrite = require('../../../src/lib/tasks-write');
+var { userHash, taskHash } = require('../../../src/controllers/cal-sync-helpers');
 
 var H = require('./harness/syncGoldenHarness');
 
@@ -594,6 +599,67 @@ test('J — multi-provider: event deleted on gcal only, msft still live — task
   var run4 = await run('gcal miss 3 — threshold with msft active');
 
   H.checkGolden('J-multi-provider-miss-guard', [run1, run2, run3, run4]);
+});
+
+// ─── K: marker-only flip under miss_count>=1 must NOT trigger a spurious ────
+//        repush (BUG-999.1549 integration-level regression, AC5)
+
+test('K — marker flips (placement_mode -> reminder) while an event is already missing (miss_count>=1): userHash is marker-invariant, so no spurious repush fires (BUG-999.1549)', async () => {
+  await seedTestUser(GCAL_ONLY);
+  // placement_mode defaults to 'anytime' (marker=0) — never overridden at seed time.
+  var task = await seedTask('w4k-1', '2026-06-17 14:00:00');
+  await stabilizeTaskTimestamps();
+
+  // Seed the ledger as if a PRIOR sync already pushed this (marker=0) task and
+  // then missed once (miss_count=1) — the real userHash()/taskHash() of the
+  // task AS PUSHED are stored, exactly like production writes them. The event
+  // is NOT seeded in the simulated remote store, so this run finds it missing
+  // again — same "already missing" setup as axis E/E2, but starting from
+  // miss_count=1 (not 0) so the repush-guard branch (miss_count>=1) is live.
+  await makeLedgerRow({
+    provider: 'gcal', origin: 'juggler', status: 'active',
+    task_id: 'w4k-1', provider_event_id: 'ev-gcal-w4k-1',
+    last_pushed_hash: taskHash(task), last_user_hash: userHash(task), last_pulled_hash: userHash(task),
+    event_start: '2026-06-17T14:00:00.000Z',
+    last_modified_at: '2026-06-10 00:00:00', last_pushed_at: '2026-06-10 00:00:00',
+    task_updated_at: H.FIXED_PAST, synced_at: H.FIXED_PAST, created_at: H.FIXED_PAST,
+    miss_count: 1
+  });
+
+  // The ONLY change since the ledger snapshot: placement_mode -> 'reminder'
+  // (task.marker: 0 -> 1). This is adapter/scheduler-derived (e.g. a calendar
+  // pull flips it from an external event's isTransparent flag) — never a user
+  // edit. No user-editable field (text/when/project/notes/url/pri/location/
+  // tools) changes.
+  await editTask('w4k-1', { placement_mode: 'reminder' });
+  await stabilizeTaskTimestamps();
+
+  var run1 = await run('marker flip via placement_mode, event still missing, miss_count already 1');
+
+  // Hard invariant (BUG-999.1549 fix): userHash is marker-invariant, so
+  // userHash(task) === ledger.last_user_hash STILL holds after the marker
+  // flip -> the repush branch (cal-sync.controller.js ~743, gated on
+  // userHash(task) !== ledger.last_user_hash && miss_count >= 1) must NOT
+  // fire — no 'repush' sync_history action, no ledger unlink (status ->
+  // 'replaced' / task_id -> null). The task instead falls through to the
+  // normal miss-count ladder (miss_count 1 -> 2, still below
+  // MISS_THRESHOLD=3) — no re-create, no deletion. Pre-fix (marker folded
+  // into userHash), the repush branch DOES fire on this exact fixture: it
+  // unlinks the ledger row (status->'replaced', task_id->null, miss_count
+  // reset to 0) and logs a 'repush' sync_history action, setting up an
+  // unnecessary event re-create on the NEXT sync — confirmed via manual
+  // self-mutation (temporarily reintroducing `task.marker ? 'marker' : ''`
+  // into userHash flips this assertion RED).
+  var repushed = ((run1.dbDelta.sync_history || {}).added || []).some(function (h) {
+    return h.action === 'repush' && h.task_id === 'w4k-1';
+  });
+  expect(repushed).toBe(false);
+  var ledgerUnlinked = ((run1.dbDelta.cal_sync_ledger || {}).changed || []).some(function (c) {
+    return c.changes && c.changes.status && c.changes.status[1] === 'replaced';
+  });
+  expect(ledgerUnlinked).toBe(false);
+  expect((run1.dbDelta.tasks_v || {}).removed).toBeUndefined();
+  H.checkGolden('K-marker-flip-no-spurious-repush', [run1]);
 });
 
 // ─── L: write-phase lock lost mid-write (503) ────────────────────────────────

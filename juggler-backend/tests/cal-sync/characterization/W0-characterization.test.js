@@ -214,6 +214,42 @@ describe('C1: Apple repush guard — miss_count >= 1 is required before re-creat
     var taskWithUrl = { text: 'T', when: 'morning', project: '', notes: '', url: 'https://example.com/t', pri: '' };
     expect(userHash(taskNoUrl)).not.toBe(userHash(taskWithUrl));
   });
+
+  // ── C1-7: BUG-999.1549 regression pin ────────────────────────────────────
+  //
+  // userHash's own doc comment (cal-sync-helpers.js:22-27) says it hashes
+  // "user-editable task fields only — excludes scheduler-controlled fields
+  // ... to distinguish genuine user edits ... from scheduler rescheduling".
+  //
+  // task.marker is NOT user-editable: it is a SQL-computed read-model column
+  // (canonical-views.sql tasks_v: `case when m.placement_mode = 'reminder'
+  // then 1 else 0 end`), and placement_mode is flipped for an EXISTING task
+  // by the calendar pull-side adapters (e.g. MicrosoftCalendarAdapter.js
+  // ~270-280) based on the external event's `isTransparent` flag — never by
+  // a user action. Yet userHash currently folds `task.marker ? 'marker' : ''`
+  // into its joined string (cal-sync-helpers.js:39), so a marker-only flip
+  // (caused by the adapter, not the user) changes the hash. This defeats the
+  // miss_count/repush safety guard at cal-sync.controller.js:743-761 (fires
+  // when userHash(task) !== ledger.last_user_hash && miss_count >= 1), which
+  // caused real data loss: 8 tasks hard-deleted 2026-07-11 (BUG-999.1549).
+  //
+  // RED on current code: task.marker is still hashed, so this FAILS until
+  // the `task.marker ? 'marker' : ''` line is removed from userHash.
+  it('C1-7: BUG-999.1549 — real userHash is INVARIANT to task.marker (adapter/scheduler-derived, not user-editable)', function () {
+    var base = {
+      text: 'Cut Grass',
+      when: 'anytime',
+      project: 'Yard',
+      notes: 'front and back',
+      url: 'https://example.com/lawn',
+      pri: 'P3',
+      location: ['home', 'outdoors'],
+      tools: ['mower', 'edger']
+    };
+    var markerOff = Object.assign({}, base, { marker: 0 });
+    var markerOn  = Object.assign({}, base, { marker: 1 });
+    expect(userHash(markerOff)).toBe(userHash(markerOn));
+  });
 });
 
 // ─── B4: Sync window — [user-tz local midnight today, now + 60 days] ─────────
