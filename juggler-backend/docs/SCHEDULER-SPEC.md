@@ -1490,9 +1490,9 @@ Canonical design rule `DESIGN-RULING-overdue-vs-unplaceable.md`: overdue = past-
 
 → **DB-single-source is W1 done, W3 WIP-unmerged, W2+W4 not built. W2 is the load-bearing scheduler-core change.**
 
-### F3.3 Recurring-Overdue Lifecycle (DEFERRED, brain #88203 / #88529)
+### F3.3 Recurring-Overdue Lifecycle (IMPLEMENTED — re-verified 2026-07-12; was DEFERRED, brain #88203 / #88529)
 
-R50 Leg-1 SHIPPED (`8e029e7`): past FIXED/RIGID-RECURRING pin overdue at original date. **DEFERRED to a `recurring-overdue-lifecycle` leg (backlog 999.801):** R50.0 recurrence-PERIOD-boundary implied-due + recurring-split implied-due, reconciled with auto-missed R32.4. R50.6/R50.7/R50.8 (computed-on-read overdue, materialized `implied_deadline`, shared `getNowInTimezone`) landed on `5ec3f20a`/`bb2c9fc`.
+R50 Leg-1 SHIPPED (`8e029e7`): past FIXED/RIGID-RECURRING pin overdue at original date. R50.0 recurrence-PERIOD-boundary implied-due (`recurringPeriodEndKey`) is **no longer deferred** — it now delegates to the ruled SSOT `computeRecurringDeadlineKey` (`shared/scheduler/missedHelpers.js`) via `juggler-backend/src/slices/scheduler/domain/logic/recurringPeriod.js` (moved there 999.1198 so `slices/task/facade` can compute a deadline without lazy-requiring `runSchedule`), shipped by the scheduler SSOT consolidation (commit `3583db08`, 999.1184/999.1191/999.1187/999.1190). R50.6/R50.7/R50.8 (computed-on-read overdue, materialized `implied_deadline`, shared `getNowInTimezone`) landed on `5ec3f20a`/`bb2c9fc`.
 
 → **Recurring-overdue lifecycle: read-side (R50.6/7/8) DONE; the recurrence-period-boundary implied-due + R32.4 auto-missed reconciliation NOT BUILT (999.801).** Partly overlaps the WIP `leg/juggler-overdue-reschedule` branch (F1.1) which is doing recurring forward-roll + effective-deadline overdue.
 
