@@ -1594,14 +1594,14 @@ function tryPlaceQueued(item, dates, dayWindows, dayBlocks, dayOcc, placedById, 
     if (slot) return { slot: slot, overdue: true, relaxed: true };
   }
 
-  // Today's overdue recurring flexible tasks: if the designated when-window has
-  // passed and the normal retries all failed, force a latest-slot relaxed-when
-  // placement so the task stays visible and the user can still complete it.
-  if (item.preferLatestSlot) {
-    slot = findLatestSlot(item, dates, dayWindows, dayBlocks, dayOcc,
-      Object.assign({}, base, { relaxWhen: true }));
-    if (slot) return { slot: slot, relaxed: true };
-  }
+  // NOTE (999.leg juggler-overdue-flex-reschedule, David ruling 2026-07-12):
+  // this rung used to force a latest-slot relaxed-when placement here (ignoring
+  // the task's own declared `when` window) purely to keep an overdue-today
+  // ANYTIME recurring instance "visible" once its genuine window was exhausted.
+  // Removed: once an instance's placement options are exhausted within its own
+  // flex window, it must go to `unscheduled` (result.unplaced, via the
+  // populateFailDiag/applyPlacementFailReason path below) — never be
+  // force-crammed into a leftover slot outside its own when-window.
 
   // Leg C (scheduler-recurring-rework §3) — flexible-TPC EARLIEST-START RELAX.
   // The spaced-day-forward search failed; retry over the WHOLE cycle (relax the soft
