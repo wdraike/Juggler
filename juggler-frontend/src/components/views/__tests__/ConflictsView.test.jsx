@@ -547,3 +547,373 @@ describe('ConflictsView — R50.3 overdue bucketing (past fixed event)', () => {
     expect(badge && badge.textContent).toBe('(0)');
   });
 });
+
+// ── W2 (juggler-issues-split-overdue-collapse) — "{N} chunks overdue" badge ──
+// bert added a chunk-count badge in renderTaskSection, gated on
+// `sec.key === 'overdue' && t._overdueChunkCount > 1` (ConflictsView.jsx:182-186).
+// bert REFER->telly: no test existed for the badge itself. These tests close
+// that gap using REAL computeConflictBuckets fixtures — the same
+// split-occurrence-chunk shape as conflictBucketsSplitOverdueCollapse.test.js
+// (which pins the GROUPING computation) — so this file pins the RENDER of
+// that computation's output, not a hand-mocked bucket shape.
+describe('ConflictsView — W2 overdue chunk-count badge ("{N} chunks overdue")', () => {
+  function openOverdueAndUnplaced() {
+    localStorage.setItem('juggler-issues-collapsed', JSON.stringify({
+      actionGroup: false, infoGroup: true, overdue: false, unplaced: false,
+      dataIssues: true, stale: true, blocked: true, unscheduled: true
+    }));
+  }
+  afterEach(() => { localStorage.clear(); });
+
+  // 4 chunk rows of ONE overdue split occurrence — collapses via
+  // groupBySplitOccurrence() (conflictBuckets.js) into a single overdue entry
+  // carrying _overdueChunkCount: 4.
+  function overdueSplitChunk(id) {
+    return {
+      id: id, text: 'Weekly Review', splitGroup: 'occA', splitTotal: 4,
+      sourceId: 'M-occA', date: '2026-06-15', overdue: true
+    };
+  }
+
+  // A DIFFERENT split occurrence reported as unplaced (not overdue) —
+  // grouped by the SAME helper into _unplacedChunkCount: 4 on the
+  // unplacedForDisplay bucket, rendered by the 'unplaced' (Unscheduled)
+  // section — a distinct sec.key from 'overdue'.
+  function unplacedSplitChunk(id) {
+    return {
+      id: id, text: 'Backlog Cleanup', splitGroup: 'occB', splitTotal: 4,
+      sourceId: 'M-occB', date: '2026-06-18', _unplacedReason: 'no_slot'
+    };
+  }
+
+  // Find a leaf element (no child elements — i.e. the actual text-bearing
+  // node, not an ancestor wrapper) whose trimmed textContent matches `re`.
+  // Needed because the badge's JSX (`{t._overdueChunkCount} chunks overdue`)
+  // splits into two text nodes under one <div>, defeating an exact
+  // getByText() match (same split-text-node issue as findSpanContaining above).
+  function findAllLeafMatching(container, re) {
+    var all = container.querySelectorAll('div, span');
+    var out = [];
+    for (var i = 0; i < all.length; i++) {
+      if (all[i].children.length === 0 && re.test(all[i].textContent.trim())) out.push(all[i]);
+    }
+    return out;
+  }
+
+  test('W2-a: collapsed overdue row with _overdueChunkCount:4 renders "4 chunks overdue" badge', () => {
+    openOverdueAndUnplaced();
+    var chunks = [
+      overdueSplitChunk('w2-a1'), overdueSplitChunk('w2-a2'),
+      overdueSplitChunk('w2-a3'), overdueSplitChunk('w2-a4')
+    ];
+    var { container } = render(<ConflictsView {...makeProps({
+      allTasks: chunks,
+      statuses: { 'w2-a1': '', 'w2-a2': '', 'w2-a3': '', 'w2-a4': '' }
+    })} />);
+
+    // Grouping collapsed the 4 chunk rows to exactly one rendered TaskCard.
+    expect(container.querySelectorAll('[data-testid="task-card"]').length).toBe(1);
+    // SELF-MUTATION: change bert's gate from `> 1` to `> 4` (or delete the
+    // badge block entirely) → this assertion FAILS.
+    var matches = findAllLeafMatching(container, /chunks overdue/);
+    expect(matches).toHaveLength(1);
+    expect(matches[0].textContent.trim()).toBe('4 chunks overdue');
+  });
+
+  test('W2-b: non-split overdue row (no _overdueChunkCount, count<=1) does NOT render the badge', () => {
+    openOverdueAndUnplaced();
+    var single = { id: 'w2-single', text: 'Single Overdue Task', overdue: true, date: '2026-06-16' };
+    var { container } = render(<ConflictsView {...makeProps({
+      allTasks: [single], statuses: { 'w2-single': '' }
+    })} />);
+
+    expect(screen.getByText('Single Overdue Task')).toBeInTheDocument();
+    // count===1 for this row (no splitGroup/sourceId collision) → groupBySplitOccurrence
+    // returns the bare task with NO _overdueChunkCount field at all.
+    // SELF-MUTATION: change the gate from `t._overdueChunkCount > 1` to
+    // `t._overdueChunkCount >= 1` (or drop the `> 1` check) →
+    // "undefined chunks overdue" or a stray badge would render → FAILS.
+    expect(findAllLeafMatching(container, /chunks overdue/)).toHaveLength(0);
+  });
+
+  test('W2-c: badge is scoped to the Overdue section only — does not leak into Unscheduled', () => {
+    openOverdueAndUnplaced();
+    var overdueChunks = [
+      overdueSplitChunk('w2-c-ov1'), overdueSplitChunk('w2-c-ov2'),
+      overdueSplitChunk('w2-c-ov3'), overdueSplitChunk('w2-c-ov4')
+    ];
+    var unplacedChunks = [
+      unplacedSplitChunk('w2-c-un1'), unplacedSplitChunk('w2-c-un2'),
+      unplacedSplitChunk('w2-c-un3'), unplacedSplitChunk('w2-c-un4')
+    ];
+
+    var { container } = render(<ConflictsView {...makeProps({
+      allTasks: overdueChunks,
+      statuses: { 'w2-c-ov1': '', 'w2-c-ov2': '', 'w2-c-ov3': '', 'w2-c-ov4': '' },
+      unplaced: unplacedChunks
+    })} />);
+
+    // Both occurrences collapsed to one card each — grouping ran on BOTH buckets
+    // (overdue via `overdue`, the other via `unplacedForDisplay`).
+    expect(container.querySelectorAll('[data-testid="task-card"]').length).toBe(2);
+    expect(screen.getByText('Weekly Review')).toBeInTheDocument();
+    var backlogCardEl = screen.getByText('Backlog Cleanup');
+
+    // The badge renders EXACTLY ONCE in the whole DOM — for the Overdue
+    // occurrence only — even though the Unscheduled occurrence ALSO carries a
+    // >1 chunk-count field (_unplacedChunkCount: 4). If the
+    // `sec.key === 'overdue'` guard were dropped (renderTaskSection is shared
+    // across both sections), the Unscheduled row would ALSO render "chunks
+    // overdue" text and this count would be 2.
+    // SELF-MUTATION: remove the `sec.key === 'overdue' &&` clause in
+    // ConflictsView.jsx (leaving only `t._overdueChunkCount > 1`) → matches
+    // grows to 2 (both rows read the same field name coincidentally? no —
+    // more realistically, widen the gate to fire on ANY chunk-count-bearing
+    // field) → FAILS.
+    var matches = findAllLeafMatching(container, /chunks overdue/);
+    expect(matches).toHaveLength(1);
+    expect(matches[0].textContent.trim()).toBe('4 chunks overdue');
+
+    // Directly confirm the Unscheduled row's own DOM subtree carries no
+    // "chunks overdue" text (the two badge concepts — Overdue's
+    // "_overdueChunkCount" and Unscheduled's own "_unplacedChunkCount" — stay
+    // textually and structurally distinct. As of the W2b fix below, the
+    // Unscheduled section DOES render its OWN badge off this same fixture
+    // ("4 chunks unplaced" — see the W2b describe block), so this assertion
+    // is scoped to confirming no cross-contamination of the OVERDUE badge
+    // text into the Unscheduled row, not the absence of any badge at all).
+    var unplacedRow = backlogCardEl.parentElement;
+    expect(unplacedRow.textContent).not.toMatch(/chunks overdue/);
+  });
+
+  // zoe-warn-section-scope-tautology (zoe-REVIEW.json, WARN, confidence:high) —
+  // W2-c above uses fixtures where each occurrence carries a DISJOINT field set
+  // (the overdue occurrence only has `_overdueChunkCount`; the unplaced occurrence
+  // only has `_unplacedChunkCount`), so the `sec.key === 'overdue'` guard in
+  // ConflictsView.jsx is never actually exercised — the field gate alone already
+  // confines each badge to the row that has that field. Proven: perl-removing the
+  // `sec.key === 'overdue' &&` clause still passes W2-c's 6 assertions (29/29 whole
+  // suite) because no row in that fixture ever carries BOTH fields at once.
+  //
+  // This test closes that gap for real: the Overdue-section occurrence's raw chunk
+  // rows are given an EXTRA, pre-set `_unplacedChunkCount: 4` field directly on the
+  // fixture (simulating a naive/wrong upstream computation that stamped BOTH
+  // chunk-count fields onto the same row instead of only the bucket-appropriate
+  // one). `groupBySplitOccurrence` in conflictBuckets.js carries any pre-existing
+  // field on the representative task straight through its `Object.assign` merge, so
+  // the grouped result genuinely has `_overdueChunkCount:2` (computed) AND
+  // `_unplacedChunkCount:4` (carried through) on the SAME object, rendered ONLY in
+  // the Overdue section (never added to `unplaced`). If the `sec.key === 'overdue'`
+  // guard on the "chunks unplaced" block were removed or wrong, this row would
+  // render "4 chunks unplaced" text INSIDE the Overdue section — genuinely detectable,
+  // unlike W2-c's disjoint fixture.
+  test('W2-d (zoe-warn-section-scope-tautology): an Overdue-section row that ALSO carries _unplacedChunkCount>1 (dual-field, simulating a naive bug) does NOT render "chunks unplaced" — pins the sec.key==\'unplaced\' guard for real', () => {
+    openOverdueAndUnplaced();
+    function overdueChunkWithFakeUnplacedField(id) {
+      return {
+        id: id, text: 'Weekly Review', splitGroup: 'occE', splitTotal: 2,
+        sourceId: 'M-occE', date: '2026-06-15', overdue: true,
+        // Pre-set on the RAW input row (not computed) -- survives
+        // groupBySplitOccurrence's Object.assign({}, g.task, augmented) merge,
+        // so the grouped Overdue-section row ends up with BOTH fields.
+        _unplacedChunkCount: 4
+      };
+    }
+    var chunks = [
+      overdueChunkWithFakeUnplacedField('w2-d-ov1'),
+      overdueChunkWithFakeUnplacedField('w2-d-ov2')
+    ];
+    var { container } = render(<ConflictsView {...makeProps({
+      allTasks: chunks,
+      statuses: { 'w2-d-ov1': '', 'w2-d-ov2': '' }
+    })} />);
+
+    expect(container.querySelectorAll('[data-testid="task-card"]').length).toBe(1);
+    // Sanity: confirm the dual-field row really was produced (both fields present
+    // on the same rendered occurrence) -- otherwise this test would prove nothing.
+    var overdueMatches = findAllLeafMatching(container, /chunks overdue/);
+    expect(overdueMatches).toHaveLength(1);
+    expect(overdueMatches[0].textContent.trim()).toBe('2 chunks overdue');
+
+    // THE PIN: even though this row carries _unplacedChunkCount:4 (>1), it is
+    // rendered by the 'overdue' section, so the "chunks unplaced" block must NOT
+    // render. SELF-MUTATION: remove `sec.key === 'unplaced' &&` from
+    // ConflictsView.jsx's unplaced-badge block (leaving only
+    // `t._unplacedChunkCount > 1`) -> this assertion FAILS (finds "4 chunks
+    // unplaced" text rendered inside the Overdue section).
+    expect(findAllLeafMatching(container, /chunks unplaced/)).toHaveLength(0);
+  });
+});
+
+// ── W2b (juggler-issues-split-overdue-collapse iter2) — "{N} chunks unplaced" badge ──
+// bert added a matching chunk-count badge for the Unscheduled section in
+// renderTaskSection, gated on `sec.key === 'unplaced' && t._unplacedChunkCount > 1`
+// (ConflictsView.jsx:191-195), resolving ernie's consistency finding
+// (ernie-info-unplaced-count-indicator-gap: the data already collapsed N chunks
+// into 1 row via groupBySplitOccurrence(), but no UI surfaced the count — only
+// the Overdue section's W2 badge did). bert REFER->telly: no test existed for
+// this second badge. These tests mirror the W2-a/b/c pattern above exactly,
+// using REAL computeConflictBuckets fixtures (same split-occurrence-chunk shape
+// as conflictBucketsSplitOverdueCollapse.test.js) so the render is pinned
+// against the actual grouping computation, not a hand-mocked bucket shape.
+describe('ConflictsView — W2b unplaced chunk-count badge ("{N} chunks unplaced")', () => {
+  function openOverdueAndUnplaced() {
+    localStorage.setItem('juggler-issues-collapsed', JSON.stringify({
+      actionGroup: false, infoGroup: true, overdue: false, unplaced: false,
+      dataIssues: true, stale: true, blocked: true, unscheduled: true
+    }));
+  }
+  afterEach(() => { localStorage.clear(); });
+
+  // 4 chunk rows of ONE unplaced split occurrence — collapses via
+  // groupBySplitOccurrence() (conflictBuckets.js), applied to
+  // unplacedForDisplay, into a single unplaced entry carrying
+  // _unplacedChunkCount: 4.
+  function unplacedSplitChunk(id) {
+    return {
+      id: id, text: 'Backlog Cleanup', splitGroup: 'occC', splitTotal: 4,
+      sourceId: 'M-occC', date: '2026-06-18', _unplacedReason: 'no_slot'
+    };
+  }
+
+  // A DIFFERENT split occurrence reported as overdue (not unplaced) — grouped
+  // by the SAME helper into _overdueChunkCount: 4 on the `overdue` bucket,
+  // rendered by the 'overdue' section — a distinct sec.key from 'unplaced'.
+  function overdueSplitChunk(id) {
+    return {
+      id: id, text: 'Weekly Review', splitGroup: 'occD', splitTotal: 4,
+      sourceId: 'M-occD', date: '2026-06-15', overdue: true
+    };
+  }
+
+  // Find a leaf element (identical helper to the W2 describe above) whose
+  // trimmed textContent matches `re` — needed because the badge's JSX
+  // (`{t._unplacedChunkCount} chunks unplaced`) splits into two text nodes
+  // under one <div>, defeating an exact getByText() match.
+  function findAllLeafMatching(container, re) {
+    var all = container.querySelectorAll('div, span');
+    var out = [];
+    for (var i = 0; i < all.length; i++) {
+      if (all[i].children.length === 0 && re.test(all[i].textContent.trim())) out.push(all[i]);
+    }
+    return out;
+  }
+
+  test('W2b-a: collapsed unplaced row with _unplacedChunkCount:4 renders "4 chunks unplaced" badge', () => {
+    openOverdueAndUnplaced();
+    var chunks = [
+      unplacedSplitChunk('w2b-a1'), unplacedSplitChunk('w2b-a2'),
+      unplacedSplitChunk('w2b-a3'), unplacedSplitChunk('w2b-a4')
+    ];
+    var { container } = render(<ConflictsView {...makeProps({ unplaced: chunks })} />);
+
+    // Grouping collapsed the 4 chunk rows to exactly one rendered TaskCard.
+    expect(container.querySelectorAll('[data-testid="task-card"]').length).toBe(1);
+    // SELF-MUTATION: change bert's gate from `> 1` to `> 4` (or delete the
+    // badge block entirely) → this assertion FAILS.
+    var matches = findAllLeafMatching(container, /chunks unplaced/);
+    expect(matches).toHaveLength(1);
+    expect(matches[0].textContent.trim()).toBe('4 chunks unplaced');
+  });
+
+  test('W2b-b: non-split unplaced row (no _unplacedChunkCount, count<=1) does NOT render the badge', () => {
+    openOverdueAndUnplaced();
+    var single = { id: 'w2b-single', text: 'Single Unplaced Task', date: '2026-06-16', _unplacedReason: 'no_slot' };
+    var { container } = render(<ConflictsView {...makeProps({ unplaced: [single] })} />);
+
+    expect(screen.getByText('Single Unplaced Task')).toBeInTheDocument();
+    // count===1 for this row (no splitGroup/sourceId collision) → groupBySplitOccurrence
+    // returns the bare task with NO _unplacedChunkCount field at all.
+    // SELF-MUTATION: change the gate from `t._unplacedChunkCount > 1` to
+    // `t._unplacedChunkCount >= 1` (or drop the `> 1` check) →
+    // "undefined chunks unplaced" or a stray badge would render → FAILS.
+    expect(findAllLeafMatching(container, /chunks unplaced/)).toHaveLength(0);
+  });
+
+  test('W2b-c: badge is scoped to the Unscheduled section only — does not leak into Overdue', () => {
+    openOverdueAndUnplaced();
+    var unplacedChunks = [
+      unplacedSplitChunk('w2b-c-un1'), unplacedSplitChunk('w2b-c-un2'),
+      unplacedSplitChunk('w2b-c-un3'), unplacedSplitChunk('w2b-c-un4')
+    ];
+    var overdueChunks = [
+      overdueSplitChunk('w2b-c-ov1'), overdueSplitChunk('w2b-c-ov2'),
+      overdueSplitChunk('w2b-c-ov3'), overdueSplitChunk('w2b-c-ov4')
+    ];
+
+    var { container } = render(<ConflictsView {...makeProps({
+      allTasks: overdueChunks,
+      statuses: { 'w2b-c-ov1': '', 'w2b-c-ov2': '', 'w2b-c-ov3': '', 'w2b-c-ov4': '' },
+      unplaced: unplacedChunks
+    })} />);
+
+    // Both occurrences collapsed to one card each — grouping ran on BOTH
+    // buckets (overdue via `overdue`, unplaced via `unplacedForDisplay`).
+    expect(container.querySelectorAll('[data-testid="task-card"]').length).toBe(2);
+    expect(screen.getByText('Backlog Cleanup')).toBeInTheDocument();
+    var overdueCardEl = screen.getByText('Weekly Review');
+
+    // The badge renders EXACTLY ONCE in the whole DOM — for the Unscheduled
+    // occurrence only — even though the Overdue occurrence ALSO carries a
+    // >1 chunk-count field (_overdueChunkCount: 4). If the
+    // `sec.key === 'unplaced'` guard were dropped (renderTaskSection is
+    // shared across both sections), the Overdue row would ALSO render
+    // "chunks unplaced" text and this count would be 2.
+    // SELF-MUTATION: remove the `sec.key === 'unplaced' &&` clause in
+    // ConflictsView.jsx (leaving only `t._unplacedChunkCount > 1`) → matches
+    // grows to 2 → FAILS.
+    var matches = findAllLeafMatching(container, /chunks unplaced/);
+    expect(matches).toHaveLength(1);
+    expect(matches[0].textContent.trim()).toBe('4 chunks unplaced');
+
+    // Directly confirm the Overdue row's own DOM subtree carries no
+    // "chunks unplaced" text — the INVERSE of W2-c above (which confirms the
+    // Unscheduled row carries no "chunks overdue" text). The two badge
+    // strings are distinct, and each is scoped to its own section only.
+    var overdueRow = overdueCardEl.parentElement;
+    expect(overdueRow.textContent).not.toMatch(/chunks unplaced/);
+  });
+
+  // zoe-warn-section-scope-tautology — INVERSE of W2-d above. W2b-c's fixture
+  // gives each occurrence a disjoint field set, so the `sec.key === 'unplaced'`
+  // guard is never actually exercised (proven: removing it still passes all 6
+  // W2/W2b badge tests, 29/29 whole suite). This test crafts an Unscheduled-section
+  // row whose raw chunk rows ALSO carry a pre-set `_overdueChunkCount: 4` field
+  // (simulating a naive bug that stamped both chunk-count fields on the same row).
+  // groupBySplitOccurrence carries the pre-existing field through its
+  // Object.assign merge, so the grouped Unscheduled-section row genuinely has BOTH
+  // `_unplacedChunkCount` (computed) AND `_overdueChunkCount` (carried through) —
+  // rendered only in the 'unplaced' section, never added to `allTasks`/`overdue`.
+  test('W2b-d (zoe-warn-section-scope-tautology): an Unscheduled-section row that ALSO carries _overdueChunkCount>1 (dual-field, simulating a naive bug) does NOT render "chunks overdue" — pins the sec.key==\'overdue\' guard for real', () => {
+    openOverdueAndUnplaced();
+    function unplacedChunkWithFakeOverdueField(id) {
+      return {
+        id: id, text: 'Backlog Cleanup', splitGroup: 'occF', splitTotal: 2,
+        sourceId: 'M-occF', date: '2026-06-18', _unplacedReason: 'no_slot',
+        // Pre-set on the RAW input row (not computed) -- survives
+        // groupBySplitOccurrence's Object.assign({}, g.task, augmented) merge,
+        // so the grouped Unscheduled-section row ends up with BOTH fields.
+        _overdueChunkCount: 4
+      };
+    }
+    var chunks = [
+      unplacedChunkWithFakeOverdueField('w2b-d-un1'),
+      unplacedChunkWithFakeOverdueField('w2b-d-un2')
+    ];
+    var { container } = render(<ConflictsView {...makeProps({ unplaced: chunks })} />);
+
+    expect(container.querySelectorAll('[data-testid="task-card"]').length).toBe(1);
+    // Sanity: confirm the dual-field row really was produced.
+    var unplacedMatches = findAllLeafMatching(container, /chunks unplaced/);
+    expect(unplacedMatches).toHaveLength(1);
+    expect(unplacedMatches[0].textContent.trim()).toBe('2 chunks unplaced');
+
+    // THE PIN: even though this row carries _overdueChunkCount:4 (>1), it is
+    // rendered by the 'unplaced' section, so the "chunks overdue" block must NOT
+    // render. SELF-MUTATION: remove `sec.key === 'overdue' &&` from
+    // ConflictsView.jsx's overdue-badge block (leaving only
+    // `t._overdueChunkCount > 1`) -> this assertion FAILS (finds "4 chunks
+    // overdue" text rendered inside the Unscheduled section).
+    expect(findAllLeafMatching(container, /chunks overdue/)).toHaveLength(0);
+  });
+});

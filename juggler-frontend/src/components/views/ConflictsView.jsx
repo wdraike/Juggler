@@ -175,6 +175,24 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
                       allTasks={allTasks} statuses={statuses}
                       todayDate={todayDate}
                     />
+                    {/* juggler-issues-split-overdue-collapse (W2) — chunk-count indicator
+                        for a collapsed split-occurrence row, Overdue section only (matches
+                        the established _unplacedChunkCount badge pattern already used in
+                        DailyViewUnschedEntry.jsx for the Unscheduled lane). */}
+                    {sec.key === 'overdue' && t._overdueChunkCount > 1 && (
+                      <div style={{ fontSize: 9, color: theme.textMuted, padding: '0 8px 2px' }}>
+                        {t._overdueChunkCount} chunks overdue
+                      </div>
+                    )}
+                    {/* ernie-info-unplaced-count-indicator-gap fix — matching chunk-count
+                        indicator for a collapsed split-occurrence row, Unscheduled section
+                        only (same wording convention as DailyViewUnschedEntry.jsx's
+                        _unplacedChunkCount badge for the Unscheduled lane). */}
+                    {sec.key === 'unplaced' && t._unplacedChunkCount > 1 && (
+                      <div style={{ fontSize: 9, color: theme.textMuted, padding: '0 8px 2px' }}>
+                        {t._unplacedChunkCount} chunks unplaced
+                      </div>
+                    )}
                     {/* Every unplaced task shows a reason chip — fall back to no_slot when
                         the backend left it unset (legacy rows; new rows always carry one). */}
                     {(
