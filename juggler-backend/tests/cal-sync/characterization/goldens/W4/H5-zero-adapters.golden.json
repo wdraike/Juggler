@@ -1,0 +1,19 @@
+[
+  {
+    "label": "zero connected adapters",
+    "statusCode": 200,
+    "body": {
+      "pushed": 0,
+      "pulled": 0,
+      "skipped": 0,
+      "deleted_local": 0,
+      "deleted_remote": 0,
+      "errors": [],
+      "providers": {}
+    },
+    "providerCalls": {},
+    "sse": [],
+    "enqueues": [],
+    "dbDelta": {}
+  }
+]

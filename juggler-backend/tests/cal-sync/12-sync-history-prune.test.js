@@ -53,13 +53,56 @@ var mockMakeStubRegistry = function () {
     getLastSyncedColumn: function() { return 'gcal_last_synced_at'; }
   };
   var adapters = { gcal: fakeGcal };
+  var getConnectedAdapters = function(user) {
+    return [fakeGcal].filter(function(a) { return a.isConnected(user); });
+  };
   return {
     getAllAdapters: function() { return [fakeGcal]; },
-    getConnectedAdapters: function(user) {
-      return [fakeGcal].filter(function(a) { return a.isConnected(user); });
-    },
+    getConnectedAdapters: getConnectedAdapters,
     getAdapter: function(id) { return adapters[id] || null; },
-    registerAdapter: function() {}
+    registerAdapter: function() {},
+    // 999.1025 sub-leg 2: cal-sync.controller.js's Phase 1 gather now lives on
+    // the real facade (see slices/calendar/facade.js:gatherProviderSyncData).
+    // This test replaces the whole facade module, so it needs its own minimal
+    // stand-in — real ledger/task DB reads (this suite seeds neither, so both
+    // resolve empty), stub adapter fetch (no network), no split-merge/Apple
+    // label logic (out of scope for this suite; those fields stay empty).
+    gatherProviderSyncData: async function(user, userId, windowStart, windowEnd, tz, stats, emitProgress) {
+      var connectedAdapters = getConnectedAdapters(user);
+      if (connectedAdapters.length === 0) return { earlyReturn: true };
+
+      var providerData = {};
+      for (var i = 0; i < connectedAdapters.length; i++) {
+        var adapter = connectedAdapters[i];
+        var token = await adapter.getValidAccessToken(user);
+        var events = await adapter.listEvents(token, windowStart.toISOString(), windowEnd.toISOString(), userId);
+        providerData[adapter.providerId] = { token: token, events: events, eventsById: {}, adapter: adapter, partialFailure: false };
+        stats.providers[adapter.providerId] = { pushed: 0, pulled: 0, skipped: 0, deleted_local: 0, deleted_remote: 0, errors: [] };
+      }
+
+      var db = require('../../src/db');
+      var ledgerRecords = await db('cal_sync_ledger')
+        .where('user_id', userId)
+        .where(function() {
+          this.where('status', 'active')
+            .orWhere(function() {
+              this.where('status', 'deleted_local').whereNotNull('provider_event_id');
+            });
+        })
+        .select();
+
+      return {
+        earlyReturn: false,
+        providerData: providerData,
+        ledgerRecords: ledgerRecords,
+        allTasks: [],
+        tasksById: {},
+        mergedFollowers: {},
+        tasksByMasterDate: {},
+        calIngestModeMap: {},
+        calendarLabels: {}
+      };
+    }
   };
 };
 jest.mock('../../src/slices/calendar/facade', () => mockMakeStubRegistry());

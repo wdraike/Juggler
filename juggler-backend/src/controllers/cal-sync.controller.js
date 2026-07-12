@@ -19,7 +19,7 @@ var { getConnectedAdapters } = require('../slices/calendar/facade');
 var calendarFacade = require('../slices/calendar/facade');
 var { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
 var { rowToTask, safeParseJSON } = require('./task.controller');
-var { localToUtc, utcToLocal } = require('../scheduler/dateHelpers');
+var { localToUtc } = require('../scheduler/dateHelpers');
 var { safeTimezone } = require('juggler-shared/scheduler/dateHelpers');
 var { taskHash, userHash, isoToJugglerDate, toMySQLDate, DEFAULT_TIMEZONE, callWithRateLimit } = require('./cal-sync-helpers');
 var sseEmitter = require('../lib/sse-emitter');
@@ -27,13 +27,10 @@ var { acquireLock, releaseLock, refreshLock } = require('../lib/sync-lock');
 var { flushQueueInLock } = require('../lib/task-write-queue');
 var { PLACEMENT_MODES } = require('../lib/placementModes');
 var { isTerminalStatus } = require('../lib/task-status');
-// 999.1217 (W4, SCHEDULER-SPEC.md D6): schedule_cache is no longer read here —
-// task_instances is authoritative for placements incl. split parts (999.841).
-// ConstraintSolver.effectiveDuration is the same pure formula the scheduler
-// used to size a placement; importing it via the facade's named export keeps
-// the JUG-HEX-H6/999.435 boundary rule (never reach into slices/scheduler/domain/
-// directly).
-var { ConstraintSolver } = require('../slices/scheduler/facade');
+// 999.1025 sub-leg 2: the ConstraintSolver.effectiveDuration duration-
+// correction pass (999.1217/D6) moved into gatherProviderSyncData in
+// slices/calendar/facade.js along with the rest of sync()'s Phase 1 — no
+// longer needed at this scope. See that function's JSDoc for the boundary.
 var { isAllDayTaskBackend } = require('../lib/isAllDayTaskBackend');
 var { handleTerminalTaskSync } = require('../lib/cal-sync-helpers');
 const { createLogger } = require('@raike/lib-logger');
@@ -243,328 +240,24 @@ async function sync(req, res) {
     }
 
     // === Phase 1: Gather data from all connected providers ===
-    var connectedAdapters = getConnectedAdapters(req.user);
-    if (connectedAdapters.length === 0) {
+    // 999.1025 sub-leg 2: extracted verbatim into the calendar slice facade
+    // (REFACTOR mode — no behavior change). See gatherProviderSyncData's
+    // JSDoc in slices/calendar/facade.js for the exact boundary this call
+    // replaces (previously inlined here).
+    var phase1Data = await calendarFacade.gatherProviderSyncData(
+      req.user, userId, windowStart, windowEnd, tz, stats, emitProgress
+    );
+    if (phase1Data.earlyReturn) {
       return res.json(stats);
     }
-
-    // Pre-validate tokens before fetching events. Adapters with invalid tokens
-    // are excluded so the ledger phase won't misinterpret missing events as deletions.
-    var validAdapters = [];
-    for (var vai = 0; vai < connectedAdapters.length; vai++) {
-      var va = connectedAdapters[vai];
-      try {
-        await va.getValidAccessToken(req.user);
-        validAdapters.push(va);
-      } catch (err) {
-        var vaErrMsg = err.message || '';
-        var vaIsTokenExpired = RE_AUTH_ERR.test(vaErrMsg);
-        if (vaIsTokenExpired) {
-          var vaEventIdCol = va.getEventIdColumn();
-          var vaTokenCols = vaEventIdCol === 'gcal_event_id'
-            ? { gcal_access_token: null, gcal_refresh_token: null, gcal_token_expiry: null }
-            : vaEventIdCol === 'apple_event_id'
-              ? { apple_cal_password: null }
-              : { msft_cal_access_token: null, msft_cal_refresh_token: null, msft_cal_token_expiry: null };
-          await getDb()('users').where('id', userId).update({ ...vaTokenCols, updated_at: getDb().fn.now() });
-        }
-        stats.errors.push({
-          phase: 'token_validation',
-          provider: va.providerId,
-          error: vaErrMsg,
-          tokenExpired: vaIsTokenExpired,
-          action: vaIsTokenExpired ? 'Please reconnect your calendar in Settings' : undefined
-        });
-        stats.providers[va.providerId] = { error: vaErrMsg, tokenExpired: vaIsTokenExpired };
-        logger.warn('[CAL-SYNC] Token validation failed for ' + va.providerId + ': ' + vaErrMsg);
-      }
-    }
-    if (validAdapters.length === 0) {
-      emitProgress('done', 'No valid calendar connections', 100);
-      return res.json(stats);
-    }
-
-    // Get tokens and fetch events for all validated providers IN PARALLEL
-    var providerData = {}; // { providerId: { token, events, eventsById } }
-    var timeMin = windowStart.toISOString();
-    var timeMax = windowEnd.toISOString();
-
-    await Promise.all(validAdapters.map(async function(adapter) {
-      try {
-        emitProgress('fetch', 'Fetching events...', 5, { provider: adapter.providerId });
-        var token = await adapter.getValidAccessToken(req.user);
-        var events = await adapter.listEvents(token, timeMin, timeMax, userId);
-        emitProgress('fetch', 'Fetched ' + events.length + ' events', 15, { provider: adapter.providerId });
-
-        var eventsById = {};
-        for (var ei = 0; ei < events.length; ei++) {
-          eventsById[events[ei].id] = events[ei];
-          // Apple events: provider_event_id stores the CalDAV URL, not the UID —
-          // index by _url too so ledger lookups work regardless of which key was stored.
-          if (events[ei]._url && !eventsById[events[ei]._url]) {
-            eventsById[events[ei]._url] = events[ei];
-          }
-        }
-
-        providerData[adapter.providerId] = { token: token, events: events, eventsById: eventsById, adapter: adapter, partialFailure: !!events._hasPartialFailure };
-        stats.providers[adapter.providerId] = { pushed: 0, pulled: 0, skipped: 0, deleted_local: 0, deleted_remote: 0, errors: [] };
-      } catch (err) {
-        logger.error('[CAL-SYNC] Event fetch failed for ' + adapter.providerId + ':', err);
-        var errMsg = err.message || '';
-        var isTokenExpired = RE_AUTH_ERR.test(errMsg);
-
-        if (isTokenExpired) {
-          var eventIdCol = adapter.getEventIdColumn();
-          var tokenCols = eventIdCol === 'gcal_event_id'
-            ? { gcal_access_token: null, gcal_refresh_token: null, gcal_token_expiry: null }
-            : eventIdCol === 'apple_event_id'
-              ? { apple_cal_password: null }
-              : { msft_cal_access_token: null, msft_cal_refresh_token: null, msft_cal_token_expiry: null };
-          await getDb()('users').where('id', userId).update({ ...tokenCols, updated_at: getDb().fn.now() });
-        }
-
-        stats.errors.push({
-          phase: 'fetch',
-          provider: adapter.providerId,
-          error: errMsg,
-          tokenExpired: isTokenExpired,
-          action: isTokenExpired ? 'Please reconnect your calendar in Settings' : undefined
-        });
-        stats.providers[adapter.providerId] = {
-          error: errMsg,
-          tokenExpired: isTokenExpired
-        };
-      }
-    }));
-
-    // Load unified ledger and all tasks once
-    // Load active rows AND deleted_local rows that still hold a provider_event_id.
-    // The deleted_local+provider_event_id case arises when deleteTask marks the ledger
-    // before the next sync runs — the provider event is still live. Phase 2's
-    // !task && event branch handles the actual provider DELETE and clears provider_event_id.
-    var ledgerRecords = await getDb()('cal_sync_ledger')
-      .where('user_id', userId)
-      .where(function() {
-        this.where('status', 'active')
-          .orWhere(function() {
-            this.where('status', 'deleted_local').whereNotNull('provider_event_id');
-          });
-      })
-      .select();
-
-    var { fetchTasksWithEventIds } = require('./task.controller');
-    // 999.488/489: signature is (userId, queryBuilder) — the legacy
-    // (db, userId, queryBuilder) shape put getDb() in the userId slot →
-    // ER_NO_TABLES_USED ((select *) subquery on cal_sync_ledger/tasks_v).
-    var allTaskRows = await fetchTasksWithEventIds(userId, function(q) {
-      q.whereNotNull('scheduled_at')
-        .where(function() { this.whereNull('unscheduled').orWhere('unscheduled', 0); });
-    });
-
-    var allTasks = allTaskRows.map(function(r) {
-      var t = rowToTask(r, tz);
-      t._recurring = r.recurring;
-      t._generated = r.generated;
-      t._scheduled_at = r.scheduled_at;
-      t._updated_at = r.updated_at;
-      t._marker = r.marker;
-      t.marker = !!r.marker;
-      t.user_id = r.user_id; // needed by Apple adapter's createEvent
-      // rowToTask only derives local date/time for user-anchored tasks
-      // (recurring / generated / marker / placement_mode = 'fixed')
-      // so the scheduler doesn't re-bias off stale auto-placements. Sync is
-      // a different consumer: it needs the local date/time for buildEventBody
-      // and for the push-filter (!time && when !== 'allday' → skip). Without
-      // this, flexible tasks (e.g. one-off with when='morning,afternoon,…')
-      // get skipped from every sync and never land on the calendar. Localize
-      // from scheduled_at here for display purposes only — this does not
-      // write back to the DB and does not affect the next scheduler run.
-      if (r.scheduled_at && (!t.date || !t.time)) {
-        var local = utcToLocal(r.scheduled_at, tz);
-        if (local) {
-          if (!t.date) t.date = local.date;
-          if (!t.time) t.time = local.time;
-          if (!t.day) t.day = local.day;
-        }
-      }
-      return t;
-    });
-
-    var tasksById = {};
-    for (var ti = 0; ti < allTasks.length; ti++) {
-      tasksById[allTasks[ti].id] = allTasks[ti];
-    }
-
-    // Contiguous-split merge (#33 finding #7). Each split chunk of an
-    // occurrence lives as its own task_instances row — so a 3-hour task
-    // cut into 6×30-min contiguous blocks persists as 6 separate tasks
-    // and, without this pass, syncs as 6 separate GCal events. Users
-    // see a stack of "Task (chunk-like titles)" instead of one span.
-    //
-    // Group sibling chunks by (master_id, occurrence_ordinal), sort by
-    // split_ordinal, find contiguous runs (where chunk N's end equals
-    // chunk N+1's start). For each run longer than 1:
-    //   - LEADER = first chunk. Mutate its in-memory dur to the run's
-    //     total, append "(parts X-Y/N)" to the title when the run doesn't
-    //     cover all of the original chunks, and let it push as normal.
-    //   - FOLLOWERS = chunks 2..N in the run. Marked in `mergedFollowers`
-    //     to suppress from the push loop below, and any existing ledger
-    //     row for them gets queued for delete (their old one-per-chunk
-    //     GCal event disappears and the leader's single merged event
-    //     takes over).
-    // The hash-skip in the ledger loop handles steady-state updates —
-    // hash now sees merged dur + new title, so the first post-deploy
-    // sync will re-push each merged leader with the new shape; after
-    // that hash matches and the sync is a no-op for that task.
-    var mergedFollowers = {}; // taskId -> leaderId (suppress in push loop)
-    var mergedLeaderInfo = {}; // leaderId -> { leaderDur, titleSuffix }
-    (function mergeContiguousSplitChunks() {
-      var byOccurrence = {};
-      allTaskRows.forEach(function(r) {
-        var tot = Number(r.split_total) || 1;
-        if (tot <= 1) return;
-        if (!r.master_id || r.occurrence_ordinal == null) return;
-        var key = r.master_id + '|' + r.occurrence_ordinal;
-        if (!byOccurrence[key]) byOccurrence[key] = [];
-        byOccurrence[key].push(r);
-      });
-      Object.keys(byOccurrence).forEach(function(k) {
-        var chunks = byOccurrence[k].slice().sort(function(a, b) {
-          return (Number(a.split_ordinal) || 1) - (Number(b.split_ordinal) || 1);
-        });
-        // Build contiguous runs. "Contiguous" = chunk N's end (UTC ms) equals
-        // chunk N+1's start (UTC ms) within a 30-second tolerance (scheduler
-        // rounds to 15-minute slots so drift is never real).
-        var runs = [];
-        var current = null;
-        chunks.forEach(function(c) {
-          if (!c.scheduled_at) return;
-          var startMs = new Date(String(c.scheduled_at).replace(' ', 'T') + 'Z').getTime();
-          var endMs = startMs + ((Number(c.dur) || 30) * 60000);
-          if (current && Math.abs(current.endMs - startMs) < 30000) {
-            current.chunks.push(c);
-            current.endMs = endMs;
-          } else {
-            current = { chunks: [c], startMs: startMs, endMs: endMs };
-            runs.push(current);
-          }
-        });
-        runs.forEach(function(run) {
-          if (run.chunks.length < 2) {
-            // Non-contiguous singleton chunk: still part of a split task.
-            // Add a "(X/N)" suffix so the user can see which part it is.
-            var c = run.chunks[0];
-            var tot = Number(c.split_total) || 1;
-            if (tot > 1) {
-              var so = Number(c.split_ordinal) || 1;
-              mergedLeaderInfo[c.id] = {
-                leaderDur: c.dur != null ? Number(c.dur) : null,
-                titleSuffix: ' (' + so + '/' + tot + ')'
-              };
-            }
-            return;
-          }
-          var leader = run.chunks[0];
-          var total = chunks.length;
-          var coversAll = run.chunks.length === total;
-          var firstPart = Number(leader.split_ordinal) || 1;
-          var lastPart = Number(run.chunks[run.chunks.length - 1].split_ordinal) || run.chunks.length;
-          mergedLeaderInfo[leader.id] = {
-            leaderDur: Math.round((run.endMs - run.startMs) / 60000),
-            titleSuffix: coversAll ? '' : ' (parts ' + firstPart + '-' + lastPart + '/' + total + ')'
-          };
-          for (var ci = 1; ci < run.chunks.length; ci++) {
-            mergedFollowers[run.chunks[ci].id] = leader.id;
-          }
-        });
-      });
-      // Apply mutations to the in-memory task objects. Leaders get merged
-      // dur + optional title suffix; followers are left untouched here
-      // and filtered later in the push loop + ledger-follower deletes.
-      for (var mi = 0; mi < allTasks.length; mi++) {
-        var info = mergedLeaderInfo[allTasks[mi].id];
-        if (!info) continue;
-        if (info.leaderDur != null) allTasks[mi].dur = info.leaderDur;
-        if (info.titleSuffix) allTasks[mi].text = (allTasks[mi].text || '') + info.titleSuffix;
-      }
-    })();
-
-    // Secondary index: (masterId|date) → instance task. Used to self-heal
-    // ledger rows whose `task_id` points to an occurrence_ordinal that the
-    // scheduler's reconcile has since renumbered. Without this, every renamed
-    // instance triggers a delete-and-recreate cycle on GCal (see issue #33 —
-    // Apr 24 reconnect surfaced 222 orphan events from exactly this drift).
-    var tasksByMasterDate = {};
-    for (var tj = 0; tj < allTasks.length; tj++) {
-      var t2 = allTasks[tj];
-      if (t2.sourceId && t2.date) tasksByMasterDate[t2.sourceId + '|' + t2.date] = t2;
-    }
-
-    // Resolve text for recurring/generated instances that inherit from templates.
-    // Instances often have empty text — the frontend resolves it at render time
-    // from the source template, but sync needs it for the calendar event title.
-    // Templates have scheduled_at=NULL so they're not in allTasks — load them.
-    var sourceIds = [];
-    allTasks.forEach(function(t) {
-      if (!t.text && t.sourceId && !tasksById[t.sourceId]) sourceIds.push(t.sourceId);
-    });
-    var templateTextById = {};
-    if (sourceIds.length > 0) {
-      var templateRows = await getDb()('tasks_v').whereIn('id', sourceIds).select('id', 'text');
-      templateRows.forEach(function(r) { templateTextById[r.id] = r.text; });
-    }
-    allTasks.forEach(function(t) {
-      if (t.text) return;
-      var src = t.sourceId;
-      if (src) {
-        t.text = (tasksById[src] && tasksById[src].text) || templateTextById[src] || '';
-      }
-    });
-
-    // 999.1217 (W4): split task placements now come straight from allTasks —
-    // each split chunk persists as its OWN task_instances row (999.841 binding
-    // ruling: chunk rows are never merged/deleted), so it already carries its
-    // own scheduled_at/dur/splitOrdinal/splitTotal/splitGroup (see taskMappers.js
-    // + tasks_with_sync_v). One calendar event per chunk falls out of the
-    // normal per-task push loop below; mergeContiguousSplitChunks() (above)
-    // already folds CONTIGUOUS chunks into one event by reading these same DB
-    // rows directly. No cache-derived per-part expansion is needed.
-    //
-    // Duration correction: DELTA-WRITE (runSchedule.js) deliberately does NOT
-    // overwrite instance.dur when a task's time_remaining drives the effective
-    // placement duration — dur stays the user-set full/nominal chunk size,
-    // time_remaining is the separate "how much is left" value (see
-    // runSchedule.js's "Don't overwrite instance.dur when time_remaining..."
-    // comment). Recompute the SAME effective duration the scheduler used
-    // (ConstraintSolver.effectiveDuration — a pure function of dur/timeRemaining,
-    // both already loaded on every task) so the pushed calendar event reflects
-    // the actually-placed block, not the full nominal duration. Skip merged
-    // leaders — mergeContiguousSplitChunks() already set their correct summed
-    // dur from the DB rows; this must not override that total.
-    allTasks.forEach(function(t) {
-      if (mergedLeaderInfo[t.id]) return;
-      if (t.timeRemaining == null) return; // dur is already correct — nothing to recompute
-      t.dur = ConstraintSolver.effectiveDuration(t);
-    });
-
-    // Load Apple write-calendar display name for progress reporting (best-effort)
-    // Also build calIngestModeMap: { calendarUrl: 'task'|'reminder' } for pull-new branching.
-    var appleCalendarLabel = null;
-    var calIngestModeMap = {}; // calendarUrl → ingest_mode
-    if (providerData.apple) {
-      try {
-        var appleCals = await getDb()('user_calendars')
-          .where({ user_id: userId, provider: 'apple', enabled: true });
-        var appleWriteCal = appleCals
-          .slice()
-          .sort(function(a, _b) { return a.sync_direction === 'full' ? -1 : 1; })[0] || null;
-        appleCalendarLabel = appleWriteCal ? (appleWriteCal.display_name || null) : null;
-        appleCals.forEach(function(c) {
-          calIngestModeMap[c.calendar_id] = c.ingest_mode || 'task';
-        });
-      } catch (_e) { /* ignore — label is display-only */ }
-    }
-    var calendarLabels = { apple: appleCalendarLabel };
+    var providerData = phase1Data.providerData;
+    var ledgerRecords = phase1Data.ledgerRecords;
+    var allTasks = phase1Data.allTasks;
+    var tasksById = phase1Data.tasksById;
+    var mergedFollowers = phase1Data.mergedFollowers;
+    var tasksByMasterDate = phase1Data.tasksByMasterDate;
+    var calIngestModeMap = phase1Data.calIngestModeMap;
+    var calendarLabels = phase1Data.calendarLabels;
 
     // === Phase 2: Process existing ledger records per provider ===
     // Group ledger by provider

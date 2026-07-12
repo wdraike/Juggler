@@ -27,6 +27,9 @@
  *   H2 — listEvents 5xx (provider skipped, ledger untouched)
  *   H3 — createEvent failure (error ledger row)
  *   H4 — updateEvent 410 (ledger -> deleted_remote)
+ *   H5 — zero connected calendar adapters (gatherProviderSyncData site-1
+ *        early-return, facade.js:992): initial stats returned unchanged, no
+ *        emitProgress, no DB writes (999.1025, zoe WARN zoe-jugfetch-w1)
  *   I  — lock contention (foreign sync_locks row -> 409 + sync:lock_conflict, no writes)
  *   J  — multi-provider (gcal+msft): event deleted on gcal only across the miss
  *        threshold while msft stays live (Bug #4 cross-provider guard)
@@ -510,6 +513,39 @@ test('H4 — updateEvent 410 on repush: ledger transitions to deleted_remote', a
 
   var run2 = await run('repush hits 410');
   H.checkGolden('H4-update-410', [run1, run2]);
+});
+
+// ─── H5: zero connected calendar adapters ────────────────────────────────────
+//
+// Pins gatherProviderSyncData's SITE-1 early return
+// (src/slices/calendar/facade.js:992, `connectedAdapters.length === 0`) —
+// found unpinned by zoe's adversarial coverage probe (999.1025, WARN
+// zoe-jugfetch-w1): all 19 pre-existing W4 scenarios seed GCAL_ONLY or
+// GCAL_MSFT (never zero-adapter), and the only zero-adapter scenario in the
+// suite exercises hasChanges(), a DIFFERENT function — not sync(). Proven by
+// zoe's spot-mutation (site-1's `return { earlyReturn: true }` swapped for a
+// fallthrough `return { earlyReturn: false, providerData: {}, ... }`, which
+// sends empty data into Phase 2 instead of returning stats early): the
+// pre-existing 19-scenario suite stayed 19/19 GREEN. Distinct from H1/site-2
+// (a user WITH a connected adapter whose token fails validation, which DOES
+// fire emitProgress before its early return) — this pins the adapter-less
+// case, which fires NO emitProgress at all (the controller's stats object is
+// returned completely untouched).
+test('H5 — zero connected calendar adapters: sync() returns the initial stats object unchanged, no provider calls, no DB writes, no emitProgress', async () => {
+  await seedTestUser(NO_PROVIDERS);
+
+  var run1 = await run('zero connected adapters');
+
+  expect(run1.statusCode).toBe(200);
+  expect(run1.body).toEqual({
+    pushed: 0, pulled: 0, skipped: 0, deleted_local: 0, deleted_remote: 0,
+    errors: [], providers: {}
+  });
+  expect(run1.providerCalls).toEqual({}); // no adapter was ever called
+  expect(run1.sse).toEqual([]); // site-1 fires NO emitProgress (unlike site-2/H1)
+  expect(run1.enqueues).toEqual([]);
+  expect(run1.dbDelta).toEqual({}); // zero DB writes — Phase 1 never reached the write phase
+  H.checkGolden('H5-zero-adapters', [run1]);
 });
 
 // ─── I: lock contention ──────────────────────────────────────────────────────
