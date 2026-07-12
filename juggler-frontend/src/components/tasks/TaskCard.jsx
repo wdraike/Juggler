@@ -31,7 +31,14 @@ function TaskCard({ task, status, onStatusChange, onDelete, onExpand, darkMode, 
   var isMarker = !!task.marker;
   var isOverdue = isTaskOverdue(task, isDone);
   var borderColor = isMarker ? '#4338CA' : (isOverdue ? theme.error : priColor);
-  var durLabel = task.dur ? (task.dur >= 60 ? Math.round(task.dur / 60 * 10) / 10 + 'h' : task.dur + 'm') : '';
+  // BUG-1 (juggler-taskcard-collapsed-duration): a collapsed split-occurrence row
+  // (conflictBuckets.js's groupBySplitOccurrence) carries the FIRST chunk's own
+  // `dur` plus a summed-total override field — `_overdueTotalDur` (Overdue
+  // section) or `_unplacedTotalDur` (Unscheduled section). Prefer the override so
+  // the badge shows the sum of incomplete chunks, matching the established
+  // DailyViewUnschedEntry.jsx pattern: `(task._unplacedTotalDur || task.dur)`.
+  var effectiveDur = task._overdueTotalDur || task._unplacedTotalDur || task.dur;
+  var durLabel = effectiveDur ? (effectiveDur >= 60 ? Math.round(effectiveDur / 60 * 10) / 10 + 'h' : effectiveDur + 'm') : '';
   var isPastDue = !isDone && task.deadline && (function() { var d = parseDate(task.deadline); var t = todayDate || new Date(); if (!todayDate) t.setHours(0,0,0,0); return d && d < t; })();
   var timeRange = (function() {
     if (task.time) return null;
@@ -40,6 +47,10 @@ function TaskCard({ task, status, onStatusChange, onDelete, onExpand, darkMode, 
     if (isNaN(start.getTime())) return null;
     var startLabel = formatTimeAmPm(start);
     if (!task.dur) return startLabel;
+    // BUG-1 review (juggler-taskcard-collapsed-duration): intentionally NOT using
+    // effectiveDur (_overdueTotalDur/_unplacedTotalDur) here — see bert-REVIEW.json /
+    // BERT-LOG.md for the reasoning (REFER→human ruling: out of scope, would imply
+    // a single contiguous block when the summed chunks are not contiguous in time).
     var finish = new Date(start.getTime() + task.dur * 60 * 1000);
     return startLabel + ' – ' + formatTimeAmPm(finish);
   })();
