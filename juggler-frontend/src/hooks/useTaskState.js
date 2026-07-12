@@ -341,7 +341,9 @@ export default function useTaskState() {
     }
   }, []);
 
-  const addTasks = useCallback(async (tasks) => {
+  const addTasks = useCallback(async (tasks, opts = {}) => {
+    // 999.1544 — same bug shape as createTask (identical bulk path): roll back
+    // the optimistic add on a rejected POST /tasks/batch and surface the error.
     dispatch({ type: 'ADD_TASKS', tasks });
     try {
       markSelfWrite(tasks.map(function(t) { return t.id; }));
@@ -349,6 +351,14 @@ export default function useTaskState() {
       // Placements refresh via SSE schedule:changed
     } catch (error) {
       console.error('Failed to add tasks:', error);
+      // The server rejected the batch add — roll back the optimistic add so
+      // the UI does not keep showing tasks that were never persisted.
+      dispatch({ type: 'REMOVE_TASKS', ids: tasks.map(function(t) { return t.id; }) });
+      // Surface the failure instead of swallowing it (JUG-UI-FEEDBACK-STANDARD).
+      if (typeof opts.onError === 'function') {
+        var serverMsg = error && error.response && error.response.data && error.response.data.error;
+        opts.onError(serverMsg || 'Could not add tasks — change reverted', error);
+      }
     }
   }, []);
 
@@ -422,7 +432,11 @@ export default function useTaskState() {
     }
   }, [scheduleSave]);
 
-  const createTask = useCallback(async (task) => {
+  const createTask = useCallback(async (task, opts = {}) => {
+    // 999.1544 — mirror updateTask/setStatus's optimistic-dispatch + rollback
+    // pattern: the server may still reject a POST /tasks (validation, 500,
+    // etc.), and until now the optimistically-added task stuck around in
+    // state forever with no rollback and no surfaced error.
     dispatch({ type: 'ADD_TASKS', tasks: [task] });
     try {
       markSelfWrite(task.id);
@@ -430,6 +444,14 @@ export default function useTaskState() {
       // Placements refresh via SSE schedule:changed
     } catch (error) {
       console.error('Failed to create task:', error);
+      // The server rejected the create — roll back the optimistic add so the
+      // UI does not keep showing a task that was never persisted.
+      dispatch({ type: 'REMOVE_TASKS', ids: [task.id] });
+      // Surface the failure instead of swallowing it (JUG-UI-FEEDBACK-STANDARD).
+      if (typeof opts.onError === 'function') {
+        var serverMsg = error && error.response && error.response.data && error.response.data.error;
+        opts.onError(serverMsg || 'Could not create task — change reverted', error);
+      }
     }
   }, []);
 

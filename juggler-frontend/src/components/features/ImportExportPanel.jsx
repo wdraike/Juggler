@@ -569,7 +569,14 @@ export default function ImportExportPanel({ onClose, darkMode, showToast, allTas
         delete task.status; // status handled separately
         tasksToAdd.push(task);
       });
-      await addTasks(tasksToAdd);
+      // 999.1544 — addTasks rolls back optimistic add + swallows the error into
+      // opts.onError (never rejects), so without this the try/catch below never
+      // saw an add failure and the unconditional success toast below still fired.
+      var addFailed = false;
+      await addTasks(tasksToAdd, {
+        onError: function(msg) { addFailed = true; showToast(msg, 'error'); }
+      });
+      if (addFailed) return;
       // Set statuses for imported tasks
       var statusUpdates = icsPreview.tasks.filter(function(t) { return t.status; });
       for (var i = 0; i < statusUpdates.length; i++) {

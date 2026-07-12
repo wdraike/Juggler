@@ -1001,7 +1001,9 @@ export default function AppLayout() {
   // Task create handler
   var handleCreate = useCallback((task) => {
     pushUndo('add task');
-    createTask(task);
+    createTask(task, {
+      onError: function(msg) { showToast(msg, 'error'); } // 999.1544
+    });
     showToast('Added: ' + task.text, 'success');
   }, [pushUndo, createTask, showToast]);
 
@@ -1205,7 +1207,9 @@ export default function AppLayout() {
 
     // For new tasks, use addTasks which does POST /tasks/batch + loadPlacements
     if (addedTasks.length > 0) {
-      addTasks(addedTasks);
+      addTasks(addedTasks, {
+        onError: function(msg) { showToast(msg, 'error'); } // 999.1544
+      });
     }
 
     showToast(msg || 'AI: ' + ops.length + ' changes applied', 'success');
