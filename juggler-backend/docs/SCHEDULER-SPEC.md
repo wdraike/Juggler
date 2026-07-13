@@ -172,11 +172,11 @@ The live placement core is **`src/scheduler/unifiedScheduleV2.js`** (2390 lines)
 - **Notes:** `placement_mode='fixed'` is the **sole** immovability signal — `date_pinned` was removed (contradiction C6: SCHEDULER.md still mentions `date_pinned`; v2 code wins). `fixed` without date+time → backend 400 on create (SCHEDULER-RULES.md:87).
 
 ### [PLACE-MODE-ANYTIME] `anytime` — no time constraint, Infinity slack, floats
-- **Code:** `buildItems:629` (`pm===ANYTIME` gating `preferLatestSlot`), `eligibleWindows` falls through to `getWhenWindows('anytime'|item.when)` (`:660-662`). No deadline ⇒ `computeSlack` returns `Infinity` (`:708`).
+- **Code:** `eligibleWindows` falls through to `getWhenWindows('anytime'|item.when)` (`:660-662`). No deadline ⇒ `computeSlack` returns `Infinity` (`:708`).
 - **Status:** IMPLEMENTED
 - **Tests:** `tests/scheduler/placementModes.test.js`, `tests/schedulerScenarios.test.js`
 - **Source:** SCHEDULER.md §4a; TASK-CONFIGURATION-MATRIX.md:66
-- **Notes:** Recurring `anytime` whose anchor minute has already passed *today* sets `preferLatestSlot=true` (`:627-628`) → uses `findLatestSlot` so it lands later in the day rather than failing.
+- **Notes:** **REMOVED (999.1559, David ruling 2026-07-12, juggler 22203501):** recurring `anytime` whose anchor minute has already passed *today* previously set `preferLatestSlot=true` → `findLatestSlot` so it landed later in the day rather than failing. Now it places EARLIEST like every other item; when its own window is exhausted it goes unscheduled (the unscheduled lane keeps it visible — NEVER-MISSING holds). Never reintroduce a day-end cram.
 
 ### [PLACE-MODE-TIME_WINDOW] `time_window` — placed at/after `preferredTimeMins`, not window start
 - **Code:** `buildItems:427` (`isWindowMode = pm===TIME_WINDOW`), `eligibleWindows:655-656` returns `[[windowLo, windowHi]]`. Slot search in `findEarliestSlot:1142-1162`: tries `prefStart = max(winStart, preferredTimeMins)` first (`:1146-1149`), then a **fallback** loop over the earlier range `[winStart, prefStart)` only if the preferred-and-later range is fully booked (`:1158-1162`).
@@ -230,12 +230,12 @@ The live placement core is **`src/scheduler/unifiedScheduleV2.js`** (2390 lines)
 - **Notes:** Past-due tails get `slack=0` + P1 boost. Slack is incrementally maintained (`other.slack = other.capacity - other.dur`, `:1941`) rather than recomputed from scratch, using `overlapWithEligibleWindows` (`:726`) for cheap capacity subtraction. SCHEDULER.md §4c says slack is computed "once after Phase 1" — the v2 code instead re-derives the queue each iteration (PARTIAL doc match; behaviorally equivalent ordering).
 
 ### [PLACE-LADDER] 4-level placement fallback ladder (`tryPlaceQueued`)
-- **Code:** `tryPlaceQueued` `unifiedScheduleV2.js:1308-1361`. Attempts, in order: (1) **normal** — respect deadline + declared `when` (`:1328`); (2) **`ignoreDeadline`** if `slack<0` → place overdue (`:1331-1335`); (3) **`relaxWhen`** if `flexWhen` → relax `when` to `anytime` (`:1337-1341`); (4) **both** if `slack<0 && flexWhen` (`:1343-1347`). `findSlot = item.preferLatestSlot ? findLatestSlot : findEarliestSlot` (`:1326`).
+- **Code:** `tryPlaceQueued` `unifiedScheduleV2.js:1308-1361`. Attempts, in order: (1) **normal** — respect deadline + declared `when` (`:1328`); (2) **`ignoreDeadline`** if `slack<0` → place overdue (`:1331-1335`); (3) **`relaxWhen`** if `flexWhen` → relax `when` to `anytime` (`:1337-1341`); (4) **both** if `slack<0 && flexWhen` (`:1343-1347`). All rungs use `findEarliestSlot` — the `preferLatestSlot ? findLatestSlot : findEarliestSlot` selector was REMOVED (999.1559, David ruling 2026-07-12, juggler 22203501).
 - **Status:** IMPLEMENTED — but **PARTIAL vs doc** (see Notes)
 - **Tests:** **NONE dedicated** — R11.6 ("4-level fallback ladder normal→overdue→flexWhen→both") is listed in SCHEDULER-TRACEABILITY-REPORT.md §"Requirements with NO tests at all" (P1). Indirect coverage via `tests/unit/flex-when-edge-cases.test.js`, `tests/scheduler/recurring-fixed-fallback.test.js`, `tests/unit/scheduler/unplacedReasonScenarios.test.js`.
 - **Source:** SCHEDULER-RULES.md §3.2; SCHEDULER-VISUAL.md §3; SCHEDULER-OVERDUE-LADDER.md:26-33
 - **Notes/contradictions:**
-  - The ladder is nominally "4-level" but the code has a **5th rescue attempt** at `:1352-1356`: if `preferLatestSlot`, a final `findLatestSlot` + `relaxWhen` pass runs so a past-window recurring flexible task stays visible. This 5th rung is **undocumented** in the §3.2 4-level table (GAP-3).
+  - **RESOLVED (999.1559):** the ladder previously had a **5th rescue attempt** (`preferLatestSlot` → final `findLatestSlot` + `relaxWhen` pass, GAP-3). The 5th rung was removed in 4bca8523 and the whole `preferLatestSlot`/`findLatestSlot` mechanism in 22203501 (David ruling 2026-07-12). The ladder is now genuinely 4-level, all rungs earliest-scan.
   - SCHEDULER-RULES.md §3.2 cites stale source lines `unifiedScheduleV2.js:1037-1079`; the actual `tryPlaceQueued` is at `1308-1361` (doc line drift; GAP-4).
   - Flags set: pass 2 → `_overdue`; pass 3 → `_whenRelaxed`/`relaxed`; pass 4 → both.
   - **Disambiguation (leg juggy4, 2026-07-02):** this ladder (`tryPlaceQueued`'s 4/5 passes, run *inside* the main queue loop) is **unaffected** by juggy4 and remains exactly as documented above. The behavior juggy4 changed lives in the **post-loop rescue passes** — Phase 4 `missedWindowItems` / Phase 5 `pastAnchoredRecurrings`, documented under [PLACE-PHASES] below — which is a separate mechanism that runs *after* an item has already exhausted this ladder (and, for Phase 5, items that were pre-routed to `pastAnchoredPreQueue` and never entered this ladder at all). Do not conflate the two "ladders."
@@ -263,15 +263,12 @@ The live placement core is **`src/scheduler/unifiedScheduleV2.js`** (2390 lines)
 - **Source:** SCHEDULER.md §4c-3; SCHEDULER-RULES.md §10
 - **Notes:** 15-minute slot granularity (`s += 15`). On total failure, calls `populateFailDiag` (`:1186`) to attribute `_unplacedReason` (tool_conflict / location_mismatch / no_slot).
 
-### [PLACE-SLOT-LATEST] `findLatestSlot` — reverse scan for `preferLatestSlot` (past-anchor recurring)
-- **Code:** `findLatestSlot` `unifiedScheduleV2.js:1216-1306`. Mirror of earliest but walks latest-first. Only reached when `item.preferLatestSlot` (set for ANYTIME recurring whose anchor passed today — `:1213-1214`). TIME_WINDOW never sets `preferLatestSlot`.
-- **Status:** IMPLEMENTED
-- **Tests:** indirect via `tests/scheduler/recurring-fixed-fallback.test.js`, `tests/scheduler/preferred-time-placement.test.js`
-- **Source:** SCHEDULER-RULES.md §3.1 (Phase 5); code comment `:1213`
-- **Notes:** Keeps a past-due flexible recurring visible later the same day instead of failing.
+### [PLACE-SLOT-LATEST] `findLatestSlot` — REMOVED (999.1559, David ruling 2026-07-12)
+- **Status:** **REMOVED** in juggler 22203501. The reverse (latest-first) scan and the `preferLatestSlot` flag that selected it were deleted entirely. A past-anchor ANYTIME recurring item now places EARLIEST like every other item; when its own window is exhausted it goes **unscheduled** (`unscheduled=1`, `scheduled_at=NULL`, `unplaced_reason` set) — the unscheduled lane keeps it visible (NEVER-MISSING holds). Do NOT reintroduce a day-end "keep it visible" cram: the ruling outlaws the mechanism itself, not just a particular rung.
+- **Tests (ruling pins):** `tests/scheduler/overdue-flex-reschedule.test.js` (BUG-1 + 999.1559 describe blocks), `tests/schedulerScenarios.test.js` S51/S52.
 
 ### [PLACE-DEPFLOOR] Dependency-ready floor (`computeDepReadyAbs` / `depReadyAbs`), scan-constant (A-001)
-- **Code:** `computeDepReadyAbs` `unifiedScheduleV2.js:894`. Returns max absolute end-minute across live (pending, non-terminal) deps; `-Infinity` if none, `Infinity` if any live dep is itself unplaced (→ item deferred). Both `findEarliestSlot` and `findLatestSlot` hoist `depReadyAbs` **once per scan** (`:1023-1024`, `:1240-1241`); each slot does O(1) `absoluteMin(date,slot) < depReadyAbs → skip`. Exported under `module.exports._testOnly` (`:2387`).
+- **Code:** `computeDepReadyAbs` `unifiedScheduleV2.js:894`. Returns max absolute end-minute across live (pending, non-terminal) deps; `-Infinity` if none, `Infinity` if any live dep is itself unplaced (→ item deferred). `findEarliestSlot` hoists `depReadyAbs` **once per scan** (`findLatestSlot` removed — 999.1559); each slot does O(1) `absoluteMin(date,slot) < depReadyAbs → skip`. Exported under `module.exports._testOnly` (`:2387`).
 - **Status:** IMPLEMENTED
 - **Tests:** `tests/scheduler/dependencies.test.js`, `tests/scheduler/depsGatingCharacterization.test.js`, `tests/scheduler/bug815-cancelled-dep-gating.test.js`, `tests/unit/scheduler-core-gaps.test.js`
 - **Source:** SCHEDULER.md §4c-3 "Dependency-ready floor"; supersedes the old per-day `depsMetByDate` boolean
@@ -369,7 +366,7 @@ The live placement core is **`src/scheduler/unifiedScheduleV2.js`** (2390 lines)
 **Total behaviors documented:** 23
 - **IMPLEMENTED:** 22 (was 21 — [PLACE-WEATHER] moved here 2026-07-02, REG-07: reconciled to
   fail-closed, no longer contradicted)
-- **PARTIAL (doc mismatch, behavior present):** 1 — [PLACE-LADDER] (undocumented 5th rung; stale line cite). ([PLACE-SLACK] also has a minor "computed once vs per-iteration" doc mismatch but is behaviorally correct → counted IMPLEMENTED.)
+- **PARTIAL (doc mismatch, behavior present):** 1 — [PLACE-LADDER] (stale line cite in SCHEDULER-RULES.md §3.2; the undocumented-5th-rung mismatch was RESOLVED by 999.1559 — rung and mechanism removed). ([PLACE-SLACK] also has a minor "computed once vs per-iteration" doc mismatch but is behaviorally correct → counted IMPLEMENTED.)
 - **CONTRADICTED:** 0 (was 1 — [PLACE-WEATHER]; RESOLVED, see above).
 - **PLANNED:** 0.
 
@@ -381,7 +378,7 @@ The live placement core is **`src/scheduler/unifiedScheduleV2.js`** (2390 lines)
 
 2. **GAP-2 — R11.x has no requirement-spec home — CLOSED (2026-07-09 sweep).** This gap described the state at authoring time. The R11 family now has a formal home: `juggler/docs/REQUIREMENTS.md` is a full R-number register (R11.1–R11.22 among ~200+ implemented rows, each with Code + Tests traceability) and takes precedence for requirement wording; `SCHEDULER-TRACEABILITY-REPORT.md` is historical.
 
-3. **GAP-3 — the "4-level" ladder is really 5-level in code.** `tryPlaceQueued` (`unifiedScheduleV2.js:1352-1356`) has a 5th `preferLatestSlot + relaxWhen` rescue rung beyond the documented normal→overdue→flexWhen→both. Undocumented in SCHEDULER-RULES.md §3.2.
+3. **GAP-3 — CLOSED (999.1559, David ruling 2026-07-12).** The 5th `preferLatestSlot + relaxWhen` rescue rung was removed in 4bca8523, and the whole `preferLatestSlot`/`findLatestSlot` mechanism was removed in juggler 22203501. The ladder is now genuinely the documented 4 levels.
 
 4. **GAP-4 — pervasive doc line-number drift.** SCHEDULER-RULES.md §3.2 cites `unifiedScheduleV2.js:1037-1079` for `tryPlaceQueued` (actual `:1308-1361`); §3.1 cites `:1172-1778`; SCHEDULER.md cites `computeDepReadyAbs` at `:788`/`:923`/`:1066` (actual `:894`). The file is now 2390 lines; most doc line cites are stale. **Action: re-anchor citations or switch to symbol-based references.**
 

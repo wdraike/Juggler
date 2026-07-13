@@ -749,13 +749,13 @@ Chain rollback:
 | **`_unplacedDetail`** | Human-readable explanation for unplaced tasks, surfaced in the UI. |
 | **`isFixedWhen`** | Boolean — true for non-recurring fixed tasks (never reset, never moved). |
 | **`isRigid`** | Boolean — true for recurring fixed tasks (placed at anchor, can be force-placed with `_conflict`). |
-| **`preferLatestSlot`** | Flag for recurring tasks whose anchor time has passed — places at end-of-day instead of earliest. |
+| **`preferLatestSlot`** | REMOVED (999.1559, David ruling 2026-07-12, juggler 22203501). Past-anchor recurring items place earliest like everything else; exhausted window → unscheduled, never a day-end cram. |
 | **`ignoreDeadline`** | Fallback flag that removes the deadline ceiling, allowing placement past the deadline. |
 | **`relaxWhen`** | Fallback flag that ignores when-window constraints, searching all time blocks. |
 | **`tryPlaceAtTime`** | Method used by Phase 0 to place items at exact times (no search). |
 | **`tryPlaceQueued`** | Method used by Phases 1–2 with the 4-level fallback ladder. |
 | **`findEarliestSlot`** | Forward search: earliest free slot within constraints. |
-| **`findLatestSlot`** | Backward search: latest free slot (for past-anchored recurring tasks). |
+| **`findLatestSlot`** | REMOVED (999.1559, David ruling 2026-07-12, juggler 22203501). The backward day-end scan was deleted with `preferLatestSlot`; all placement uses `findEarliestSlot`. |
 | **`placeSplitInline`** | Inline split placement for non-recurring split tasks (creates chunks on demand). |
 | **`dayOcc`** | The occupancy grid data structure — `{ [dateKey]: { [minute]: true } }`. |
 | **`GRID_START`** | 6 (6:00 AM) — earliest minute in the scheduling grid. |

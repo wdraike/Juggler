@@ -993,10 +993,12 @@ describe('Tier 11: recurring_flexible past-anchor placement', () => {
     var p = placement(r, 'weekly_claim');
     expect(p).not.toBeNull();
     expect(p.day).toBe(TODAY);
-    // EARLIEST free afternoon slot at/after now (1:20 PM → next grid slot),
-    // NOT the old latest-slot cram at 990 (4:30 PM). Ruling 2026-07-12.
-    expect(p.start).toBeLessThanOrEqual(825);
-    expect(p.start).toBeGreaterThanOrEqual(800);
+    // EARLIEST free afternoon slot at/after now: deterministic 810 — the
+    // nowMins occupancy clamp kills slots < ceil(800/15)*15 = 810, and the
+    // afternoon scan runs 780→795→810. Exact pin (not a band) so even a
+    // one-slot drift toward the old latest-slot cram at 990 (4:30 PM) fails.
+    // Ruling 2026-07-12.
+    expect(p.start).toBe(810);
     expect(isUnplaced(r, 'weekly_claim')).toBe(false);
   });
 

@@ -145,7 +145,8 @@ Every schedulable task becomes one item object. Fields used downstream by `place
 
   // Computed later
   slack,              // capacity − dur; filled after all items built
-  preferLatestSlot,   // RECURRING_FLEXIBLE past-anchorMin today → push to latest slot
+  // preferLatestSlot REMOVED (999.1559, David ruling 2026-07-12) — past-anchor
+  // items place earliest; exhausted window → unscheduled, never day-end cram
   isAllDay            // when includes 'allday' → item is filtered out before placement
 }
 ```

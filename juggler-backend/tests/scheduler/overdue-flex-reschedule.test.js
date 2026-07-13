@@ -270,13 +270,15 @@ describe('999.1559 — broader case (unrestricted when + preferredTimeMins past)
   // With when='', an ANYTIME item's own genuine window is its preferred-time
   // flex window (anchor 470 ± flex 60 → [410, 530]); at now=700 that window is
   // fully in the past, so per David's 2026-07-12 ruling the instance is
-  // unscheduled — never force-placed. Empirically this case already routes to
-  // unscheduled on current code (findLatestSlot also finds no slot in an
-  // exhausted window — direction doesn't matter in an empty window), so this
-  // test is a RULING PIN guarding against any future "keep it visible at day
-  // end" fallback reintroducing the cram. The live RED for the still-crammed
-  // variant (when-window with room left after now) is S51 in
-  // schedulerScenarios.test.js.
+  // unscheduled — never force-placed. Mechanism (verified, harrison review
+  // 2026-07-13): at now=700 >= 530 the item is diverted in buildItems by
+  // isMissedPreferredTime and never reaches tryPlaceQueued at all — the rest
+  // of the day (>=705) is genuinely open, so under the OLD code a placement
+  // scan WOULD have found day-end room. This test is therefore a RULING PIN
+  // guarding against any future "keep it visible at day end" fallback (in any
+  // phase) reintroducing the cram. The formerly-RED case that exercised the
+  // removed findLatestSlot branch itself (when-window with room left after
+  // now) is S51 in schedulerScenarios.test.js.
   test('ANYTIME daily-recurring, when=\'\', preferred window (470+60) fully past at now=700: unscheduled with unplaced_reason set — NOT placed anywhere, especially not the day\'s last slot', () => {
     const t = makeAnytimeMorningTask({ id: 'ov_pref_1', when: '' });
     const result = run([t], 700);
