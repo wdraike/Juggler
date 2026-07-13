@@ -76,7 +76,6 @@ var app = require('./application');
 var SCHED_KEYS = require('./application/commands/UpdateConfig').SCHED_KEYS;
 
 // ── infra seams the use-cases inject (the SAME modules the legacy files used) ──
-var libDb = require('../../lib/db');
 var { cache } = require('../../lib/cache');
 var config = require('../../lib/config');
 // 999.1199: lib/tasks-write is internal to slices/task/adapters (eslint
@@ -100,11 +99,6 @@ var { validateImportBody } = require('../../schemas/data-import.schema');
 var proxyConfig = require('../../proxy-config');
 var { createLogger } = require('@raike/lib-logger');
 var logger = createLogger('user-config.facade');
-
-// `getDb()` shim — returns the SAME knex the repository uses (lib/db.getDefaultDb()),
-// mocked by the golden master onto its mockDb. Used by the verbatim cross-table
-// collaborators below that reach tables outside the ConfigRepositoryPort.
-function getDb() { return libDb.getDefaultDb(); }
 
 // ── zod schemas (lifted verbatim — config.controller.js:18-32) ───────────────
 // jug-geopoint-coord-validation (999.557): coordinates are range-validated so out-of-range
@@ -138,7 +132,9 @@ var _userRepo = new KnexUserRepository();           // over lib/db — users tab
 // ── CROSS-TABLE / CROSS-SERVICE COLLABORATORS (lifted VERBATIM) ──────────────
 // These reach tables/services the ConfigRepositoryPort does not model. Inside a
 // transaction they use `trxRepo.db` (the raw trx handle the config repo carries);
-// outside they use getDb().
+// outside a transaction they delegate to a small dedicated adapter
+// (KnexFeatureEventsRepository / KnexImportRowClock — JUG-FACADE-DB-VIOLATIONS
+// stage 2b) instead of holding a facade-level db handle.
 
 // reverseGeocodeDisplayName — weather slice facade (replaceLocations enrichment).
 // 999.1192: cross-slice call via the weather slice's own facade, not the HTTP
@@ -204,6 +200,9 @@ function mergeListTaskIds(trxRepo, userId) {
 // for created_at/updated_at on the IMPORT path. The import insert is a task-table
 // write outside the config repo, so its timestamps are NOT in KnexConfigRepository's
 // P1 scope (it stays as the legacy did). statuses comes through as the 4th arg.
+// JUG-FACADE-DB-VIOLATIONS stage 2b: the fn.now() timestamp source moved to
+// adapters/KnexImportRowClock.js — the row-mapping logic itself stays here.
+var KnexImportRowClock = require('./adapters/KnexImportRowClock');
 function importBuildTaskRow(t, userId, tz, statuses) {
   var loc = t.location || t.where;
   var locationArr = Array.isArray(loc) ? loc : (loc && loc !== 'anywhere' ? [loc] : []);
@@ -305,8 +304,8 @@ function importBuildTaskRow(t, userId, tz, statuses) {
     cal_event_url: t.calEventUrl || null,
     slack_mins: t.slackMins != null ? t.slackMins : null,
     // ── timestamps (import path uses DB now(), per original comment) ──
-    created_at: getDb().fn.now(),
-    updated_at: getDb().fn.now()
+    created_at: KnexImportRowClock.now(),
+    updated_at: KnexImportRowClock.now()
   };
 }
 
@@ -348,29 +347,16 @@ function enforceDowngradeLimits(userId, planFeatures) {
 // feature-gate I/O primitives — injected from the legacy module so the thin
 // middleware delegation keeps the EXACT same DB sequence + the pinned FLAG-2 log
 // shape (Surface-6 mocks src/db). These are private to feature-gate.js, so the
-// facade re-derives them over the same getDb()/usage-reporter the legacy used.
+// facade re-derives them over the same usage-reporter the legacy used.
+// JUG-FACADE-DB-VIOLATIONS stage 2b: logFeatureEvent moved VERBATIM into
+// adapters/KnexFeatureEventsRepository.js (the FLAG-2 log shape + fire-and-forget
+// .catch preserved there) — getCurrentPeriodBounds stays here (pure date math, no DB).
 var usageReporter = require('../../lib/usage-reporter');
 // 999.1194: inject the adapter-based resolveProductId so usage-reporter no longer
 // reaches up into plan-features.middleware (layering inversion fix).
 usageReporter.setProductIdResolver(function () { return _entitlement.resolveProductId(); });
-function logFeatureEvent(reqOrUserId, featureKey, eventType, value) {
-  var userId = typeof reqOrUserId === 'object' ? (reqOrUserId.user && reqOrUserId.user.id) : reqOrUserId;
-  var planId = typeof reqOrUserId === 'object' ? reqOrUserId.planId : 'free';
-  return getDb()('feature_events').insert({
-    user_id: userId,
-    feature_key: featureKey,
-    event_type: eventType,
-    planId: planId || 'free',
-    plan_id: typeof reqOrUserId === 'object' ? (reqOrUserId.planId || null) : null,
-    endpoint: typeof reqOrUserId === 'object' ? (reqOrUserId.method + ' ' + (reqOrUserId.originalUrl || reqOrUserId.url)) : null,
-    ip_address: typeof reqOrUserId === 'object' ? (reqOrUserId.ip || (reqOrUserId.headers && reqOrUserId.headers['x-forwarded-for']) || null) : null,
-    request_id: typeof reqOrUserId === 'object' ? ((reqOrUserId.headers && reqOrUserId.headers['x-request-id']) || null) : null,
-    value: value ? JSON.stringify(value) : null,
-    created_at: new Date()
-  }).catch(function (err) {
-    logger.error('[feature-gate] Failed to log event:', { error: err });
-  });
-}
+var KnexFeatureEventsRepository = require('./adapters/KnexFeatureEventsRepository');
+var logFeatureEvent = KnexFeatureEventsRepository.logFeatureEvent;
 function getCurrentPeriodBounds(featureKey) {
   var now = new Date();
   if (featureKey.includes('per_hour')) {
@@ -493,8 +479,11 @@ var _enforceEntityLimit = new app.EnforceEntityLimit({ repo: _repo, logger: logg
 // feature-events.routes.js GET / (999.1196) — the route has no other db-mock
 // coupling to preserve (unlike my-plan's entity-limits/db composition-root
 // seam), so this one is wired into the DEFAULT singleton like the rest of the
-// facade's use-cases.
-var _getFeatureEventsReport = new app.GetFeatureEventsReport({ db: getDb() });
+// facade's use-cases. JUG-FACADE-DB-VIOLATIONS stage 2b: `db` is now the
+// KnexFeatureEventsRepository's query function (adapters are the slice's only
+// DB layer), not a facade-held knex handle — same `db('feature_events')` call
+// shape GetFeatureEventsReport already makes.
+var _getFeatureEventsReport = new app.GetFeatureEventsReport({ db: KnexFeatureEventsRepository.query });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FACADE OPERATIONS — one per handler/gate; each returns { status, body }

@@ -255,6 +255,7 @@ const SLICES = [
   },
   {
     name: 'user-config',
+    facadeDbClean: true, // purged 2026-07-13 (JUG-FACADE-DB-VIOLATIONS stage 2b — adapters/KnexFeatureEventsRepository.js + adapters/KnexImportRowClock.js)
     ref: 'JUG-HEX-H4 (W6)',
     facadeFiles: ['**/slices/user-config/facade.js', '**/slices/user-config/index.js'],
     extraExempt: ['**/slices/user-config/application/**/*.js', '**/slices/user-config/domain/**/*.js'],
