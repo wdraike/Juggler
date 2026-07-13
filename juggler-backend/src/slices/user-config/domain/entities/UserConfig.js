@@ -89,6 +89,17 @@ function UserConfig(props) {
 UserConfig.VALID_KEYS = VALID_KEYS;
 
 /**
+ * Export/import format version (999.1603). Stamped onto every export by
+ * ExportData; ImportData REJECTS payloads stamped with a NEWER version (an
+ * export from a future build whose shape this server cannot faithfully read).
+ * Payloads with no stamp are legacy v7 — accepted.
+ * History: 7 (implicit, `v7: true` era) → 8 (adds scheduleTemplates /
+ * templateDefaults / templateOverrides / tempUnitPref / full `preferences`
+ * object + this stamp).
+ */
+UserConfig.EXPORT_FORMAT_VERSION = 8;
+
+/**
  * True iff `key` is a writable config key — mirrors updateConfig's
  * `validKeys.includes(key)` guard (config.controller.js:111).
  * @param {*} key

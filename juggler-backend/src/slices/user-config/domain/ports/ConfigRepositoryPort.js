@@ -165,10 +165,13 @@
  *
  * ── DATA EXPORT/IMPORT (config tables only) ──────────────────────────────────
  *
- * @property {(userId: string) => Promise<void>} clearUserConfigTables
+ * @property {(userId: string, configKeys?: string[]) => Promise<void>} clearUserConfigTables
  *   Delete the user's user_config, tools, locations, projects rows (the import
  *   wipe of CONFIG tables — task wipe is the task slice's `deleteTasksWhere`).
  *   MUST run inside a transaction. (Legacy: importData trx, data.controller.js:70-73.)
+ *   999.1603: a non-empty `configKeys` array makes the user_config delete
+ *   SELECTIVE (only those keys — rows the import does not rewrite survive);
+ *   absent/empty = full user_config wipe. tools/locations/projects always full-wipe.
  *
  * @property {(userId: string, rows: Object[]) => Promise<void>} insertLocations
  *   Bulk insert location rows (import path — no prior delete). (Legacy: importData

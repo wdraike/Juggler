@@ -805,7 +805,27 @@ describe('Surface 2 — data.controller: export/import (H2)', () => {
       expect(res.body.error).toMatch(/Invalid import data/);
     });
 
+    // 999.1603: the replace import pre-reads user_config (preference merge),
+    // selectively wipes, inserts, then RE-READS in the trx to VERIFY writes.
+    // In THIS suite's re-wiring only bare awaited where-chains pop the FIFO
+    // (`.insert`/`.del` are mockResolvedValue — no pop), so exactly TWO entries:
+    // the pre-read ([]) and the verification re-read (exactly what the import
+    // wrote, as real MySQL would return it).
+    function queueImportConfigRoundTrip() {
+      resolveQueue.push([]); // getConfigRows pre-read
+      resolveQueue.push([
+        { config_key: 'tool_matrix', config_value: {} },
+        { config_key: 'time_blocks', config_value: {} },
+        { config_key: 'loc_schedules', config_value: {} },
+        { config_key: 'loc_schedule_defaults', config_value: {} },
+        { config_key: 'loc_schedule_overrides', config_value: {} },
+        { config_key: 'hour_location_overrides', config_value: {} },
+        { config_key: 'preferences', config_value: { gridZoom: 60, splitDefault: false, splitMinDefault: 15, schedFloor: 480, schedCeiling: 1380 } }
+      ]); // getConfigRows verification re-read
+    }
+
     test('H2-7: valid import returns 200 with counts shape', async () => {
+      queueImportConfigRoundTrip();
       const res = await request(app)
         .post('/api/data/import?confirm=delete_all')
         .set('Authorization', `Bearer ${VALID_TOKEN}`)
@@ -828,6 +848,7 @@ describe('Surface 2 — data.controller: export/import (H2)', () => {
     });
 
     test('H2-8: deduplicates tasks by id (last occurrence wins)', async () => {
+      queueImportConfigRoundTrip();
       const res = await request(app)
         .post('/api/data/import?confirm=delete_all')
         .set('Authorization', `Bearer ${VALID_TOKEN}`)

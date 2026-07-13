@@ -32,9 +32,12 @@ function registerDataTools(server, userId) {
 
       var tasks = taskRows.map(function(r) { return rowToTask(r, tz); });
       var config = {};
+      var parseConfigValue = require('../../slices/user-config/facade').parseConfigValue;
       configRows.forEach(function(row) {
-        config[row.config_key] = typeof row.config_value === 'string'
-          ? JSON.parse(row.config_value) : row.config_value;
+        // 999.1603 fork-fix: GUARDED parse (same fix as ExportData). The bare
+        // JSON.parse crashed the whole MCP export for any user with a JSON-scalar
+        // config value (temp_unit_pref comes back unwrapped: 'C', not '"C"').
+        config[row.config_key] = parseConfigValue(row.config_value);
       });
 
       var result = {

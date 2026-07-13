@@ -27,3 +27,6 @@ juggler-backend/purge-orphan-events-*.csv
 # MemPalace per-project files (issue #185)
 mempalace.yaml
 entities.json
+
+# service-auth dev keys (auto-generated at boot; never commit private keys)
+src/keys/

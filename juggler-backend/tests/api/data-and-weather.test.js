@@ -206,6 +206,27 @@ describe('POST /api/data/import', () => {
   };
 
   test('imports a valid payload with ?confirm=delete_all', async () => {
+    // 999.1603: the replace import now (a) pre-reads user_config for the
+    // preference merge, (b) selectively wipes, (c) inserts, then (d) RE-READS
+    // inside the trx to VERIFY every written key — feed the FIFO mock in that
+    // call order: pre-read, 4 wipe dels, config insert, verification re-read
+    // (which must return exactly what the import wrote, as real MySQL would).
+    resolveQueue.push([]); // getConfigRows pre-read
+    resolveQueue.push([]); // user_config selective del
+    resolveQueue.push([]); // tools del
+    resolveQueue.push([]); // locations del
+    resolveQueue.push([]); // projects del
+    resolveQueue.push([]); // insertConfigRows
+    resolveQueue.push([
+      { config_key: 'tool_matrix', config_value: {} },
+      { config_key: 'time_blocks', config_value: {} },
+      { config_key: 'loc_schedules', config_value: {} },
+      { config_key: 'loc_schedule_defaults', config_value: {} },
+      { config_key: 'loc_schedule_overrides', config_value: {} },
+      { config_key: 'hour_location_overrides', config_value: {} },
+      { config_key: 'preferences', config_value: { gridZoom: 60, splitDefault: false, splitMinDefault: 15, schedFloor: 480, schedCeiling: 1380 } }
+    ]); // getConfigRows verification re-read
+
     const res = await request(app)
       .post('/api/data/import?confirm=delete_all')
       .set('Authorization', `Bearer ${VALID_TOKEN}`)

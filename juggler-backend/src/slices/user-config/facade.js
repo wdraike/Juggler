@@ -699,6 +699,10 @@ async function countScheduleTemplates(userId) {
 }
 
 module.exports = {
+  // 999.1603: the guarded config-value parse, exported for external readers of
+  // raw user_config rows (mcp/tools/data.js export fork) — the slice-boundary
+  // rule forbids them requiring domain/entities/UserConfig directly.
+  parseConfigValue: domain.UserConfig.parseConfigValue,
   // facade operations (one per handler/gate) the thin controllers/middleware delegate to
   getAllConfig: getAllConfig,
   getProjects: getProjects,

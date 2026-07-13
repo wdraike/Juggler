@@ -14,10 +14,13 @@
  *                    repo.getLocations, repo.getTools, repo.getProjects,
  *                    repo.getConfigRows ]).
  *   3. map task rows via rowToTask(r, tz); build the statuses map (only truthy status).
- *   4. build the config map (JSON.parse each config_value when a string — the
- *      legacy export parse, data.controller.js:240-243; NOTE this is the
- *      no-try/catch JSON.parse, NOT getAllConfig's guarded parse — preserved as-is).
- *   5. shape the v7 export body with all the prefs `|| <default>` fallbacks verbatim.
+ *   4. build the config map via UserConfig.parseConfigValue (999.1603 — GUARDED
+ *      parse; the characterized no-try/catch JSON.parse crashed the export for
+ *      any user holding a JSON-scalar config value like temp_unit_pref, because
+ *      mysql2 returns JSON-column scalars unwrapped).
+ *   5. shape the v7 export body with all the prefs `|| <default>` fallbacks verbatim,
+ *      PLUS (999.1603) scheduleTemplates/templateDefaults/templateOverrides/
+ *      tempUnitPref, the full `preferences` object, and exportFormatVersion.
  *
  * The route-layer requireFeature('data.export') gate (golden-master H2-3) stays in
  * the W6 route middleware — it is enforced by GateFeature, NOT here.
@@ -34,6 +37,8 @@
  */
 
 'use strict';
+
+var UserConfig = require('../../domain/entities/UserConfig');
 
 /** @param {ExportDataDeps} deps */
 function ExportData(deps) {
@@ -77,8 +82,13 @@ ExportData.prototype.execute = async function execute(input) {
 
   var config = {};
   configRows.forEach(function (row) {
-    config[row.config_key] = typeof row.config_value === 'string'
-      ? JSON.parse(row.config_value) : row.config_value;
+    // 999.1603: GUARDED parse (UserConfig.parseConfigValue), replacing the
+    // characterized bare JSON.parse. The bare parse 500'd the whole export for
+    // any user with a JSON-scalar config value: config_value is a JSON column,
+    // and mysql2 returns scalar strings UNWRAPPED (temp_unit_pref comes back as
+    // C, not "C") — JSON.parse('C') throws. The guarded parse returns the raw
+    // string in that case, which IS the value.
+    config[row.config_key] = UserConfig.parseConfigValue(row.config_value);
   });
 
   var prefs = config.preferences || {};
@@ -102,6 +112,19 @@ ExportData.prototype.execute = async function execute(input) {
     schedFloor: prefs.schedFloor || 480,
     schedCeiling: prefs.schedCeiling || 1380,
     calSyncSettings: config.cal_sync_settings || {},
+    // 999.1603 — round-trip completeness: the template keys were exported by
+    // NOTHING before, so every export→import cycle destroyed them (import wiped
+    // all config rows and re-inserted only what the payload carried). `|| null`
+    // mirrors GetConfig's absent-key representation; ImportData's presence check
+    // (`!= null`) skips nulls, preserving the target's existing rows.
+    scheduleTemplates: config.schedule_templates || null,
+    templateDefaults: config.template_defaults || null,
+    templateOverrides: config.template_overrides || null,
+    tempUnitPref: config.temp_unit_pref || null,
+    // Full preferences passthrough — the 5 scalars above are the legacy v7
+    // contract; this object carries EVERY subkey (calCompletedBehavior, …).
+    preferences: prefs,
+    exportFormatVersion: UserConfig.EXPORT_FORMAT_VERSION,
     updated: this._now()
   };
   return { status: 200, body: body };

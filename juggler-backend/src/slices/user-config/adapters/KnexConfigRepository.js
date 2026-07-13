@@ -456,15 +456,25 @@ KnexConfigRepository.prototype.getActiveWhenTaggedTasks = function getActiveWhen
 
 /**
  * Delete the user's user_config, tools, locations, projects rows (import wipe of
- * CONFIG tables). Verbatim relocation of importData's config wipe
- * (data.controller.js:70-73). MUST be called within runInTransaction. The task
- * wipe (data.controller.js:75 deleteTasksWhere) stays with the task slice.
+ * CONFIG tables). Relocation of importData's config wipe (data.controller.js:70-73).
+ * MUST be called within runInTransaction. The task wipe (data.controller.js:75
+ * deleteTasksWhere) stays with the task slice.
+ *
+ * 999.1603: when `configKeys` is a non-empty array, the user_config delete is
+ * SELECTIVE (only those keys) so config rows the import does not rewrite survive
+ * a replace-mode import. Omitted/empty → full user_config wipe (legacy behavior).
+ * tools/locations/projects are always a full wipe (v7 replace contract).
  * @param {string} userId
+ * @param {string[]} [configKeys]  config_key values to delete; absent = all.
  * @returns {Promise<void>}
  */
-KnexConfigRepository.prototype.clearUserConfigTables = function clearUserConfigTables(userId) {
+KnexConfigRepository.prototype.clearUserConfigTables = function clearUserConfigTables(userId, configKeys) {
   var db = this.db;
-  return db('user_config').where('user_id', userId).del()
+  var configDelete = db('user_config').where('user_id', userId);
+  if (Array.isArray(configKeys) && configKeys.length > 0) {
+    configDelete = configDelete.whereIn('config_key', configKeys);
+  }
+  return configDelete.del()
     .then(function () { return db('tools').where('user_id', userId).del(); })
     .then(function () { return db('locations').where('user_id', userId).del(); })
     .then(function () { return db('projects').where('user_id', userId).del(); })
