@@ -964,14 +964,18 @@ describe('Tier 10: Overdue placement flags', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// TIER 11: recurring_flexible preferLatestSlot
+// TIER 11: recurring_flexible past-anchor placement
+// (REVISED 2026-07-13, 999.1559: preferLatestSlot/findLatestSlot removed per
+//  David ruling 2026-07-12 — past-anchor items place EARLIEST like everything
+//  else; when their genuine window is exhausted they go unscheduled, never
+//  crammed backward from day end.)
 // ═══════════════════════════════════════════════════════════════════
 
 describe('Tier 11: recurring_flexible past-anchor placement', () => {
 
-  test('S51: recurring_flexible past anchor time → placed at latest available slot, not unplaced', () => {
+  test('S51: recurring_flexible past anchor time → placed at earliest available slot after now, not crammed at day end, not unplaced', () => {
     // Mirrors "Submit Weekly UI Claim" at 12:30 PM when it's now 1:20 PM.
-    // preferLatestSlot fires → findLatestSlot finds the latest free afternoon slot.
+    // The afternoon window still has room after now → earliest placement.
     var r = schedule([
       task({
         id: 'weekly_claim',
@@ -989,14 +993,16 @@ describe('Tier 11: recurring_flexible past-anchor placement', () => {
     var p = placement(r, 'weekly_claim');
     expect(p).not.toBeNull();
     expect(p.day).toBe(TODAY);
-    // Placed at the LATEST free afternoon slot (4:30 PM = 990 min), not at anchor
-    expect(p.start).toBe(990);
+    // EARLIEST free afternoon slot at/after now (1:20 PM → next grid slot),
+    // NOT the old latest-slot cram at 990 (4:30 PM). Ruling 2026-07-12.
+    expect(p.start).toBeLessThanOrEqual(825);
+    expect(p.start).toBeGreaterThanOrEqual(800);
     expect(isUnplaced(r, 'weekly_claim')).toBe(false);
   });
 
   test('S52: recurring_flexible before anchor time → placed via normal earliest-slot logic', () => {
-    // At 11:00 AM (660 min), the 12:30 PM anchor has NOT passed → preferLatestSlot=false.
-    // Normal findEarliestSlot fires and places at the earliest available afternoon slot.
+    // At 11:00 AM (660 min), the 12:30 PM anchor has NOT passed.
+    // findEarliestSlot places at the earliest available afternoon slot.
     var r = schedule([
       task({
         id: 'weekly_claim_early',

@@ -18,9 +18,9 @@
  *     chain are not given an earlier deadline derived from their successor's deadline. The
  *     comment at line 262 flags this for 4.4. See docs/SCHEDULER-V2-STATUS.md.
  *   - Location/tool constraint enforcement: IMPLEMENTED — checkLoc initialized at line 732;
- *     canTaskRunAtMin() called in findEarliestSlot (line 805) and findLatestSlot (line 869).
+ *     canTaskRunAtMin() called in findEarliestSlot.
  *   - Dependency-met check: IMPLEMENTED — checkDeps gate + computeDepReadyAbs() hoisted
- *     once per scan (A-001); depReadyAbs compared per slot in findEarliestSlot / findLatestSlot.
+ *     once per scan (A-001); depReadyAbs compared per slot in findEarliestSlot.
  *   - Split chunks: pre-inserted as distinct DB rows (Phase 1); scheduler treats each as a
  *     regular task (design intent, not a gap).
  *   - timesPerCycle / recurring_rigid nuances: OPEN — held for UX review (see MASTER-PLAN).
@@ -604,21 +604,12 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, _cfg) {
       slack: null, // filled later
       // Multi-step spacing (999.874): target date and deadline from expandRecurring
       _targetDate: t._targetDate || null,
-      _deadlineDate: t._deadlineDate || null,
-      // ANYTIME recurring tasks whose scheduled time has already passed today
-      // get pushed to the latest available slot so they stay visible on the
-      // day grid and the user can still mark them done before end of day.
-      // TIME_WINDOW tasks are intentionally excluded — when their preferred
-      // time window is past they should go to unplaced with reason 'missed'.
-      // The `recurring &&` guard is required: without it, any non-recurring
-      // ANYTIME task whose anchorMin < nowMins would incorrectly get
-      // preferLatestSlot = true.
-      preferLatestSlot: (
-        pm === PLACEMENT_MODES.ANYTIME &&
-        recurring &&
-        anchorDate === todayIsoKey &&
-        anchorMin != null && nowMins != null && anchorMin < nowMins
-      )
+      _deadlineDate: t._deadlineDate || null
+      // preferLatestSlot REMOVED (999.1559, David ruling 2026-07-12): a
+      // recurring instance whose time has passed places EARLIEST like every
+      // other item, and goes unscheduled when its own window is exhausted —
+      // never crammed backward from day end. NEVER-MISSING still holds: the
+      // unscheduled lane keeps it visible.
     });
   });
 
@@ -992,7 +983,7 @@ function absoluteMin(dateIdx, startMin) {
 
 // A-001: Compute the earliest absolute minute at which all live deps are
 // satisfied, for the *current snapshot* of placedById/statuses/dates.
-// Called once per findEarliestSlot / findLatestSlot scan (not per slot).
+// Called once per findEarliestSlot scan (not per slot).
 //
 // Return semantics:
 //   Infinity  → at least one live dep is unplaced; item can never be placed
@@ -1405,110 +1396,11 @@ function populateFailDiag(diag, sig) {
   diag.failDetail = 'No eligible time window available for this task';
 }
 
-// Mirror of findEarliestSlot that searches from the end of the day backwards,
-// returning the latest free slot. Used for scheduler-managed recurring tasks
-// whose original time has passed — keeps them visible at end-of-day so the
-// user can still mark them done.
-// TIME_WINDOW tasks never reach this path — preferLatestSlot is set only for ANYTIME
-// recurring tasks (see schedulingMode logic above). The prefStart logic therefore
-// lives only in findEarliestSlot; adding it here would be dead code today.
-function findLatestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
-  var earliestIdx = 0;
-  var latestIdx = dates.length - 1;
-  if (item.deadlineDate && !(opts && opts.ignoreDeadline)) {
-    var di = indexOfDate(dates, item.deadlineDate);
-    if (di >= 0) latestIdx = di;
-  }
-  if (item.isRecurring && item.anchorDate) {
-    var ai = indexOfDate(dates, item.anchorDate);
-    if (ai >= 0) {
-      earliestIdx = ai;
-      if (item.isDayLocked) {
-        latestIdx = ai;
-      } else if (item.cycleDays > 0) {
-        var capIdx = ai + item.cycleDays - 1;
-        if (capIdx < latestIdx) latestIdx = capIdx;
-      } else {
-        latestIdx = ai;
-      }
-    }
-  }
-
-  var placedById = opts && opts.placedById;
-  var statuses = (opts && opts.statuses) || {};
-  var relaxDepsL = !!(opts && opts.relaxDeps);
-  var checkDeps = !relaxDepsL && placedById && item.dependsOn && item.dependsOn.length > 0;
-  // A-001: same per-scan dep-readiness cache as findEarliestSlot (see comment there).
-  var depReadyAbs = checkDeps ? computeDepReadyAbs(item, placedById, statuses, dates) : -Infinity;
-  var relaxWhen = !!(opts && opts.relaxWhen);
-  var cfg = (opts && opts.cfg) || null;
-  var toolMatrix = cfg && cfg.toolMatrix;
-  var checkLoc = cfg && item.task && (
-    (Array.isArray(item.task.location) && item.task.location.length > 0) ||
-    (Array.isArray(item.task.tools) && item.task.tools.length > 0)
-  );
-  var weatherByDateHour = cfg && cfg.weatherByDateHour;
-  // FAIL-CLOSED (999.881 / R38 CC6): same as findEarliestSlot — weather-constrained
-  // tasks must NOT be placed when weather data is absent.
-  var checkWeather = weatherByDateHour
-    && item.task && hasWeatherConstraint(item.task);
-
-  // A-002: same per-run location cache as findEarliestSlot (env reused across the run).
-  var env = opts && opts.env;
-  var locCache = env ? (env._locCache || (env._locCache = Object.create(null))) : null;
-
-  // FR1 / AC1.2 — same diagnostic accumulation as findEarliestSlot (see comments there).
-  var diag = (opts && opts.diag) || null;
-  var locToolDiag = null;
-  var locToolIsLocation = false;
-  var sawEligibleWindow = false;
-  var sawCapacityBlock = false;
-  function recordLocTool(dateKey, startMin, blocksForDay) {
-    if (!diag || !checkLoc) return;
-    var locId = resolveLocationId(dateKey, startMin, cfg, blocksForDay);
-    var why = whyCannotRun(item.task, locId, toolMatrix);
-    if (why && why.ok === false) {
-      if (why.cause === 'location_mismatch') {
-        locToolIsLocation = true;
-        locToolDiag = why;
-      } else if (!locToolIsLocation && !locToolDiag) {
-        locToolDiag = why;
-      }
-    }
-  }
-
-  for (var i = latestIdx; i >= earliestIdx; i--) {
-    var d = dates[i];
-    if (item.allowedDows && !item.allowedDows[d.isoDow]) continue;
-    var wins = eligibleWindows(item, d.key, dayWindows, dayBlocks, relaxWhen);
-    if (!wins.length) continue;
-    sawEligibleWindow = true;
-    var occ = dayOcc[d.key] || {};
-    var blocks = dayBlocks[d.key];
-    for (var w = wins.length - 1; w >= 0; w--) {
-      var winStart = wins[w][0];
-      var winEnd = wins[w][1];
-      var startMax = Math.floor((winEnd - item.dur) / 15) * 15;
-      for (var s = startMax; s >= winStart; s -= 15) {
-        if (!isFreeWithTravel(occ, s, item.dur, item.travelBefore, item.travelAfter)) { sawCapacityBlock = true; continue; }
-        if (checkDeps && absoluteMin(i, s) < depReadyAbs) { sawCapacityBlock = true; continue; }
-        if (checkLoc && !canTaskRunAtMinCached(item.task, d.key, s, cfg, toolMatrix, blocks, locCache)) { recordLocTool(d.key, s, blocks); continue; }
-        if (checkWeather && !weatherOk(item.task, d.key, s, weatherByDateHour)) { sawCapacityBlock = true; continue; }
-        return { dateKey: d.key, start: s };
-      }
-    }
-  }
-  if (diag) populateFailDiag(diag, {
-    checkLoc: checkLoc,
-    locToolDiag: locToolDiag,
-    sawEligibleWindow: sawEligibleWindow,
-    sawCapacityBlock: sawCapacityBlock,
-    // F7: same categorical dep-block signal as findEarliestSlot (see comment there).
-    sawDepBlock: checkDeps && depReadyAbs === Infinity,
-    depBlockIds: (checkDeps && depReadyAbs === Infinity) ? findBlockingDepIds(item, placedById, statuses) : null
-  });
-  return null;
-}
+// findLatestSlot REMOVED (999.1559, David ruling 2026-07-12): the backward
+// day-end scan existed only to cram past-anchor ANYTIME recurring items into
+// the last free slot. Ruled out: an item whose own window is exhausted goes
+// unscheduled (the unscheduled lane keeps it visible — NEVER-MISSING holds);
+// an item with room left in its window places earliest like everything else.
 
 // Central placement attempt with fallback ladder. Returns:
 //   { slot, overdue, relaxed } on success (any field may be unset/false)
@@ -1521,7 +1413,7 @@ function findLatestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
 function tryPlaceQueued(item, dates, dayWindows, dayBlocks, dayOcc, placedById, statuses, cfg, env) {
   var relaxDepsFlag = !!(env && env.relaxDeps);
   // FR1 / AC1.2 — single diag sink shared across all fallback-ladder attempts.
-  // findEarliestSlot/findLatestSlot write the FIRST (strictest) pass's reason and
+  // findEarliestSlot writes the FIRST (strictest) pass's reason and
   // leave it untouched on later relaxed retries (populateFailDiag is first-pass-wins),
   // so the surfaced reason reflects why the primary placement failed.
   var diag = {};
@@ -1533,7 +1425,8 @@ function tryPlaceQueued(item, dates, dayWindows, dayBlocks, dayOcc, placedById, 
   // instead (the scheduler's correct output when no in-period slot exists).
   var overdueApplicable = item.slack != null && isFinite(item.slack) && item.slack < 0 && !item._periodEndCap;
   var flexApplicable = !!item.flexWhen;
-  var findSlot = item.preferLatestSlot ? findLatestSlot : findEarliestSlot;
+  // Always earliest — preferLatestSlot/findLatestSlot removed (999.1559).
+  var findSlot = findEarliestSlot;
 
   // D-A / W1 (David ruling 2026-07-02; ernie DADC-CODE-REVIEW.md finding #1):
   // a plain ONE-OFF (non-recurring, non-split) whose deadline day is entirely

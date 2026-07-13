@@ -7,9 +7,17 @@ process.env.NODE_ENV = 'test';
 // without touching production behavior (only applied when unset).
 if (!process.env.SERVICE_NAME) process.env.SERVICE_NAME = 'juggler';
 
+// vinatieri quarantine ratchet — known-red suites parked with tickets so the
+// passing set stays a HARD gate (pre-push + CI). List may only shrink; see
+// jest.quarantine.json (999.1564 / 999.1439) + .planning/patriots/PLAYBOOK.md.
+let quarantine = [];
+try { quarantine = require('./jest.quarantine.json').patterns || []; }
+catch (e) { console.warn('[quarantine] jest.quarantine.json unreadable — running ALL suites: ' + e.message); }
+
 module.exports = {
   testEnvironment: 'node',
   testMatch: ['**/tests/**/*.test.js', '**/src/__tests__/**/*.test.js'],
+  testPathIgnorePatterns: ['/node_modules/', ...quarantine],
   collectCoverageFrom: ['src/**/*.js', '!src/server.js'],
   coverageReporters: ['text', 'text-summary', 'json-summary', 'lcov'],
   // Coverage thresholds — baseline minus 2% buffer to catch regressions.

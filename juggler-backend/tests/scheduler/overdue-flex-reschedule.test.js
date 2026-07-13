@@ -191,7 +191,7 @@ function unplacedEntryFor(result, taskId) {
 }
 
 describe('BUG-1 (W1): preferLatestSlot force-place-at-last-slot must NOT survive once genuine (own when-window) search is exhausted', () => {
-  test('ANYTIME daily-recurring instance, own when-window (morning) exhausted for today, rest of day genuinely open: DESIRED = unscheduled=1/scheduled_at=NULL/unplaced_reason set — CURRENTLY FAILS: force-placed at day-end (23:30) via findLatestSlot/relaxWhen fallback', () => {
+  test('ANYTIME daily-recurring instance, own when-window (morning) exhausted for today, rest of day genuinely open: unscheduled with unplaced_reason set (ruling pin — the old findLatestSlot/relaxWhen day-end cram is removed, 999.1559)', () => {
     const t = makeAnytimeMorningTask({ id: 'ov_any_1' });
     const result = run([t], 490);
 
@@ -262,6 +262,39 @@ describe('BUG-1 (W1): preferLatestSlot force-place-at-last-slot must NOT survive
     expect(unplacedEntry).toBeTruthy();
     const unplacedTask = unplacedEntry && (unplacedEntry.task || unplacedEntry);
     expect(gridEntryFor(result, 'ov_weekly_1')).toBeNull();
+    expect(unplacedTask._unplacedReason).toBeTruthy();
+  });
+});
+
+describe('999.1559 — broader case (unrestricted when + preferredTimeMins past): must stay UNSCHEDULED, never backward-scan-crammed', () => {
+  // With when='', an ANYTIME item's own genuine window is its preferred-time
+  // flex window (anchor 470 ± flex 60 → [410, 530]); at now=700 that window is
+  // fully in the past, so per David's 2026-07-12 ruling the instance is
+  // unscheduled — never force-placed. Empirically this case already routes to
+  // unscheduled on current code (findLatestSlot also finds no slot in an
+  // exhausted window — direction doesn't matter in an empty window), so this
+  // test is a RULING PIN guarding against any future "keep it visible at day
+  // end" fallback reintroducing the cram. The live RED for the still-crammed
+  // variant (when-window with room left after now) is S51 in
+  // schedulerScenarios.test.js.
+  test('ANYTIME daily-recurring, when=\'\', preferred window (470+60) fully past at now=700: unscheduled with unplaced_reason set — NOT placed anywhere, especially not the day\'s last slot', () => {
+    const t = makeAnytimeMorningTask({ id: 'ov_pref_1', when: '' });
+    const result = run([t], 700);
+
+    const onGrid = idsOnGrid(result);
+    const unplaced = idsUnplaced(result);
+    // NEVER-MISSING sanity: placed XOR unplaced.
+    expect(onGrid.has('ov_pref_1') && unplaced.has('ov_pref_1')).toBe(false);
+    expect(onGrid.has('ov_pref_1') || unplaced.has('ov_pref_1')).toBe(true);
+
+    // Own window exhausted → unscheduled (ruling), never grid-crammed.
+    expect(onGrid.has('ov_pref_1')).toBe(false);
+    expect(unplaced.has('ov_pref_1')).toBe(true);
+    expect(gridEntryFor(result, 'ov_pref_1')).toBeNull();
+
+    const unplacedEntry = unplacedEntryFor(result, 'ov_pref_1');
+    expect(unplacedEntry).toBeTruthy();
+    const unplacedTask = unplacedEntry && (unplacedEntry.task || unplacedEntry);
     expect(unplacedTask._unplacedReason).toBeTruthy();
   });
 });

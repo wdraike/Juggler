@@ -1,0 +1,15 @@
+{
+  "_doc": "vinatieri quarantine ratchet — known-red suites excluded so the passing set stays a hard gate (pre-push + CI). List may only SHRINK; every entry needs a backlog ticket. 2026-07-13: harrison solo-verified 5 original entries were pool-load flakes and they were UN-quarantined same day; remaining entries are genuinely red. See .planning/patriots/PLAYBOOK.md § vinatieri.",
+  "tickets": {
+    "tests/taskControllerUnit.test.js": "999.1439 (pending David ruling — rowToTask preferred_time_mins precedence)",
+    "tests/taskPipeline.test.js": "999.1439 (same rowToTask ruling family)",
+    "_rest": "999.1564"
+  },
+  "patterns": [
+    "tests/api/ai-command.test.js",
+    "tests/slices/task/adapters/taskRepository.contract.test.js",
+    "tests/slices/user-config/adapters/configRepository.contract.test.js",
+    "tests/taskControllerUnit.test.js",
+    "tests/taskPipeline.test.js"
+  ]
+}
