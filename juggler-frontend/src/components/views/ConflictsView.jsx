@@ -65,8 +65,8 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
     {
       key: 'overdue', title: 'Overdue', tasks: issues.overdue, color: theme.redText,
       empty: 'All clear — nothing is overdue.',
-      tip: 'Tasks past their due date/time that aren\'t done',
-      help: 'These tasks are past their due date/time and still open — including calendar events and recurring instances whose date has already passed. They stay pinned on the calendar at their original time, flagged overdue. Mark them done, reschedule to a new date, or cancel them.'
+      tip: "Fixed events and calendar syncs past their due date/time that aren't done",
+      help: 'These are fixed-time events and calendar-synced items past their due date/time that are still open. They stay pinned on the calendar at their original time, flagged overdue. Mark them done, reschedule to a new date, or cancel them.'
     },
     {
       // sched-audit L3 ernie BLOCK (l3-ernie-1) — use the deduped

@@ -2065,14 +2065,47 @@ async function runScheduleAndPersist(userId, _retries, options) {
           return;
         }
       }
-      // Case B: was previously placed — pin in place. Keep unscheduled=0 so the
-      // task renders at its scheduled position; overdue is computed-on-read
-      // (computeOverdueForRow) from `original.deadline`/date being in the past —
-      // reaching this branch already implies that computed value is true (W3,
-      // sched-drop-overdue-column: no write needed to make it read true).
+      // Case B: was previously placed — movable past-due tasks go to unscheduled.
+      // Per David's ruling: overdue movable tasks (recurring + one-off with deadlines)
+      // MUST become unscheduled — shown only in the Issues tab "Unscheduled" section,
+      // NOT on any calendar grid time area. Fixed/ingested events stay pinned on the
+      // grid at their slot (they are immovable — the scheduler never moves them).
+      var isFixedTask = original.placementMode === PLACEMENT_MODES.FIXED;
+      var _bScheduledMins = original.time ? parseTimeToMinutes(original.time) : null;
+      var _bIsPastDue = computeIsPastDue(original, _bScheduledMins, timeInfo);
+      var isMovablePastDue = !isFixedTask && _bIsPastDue;
+
+      if (isMovablePastDue) {
+        // Movable past-due → unscheduled lane. Clear scheduled_at so it doesn't
+        // render on the grid; date stays at its current value (already pinned
+        // to deadline/occurrence date by upstream logic).
+        var _mvDbUpdate = {
+          unscheduled: 1,
+          scheduled_at: null,
+          unplaced_reason: t._unplacedReason || REASON_CODES.NO_SLOT,
+          unplaced_detail: t._unplacedDetail || 'No available slot in the schedule',
+          updated_at: _runScheduleCommand.clockNow()
+        };
+        if (result.slackByTaskId && t.id in result.slackByTaskId) {
+          _mvDbUpdate.slack_mins = result.slackByTaskId[t.id];
+        }
+        pendingUpdates.push({ id: t.id, dbUpdate: _mvDbUpdate });
+        // Emit SSE transition: placed → unscheduled/overdue.
+        updatedTasks.push({
+          id: t.id,
+          text: original.text,
+          from: original.date,
+          to: original.date,
+          fromTime: original.time,
+          patch: { overdue: true, unscheduled: true }
+        });
+        cleared++;
+        return;
+      }
+
+      // Fixed/ingested past-due: stay pinned on the grid at their slot.
       // `original.overdue` is the ALREADY-COMPUTED value from rowToTask at the
-      // top of this run (not a raw column read) — the single source of truth
-      // for "was this already overdue" continuity.
+      // top of this run — the single source of truth for continuity.
       var wasAlreadyOverdue = !!original.overdue;
 
       // Only write if there's a state change:
@@ -2255,12 +2288,18 @@ async function runScheduleAndPersist(userId, _retries, options) {
       // instances the scheduler tried this run. For a recurring instance that was NEVER
       // placed (scheduled_at=NULL) and whose day is definitively past, this guard must
       // not block auto-miss — the instance is stuck and must become 'missed'.
-      // All other unplaced tasks (non-recurring, future/today, previously placed)
-      // still skip through here as before.
+      // All other unplaced tasks (non-recurring, future/today) still skip through here.
+      //
+      // ponytail: recurring instances WITH a prior scheduled_at that landed in unplaced
+      // this run MUST also fall through — the David ruling 2026-07-09 code below
+      // (:2299-2317) writes unscheduled=1 for them, pulling them off the grid. The prior
+      // guard (`rawRowPast.scheduled_at != null → return`) blocked that write, leaving
+      // them pinned on the grid as overdue slotted work — the exact symptom this fix
+      // addresses.
       if (unplacedIds[t.id]) {
-        if (!t.recurring || rawRowPast.scheduled_at != null) return;
-        // Recurring + never-placed + definitively past: fall through.
-        // The timeFlex window check below makes the final call.
+        if (!t.recurring) return;
+        // Recurring (placed or not) + in unplaced: fall through to Phase 9.
+        // The effectiveDeadline check below makes the final call.
       }
 
       // Fixed tasks are user-anchored — never move them, even if past.
@@ -2484,9 +2523,11 @@ async function runScheduleAndPersist(userId, _retries, options) {
 
   // Synthesize placements for finished tasks so they appear on the calendar
   // when the "all" filter is active (scheduler only places active tasks).
-  // Also synthesize placements for overdue tasks — they have a scheduled_at
-  // but weren't re-placed this run. They stay visible in the grid at their
-  // last scheduled position with an overdue indicator (overdue=1).
+  // Also synthesize placements for overdue FIXED/ingested tasks — they have a
+  // scheduled_at but weren't re-placed this run. They stay visible in the grid
+  // at their last scheduled position with an overdue indicator.
+  // Movable overdue tasks are NOT synthesized here — they are unscheduled=1
+  // (Phase 8/9 writes) and must appear only in the Issues Unscheduled section.
   var placedIds = {};
   Object.keys(outPlacements).forEach(function(dk) {
     outPlacements[dk].forEach(function(p) {
@@ -2498,6 +2539,9 @@ async function runScheduleAndPersist(userId, _retries, options) {
   allTasks.forEach(function(t) {
     if (placedIds[t.id]) return;
     if (t.generated || t.taskType === 'recurring_template') return;
+    // Skip tasks flagged unscheduled — they are in the Unscheduled lane, not the grid.
+    var _rawT = rawRowById[t.id];
+    if (_rawT && _rawT.unscheduled) return;
     var st = statuses[t.id] || '';
     var isFinished = st === 'done' || st === 'cancel' || st === 'skip';
     var scheduledMins = t.time ? parseTimeToMinutes(t.time) : null;

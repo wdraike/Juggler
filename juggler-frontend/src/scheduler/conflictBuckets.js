@@ -80,7 +80,14 @@ export function computeConflictBuckets({ allTasks, statuses, unplaced, backlog, 
     if (t.overdue) isOverdue = true;
 
     if (isOverdue) {
-      overdue.push(t);
+      // Movable overdue tasks (unscheduled=1) are routed to the Unscheduled
+      // bucket, not Overdue. Only fixed/ingested events (immovable) stay in
+      // the Overdue bucket — they remain pinned on the grid at their slot.
+      if (t.unscheduled) {
+        // Will be picked up by unplacedList merge below — don't add to overdue.
+      } else {
+        overdue.push(t);
+      }
     } else if (!t.deadline && t.date && t.date !== 'TBD') {
       var td = parseDate(t.date);
       if (td && td < today) stale.push(t);
