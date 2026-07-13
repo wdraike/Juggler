@@ -217,6 +217,23 @@ function importBuildTaskRow(t, userId, tz, statuses) {
   var deadline = t.deadline ? toDateISO(t.deadline) || null : null;
   var earliestStartDate = (t.earliestStart || t.earliest_start) ? toDateISO(t.earliestStart || t.earliest_start) || null : null;
   var st = statuses || {};
+  var status = st[t.id] || t.status || '';
+
+  // chk_task_instances_terminal_scheduled: a terminal-status instance must carry a
+  // scheduled_at (the exact status list below is the constraint's, NOT the wider
+  // shared TERMINAL_STATUSES — 'pause' is terminal for cal-sync but not here).
+  // Legacy exports can hold terminal tasks that were never placed; inserting them
+  // verbatim aborts the whole import. Apply the SAME normalization the constraint
+  // migration (20260527213906) applied to existing rows: anchor to the best
+  // available timestamp, else clear the status to non-terminal.
+  if (!scheduledAt && ['done', 'skip', 'cancel', 'missed'].indexOf(status) >= 0) {
+    var anchor = t.completedAt ? new Date(t.completedAt) : null;
+    if (anchor && !isNaN(anchor.getTime())) {
+      scheduledAt = anchor;
+    } else {
+      status = '';
+    }
+  }
 
   return {
     id: t.id,
@@ -227,7 +244,7 @@ function importBuildTaskRow(t, userId, tz, statuses) {
     time_remaining: t.timeRemaining != null ? t.timeRemaining : null,
     pri: t.pri || 'P3',
     project: t.project || null,
-    status: st[t.id] || t.status || '',
+    status: status,
     section: t.section || null,
     notes: t.notes || null,
     deadline: deadline,

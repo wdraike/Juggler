@@ -215,3 +215,43 @@ test('missing extraTasks → 400 "Invalid import data" (shape guard fires FIRST)
   var after = await snapshot();
   expect(after).toEqual(before);
 }, 30000);
+
+test('terminal-status task without a date imports (normalized to satisfy chk_task_instances_terminal_scheduled)', async () => {
+  await assertDbAvailable();
+
+  // Regression: legacy exports can hold terminal-status tasks (done/skip/cancel/missed)
+  // that were never placed (no date). Inserting them verbatim violates the
+  // chk_task_instances_terminal_scheduled CHECK constraint and 500s the ENTIRE import.
+  // Import must apply the same normalization the constraint migration
+  // (20260527213906) applied to existing rows: anchor scheduled_at to the best
+  // available timestamp (completedAt), else clear the status to non-terminal.
+  // status rides on the task objects (t.status) — that path flows in BOTH modes
+  // (merge deliberately ignores the top-level statuses map — KEEP-MINE, #59583).
+  var data = {
+    v7: true,
+    extraTasks: [
+      { id: 'term-anchored-1', text: 'Done, never placed, has completedAt', dur: 20, pri: 'P3', status: 'done', completedAt: '2026-04-18T13:35:59Z' },
+      { id: 'term-cleared-1', text: 'Skip, never placed, no timestamp at all', dur: 20, pri: 'P3', status: 'skip' },
+      { id: 'normal-1', text: 'Ordinary pending task', dur: 30, pri: 'P2' }
+    ]
+  };
+
+  var res = await facade.importData({
+    userId: USER_ID, mode: 'merge',
+    timezoneHeader: 'America/New_York', data: data
+  });
+
+  expect(res.status).toBe(200);
+  expect(res.body.counts.tasks).toBe(3);
+
+  // completedAt present → status kept, scheduled_at anchored to completedAt.
+  var anchored = await db('task_instances').where({ user_id: USER_ID, id: 'term-anchored-1' }).first();
+  expect(anchored.status).toBe('done');
+  expect(anchored.scheduled_at).not.toBeNull();
+  expect(JSON.stringify(anchored.scheduled_at)).toContain('2026-04-18');
+
+  // No timestamp to anchor to → status cleared to non-terminal (migration's last-resort rule).
+  var cleared = await db('task_instances').where({ user_id: USER_ID, id: 'term-cleared-1' }).first();
+  expect(cleared.status).toBe('');
+  expect(cleared.scheduled_at).toBeNull();
+}, 30000);
