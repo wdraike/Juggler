@@ -78,21 +78,12 @@ var WeatherProviderPort = require('./domain/ports/WeatherProviderPort');
 // is a concurrently-owned file this leg does not modify. These two small
 // collaborators are lifted verbatim here, mirroring the user-config facade's
 // "port doesn't model this table" cross-table-collaborator idiom.
-var libDb = require('../../lib/db');
-function getDb() { return libDb.getDefaultDb(); }
-
-// admin /debug's OWN tasks_v load (schedule.routes.js ~L90) — deliberately NOT
-// SchedulerTaskProvider.loadSchedulableRows, which uses a DIFFERENT filter
-// for the live scheduler's working set.
-function loadDebugTasks(userId) {
-  return getDb()('tasks_v').where({ user_id: userId }).whereNot('status', 'disabled');
-}
-
-// stepper /step/:id/stop's raw ownership read (schedule.routes.js ~L198),
-// used only when schedulerSession.getSession() already returned null.
-function findStepperSessionOwner(sessionId) {
-  return getDb()('scheduler_sessions').where('session_id', sessionId).first();
-}
+// JUG-FACADE-DB-VIOLATIONS stage 1: both reads moved VERBATIM into
+// adapters/KnexDebugReads.js (their "deliberately NOT the port" rationale
+// moved with them) — the facade now carries zero direct db access.
+var _debugReads = require('./adapters/KnexDebugReads');
+var loadDebugTasks = _debugReads.loadDebugTasks;
+var findStepperSessionOwner = _debugReads.findStepperSessionOwner;
 
 var RunSchedulerDebug = application.RunSchedulerDebug;
 var _runSchedulerDebug = new RunSchedulerDebug({

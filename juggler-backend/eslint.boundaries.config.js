@@ -178,7 +178,19 @@ function sliceRules(slice) {
 // list for the domain/application self-import exemption (omitted when absent).
 function sliceExemptions(slice) {
   const blocks = [
-    { files: slice.facadeFiles, rules: { 'no-restricted-syntax': 'off' } },
+    // JUG-FACADE-DB-VIOLATIONS ratchet: a slice that declares facadeDbClean
+    // keeps its facade exempt from the SLICE-INTERNAL selectors (facades wire
+    // their own internals by design) but gains the DB-direct ban — facades
+    // delegate DB access to adapters. Flip per slice as its facade is purged;
+    // never flip one back.
+    {
+      files: slice.facadeFiles,
+      rules: {
+        'no-restricted-syntax': slice.facadeDbClean
+          ? ['error', ...DB_DIRECT_SELECTORS, TASKS_WRITE_RESTRICTION]
+          : 'off'
+      }
+    },
     { files: ['**/slices/' + slice.name + '/adapters/**/*.js'], rules: { 'no-restricted-syntax': 'off' } }
   ];
   if (slice.extraExempt) {
@@ -208,6 +220,7 @@ const SLICES = [
   },
   {
     name: 'weather',
+    facadeDbClean: true, // verified db-free 2026-07-13 (JUG-FACADE-DB-VIOLATIONS stage 0)
     ref: 'JUG-HEX-H1 (W3)',
     facadeFiles: ['**/slices/weather/facade.js', '**/slices/weather/index.js'],
     restrictions: [
@@ -256,6 +269,7 @@ const SLICES = [
   },
   {
     name: 'scheduler',
+    facadeDbClean: true, // purged 2026-07-13 (JUG-FACADE-DB-VIOLATIONS stage 1 — adapters/KnexDebugReads.js)
     ref: 'JUG-HEX-H6 / 999.435',
     facadeFiles: ['**/slices/scheduler/facade.js', '**/slices/scheduler/index.js'],
     extraExempt: ['**/slices/scheduler/application/**/*.js', '**/slices/scheduler/domain/**/*.js'],
@@ -373,7 +387,13 @@ module.exports = [
   // (src/scheduler/*.js), NOT slices/scheduler/{adapters,domain,application}/** —
   // those keep their inward slice enforcement. Remove this block when the H7B
   // refactor lands and `npm run lint:boundaries` is clean without it.
-  { files: ['**/scheduler/*.js'], rules: { 'no-restricted-syntax': 'off' } },
+  // Glob narrowed **/scheduler/*.js → **/src/scheduler/*.js (harrison BLOCK,
+  // JUG-FACADE-DB-VIOLATIONS stage 0): the broad form ALSO matched
+  // slices/scheduler/facade.js + index.js, silently clobbering the
+  // facadeDbClean replacement block back to 'off' (flat config later-wins) —
+  // the block's own comment always claimed src/scheduler/*.js-only intent,
+  // and the wall-clock block below already uses the narrow form.
+  { files: ['**/src/scheduler/*.js'], rules: { 'no-restricted-syntax': 'off' } },
   // (999.1401) The former grandfather exemption for controllers/cal-sync.controller.js
   // is gone: the controller now imports KnexScheduleRepository via the scheduler
   // facade's named export, so the boundary rule enforces the facade there too.
