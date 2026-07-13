@@ -71,6 +71,101 @@ const TASKS_WRITE_RESTRICTION = {
     '{ db: trxOrDb } as a transaction token). See 999.1199.'
 };
 
+// Direct-db import ban (JUG-NO-SLICE-BOUNDARY-ENFORCEMENT). DB access belongs
+// in slice adapters behind repository ports. Two selectors because the module
+// is reachable two ways: the legacy root module (src/db.js, any `../`-relative
+// depth, incl. `../../src/db`) and the lib module (src/lib/db + the vendored
+// @raike/lib-db it wraps). AST selectors — comments that merely mention
+// require('../../db') (e.g. taskMappers.js:25 header) never match.
+// Grandfathered legacy call sites are listed EXPLICITLY in
+// DB_GRANDFATHERED_FILES below — a ratchet: the list only shrinks, never grows.
+const DB_DIRECT_SELECTORS = [
+  {
+    selector:
+      "CallExpression[callee.name='require'] > Literal[value=/^(\\.\\.?\\/)+(src\\/)?db$/]",
+    message:
+      'Direct import of the db module is forbidden — DB access goes through the owning ' +
+      "slice's facade/repository port (adapters are the only DB layer). Legacy sites are " +
+      'grandfathered in eslint.boundaries.config.js DB_GRANDFATHERED_FILES; do not add new ones. ' +
+      'See JUG-NO-SLICE-BOUNDARY-ENFORCEMENT.'
+  },
+  {
+    selector:
+      "CallExpression[callee.name='require'] > Literal[value=/(^|\\/)lib[-\\/]db$/]",
+    message:
+      'Direct import of lib/db (or @raike/lib-db) is forbidden — DB access goes through the ' +
+      "owning slice's facade/repository port (adapters are the only DB layer). Legacy sites are " +
+      'grandfathered in eslint.boundaries.config.js DB_GRANDFATHERED_FILES; do not add new ones. ' +
+      'See JUG-NO-SLICE-BOUNDARY-ENFORCEMENT.'
+  }
+];
+
+// Domain-purity selectors (JUG-NO-SLICE-BOUNDARY-ENFORCEMENT): slice domain
+// code must have zero infrastructure dependencies — no DB, no HTTP/express,
+// no Redis, no SDKs, no Node IO, and no adapter imports (not even its own
+// slice's). Currently ZERO violations (verified 2026-07-13, incl. transitive
+// requires of taskMappers' helpers) — this block locks that in so the
+// 2026-07-11 hex-audit class of claim is machine-checkable instead of
+// grep-guessable.
+const DOMAIN_PURITY_SELECTORS = [
+  {
+    selector:
+      "CallExpression[callee.name='require'] > Literal[value=/^(node:)?(knex|mysql2|express|axios|node-fetch|ioredis|redis|googleapis|bcrypt|bcryptjs|argon2|jsonwebtoken|nodemailer|fs|child_process|net|http|https)(\\/|$)/]",
+    message:
+      'Infrastructure package import inside slice domain code — domain must stay pure ' +
+      '(no DB/HTTP/Redis/SDK/Node-IO). Depend on a port and let an adapter own the ' +
+      'infrastructure. See JUG-NO-SLICE-BOUNDARY-ENFORCEMENT.'
+  },
+  {
+    selector:
+      "CallExpression[callee.name='require'] > Literal[value=/(^|\\/)adapters(\\/|$)/]",
+    message:
+      'Adapter import inside slice domain code — domain depends on ports only; wiring ' +
+      'adapters to ports happens in the facade/application layer. ' +
+      'See JUG-NO-SLICE-BOUNDARY-ENFORCEMENT.'
+  }
+];
+
+// Ratchet list: production files that ALREADY require the db module directly.
+// Each entry is an exact path. REMOVE entries as their refactors land
+// (JUG-FACADE-DB-VIOLATIONS, JUG-SCHEDULER-LEGACY-DB-BYPASS, MCP/middleware
+// slice work); NEVER add one — new code uses slice facades/ports.
+// (Facades + slices/*/adapters/** + src/scheduler/*.js are NOT listed: their
+// own exemption blocks below already turn no-restricted-syntax off / replace
+// it. src/app.js, src/server.js, src/db.js, src/db/**, src/lib/db/** are the
+// composition roots + the db modules themselves — permanently allowed via
+// DB_ALLOWED_FILES, not this ratchet.)
+const DB_GRANDFATHERED_FILES = [
+  '**/src/controllers/cal-sync.controller.js',
+  '**/src/cron/cal-history-cron.js',
+  '**/src/jobs/morning-schedule-cron.js',
+  '**/src/lib/push-subscriptions.js',
+  '**/src/lib/sync-lock.js',
+  '**/src/lib/task-write-queue.js',
+  '**/src/mcp/getUserTimezone.js',
+  '**/src/mcp/tools/config.js',
+  '**/src/mcp/tools/data.js',
+  '**/src/mcp/tools/tasks.js',
+  '**/src/mcp/transport.js',
+  '**/src/middleware/calendar-limit.js',
+  '**/src/middleware/feature-gate.js',
+  '**/src/middleware/jwt-auth.js',
+  '**/src/routes/health.diagnostics.js',
+  '**/src/routes/health.routes.js',
+  '**/src/routes/my-plan.routes.js'
+];
+
+// Composition roots + the db modules themselves — allowed to touch the db
+// module forever (they ARE the wiring/DB layer). Kept separate from the
+// ratchet list so "shrink to zero" stays a meaningful goal for the latter.
+const DB_ALLOWED_FILES = [
+  '**/src/app.js',
+  '**/src/server.js',
+  '**/src/db.js',
+  '**/src/db/**/*.js',
+  '**/src/lib/db/**/*.js'
+];
+
 // Map a slice descriptor to its array of selector objects.
 function sliceRules(slice) {
   return slice.restrictions.map((r) =>
@@ -241,6 +336,22 @@ module.exports = [
       'no-restricted-syntax': [
         'error',
         ...SLICES.flatMap(sliceRules),
+        TASKS_WRITE_RESTRICTION,
+        ...DB_DIRECT_SELECTORS
+      ]
+    }
+  },
+  // DB ratchet grandfather + composition-root allowance: REPLACE the base rule
+  // with everything EXCEPT the db selectors for these exact files (a plain
+  // 'off' would also disable the slice-facade selectors, regressing 999.1401's
+  // un-exemption of cal-sync.controller.js). Placed BEFORE the slice exemption
+  // blocks so facades/adapters still end up fully off as before.
+  {
+    files: [...DB_GRANDFATHERED_FILES, ...DB_ALLOWED_FILES],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        ...SLICES.flatMap(sliceRules),
         TASKS_WRITE_RESTRICTION
       ]
     }
@@ -296,6 +407,25 @@ module.exports = [
           selector: "CallExpression[callee.object.name='Date'][callee.property.name='now']",
           message: 'Bare Date.now() in the legacy scheduler — derive time from the injected ClockPort (clock.now().getTime()). See 999.1195.'
         }
+      ]
+    }
+  },
+  // Domain purity (JUG-NO-SLICE-BOUNDARY-ENFORCEMENT). LAST on purpose: it
+  // REPLACES the per-slice domain 'off' exemptions (extraExempt) for
+  // slices/*/domain/** files with the full boundary set PLUS the purity
+  // selectors — so domain files keep the cross-slice facade rules AND gain
+  // the no-infrastructure guarantee their headers promise. Relative
+  // intra-slice requires (value-objects, ../logic, shared pure helpers) match
+  // none of these selectors and stay legal. Zero violations at introduction.
+  {
+    files: ['**/slices/*/domain/**/*.js'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        ...SLICES.flatMap(sliceRules),
+        TASKS_WRITE_RESTRICTION,
+        ...DB_DIRECT_SELECTORS,
+        ...DOMAIN_PURITY_SELECTORS
       ]
     }
   }
