@@ -50,6 +50,7 @@ describe('calendar facade — ports / entities / VOs / adapters', () => {
   const expectedFns = [
     'CalendarPort',
     'SyncStateRepositoryPort',
+    'CalendarAccountRepositoryPort',
     'CalendarEvent',
     'SyncState',
     'EventId',
@@ -59,6 +60,8 @@ describe('calendar facade — ports / entities / VOs / adapters', () => {
     'AppleCalendarAdapter',
     'InMemoryCalendarAdapter',
     'KnexSyncStateRepository',
+    'KnexCalendarAccountRepository',
+    'InMemoryCalendarAccountRepository',
   ];
 
   test.each(expectedFns)('exposes %s', (name) => {

@@ -54,6 +54,9 @@ var MicrosoftCalendarAdapter = require('./adapters/MicrosoftCalendarAdapter');
 var AppleCalendarAdapter = require('./adapters/AppleCalendarAdapter');
 var InMemoryCalendarAdapter = require('./adapters/InMemoryCalendarAdapter');
 var KnexSyncStateRepository = require('./adapters/KnexSyncStateRepository');
+var CalendarAccountRepositoryPort = require('./domain/ports/CalendarAccountRepositoryPort');
+var KnexCalendarAccountRepository = require('./adapters/KnexCalendarAccountRepository');
+var InMemoryCalendarAccountRepository = require('./adapters/InMemoryCalendarAccountRepository');
 
 // ── adapter registry (owned here over slice adapters — W5) ─────────
 // Default registry is EXACTLY {gcal, msft, apple} — identical to the prior
@@ -117,9 +120,29 @@ var gcalApi = require('../../lib/gcal-api');
 var msftCalApi = require('../../lib/msft-cal-api');
 var appleCalApi = require('../../lib/apple-cal-api');
 var { encrypt, decrypt } = require('../../lib/credential-encrypt');
-var db = require('../../lib/db').getDefaultDb();
 var { createLogger } = require('@raike/lib-logger');
 var logger = createLogger('calendar.facade');
+
+// JUG-FACADE-DB-VIOLATIONS stage 3: account/OAuth management DB access
+// (users/user_config/user_calendars/oauth_code_nonces) moved to this adapter —
+// the facade itself carries no direct db access. Default-instantiated over
+// lib/db's shared singleton (same convention as KnexSyncStateRepository).
+var accountRepo = new KnexCalendarAccountRepository();
+
+// countLocalChangesSince/getSyncHistory (999.942 W1/W2) now live on
+// KnexSyncStateRepository (stage 3). Lazily instantiated (NOT at module load,
+// unlike accountRepo above): tests/cal-sync/characterization/W3-audit-
+// characterization.test.js mocks this constructor as a plain object ({}) — a
+// call this facade never made before stage 3 (it only re-exported the class).
+// Constructing on first actual USE (inside countLocalChangesSince/
+// getSyncHistory below, which W3 never calls) keeps that mock valid while
+// still exercising the real class in production and in the W1/W2 suites that
+// DO call these functions.
+var _syncStateRepo = null;
+function getSyncStateRepo() {
+  if (!_syncStateRepo) _syncStateRepo = new KnexSyncStateRepository();
+  return _syncStateRepo;
+}
 
 // ── GCal operations ──
 
@@ -140,9 +163,7 @@ async function getGcalStatus(user) {
     }
   }
 
-  var autoSyncRow = await db('user_config')
-    .where({ user_id: user.id, config_key: 'gcal_auto_sync' })
-    .first();
+  var autoSyncRow = await accountRepo.getUserConfig(user.id, 'gcal_auto_sync');
   var autoSync = false;
   if (autoSyncRow) {
     var val = typeof autoSyncRow.config_value === 'string'
@@ -173,13 +194,9 @@ async function gcalMarkCodeUsed(code) {
   var key = code.substring(0, 40);
   var hash = require('crypto').createHash('sha256').update(key).digest('hex');
 
-  await db.raw('DELETE FROM oauth_code_nonces WHERE expires_at < NOW()').catch(function() {});
+  await accountRepo.deleteExpiredOAuthNonces().catch(function() {});
 
-  var result = await db.raw(
-    'INSERT IGNORE INTO oauth_code_nonces (code_hash, expires_at) ' +
-    'VALUES (?, DATE_ADD(NOW(), INTERVAL 2 MINUTE))',
-    [hash]
-  );
+  var result = await accountRepo.insertOAuthNonceIgnoreDuplicate(hash);
   return result[0].affectedRows === 1;
 }
 
@@ -212,7 +229,7 @@ async function gcalCallback(code, state, reqUser) {
 
   var update = {
     gcal_access_token: tokens.access_token,
-    updated_at: db.fn.now()
+    updated_at: accountRepo.now()
   };
   if (tokens.refresh_token) {
     update.gcal_refresh_token = tokens.refresh_token;
@@ -221,34 +238,31 @@ async function gcalCallback(code, state, reqUser) {
     update.gcal_token_expiry = new Date(tokens.expiry_date);
   }
 
-  await db('users').where('id', userId).update(update);
+  await accountRepo.updateUser(userId, update);
 
   var frontendUrl = require('../../proxy-config').services.juggler.frontend;
   return { status: 302, redirect: frontendUrl + '/?gcal=connected' };
 }
 
 async function gcalDisconnect(userId) {
-  await db('users').where('id', userId).update({
+  await accountRepo.updateUser(userId, {
     gcal_access_token: null,
     gcal_refresh_token: null,
     gcal_token_expiry: null,
-    updated_at: db.fn.now()
+    updated_at: accountRepo.now()
   });
   return { disconnected: true };
 }
 
 async function setGcalAutoSync(userId, enabled) {
   var value = !!enabled;
-  var existing = await db('user_config')
-    .where({ user_id: userId, config_key: 'gcal_auto_sync' })
-    .first();
+  var existing = await accountRepo.getUserConfig(userId, 'gcal_auto_sync');
 
   if (existing) {
-    await db('user_config')
-      .where({ user_id: userId, config_key: 'gcal_auto_sync' })
-      .update({ config_value: JSON.stringify(value), updated_at: db.fn.now() });
+    await accountRepo.updateUserConfig(userId, 'gcal_auto_sync',
+      { config_value: JSON.stringify(value), updated_at: accountRepo.now() });
   } else {
-    await db('user_config').insert({
+    await accountRepo.insertUserConfig({
       user_id: userId,
       config_key: 'gcal_auto_sync',
       config_value: JSON.stringify(value)
@@ -277,17 +291,14 @@ async function getMsftStatus(user) {
       var info = await msftCalApi.getUserInfo(token);
       if (info && info.email) {
         msftEmail = info.email;
-        await db('users').where('id', user.id)
-          .update({ msft_cal_email: msftEmail, updated_at: db.fn.now() });
+        await accountRepo.updateUser(user.id, { msft_cal_email: msftEmail, updated_at: accountRepo.now() });
       }
     } catch (e) {
       logger.warn('MSFT account email lazy backfill failed (non-fatal):', e.message);
     }
   }
 
-  var autoSyncRow = await db('user_config')
-    .where({ user_id: user.id, config_key: 'msft_cal_auto_sync' })
-    .first();
+  var autoSyncRow = await accountRepo.getUserConfig(user.id, 'msft_cal_auto_sync');
   var autoSync = false;
   if (autoSyncRow) {
     var val = typeof autoSyncRow.config_value === 'string'
@@ -318,13 +329,9 @@ async function msftMarkCodeUsed(code) {
   var key = code.substring(0, 40);
   var hash = require('crypto').createHash('sha256').update(key).digest('hex');
 
-  await db.raw('DELETE FROM oauth_code_nonces WHERE expires_at < NOW()').catch(function() {});
+  await accountRepo.deleteExpiredOAuthNonces().catch(function() {});
 
-  var result = await db.raw(
-    'INSERT IGNORE INTO oauth_code_nonces (code_hash, expires_at) ' +
-    'VALUES (?, DATE_ADD(NOW(), INTERVAL 2 MINUTE))',
-    [hash]
-  );
+  var result = await accountRepo.insertOAuthNonceIgnoreDuplicate(hash);
   return result[0].affectedRows === 1;
 }
 
@@ -360,7 +367,7 @@ async function msftCallback(code, state, reqUser) {
 
   var update = {
     msft_cal_access_token: tokens.accessToken,
-    updated_at: db.fn.now()
+    updated_at: accountRepo.now()
   };
   if (tokens.refreshToken) {
     update.msft_cal_refresh_token = tokens.refreshToken;
@@ -376,34 +383,31 @@ async function msftCallback(code, state, reqUser) {
     logger.warn('MSFT account email capture failed (non-fatal):', e.message);
   }
 
-  await db('users').where('id', userId).update(update);
+  await accountRepo.updateUser(userId, update);
 
   var frontendUrl = require('../../proxy-config').services.juggler.frontend;
   return { status: 302, redirect: frontendUrl + '/?msftcal=connected' };
 }
 
 async function msftDisconnect(userId) {
-  await db('users').where('id', userId).update({
+  await accountRepo.updateUser(userId, {
     msft_cal_access_token: null,
     msft_cal_refresh_token: null,
     msft_cal_token_expiry: null,
-    updated_at: db.fn.now()
+    updated_at: accountRepo.now()
   });
   return { disconnected: true };
 }
 
 async function setMsftAutoSync(userId, enabled) {
   var value = !!enabled;
-  var existing = await db('user_config')
-    .where({ user_id: userId, config_key: 'msft_cal_auto_sync' })
-    .first();
+  var existing = await accountRepo.getUserConfig(userId, 'msft_cal_auto_sync');
 
   if (existing) {
-    await db('user_config')
-      .where({ user_id: userId, config_key: 'msft_cal_auto_sync' })
-      .update({ config_value: JSON.stringify(value), updated_at: db.fn.now() });
+    await accountRepo.updateUserConfig(userId, 'msft_cal_auto_sync',
+      { config_value: JSON.stringify(value), updated_at: accountRepo.now() });
   } else {
-    await db('user_config').insert({
+    await accountRepo.insertUserConfig({
       user_id: userId,
       config_key: 'msft_cal_auto_sync',
       config_value: JSON.stringify(value)
@@ -420,8 +424,7 @@ async function appleGetStatus(user) {
 
   var allCalendars = [];
   try {
-    allCalendars = await db('user_calendars')
-      .where({ user_id: user.id, provider: 'apple' });
+    allCalendars = await accountRepo.findUserCalendars(user.id, 'apple');
   } catch (_e) {
     // Table may not exist if migration hasn't run yet
   }
@@ -429,9 +432,7 @@ async function appleGetStatus(user) {
   var connected = hasCredentials && (allCalendars.length > 0 || !!user.apple_cal_calendar_url);
   var lastSyncedAt = user.apple_cal_last_synced_at || null;
 
-  var autoSyncRow = await db('user_config')
-    .where({ user_id: user.id, config_key: 'apple_cal_auto_sync' })
-    .first();
+  var autoSyncRow = await accountRepo.getUserConfig(user.id, 'apple_cal_auto_sync');
   var autoSync = false;
   if (autoSyncRow) {
     var val = typeof autoSyncRow.config_value === 'string'
@@ -477,17 +478,16 @@ async function appleConnect(userId, body) {
     return { status: 404, body: { error: 'No calendars found on this account' } };
   }
 
-  await db('users').where('id', userId).update({
+  await accountRepo.updateUser(userId, {
     apple_cal_server_url: url,
     apple_cal_username: username,
     apple_cal_password: encrypt(password),
-    updated_at: db.fn.now()
+    updated_at: accountRepo.now()
   });
 
   var existingSelections = [];
   try {
-    existingSelections = await db('user_calendars')
-      .where({ user_id: userId, provider: 'apple' });
+    existingSelections = await accountRepo.findUserCalendars(userId, 'apple');
   } catch (e) {
     logger.warn('user_calendars table not available:', e.message);
   }
@@ -520,24 +520,22 @@ async function appleSelectCalendar(userId, body) {
     return { status: 400, body: { error: 'calendarUrl is required' } };
   }
 
-  var user = await db('users').where('id', userId).first();
+  var user = await accountRepo.getUser(userId);
   if (!user || !user.apple_cal_username || !user.apple_cal_password) {
     return { status: 400, body: { error: 'Not connected to Apple Calendar. Connect first.' } };
   }
 
-  await db('users').where('id', userId).update({
+  await accountRepo.updateUser(userId, {
     apple_cal_calendar_url: calendarUrl,
-    updated_at: db.fn.now()
+    updated_at: accountRepo.now()
   });
 
-  var existing = await db('user_calendars')
-    .where({ user_id: userId, provider: 'apple', calendar_id: calendarUrl })
-    .first();
+  var existing = await accountRepo.findUserCalendarByCalendarId(userId, 'apple', calendarUrl);
 
   if (existing) {
-    await db('user_calendars').where('id', existing.id).update({ enabled: true, updated_at: db.fn.now() });
+    await accountRepo.updateUserCalendarById(existing.id, { enabled: true, updated_at: accountRepo.now() });
   } else {
-    await db('user_calendars').insert({
+    await accountRepo.insertUserCalendar({
       user_id: userId,
       provider: 'apple',
       calendar_id: calendarUrl,
@@ -555,27 +553,25 @@ async function appleSelectCalendars(userId, body) {
     return { status: 400, body: { error: 'calendars array is required' } };
   }
 
-  var user = await db('users').where('id', userId).first();
+  var user = await accountRepo.getUser(userId);
   if (!user || !user.apple_cal_username || !user.apple_cal_password) {
     return { status: 400, body: { error: 'Not connected to Apple Calendar. Connect first.' } };
   }
 
   for (var i = 0; i < calendars.length; i++) {
     var cal = calendars[i];
-    var existing = await db('user_calendars')
-      .where({ user_id: userId, provider: 'apple', calendar_id: cal.url })
-      .first();
+    var existing = await accountRepo.findUserCalendarByCalendarId(userId, 'apple', cal.url);
 
     if (existing) {
-      await db('user_calendars').where('id', existing.id).update({
+      await accountRepo.updateUserCalendarById(existing.id, {
         display_name: cal.displayName || existing.display_name,
         enabled: cal.enabled !== undefined ? cal.enabled : existing.enabled,
         sync_direction: cal.syncDirection || existing.sync_direction,
         ingest_mode: cal.ingestMode || existing.ingest_mode,
-        updated_at: db.fn.now()
+        updated_at: accountRepo.now()
       });
     } else {
-      await db('user_calendars').insert({
+      await accountRepo.insertUserCalendar({
         user_id: userId,
         provider: 'apple',
         calendar_id: cal.url,
@@ -587,53 +583,45 @@ async function appleSelectCalendars(userId, body) {
     }
   }
 
-  var firstEnabled = await db('user_calendars')
-    .where({ user_id: userId, provider: 'apple', enabled: true })
-    .first();
+  var firstEnabled = await accountRepo.findFirstEnabledUserCalendar(userId, 'apple');
 
-  await db('users').where('id', userId).update({
+  await accountRepo.updateUser(userId, {
     apple_cal_calendar_url: firstEnabled ? firstEnabled.calendar_id : null,
-    updated_at: db.fn.now()
+    updated_at: accountRepo.now()
   });
 
-  var savedCalendars = await db('user_calendars')
-    .where({ user_id: userId, provider: 'apple' });
+  var savedCalendars = await accountRepo.findUserCalendars(userId, 'apple');
 
   return { status: 200, body: { calendars: savedCalendars } };
 }
 
 async function appleGetCalendars(userId) {
-  var calendars = await db('user_calendars')
-    .where({ user_id: userId, provider: 'apple' });
+  var calendars = await accountRepo.findUserCalendars(userId, 'apple');
   return { status: 200, body: { calendars: calendars } };
 }
 
 async function appleUpdateCalendar(userId, calendarId, body) {
-  var row = await db('user_calendars')
-    .where({ id: calendarId, user_id: userId })
-    .first();
+  var row = await accountRepo.findUserCalendarByIdForUser(calendarId, userId);
 
   if (!row) {
     return { status: 404, body: { error: 'Calendar not found' } };
   }
 
-  var updates = { updated_at: db.fn.now() };
+  var updates = { updated_at: accountRepo.now() };
   if (body.enabled !== undefined) updates.enabled = body.enabled;
   if (body.syncDirection) updates.sync_direction = body.syncDirection;
   if (body.ingestMode) updates.ingest_mode = body.ingestMode;
 
-  await db('user_calendars').where('id', calendarId).update(updates);
+  await accountRepo.updateUserCalendarById(calendarId, updates);
 
-  var firstEnabled = await db('user_calendars')
-    .where({ user_id: userId, provider: 'apple', enabled: true })
-    .first();
+  var firstEnabled = await accountRepo.findFirstEnabledUserCalendar(userId, 'apple');
 
-  await db('users').where('id', userId).update({
+  await accountRepo.updateUser(userId, {
     apple_cal_calendar_url: firstEnabled ? firstEnabled.calendar_id : null,
-    updated_at: db.fn.now()
+    updated_at: accountRepo.now()
   });
 
-  var updated = await db('user_calendars').where('id', calendarId).first();
+  var updated = await accountRepo.findUserCalendarById(calendarId);
   return { status: 200, body: { calendar: updated } };
 }
 
@@ -659,8 +647,7 @@ async function appleRefreshCalendars(userId, user) {
     return { status: 500, body: { error: 'Failed to discover calendars.', detail: e.message } };
   }
 
-  var existingRows = await db('user_calendars')
-    .where({ user_id: userId, provider: 'apple' });
+  var existingRows = await accountRepo.findUserCalendars(userId, 'apple');
   var existingByUrl = {};
   existingRows.forEach(function(r) { existingByUrl[r.calendar_id] = r; });
 
@@ -671,25 +658,24 @@ async function appleRefreshCalendars(userId, user) {
 
     if (existingByUrl[rc.url]) {
       if (existingByUrl[rc.url].display_name !== rc.displayName) {
-        await db('user_calendars').where('id', existingByUrl[rc.url].id)
-          .update({ display_name: rc.displayName, updated_at: db.fn.now() });
+        await accountRepo.updateUserCalendarById(existingByUrl[rc.url].id,
+          { display_name: rc.displayName, updated_at: accountRepo.now() });
       }
     } else {
-      await db('user_calendars').insert({
+      await accountRepo.insertUserCalendar({
         user_id: userId,
         provider: 'apple',
         calendar_id: rc.url,
         display_name: rc.displayName,
         enabled: false,
         sync_direction: 'full',
-        created_at: db.fn.now(),
-        updated_at: db.fn.now()
+        created_at: accountRepo.now(),
+        updated_at: accountRepo.now()
       });
     }
   }
 
-  var allCalendars = await db('user_calendars')
-    .where({ user_id: userId, provider: 'apple' });
+  var allCalendars = await accountRepo.findUserCalendars(userId, 'apple');
 
   return {
     status: 200,
@@ -709,40 +695,32 @@ async function appleRefreshCalendars(userId, user) {
 }
 
 async function appleDisconnect(userId) {
-  await db('user_calendars')
-    .where({ user_id: userId, provider: 'apple' })
-    .del();
+  await accountRepo.deleteUserCalendars(userId, 'apple');
 
-  await db('users').where('id', userId).update({
+  await accountRepo.updateUser(userId, {
     apple_cal_server_url: null,
     apple_cal_username: null,
     apple_cal_password: null,
     apple_cal_calendar_url: null,
     apple_cal_sync_token: null,
     apple_cal_last_synced_at: null,
-    updated_at: db.fn.now()
+    updated_at: accountRepo.now()
   });
 
-  await db('user_config')
-    .where({ user_id: userId, config_key: 'apple_cal_auto_sync' })
-    .del()
-    .catch(function() {});
+  await accountRepo.deleteUserConfig(userId, 'apple_cal_auto_sync').catch(function() {});
 
   return { disconnected: true };
 }
 
 async function setAppleAutoSync(userId, enabled) {
   var value = !!enabled;
-  var existing = await db('user_config')
-    .where({ user_id: userId, config_key: 'apple_cal_auto_sync' })
-    .first();
+  var existing = await accountRepo.getUserConfig(userId, 'apple_cal_auto_sync');
 
   if (existing) {
-    await db('user_config')
-      .where({ user_id: userId, config_key: 'apple_cal_auto_sync' })
-      .update({ config_value: JSON.stringify(value) });
+    await accountRepo.updateUserConfig(userId, 'apple_cal_auto_sync',
+      { config_value: JSON.stringify(value) });
   } else {
-    await db('user_config').insert({
+    await accountRepo.insertUserConfig({
       user_id: userId,
       config_key: 'apple_cal_auto_sync',
       config_value: JSON.stringify(value)
@@ -754,61 +732,38 @@ async function setAppleAutoSync(userId, enabled) {
 
 // ── 999.942 W1/W2: cal-sync controller read-path facade methods ──
 // hasChanges/getSyncHistory (cal-sync.controller.js) previously ran these
-// queries via a raw inline `getDb()('tasks_v'|'sync_history')` call. This
-// re-exposes the SAME exact queries behind the facade boundary — no
-// orchestration logic, no shape change (REFACTOR mode — no behavior change).
+// queries via a raw inline `getDb()('tasks_v'|'sync_history')` call, then
+// (999.942) via a `srcDb` (`../../db`) require in this facade. JUG-FACADE-DB-
+// VIOLATIONS stage 3 moves BOTH query bodies verbatim onto syncStateRepo
+// (adapters/KnexSyncStateRepository.js — it already carries an injected db
+// handle over the SAME lib/db singleton `srcDb` re-exported byte-identically).
+// No orchestration logic, no shape change (REFACTOR mode — no behavior
+// change); W1/W2 characterization suites stay green unchanged.
 //
-// Uses `../../db` (src/db.js) rather than the `lib/db.getDefaultDb()` var
-// used above: src/db.js simply re-exports lib/db's getDefaultDb() singleton
-// verbatim, so this is the byte-identical connection in production — it
-// matches what the controller's pre-existing `getDb()` already resolved to.
+// NOTE: `srcDb` (`require('../../db')`) is STILL required below — it backs
+// auditCalendarSync/gatherProviderSyncData, which are sync()/audit()
+// orchestration logic explicitly OUT OF SCOPE for this stage (a different
+// ticket, JUG-H7-SYNC-EXTRACT/999.1515 — see the flagged conflict in this
+// stage's report). Do not remove this require.
 var srcDb = require('../../db');
 
 /**
  * Count tasks_v rows for a user updated after a given timestamp (used by
  * hasChanges' local-change detection). Exact query previously inlined in
- * cal-sync.controller.js:hasChanges.
+ * cal-sync.controller.js:hasChanges, now on syncStateRepo (stage 3).
  */
 async function countLocalChangesSince(userId, sinceTimestamp) {
-  return srcDb('tasks_v')
-    .where('user_id', userId)
-    .whereNotNull('scheduled_at')
-    .where('updated_at', '>', sinceTimestamp)
-    .count('* as cnt')
-    .first();
+  return getSyncStateRepo().countLocalChangesSince(userId, sinceTimestamp);
 }
 
 /**
  * Read the recent sync_history runs (grouped run IDs + detail rows) for a
  * user. Exact two-query sequence previously inlined in
  * cal-sync.controller.js:getSyncHistory — grouping/shaping stays in the
- * controller, only the raw reads move behind the facade.
+ * controller, the raw reads live on syncStateRepo (stage 3).
  */
 async function getSyncHistory(userId, opts) {
-  opts = opts || {};
-  var runLimit = opts.runLimit;
-
-  var recentRuns = await srcDb('sync_history')
-    .where('user_id', userId)
-    .select('sync_run_id')
-    .max('created_at as run_time')
-    .groupBy('sync_run_id')
-    .orderBy('run_time', 'desc')
-    .limit(runLimit);
-
-  if (recentRuns.length === 0) {
-    return { recentRuns: recentRuns, rows: [] };
-  }
-
-  var runIds = recentRuns.map(function(r) { return r.sync_run_id; });
-
-  var rows = await srcDb('sync_history')
-    .where('user_id', userId)
-    .whereIn('sync_run_id', runIds)
-    .orderBy('id', 'asc')
-    .select();
-
-  return { recentRuns: recentRuns, rows: rows };
+  return getSyncStateRepo().getSyncHistory(userId, opts);
 }
 
 // ── 999.1026: cal-sync controller audit-path facade method ──
@@ -1357,6 +1312,7 @@ module.exports = {
   // domain ports
   CalendarPort: CalendarPort,
   SyncStateRepositoryPort: SyncStateRepositoryPort,
+  CalendarAccountRepositoryPort: CalendarAccountRepositoryPort,
 
   // domain entities + value objects
   CalendarEvent: CalendarEvent,
@@ -1370,6 +1326,9 @@ module.exports = {
   AppleCalendarAdapter: AppleCalendarAdapter,
   InMemoryCalendarAdapter: InMemoryCalendarAdapter,
   KnexSyncStateRepository: KnexSyncStateRepository,
+  // JUG-FACADE-DB-VIOLATIONS stage 3
+  KnexCalendarAccountRepository: KnexCalendarAccountRepository,
+  InMemoryCalendarAccountRepository: InMemoryCalendarAccountRepository,
 
   // 999.943: Thin HTTP adapter operations for calendar controllers
   getGcalStatus: getGcalStatus,

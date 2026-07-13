@@ -164,4 +164,72 @@ KnexSyncStateRepository.prototype.clearSyncToken = function (userId, providerId)
   return this.setSyncToken(userId, providerId, null);
 };
 
+// ── JUG-FACADE-DB-VIOLATIONS stage 3: cal-sync controller read-path queries ──
+// countLocalChangesSince/getSyncHistory, moved VERBATIM from calendar/facade.js
+// (999.942 W1/W2) into this repository — it already carries an injected db
+// handle over the SAME singleton (lib/db.getDefaultDb(), byte-identical to the
+// srcDb (`../../db`) connection the facade used). NOT part of
+// SYNC_STATE_REPOSITORY_PORT_METHODS (that frozen list is the minimal
+// per-provider sync-state contract asserted by port-contract.unit.test.js) —
+// these are extra methods on the same class, matching the `columnsFor` helper
+// precedent above.
+
+/**
+ * Count tasks_v rows for a user updated after a given timestamp (used by
+ * hasChanges' local-change detection). Exact query previously inlined in
+ * cal-sync.controller.js:hasChanges, then relocated verbatim to
+ * calendar/facade.js#countLocalChangesSince (999.942 W1).
+ * @param {(string|number)} userId
+ * @param {(string|Date)} sinceTimestamp
+ * @returns {Promise<{cnt: number}>}
+ */
+KnexSyncStateRepository.prototype.countLocalChangesSince = function (userId, sinceTimestamp) {
+  return this.db('tasks_v')
+    .where('user_id', userId)
+    .whereNotNull('scheduled_at')
+    .where('updated_at', '>', sinceTimestamp)
+    .count('* as cnt')
+    .first();
+};
+
+/**
+ * Read the recent sync_history runs (grouped run IDs + detail rows) for a
+ * user. Exact two-query sequence previously inlined in
+ * cal-sync.controller.js:getSyncHistory, then relocated verbatim to
+ * calendar/facade.js#getSyncHistory (999.942 W2) — grouping/shaping stays in
+ * the controller, only the raw reads live here.
+ * @param {(string|number)} userId
+ * @param {{runLimit: number}} opts
+ * @returns {Promise<{recentRuns: Object[], rows: Object[]}>}
+ */
+KnexSyncStateRepository.prototype.getSyncHistory = function (userId, opts) {
+  var o = opts || {};
+  var runLimit = o.runLimit;
+  var self = this;
+
+  return this.db('sync_history')
+    .where('user_id', userId)
+    .select('sync_run_id')
+    .max('created_at as run_time')
+    .groupBy('sync_run_id')
+    .orderBy('run_time', 'desc')
+    .limit(runLimit)
+    .then(function (recentRuns) {
+      if (recentRuns.length === 0) {
+        return { recentRuns: recentRuns, rows: [] };
+      }
+
+      var runIds = recentRuns.map(function (r) { return r.sync_run_id; });
+
+      return self.db('sync_history')
+        .where('user_id', userId)
+        .whereIn('sync_run_id', runIds)
+        .orderBy('id', 'asc')
+        .select()
+        .then(function (rows) {
+          return { recentRuns: recentRuns, rows: rows };
+        });
+    });
+};
+
 module.exports = KnexSyncStateRepository;

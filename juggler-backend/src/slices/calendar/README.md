@@ -28,7 +28,8 @@ slices/calendar/
 │   │   └── SyncState.js              # Per-user, per-provider sync record
 │   ├── ports/
 │   │   ├── CalendarPort.js           # Driven-port contract (JSDoc typedef + CALENDAR_PORT_METHODS)
-│   │   └── SyncStateRepositoryPort.js # Sync-state persistence port (SYNC_STATE_REPOSITORY_PORT_METHODS)
+│   │   ├── SyncStateRepositoryPort.js # Sync-state persistence port (SYNC_STATE_REPOSITORY_PORT_METHODS)
+│   │   └── CalendarAccountRepositoryPort.js # Account/OAuth mgmt port (CALENDAR_ACCOUNT_REPOSITORY_PORT_METHODS)
 │   └── value-objects/
 │       ├── EventId.js                # Immutable event ID wrapper
 │       └── ProviderType.js           # Validated provider enum ('gcal'|'msft'|'apple'|'memory')
@@ -37,7 +38,9 @@ slices/calendar/
 │   ├── MicrosoftCalendarAdapter.js   # Microsoft Calendar implementation
 │   ├── AppleCalendarAdapter.js       # Apple CalDAV implementation
 │   ├── InMemoryCalendarAdapter.js    # Test double (NOT in default registry)
-│   └── KnexSyncStateRepository.js   # SyncStateRepositoryPort backed by users table
+│   ├── KnexSyncStateRepository.js    # SyncStateRepositoryPort backed by users table
+│   ├── KnexCalendarAccountRepository.js     # CalendarAccountRepositoryPort — users/user_config/user_calendars/oauth_code_nonces
+│   └── InMemoryCalendarAccountRepository.js # CalendarAccountRepositoryPort test double
 ├── facade.js                         # Public API — owns the adapter registry
 └── index.js                          # Re-exports facade + `{ calendar: facade }` namespace
 ```

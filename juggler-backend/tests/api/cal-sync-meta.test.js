@@ -15,6 +15,14 @@ process.env.NODE_ENV = 'test';
 const { createMockChainDb } = require('../helpers/mockChainDb');
 const { mockDb, resolveQueue } = createMockChainDb();
 jest.mock('../../src/db', () => mockDb);
+// JUG-FACADE-DB-VIOLATIONS stage 3: countLocalChangesSince/getSyncHistory now
+// route through KnexSyncStateRepository (adapters/KnexSyncStateRepository.js),
+// whose default db resolves via `../../lib/db`, not `../../db` — mock BOTH
+// paths onto the SAME mockDb (dual-mock pattern already used by
+// tests/characterization/gcalController.characterization.test.js to avoid the
+// "broken-mock drift" its header documents: a single-path mock silently starts
+// hitting the real DB once the facade's internal require path changes).
+jest.mock('../../src/lib/db', () => ({ getDefaultDb: () => mockDb }));
 
 // JWT mock — injects test user for Bearer tokens
 const TEST_USER = {
