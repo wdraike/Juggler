@@ -400,4 +400,29 @@ describe('KnexTaskRepository — DB-backed characterization (test-bed @3407)', f
     expect(await knex('task_masters').where('id', row.id).first()).toBeUndefined();
     expect(await knex('task_instances').where('id', row.id).first()).toBeUndefined();
   });
+
+  // JUG-FACADE-DB-VIOLATIONS stage 4: countDisabledInstances moved from
+  // facade.js's getDb()('tasks_v') read into this repository method — new
+  // db-backed pin (the site was previously exercised only through mocked
+  // ReEnableTask use-case tests, never against a real tasks_v read).
+  test('countDisabledInstances counts only status=disabled instances under the source, scoped to the user', async function () {
+    var r = repo();
+    var now = new Date();
+    var masterId = uuidv7();
+    await knex('task_masters').insert({
+      id: masterId, user_id: USER, text: 'recur-master', dur: 30, pri: 'P3',
+      recurring: 1, status: '', created_at: now, updated_at: now
+    });
+    await knex('task_instances').insert([
+      { id: uuidv7(), master_id: masterId, user_id: USER, status: 'disabled',
+        occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30, created_at: now, updated_at: now },
+      { id: uuidv7(), master_id: masterId, user_id: USER, status: 'disabled',
+        occurrence_ordinal: 2, split_ordinal: 1, split_total: 1, dur: 30, created_at: now, updated_at: now },
+      { id: uuidv7(), master_id: masterId, user_id: USER, status: '',
+        occurrence_ordinal: 3, split_ordinal: 1, split_total: 1, dur: 30, created_at: now, updated_at: now }
+    ]);
+
+    expect(await r.countDisabledInstances(USER, masterId)).toBe(2);
+    expect(await r.countDisabledInstances(OTHER, masterId)).toBe(0);
+  });
 });

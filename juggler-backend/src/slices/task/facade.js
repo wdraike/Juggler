@@ -80,7 +80,6 @@ var dateHelpers = require('../../scheduler/dateHelpers');
 var safeTimezone = dateHelpers.safeTimezone;
 var localToUtc = dateHelpers.localToUtc;
 var utcToLocal = dateHelpers.utcToLocal;
-var libDb = require('../../lib/db');
 var sseEmitter = require('../../lib/sse-emitter');
 // 999.1198 (ScheduleTriggerPort inversion): the schedule trigger comes from the
 // dependency-free scheduler/scheduleTrigger seam (scheduleQueue registers itself
@@ -103,7 +102,6 @@ var { PLACEMENT_MODES } = require('../../lib/placementModes');
 var { isTerminalStatus } = require('../../lib/task-status');
 var { isRollingMaster, computeRollingAnchor, ANCHOR_PROJECTION_STATUSES } = require('../../lib/rolling-anchor');
 var { isPatternRecurMaster, computeNextOccurrenceAnchor } = require('../../lib/next-occurrence-anchor');
-var { applyCalLockedLedgerFilter } = require('./domain/calLockedPredicate');
 var { getNowInTimezone } = require('juggler-shared/scheduler/getNowInTimezone');
 // FR-4/FR-5 (juggler-recur-lifecycle-redesign, W5): the material-edit
 // reconciliation engine reuses the scheduler's own TPC cycle-boundary +
@@ -115,11 +113,6 @@ var expandRecurringShared = require('juggler-shared/scheduler/expandRecurring');
 var { recurringPeriodEndKey } = require('../scheduler/domain/logic/recurringPeriod');
 var { createLogger } = require('@raike/lib-logger');
 var logger = createLogger('task.facade');
-
-// `getDb()` shim — returns the SAME knex the repository uses (lib/db.getDefaultDb()),
-// which the golden master mocks onto its mockDb. Used by the verbatim raw-table
-// collaborators below for cross-table reads outside the TaskRepositoryPort.
-function getDb() { return libDb.getDefaultDb(); }
 
 // ── zod schemas (lifted verbatim — controller L1585-1609) ────────────────────
 var taskPatchSchema = z.object({
@@ -148,7 +141,12 @@ var statusUpdateSchema = z.object({
 // ─────────────────────────────────────────────────────────────────────────────
 // DEFAULT WIRING (production adapters)
 // ─────────────────────────────────────────────────────────────────────────────
+var KnexLedgerWrites = require('./adapters/KnexLedgerWrites');
 var _repo = new KnexTaskRepository();      // over lib/db (ADR-0002)
+// JUG-FACADE-DB-VIOLATIONS stage 4: cal_sync_ledger/task_masters.next_start
+// fn.now()-stamped writes — kept OFF KnexTaskRepository (INVARIANT P1 forbids
+// fn.now() there); see adapters/KnexLedgerWrites.js header.
+var _ledgerWrites = new KnexLedgerWrites();
 var _cache = new RedisTaskCache();         // over lib/cache (H2)
 var _events = new EventBusTaskEvents();    // over lib/events (ADR-0001, publisher-only)
 
@@ -180,72 +178,22 @@ function hasSchedulingFields(row) {
 // CreateTask/UpdateTask/BatchCreateTasks use-cases depend on the port (_projects),
 // not on this function.
 var KnexProjectsRepository = require('./adapters/KnexProjectsRepository');
-var _projects = new KnexProjectsRepository({ getDb: getDb });
+// JUG-FACADE-DB-VIOLATIONS stage 4: no explicit getDb dep — the adapter's own
+// default (lib/db.getDefaultDb(), same singleton) applies.
+var _projects = new KnexProjectsRepository();
 function ensureProject(userId, projectName) {
   return _projects.ensureProject(userId, projectName);
 }
 
 // ── validateTaskReferences (999.586) ─────────────────────────────────────────
-// DB-backed existence validation for the three reference-array JSON columns on
-// task_masters. The pure validateTaskInput() already rejected malformed SHAPES
-// (non-array / non-string elements); this checks that referenced IDs actually
-// EXIST and belong to the user:
-//   - depends_on → every id must be one of the user's task_masters.id values.
-//     (Cycle detection is OUT of scope — that is backlog item 999.587.)
-//   - location   → every id must be one of the user's locations.location_id values.
-//   - tools      → every id must be one of the user's tools.tool_id values.
-// Returns an array of human-readable error strings (empty = valid), matching the
-// validateTaskInput() contract so the use-case can merge + 400 uniformly.
-// Only fields PRESENT in `body` are checked (partial updates don't re-validate
-// untouched fields). Empty arrays are valid (they clear the field).
-async function validateTaskReferences(userId, body) {
-  var errors = [];
-  var db = getDb();
-
-  if (Array.isArray(body.dependsOn) && body.dependsOn.length > 0) {
-    var depIds = body.dependsOn.slice();
-    var foundDeps = await db('task_masters')
-      .where('user_id', userId)
-      .whereIn('id', depIds)
-      .select('id');
-    var foundDepSet = {};
-    foundDeps.forEach(function (r) { foundDepSet[r.id] = true; });
-    var missingDeps = depIds.filter(function (id) { return !foundDepSet[id]; });
-    if (missingDeps.length > 0) {
-      errors.push('dependsOn references unknown task ID(s): ' + missingDeps.join(', '));
-    }
-  }
-
-  if (Array.isArray(body.location) && body.location.length > 0) {
-    var locIds = body.location.slice();
-    var foundLocs = await db('locations')
-      .where('user_id', userId)
-      .whereIn('location_id', locIds)
-      .select('location_id');
-    var foundLocSet = {};
-    foundLocs.forEach(function (r) { foundLocSet[r.location_id] = true; });
-    var missingLocs = locIds.filter(function (id) { return !foundLocSet[id]; });
-    if (missingLocs.length > 0) {
-      errors.push('location references unknown location ID(s): ' + missingLocs.join(', '));
-    }
-  }
-
-  if (Array.isArray(body.tools) && body.tools.length > 0) {
-    var toolIds = body.tools.slice();
-    var foundTools = await db('tools')
-      .where('user_id', userId)
-      .whereIn('tool_id', toolIds)
-      .select('tool_id');
-    var foundToolSet = {};
-    foundTools.forEach(function (r) { foundToolSet[r.tool_id] = true; });
-    var missingTools = toolIds.filter(function (id) { return !foundToolSet[id]; });
-    if (missingTools.length > 0) {
-      errors.push('tools references unknown tool ID(s): ' + missingTools.join(', '));
-    }
-  }
-
-  return errors;
-}
+// JUG-FACADE-DB-VIOLATIONS stage 4: the DB-backed existence-validation body
+// moved VERBATIM into adapters/KnexReferenceValidator.js (see its header for
+// the full contract — dependsOn/location/tools existence checks). The facade
+// keeps this name bound to the adapter's export so the three EXISTING
+// validateReferences dep seams below (CreateTask/UpdateTask/BatchCreateTasks)
+// are unchanged.
+var KnexReferenceValidator = require('./adapters/KnexReferenceValidator');
+var validateTaskReferences = KnexReferenceValidator.validateReferences;
 
 // ── splitFields shim wrapper (UpdateTask expects { splitFields }) ────────────
 var splitFieldsLib = { splitFields: splitFields };
@@ -773,11 +721,7 @@ async function handleTemplatePause(ctx) {
     // ruling) rather than deleting them, matching the pattern used by billing
     // downgrade's cascade of 'disabled' to instances.
     var pausedIds = [];
-    var futureInstances = await getDb()('tasks_with_sync_v')
-      .where({ source_id: id, user_id: userId })
-      .where('status', '')
-      .where('scheduled_at', '>', new Date())
-      .select('id', 'gcal_event_id');
+    var futureInstances = await _repo.getFutureOpenInstances(id, userId);
     if (!Array.isArray(futureInstances)) futureInstances = [];
 
     pausedIds = futureInstances.map(function (i) { return i.id; });
@@ -785,11 +729,7 @@ async function handleTemplatePause(ctx) {
     if (pausedIds.length > 0) {
       // Mark cal_sync ledger entries as deleted_local so paused instances don't
       // create stale calendar events — the same cleanup the old delete path used.
-      await getDb()('cal_sync_ledger')
-        .where('user_id', userId)
-        .whereIn('task_id', pausedIds)
-        .where('status', 'active')
-        .update({ status: 'deleted_local', task_id: null, synced_at: getDb().fn.now() })
+      await _ledgerWrites.clearActiveLedgerForTasks(userId, pausedIds)
         .catch(function (err) { logger.error('[silent-catch]', err.message); });
 
       // Cascade pause status to the instances (matching the billing downgrade pattern
@@ -809,10 +749,7 @@ async function handleTemplatePause(ctx) {
   // Unpause: re-activate all instances that were paused because the template was paused.
   // This mirrors the ReEnableTask pattern that sets status='' on disabled instances.
   if (status === '') {
-    var pausedInstances = await getDb()('tasks_with_sync_v')
-      .where({ source_id: id, user_id: userId })
-      .where('status', 'pause')
-      .select('id');
+    var pausedInstances = await _repo.getPausedInstances(id, userId);
     if (!Array.isArray(pausedInstances)) pausedInstances = [];
 
     var unpausedIds = pausedInstances.map(function (i) { return i.id; });
@@ -847,12 +784,20 @@ function loadMaster(masterId, userId) {
 // ctx.db (optional): the active knex transaction handle to write through. When the
 // caller runs inside a transaction (batchUpdateTxn), it MUST pass its `trx` here so
 // the next_start UPDATE participates in the same commit/
-// rollback boundary as the rest of the batch — otherwise a getDb() write on the base
+// rollback boundary as the rest of the batch — otherwise a base-pool write
 // autocommit connection escapes the transaction (WARN ernie-w1-anchor-trx-escape /
 // cookie-C1, 2026-07-04): a later rollback would leave the anchor advanced while the
 // status change it was derived from reverts. Callers outside a transaction
 // (UpdateTaskStatus.js, lockedBatchUpdate — both already non-transactional, matching
-// this function's pre-existing getDb() default) omit ctx.db and are unaffected.
+// this function's pre-existing base-pool default) omit ctx.db and are unaffected.
+// JUG-FACADE-DB-VIOLATIONS stage 4: the actual UPDATE (GREATEST/COALESCE monotonic
+// guard) moved to adapters/KnexLedgerWrites.js's updateNextStartAnchor (kept OFF
+// KnexTaskRepository — see that adapter's header for why); the `ctx.db || _repo.db`
+// trx-threading choice below is PRESERVED EXACTLY (same conditional, same default
+// source — _repo.db is the identical lib/db.getDefaultDb() singleton the removed
+// getDb() shim returned) — the adapter method takes the resolved handle as a
+// required param rather than re-defaulting internally, so this call site remains
+// the single place that decides base-pool vs caller-trx.
 // Test-only clock seam (999.1440, same pattern as runSchedule.js _setClock /
 // 999.1427): applyRollingAnchor's `done` branch derives the completion date
 // from "today in the user's tz" — wall-clock-boundary-sensitive for tests
@@ -866,7 +811,7 @@ async function applyRollingAnchor(ctx) {
   var userId = ctx.userId;
   var status = ctx.status;
   var existing = ctx.existing;
-  var _db = ctx.db || getDb();
+  var _db = ctx.db || _repo.db;
   var _masterForAnchor = ctx.preloadedMaster
     || await _repo.getMasterById(masterId, userId);
   if (_masterForAnchor && isRollingMaster(_masterForAnchor)) {
@@ -883,12 +828,7 @@ async function applyRollingAnchor(ctx) {
       // rolling_anchor / next_occurrence_anchor columns have been dropped.
       // Monotonic guard: GREATEST(COALESCE(...)) computes the max SERVER-SIDE
       // to prevent a concurrent terminal write from regressing the anchor.
-      await _db('task_masters')
-        .where({ id: masterId, user_id: userId })
-        .update({
-          next_start: getDb().raw('GREATEST(COALESCE(next_start, ?), ?)', [_newAnchor, _newAnchor]),
-          updated_at: getDb().fn.now()
-        });
+      await _ledgerWrites.updateNextStartAnchor(_db, masterId, userId, _newAnchor);
     }
   } else if (_masterForAnchor && isPatternRecurMaster(_masterForAnchor)) {
     var _pInstanceDate = existing.date ? String(existing.date).slice(0, 10) : null;
@@ -900,12 +840,7 @@ async function applyRollingAnchor(ctx) {
       // next_start is the single unified anchor column. The legacy
       // next_occurrence_anchor column has been dropped.
       // Monotonic guard: same GREATEST(COALESCE(...)) as the rolling branch.
-      await _db('task_masters')
-        .where({ id: masterId, user_id: userId })
-        .update({
-          next_start: getDb().raw('GREATEST(COALESCE(next_start, ?), ?)', [_pNewAnchor, _pNewAnchor]),
-          updated_at: getDb().fn.now()
-        });
+      await _ledgerWrites.updateNextStartAnchor(_db, masterId, userId, _pNewAnchor);
     }
   }
 }
@@ -956,9 +891,7 @@ function loadSplitSiblings(ctx) {
 
 // updateTaskStatus done-frozen reactivation (verbatim — controller L1775-1777).
 async function reactivateDoneFrozen(ctx) {
-  await getDb()('cal_sync_ledger')
-    .where({ user_id: ctx.userId, task_id: ctx.id, status: 'done_frozen' })
-    .update({ status: 'active', synced_at: getDb().fn.now() });
+  await _ledgerWrites.reactivateDoneFrozenLedger(ctx.userId, ctx.id);
 }
 
 // updateTaskStatus skip/cancel outbound cal-sync trigger.
@@ -978,8 +911,7 @@ var triggerCalSync = {
 
 // deleteTask cal_sync_settings read (verbatim — controller L1388-1392).
 async function loadCalSyncSettings(userId) {
-  var _csRow = await getDb()('user_config')
-    .where({ user_id: userId, config_key: 'cal_sync_settings' }).first();
+  var _csRow = await _repo.getCalSyncSettingsConfig(userId);
   return _csRow
     ? (typeof _csRow.config_value === 'string' ? JSON.parse(_csRow.config_value) : _csRow.config_value)
     : {};
@@ -987,10 +919,7 @@ async function loadCalSyncSettings(userId) {
 
 // deleteTask provider-origin ledger lookup (verbatim — controller L1407-1410).
 function findProviderLedgerRow(userId, id) {
-  return getDb()('cal_sync_ledger')
-    .where({ user_id: userId, task_id: id, status: 'active' })
-    .where('origin', '!=', 'juggler')
-    .first();
+  return _repo.findActiveProviderLedgerRow(userId, id);
 }
 
 // FR-6 (juggler-recur-lifecycle-redesign): series-delete cal_locked gate. The
@@ -1011,15 +940,7 @@ function findProviderLedgerRow(userId, id) {
 // no shared home, a divergence risk on a security-adjacent guard. Now both
 // call `domain/calLockedPredicate` — see that module's header.
 function findCalLockedSeriesInstance(userId, templateId) {
-  var qb = getDb()('cal_sync_ledger as l')
-    .join('tasks_with_sync_v as t', 't.id', 'l.task_id')
-    .where('l.user_id', userId)
-    .where('t.user_id', userId)
-    .where(function () {
-      this.where('t.source_id', templateId).orWhere('t.id', templateId);
-    })
-    .select('l.provider', 'l.task_id');
-  return applyCalLockedLedgerFilter(qb, 'l').first();
+  return _repo.findCalLockedSeriesLedgerRow(userId, templateId);
 }
 
 // deleteTask cascade-recurring delete block (verbatim — controller L1434-1498, the
@@ -1220,18 +1141,11 @@ async function lockedBatchUpdate(ctx) {
   var queuedCount = 0;
 
   var idsToCheck = updates.map(function (u) { return u.id; }).filter(Boolean);
-  var existCheck = await getDb()('tasks_with_sync_v')
-    .where('user_id', userId)
-    .whereIn('id', idsToCheck)
-    .select('id', 'task_type', 'source_id', 'master_id', 'scheduled_at', 'status',
-            'when', 'date', 'gcal_event_id', 'msft_event_id');
+  var existCheck = await _repo.fetchTasksForLockedBatchCheck(userId, idsToCheck);
   var existById = {};
   existCheck.forEach(function (r) { existById[r.id] = r; });
 
-  var _lockedLedger = await getDb()('cal_sync_ledger')
-    .whereIn('task_id', idsToCheck)
-    .where('status', 'active')
-    .select('task_id', 'origin');
+  var _lockedLedger = await _repo.fetchActiveLedgerOriginsForTasks(idsToCheck);
   var _lockedOriginById = {};
   _lockedLedger.forEach(function (r) {
     if (!_lockedOriginById[r.task_id] || _lockedOriginById[r.task_id] === 'juggler') {
@@ -1462,7 +1376,7 @@ async function batchUpdateTxn(ctx) {
       // inside batchUpdateTxn's own `trx` — thread it through so the anchor UPDATE
       // commits/rolls back atomically with the rest of the batch (see applyRollingAnchor
       // header for the escape hazard this closes). lockedBatchUpdate's call site is
-      // non-transactional already and is intentionally left on the getDb() default.
+      // non-transactional already and is intentionally left on the base-pool default.
       await applyRecurrenceAnchors({
         userId: userId,
         status: row.status,
@@ -1515,11 +1429,8 @@ async function detachLedger(ctx) {
 }
 
 // reEnableTask disabled-instance counter (verbatim — controller L2314-2317).
-async function countDisabledInstances(userId, id) {
-  var disabledInstances = await getDb()('tasks_v')
-    .where({ source_id: id, user_id: userId, status: 'disabled' })
-    .count('* as count').first();
-  return parseInt(disabledInstances.count, 10);
+function countDisabledInstances(userId, id) {
+  return _repo.countDisabledInstances(userId, id);
 }
 
 // entity-limit counters — resolved LAZILY (the legacy reEnableTask did

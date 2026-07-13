@@ -66,7 +66,9 @@ var taskInstances = require('../../../lib/task-instances');
 var TASK_REPOSITORY_PORT_METHODS =
   require('../domain/ports/TaskRepositoryPort').TASK_REPOSITORY_PORT_METHODS;
 
-var isCalLockedLedgerRow = require('../domain/calLockedPredicate').isCalLockedLedgerRow;
+var calLockedPredicate = require('../domain/calLockedPredicate');
+var isCalLockedLedgerRow = calLockedPredicate.isCalLockedLedgerRow;
+var applyCalLockedLedgerFilter = calLockedPredicate.applyCalLockedLedgerFilter;
 
 /**
  * @param {Object} [deps]
@@ -503,6 +505,147 @@ KnexTaskRepository.prototype.fetchOneShottedInstanceId = function fetchOneShotte
     .select('id')
     .first()
     .then(function (r) { return r ? r.id : null; });
+};
+
+/**
+ * updateTaskStatus recurring_template pause cascade — the user's future OPEN
+ * (status='') instances of a template, scheduled after "now". Verbatim
+ * relocation of facade.js's handleTemplatePause pause-branch read
+ * (JUG-FACADE-DB-VIOLATIONS stage 4).
+ * @param {string} sourceId
+ * @param {string} userId
+ * @returns {Promise<Object[]>}
+ */
+KnexTaskRepository.prototype.getFutureOpenInstances = function getFutureOpenInstances(sourceId, userId) {
+  return this.db('tasks_with_sync_v')
+    .where({ source_id: sourceId, user_id: userId })
+    .where('status', '')
+    .where('scheduled_at', '>', new Date())
+    .select('id', 'gcal_event_id');
+};
+
+/**
+ * updateTaskStatus recurring_template unpause cascade — the user's PAUSED
+ * instances of a template. Verbatim relocation of facade.js's
+ * handleTemplatePause unpause-branch read (JUG-FACADE-DB-VIOLATIONS stage 4).
+ * @param {string} sourceId
+ * @param {string} userId
+ * @returns {Promise<Object[]>}
+ */
+KnexTaskRepository.prototype.getPausedInstances = function getPausedInstances(sourceId, userId) {
+  return this.db('tasks_with_sync_v')
+    .where({ source_id: sourceId, user_id: userId })
+    .where('status', 'pause')
+    .select('id');
+};
+
+// NOTE (JUG-FACADE-DB-VIOLATIONS stage 4 scope decision): the cal_sync_ledger
+// soft-clear/reactivate writes and the task_masters.next_start anchor write
+// do NOT live here — they stamp `synced_at`/`updated_at` via `fn.now()`,
+// which INVARIANT P1 above forbids in this file (ZERO fn.now() references,
+// enforced by the SOURCE PROOF test in KnexTaskRepository.test.js). Per the
+// pre-existing Oscar-gated W3 RE-REVIEW decision (see facade.js header),
+// those columns are OUT of P1 scope and were never routed through this repo.
+// They now live in adapters/KnexLedgerWrites.js instead, preserving fn.now()
+// verbatim (no behavior change) while still moving the getDb() call sites
+// out of the facade and into an adapter.
+
+/**
+ * deleteTask's cal_sync_settings config row. Verbatim relocation of
+ * facade.js's loadCalSyncSettings read (JUG-FACADE-DB-VIOLATIONS stage 4).
+ * Cross-slice read (user_config is owned by the user-config slice) —
+ * preserved verbatim rather than re-homed, matching the pre-existing
+ * raw-table-collaborator convention this facade has used since W3/W6.
+ * @param {string} userId
+ * @returns {Promise<?Object>}
+ */
+KnexTaskRepository.prototype.getCalSyncSettingsConfig = function getCalSyncSettingsConfig(userId) {
+  return this.db('user_config')
+    .where({ user_id: userId, config_key: 'cal_sync_settings' })
+    .first();
+};
+
+/**
+ * deleteTask's provider-origin ledger lookup — the first ACTIVE, non-juggler-
+ * origin cal_sync_ledger row for a task. Verbatim relocation of facade.js's
+ * findProviderLedgerRow (JUG-FACADE-DB-VIOLATIONS stage 4).
+ * @param {string} userId
+ * @param {string} taskId
+ * @returns {Promise<?Object>}
+ */
+KnexTaskRepository.prototype.findActiveProviderLedgerRow = function findActiveProviderLedgerRow(userId, taskId) {
+  return this.db('cal_sync_ledger')
+    .where({ user_id: userId, task_id: taskId, status: 'active' })
+    .where('origin', '!=', 'juggler')
+    .first();
+};
+
+/**
+ * FR-6 series-delete cal_locked gate — does ANY instance (or the template
+ * itself) under `templateId` have an ACTIVE cal_sync_ledger row whose origin
+ * is a real calendar provider (not 'juggler')? Verbatim relocation of
+ * facade.js's findCalLockedSeriesInstance (JUG-FACADE-DB-VIOLATIONS stage 4).
+ * Shares the same domain/calLockedPredicate rule as fetchTaskWithEventIds'
+ * cal_locked derivation above (bert fix, cookie ARCH-REVIEW-W2.json W2-ARCH-W3).
+ * @param {string} userId
+ * @param {string} templateId
+ * @returns {Promise<?Object>}
+ */
+KnexTaskRepository.prototype.findCalLockedSeriesLedgerRow = function findCalLockedSeriesLedgerRow(userId, templateId) {
+  var qb = this.db('cal_sync_ledger as l')
+    .join('tasks_with_sync_v as t', 't.id', 'l.task_id')
+    .where('l.user_id', userId)
+    .where('t.user_id', userId)
+    .where(function () {
+      this.where('t.source_id', templateId).orWhere('t.id', templateId);
+    })
+    .select('l.provider', 'l.task_id');
+  return applyCalLockedLedgerFilter(qb, 'l').first();
+};
+
+/**
+ * batchUpdateTasks LOCKED-path existence/shape check for the batch's ids.
+ * Verbatim relocation of facade.js's lockedBatchUpdate existCheck read
+ * (JUG-FACADE-DB-VIOLATIONS stage 4).
+ * @param {string} userId
+ * @param {string[]} ids
+ * @returns {Promise<Object[]>}
+ */
+KnexTaskRepository.prototype.fetchTasksForLockedBatchCheck = function fetchTasksForLockedBatchCheck(userId, ids) {
+  return this.db('tasks_with_sync_v')
+    .where('user_id', userId)
+    .whereIn('id', ids)
+    .select('id', 'task_type', 'source_id', 'master_id', 'scheduled_at', 'status',
+            'when', 'date', 'gcal_event_id', 'msft_event_id');
+};
+
+/**
+ * batchUpdateTasks LOCKED-path active cal_sync_ledger origins for the batch's
+ * ids (drives the cal-sync edit guard). Verbatim relocation of facade.js's
+ * lockedBatchUpdate ledger read (JUG-FACADE-DB-VIOLATIONS stage 4).
+ * @param {string[]} taskIds
+ * @returns {Promise<Object[]>}
+ */
+KnexTaskRepository.prototype.fetchActiveLedgerOriginsForTasks = function fetchActiveLedgerOriginsForTasks(taskIds) {
+  return this.db('cal_sync_ledger')
+    .whereIn('task_id', taskIds)
+    .where('status', 'active')
+    .select('task_id', 'origin');
+};
+
+/**
+ * reEnableTask's disabled-instance counter for a recurring template. Verbatim
+ * relocation of facade.js's countDisabledInstances (JUG-FACADE-DB-VIOLATIONS
+ * stage 4).
+ * @param {string} userId
+ * @param {string} sourceId
+ * @returns {Promise<number>}
+ */
+KnexTaskRepository.prototype.countDisabledInstances = function countDisabledInstances(userId, sourceId) {
+  return this.db('tasks_v')
+    .where({ source_id: sourceId, user_id: userId, status: 'disabled' })
+    .count('* as count').first()
+    .then(function (row) { return parseInt(row.count, 10); });
 };
 
 // ── WRITES (delegate to lib/tasks-write; P1 new Date() timestamps) ────────────

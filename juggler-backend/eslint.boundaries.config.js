@@ -232,6 +232,7 @@ const SLICES = [
   },
   {
     name: 'task',
+    facadeDbClean: true, // purged 2026-07-13 (JUG-FACADE-DB-VIOLATIONS stage 4 — validateTaskReferences → adapters/KnexReferenceValidator.js; handleTemplatePause/anchor writes/cal_sync_ledger sites/user_config read/countDisabledInstances → KnexTaskRepository methods)
     ref: 'JUG-HEX-H3 (W6)',
     facadeFiles: ['**/slices/task/facade.js', '**/slices/task/index.js'],
     extraExempt: ['**/slices/task/application/**/*.js', '**/slices/task/domain/**/*.js'],
