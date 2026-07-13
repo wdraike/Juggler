@@ -30,3 +30,4 @@ entities.json
 
 # service-auth dev keys (auto-generated at boot; never commit private keys)
 src/keys/
+juggler-backend/src/keys/
