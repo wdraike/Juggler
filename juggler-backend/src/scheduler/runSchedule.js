@@ -1933,6 +1933,20 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (original.taskType === 'recurring_instance') {
       var rawRec = rawRowById[t.id];
       var hasScheduledAt = rawRec ? !!rawRec.scheduled_at : !!original.scheduledAt;
+      // sched-chunk-collision-lockbypass fix: a chunk unplaced this run because it
+      // structurally overflowed its cycle's capacity (RECURRING_SPLIT_OVERFLOW —
+      // unifiedScheduleV2.js's time-boxing pass) was never a genuinely-scheduled,
+      // merely-overdue placement the R-FR5 pin below is meant to protect — its prior
+      // scheduled_at is a stale artifact from a run whose chunk distribution no
+      // longer holds (e.g. an earlier sibling chunk now occupies more of the day).
+      // Pinning it in place risks re-surfacing exactly the sibling-collision bug
+      // this fix addresses (two chunks left sharing one identical scheduled_at
+      // forever, since neither the persist step nor a later run ever revisits a
+      // pinned "already in place" row). Route it through the unscheduled path
+      // below instead, same as a never-placed chunk.
+      if (hasScheduledAt && t._unplacedReason === REASON_CODES.RECURRING_SPLIT_OVERFLOW) {
+        hasScheduledAt = false;
+      }
       if (hasScheduledAt) {
         // R-FR5: past-due rolling instance that couldn't be placed this run.
         // W3 (sched-drop-overdue-column, M-5): overdue is no longer written
@@ -1974,9 +1988,18 @@ async function runScheduleAndPersist(userId, _retries, options) {
         }
         return;
       }
-      var unplacedChunkUpdate = { unscheduled: 1, unplaced_reason: t._unplacedReason || REASON_CODES.NO_SLOT, unplaced_detail: t._unplacedDetail || 'No available slot in the schedule', updated_at: _runScheduleCommand.clockNow() };
+      var unplacedChunkUpdate = { unscheduled: 1, scheduled_at: null, unplaced_reason: t._unplacedReason || REASON_CODES.NO_SLOT, unplaced_detail: t._unplacedDetail || 'No available slot in the schedule', updated_at: _runScheduleCommand.clockNow() };
       if (result.slackByTaskId && t.id in result.slackByTaskId) {
         unplacedChunkUpdate.slack_mins = result.slackByTaskId[t.id];
+      }
+      // ernie fix-review WARN (sched-chunk-collision-lockbypass): a RECURRING_SPLIT_OVERFLOW
+      // chunk diverted into this path above can ALSO be past-dated with a pending
+      // forward-roll (forwardRollDeadlineById[t.id] set) — mirror the R-OD1/W1 date
+      // advance the R-FR5 branch performs above (:1970-1972), or the row is left
+      // unscheduled at a stale past `date` (the same "stuck at a past date" symptom
+      // that fix addressed, reintroduced for this diverted path).
+      if (forwardRollDeadlineById[t.id] != null) {
+        unplacedChunkUpdate.date = timeInfo.todayKey;
       }
       pendingUpdates.push({ id: t.id, dbUpdate: unplacedChunkUpdate });
       cleared++;
