@@ -95,19 +95,23 @@ describe('TEMPLATE_FIELDS export', () => {
 // rowToTask: preferred_time_mins inheritance
 // ═══════════════════════════════════════════════════════════════
 
+// David ruling 2026-07-13 (999.1439, reality-wins): a PLACED instance keeps its
+// live scheduled_at time — template preferred_time_mins fills task.time ONLY when
+// the instance has no live time (unplaced). Same direction as BUG-811 +
+// schedulerScenarios (4f7f3df5) + schedulerPersistIntegration (45915470).
 describe('rowToTask: preferred_time_mins', () => {
-  test('instance inherits time from template preferred_time_mins', () => {
+  test('placed instance keeps its own time; preferredTimeMins still inherited', () => {
     var tmpl = makeTemplate({ id: 't1', preferred_time_mins: 720 }); // noon
-    var inst = makeInstance('t1', { id: 'i1', scheduled_at: '2026-04-07 11:00:00' }); // 7am UTC
+    var inst = makeInstance('t1', { id: 'i1', scheduled_at: '2026-04-07 11:00:00' }); // 7:00 AM EDT
     var srcMap = { t1: tmpl };
     var task = rowToTask(inst, TZ, srcMap);
-    expect(task.time).toBe('12:00 PM');
+    expect(task.time).toBe('7:00 AM'); // live slot wins, NOT template noon
     expect(task.preferredTimeMins).toBe(720);
   });
 
-  test('instance inherits 7:00 AM from preferred_time_mins=420', () => {
+  test('unplaced instance inherits 7:00 AM from preferred_time_mins=420', () => {
     var tmpl = makeTemplate({ id: 't1', preferred_time_mins: 420 });
-    var inst = makeInstance('t1', { id: 'i1', scheduled_at: '2026-04-07 16:00:00' });
+    var inst = makeInstance('t1', { id: 'i1', scheduled_at: null });
     var srcMap = { t1: tmpl };
     var task = rowToTask(inst, TZ, srcMap);
     expect(task.time).toBe('7:00 AM');
@@ -129,9 +133,11 @@ describe('rowToTask: preferred_time_mins', () => {
     expect(task.time).toBe('11:00 AM'); // own time, not 12:00 PM
   });
 
+  // Formatting cases: instances are UNPLACED so template preferred_time_mins
+  // legitimately fills task.time (reality-wins leaves nothing else to show).
   test('midnight preferred_time_mins=0 produces 12:00 AM', () => {
     var tmpl = makeTemplate({ id: 't1', preferred_time_mins: 0 });
-    var inst = makeInstance('t1', { id: 'i1', scheduled_at: '2026-04-07 15:00:00' });
+    var inst = makeInstance('t1', { id: 'i1', scheduled_at: null });
     var srcMap = { t1: tmpl };
     var task = rowToTask(inst, TZ, srcMap);
     expect(task.time).toBe('12:00 AM');
@@ -139,7 +145,7 @@ describe('rowToTask: preferred_time_mins', () => {
 
   test('preferred_time_mins with minutes (7:30 AM = 450)', () => {
     var tmpl = makeTemplate({ id: 't1', preferred_time_mins: 450 });
-    var inst = makeInstance('t1', { id: 'i1', scheduled_at: '2026-04-07 15:00:00' });
+    var inst = makeInstance('t1', { id: 'i1', scheduled_at: null });
     var srcMap = { t1: tmpl };
     var task = rowToTask(inst, TZ, srcMap);
     expect(task.time).toBe('7:30 AM');
@@ -147,7 +153,7 @@ describe('rowToTask: preferred_time_mins', () => {
 
   test('preferred_time_mins 1080 = 6:00 PM', () => {
     var tmpl = makeTemplate({ id: 't1', preferred_time_mins: 1080 });
-    var inst = makeInstance('t1', { id: 'i1', scheduled_at: '2026-04-07 15:00:00' });
+    var inst = makeInstance('t1', { id: 'i1', scheduled_at: null });
     var srcMap = { t1: tmpl };
     var task = rowToTask(inst, TZ, srcMap);
     expect(task.time).toBe('6:00 PM');

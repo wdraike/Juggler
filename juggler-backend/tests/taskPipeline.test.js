@@ -249,8 +249,13 @@ describe('rowToTask: template field inheritance', () => {
 // 3. Midnight Fallback for Recurring Instances
 // ═══════════════════════════════════════════════════════════════════
 
-describe('rowToTask: template preferred time override via preferred_time_mins', () => {
-  test('instance always gets time from template preferred_time_mins (not from stale scheduled_at)', () => {
+// David ruling 2026-07-13 (999.1439, reality-wins): a PLACED instance keeps its
+// live scheduled_at time; template preferred_time_mins fills task.time ONLY when
+// the instance is unplaced (scheduled_at NULL — the modern "cleared" state, not
+// the legacy midnight sentinel these tests used to simulate). Same direction as
+// BUG-811 + schedulerScenarios (4f7f3df5) + schedulerPersistIntegration (45915470).
+describe('rowToTask: template preferred time fallback via preferred_time_mins', () => {
+  test('unplaced instance gets time from template preferred_time_mins', () => {
     var template = makeTemplateRow({
       id: 'ht_lunch',
       preferred_time_mins: 720, // 12:00 PM
@@ -259,13 +264,14 @@ describe('rowToTask: template preferred time override via preferred_time_mins', 
     });
     var instance = makeInstanceRow('ht_lunch', {
       id: 'rc_lunch_44',
-      scheduled_at: new Date('2026-04-04T04:00:00Z'), // midnight ET (scheduler cleared)
+      scheduled_at: null,   // cleared/unplaced — no live time
+      date: '2026-04-04',   // unplaced recurring instance carries target day in date col
     });
     var srcMap = {}; srcMap['ht_lunch'] = template;
     var task = rowToTask(instance, TZ, srcMap);
 
     expect(task.time).toBe('12:00 PM');  // from template preferred_time_mins
-    expect(task.date).toBe('2026-04-04');       // date from instance (correct day)
+    expect(task.date).toBe('2026-04-04');       // date from instance date column (correct day)
   });
 
   test('instance at midnight stays midnight when template has preferred_time_mins=0', () => {
@@ -292,7 +298,7 @@ describe('rowToTask: template preferred time override via preferred_time_mins', 
     expect(task.time).toBe('12:00 AM'); // no source to fall back to
   });
 
-  test('instance with stale scheduler time gets template preferred_time_mins instead', () => {
+  test('placed instance keeps its scheduler-placed time (reality wins over template)', () => {
     var template = makeTemplateRow({
       id: 'ht_stale',
       preferred_time_mins: 720, // 12:00 PM
@@ -301,12 +307,13 @@ describe('rowToTask: template preferred time override via preferred_time_mins', 
     });
     var instance = makeInstanceRow('ht_stale', {
       id: 'rc_stale_44',
-      scheduled_at: new Date('2026-04-04T11:00:00Z'), // 7:00 AM ET (scheduler's old placement)
+      scheduled_at: new Date('2026-04-04T11:00:00Z'), // 7:00 AM ET (scheduler's placement)
     });
     var srcMap = {}; srcMap['ht_stale'] = template;
     var task = rowToTask(instance, TZ, srcMap);
 
-    expect(task.time).toBe('12:00 PM');  // template preferred_time_mins, NOT 7:00 AM
+    expect(task.time).toBe('7:00 AM');  // live placement, NOT template noon
+    expect(task.preferredTimeMins).toBe(720); // preference itself still inherited
   });
 
   test('instance uses own time when source has null preferred_time_mins', () => {
@@ -430,7 +437,7 @@ describe('Full pipeline: rowToTask → scheduler', () => {
     var instance = makeInstanceRow('ht_lunch_pipe', {
       id: 'rc_lunch_pipe_44',
       date: '2026-04-04',
-      scheduled_at: new Date('2026-04-04T04:00:00Z'), // midnight ET
+      scheduled_at: null, // cleared/unplaced (modern state; was a midnight sentinel pre-999.1439 ruling)
       placement_mode: 'time_window', // required for preferred_time_mins scheduling path
     });
 
@@ -472,7 +479,7 @@ describe('Full pipeline: rowToTask → scheduler', () => {
     var instance = makeInstanceRow('ht_bf_pipe', {
       id: 'rc_bf_pipe_44',
       date: '2026-04-04',
-      scheduled_at: new Date('2026-04-04T04:00:00Z'), // midnight ET (cleared)
+      scheduled_at: null, // cleared/unplaced (modern state; was a midnight sentinel pre-999.1439 ruling)
     });
 
     var srcMap = {}; srcMap['ht_bf_pipe'] = template;
