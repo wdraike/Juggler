@@ -46,10 +46,22 @@ var debugLimiter = rateLimit({
 router.post('/run', authenticateJWT, schedulerLimiter, withSyncLock(async function(req, res) {
   try {
     var opts = { timezone: safeTimezone(req.headers['x-timezone'], DEFAULT_TIMEZONE) };
+    // Emit schedule:running so the frontend toolbar shows "Scheduling..."
+    try { require('../lib/sse-emitter').emit(req.user.id, 'schedule:running', {}); } catch (_e) { /* non-fatal */ }
     var result = await runScheduleAndPersist(req.user.id, undefined, opts);
+    // Emit SSE schedule:changed with changeset so connected frontends update
+    // surgically (added/changed/removed) instead of falling back to full reload.
+    try {
+      var sseEmitter = require('../lib/sse-emitter');
+      var payload = {};
+      if (result && result.changeset) payload.changeset = result.changeset;
+      sseEmitter.emit(req.user.id, 'schedule:changed', payload);
+    } catch (_e) { /* non-fatal — SSE not available */ }
     // result now includes dayPlacements and unplaced from the same run (cached)
     res.json(result);
   } catch (error) {
+    // Emit schedule:changed (with empty payload) to clear the "Scheduling..." indicator
+    try { require('../lib/sse-emitter').emit(req.user.id, 'schedule:changed', {}); } catch (_e) { /* non-fatal */ }
     logger.error('Schedule run error:', error);
     res.status(500).json({ error: 'Failed to run scheduler' });
   }

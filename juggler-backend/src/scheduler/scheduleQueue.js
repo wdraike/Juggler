@@ -319,20 +319,29 @@ async function claimAndRun(userId) {
   // Start heartbeat for long-running scheduler jobs
   var heartbeat = startClaimHeartbeat(userId);
   try {
+    // Emit schedule:running so the frontend toolbar shows "Scheduling..."
+    try { getSseEmitter().emit(userId, 'schedule:running', {}); } catch (_e) { /* non-fatal */ }
     var runWithLock = getWithLock();
     var runScheduleAndPersist = getRunScheduleAndPersist();
     var flushQueueInLock = getFlushQueueInLock();
 
+    var _schedResult;
     await runWithLock(userId, async function() {
       // Flush any pending writes before scheduler reads task state
       await flushQueueInLock(userId);
       // Run the scheduler
-      await runScheduleAndPersist(userId, row.source);
+      _schedResult = await runScheduleAndPersist(userId, row.source);
     });
 
-    // Success: sweep the queue and notify frontend
+    // Success: sweep the queue and notify frontend with the changeset
     await dequeueScheduleRun(userId);
-    try { getSseEmitter().emit(userId, 'schedule:changed', {}); } catch (_e) { /* non-fatal */ }
+    try {
+      var _ssePayload = {};
+      if (_schedResult && _schedResult.changeset) {
+        _ssePayload.changeset = _schedResult.changeset;
+      }
+      getSseEmitter().emit(userId, 'schedule:changed', _ssePayload);
+    } catch (_e) { /* non-fatal */ }
     return { claimed: true, success: true };
   } catch (err) {
     // On failure, release the claim so someone else can retry.
@@ -341,6 +350,8 @@ async function claimAndRun(userId) {
     // ONLY to the in-memory _lastError and was never recorded anywhere.
     logger.error('scheduler run failed (claimAndRun)', { userId: userId, error: err.message, stack: err.stack });
     _lastError = { timestamp: _now(), message: err.message };
+    // Emit schedule:changed to clear the "Scheduling..." indicator on error
+    try { getSseEmitter().emit(userId, 'schedule:changed', {}); } catch (_e2) { /* non-fatal */ }
     await releaseClaim(userId, INSTANCE_ID);
     return { claimed: true, success: false, error: err.message };
   } finally {
