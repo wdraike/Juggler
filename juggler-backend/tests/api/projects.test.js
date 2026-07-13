@@ -260,6 +260,10 @@ describe('PUT /api/projects/reorder', () => {
     expect(res.body.reordered).toBe(0);
   });
 
+  // Message drift (999.1247 triage): the zod body schema now short-circuits BEFORE
+  // the use-case's legacy guards ('ids array required' / 'Too many ids') and returns
+  // the standardized { error: 'Validation failed', details } envelope — same contract
+  // the import path pins. Rejection semantics (400, no writes) are unchanged.
   test('rejects non-array ids', async () => {
     const res = await request(app)
       .put('/api/projects/reorder')
@@ -267,7 +271,8 @@ describe('PUT /api/projects/reorder', () => {
       .send({ ids: 'not-an-array' });
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/ids array required/);
+    expect(res.body.error).toBe('Validation failed');
+    expect(res.body.details).toBeDefined();
   });
 
   test('rejects ids array exceeding 500 items', async () => {
@@ -278,7 +283,8 @@ describe('PUT /api/projects/reorder', () => {
       .send({ ids });
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/Too many ids/);
+    expect(res.body.error).toBe('Validation failed');
+    expect(res.body.details).toBeDefined();
   });
 });
 
