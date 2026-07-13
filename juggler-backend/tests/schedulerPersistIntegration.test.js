@@ -119,14 +119,25 @@ describe('rowToTask with real DB rows', () => {
     var { rowToTask, buildSourceMap } = require('../src/controllers/task.controller');
     await testDb.seedTemplate({ id: 'tmpl-rt', text: 'Lunch', preferred_time_mins: 720, time_flex: 60 });
     await testDb.seedInstance('tmpl-rt', { id: 'inst-rt', scheduled_at: '2026-04-07 11:00:00' });
+    await testDb.seedInstance('tmpl-rt', { id: 'inst-rt-unplaced' }); // never placed — scheduled_at null
 
     var db = testDb.getDb();
     var rows = await db('tasks_v').where('user_id', 'test-user-001');
     var srcMap = buildSourceMap(rows);
-    var instRow = rows.find(function(r) { return r.id === 'inst-rt'; });
-    var task = rowToTask(instRow, 'America/New_York', srcMap);
-    expect(task.time).toBe('12:00 PM'); // from preferred_time_mins, not 7am UTC
-    expect(task.preferredTimeMins).toBe(720);
+
+    // BUG-811 ruling (this pin reconciled like schedulerScenarios was in 4f7f3df5):
+    // a PLACED instance keeps its live scheduled_at time — template
+    // preferred_time_mins fills task.time ONLY when there is no live time.
+    // Both cases inherit preferredTimeMins itself from the template via sourceMap.
+    var placedRow = rows.find(function(r) { return r.id === 'inst-rt'; });
+    var placedTask = rowToTask(placedRow, 'America/New_York', srcMap);
+    expect(placedTask.time).toBe('7:00 AM'); // live slot (11:00 UTC = 7:00 AM EDT), NOT template time
+    expect(placedTask.preferredTimeMins).toBe(720);
+
+    var unplacedRow = rows.find(function(r) { return r.id === 'inst-rt-unplaced'; });
+    var unplacedTask = rowToTask(unplacedRow, 'America/New_York', srcMap);
+    expect(unplacedTask.time).toBe('12:00 PM'); // no live time → template preferred_time_mins
+    expect(unplacedTask.preferredTimeMins).toBe(720);
   });
 });
 
