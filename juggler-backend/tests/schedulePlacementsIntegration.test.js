@@ -20,6 +20,7 @@ var { deriveSchedulePlacements } = require('../src/scheduler/deriveSchedulePlace
 var { DEFAULT_TIME_BLOCKS, DEFAULT_TOOL_MATRIX } = require('../src/scheduler/constants');
 var tasksWrite = require('../src/lib/tasks-write');
 var { assertDbAvailable } = require('./helpers/requireDB');
+var { rowToTask } = require('../src/controllers/task.controller');
 
 var available = false;
 var USER_ID = 'placements-test-001';
@@ -261,13 +262,36 @@ describe('deriveSchedulePlacements', () => {
     // separate Phase 8 fix leg, not BUG-671's display-synthesis scope.
   });
 
-  test('999.671 deadline-bearing past+unplaceable task IS flagged _overdue (deadline contract preserved)', async () => {
+  test('999.671 deadline-bearing past+unplaceable task reads genuinely overdue (deadline contract preserved), routed to unplaced not the grid (999.1569)', async () => {
     // Companion to the roll-forward test: a DEADLINE-bearing task that is past its
-    // deadline AND unplaceable (when='_invalid_window_') SHOULD appear with _overdue
-    // via the isPastDue path, because `(t.deadline || t.overdue)` is truthy.
+    // deadline AND unplaceable (when='_invalid_window_') must never be silently
+    // exempted the way a floating (no-deadline) task is, because
+    // `(t.deadline || t.overdue)` is truthy.
     //
-    // This guards bert's fix from over-suppression: if the gate were written as `false &&`
-    // universally, this test would flip RED, proving the fix is wrong.
+    // NOTE (harrison 999.1568 W3): the `overdue:true` read below comes from
+    // taskMappers.js's computeOverdueForRow — an INDEPENDENT mirror of
+    // runSchedule.computeIsPastDue's gate, NOT a call into it — so this test
+    // alone cannot catch an over-suppressed (`false &&`) routing gate. The
+    // routing gate itself is pinned directly (unit) in
+    // tests/scheduler/synthesis-guard-stale-rawrow-999-1569.test.js.
+    //
+    // REVISED (999.1569): this fixture (hasScheduledAt=true, real deadline,
+    // unifiedScheduleV2's D-A pinning pass rewrites in-memory `task.date` to the
+    // deadline's OWN date-key for a genuinely-stillUnplaced one-off task) makes
+    // computeIsPastDue's `t.date < todayKey` branch true regardless of placement
+    // mode — Phase 8 Case B (runSchedule.js) therefore routes this task through
+    // `isMovablePastDue` -> unscheduled=1/scheduled_at=null, NOT the "pinned in
+    // place, still shown overdue on the grid" branch the original assertion
+    // assumed. The original assertion (task found in dayPlacements) was
+    // unknowingly pinned to 999.1569's bug: pre-fix, the synthesis-loop guard
+    // read a stale pre-Phase-1 rawRowById snapshot and synthesized a bogus grid
+    // entry for this already-unscheduled-this-run task; post-fix, the guard
+    // correctly excludes it from dayPlacements entirely (movable overdue tasks
+    // appear only in the Unscheduled section, per runSchedule.js's own
+    // documented synthesis-loop invariant). Updated to assert the CORRECT
+    // invariant: NOT on the grid, IS in result.unplaced with a real reason, and
+    // still reads genuinely overdue via the computed read model — preserving
+    // this test's original "not silently exempted like a floating task" intent.
     //
     // Traceability: BUG-671
     if (!available) return;
@@ -287,18 +311,32 @@ describe('deriveSchedulePlacements', () => {
     });
     var result = await runScheduleAndPersist(USER_ID, undefined, { timezone: 'America/New_York' });
 
-    // A deadline-bearing unplaceable task with a past date MUST appear with _overdue=true.
-    // (isPastDue fires because t.deadline is truthy.)
-    var found = null;
+    // NEVER-MISSING (999.1569): must NOT appear on the calendar grid — it is
+    // unscheduled=1 this run.
+    var foundOnGrid = null;
     if (result.dayPlacements) {
       Object.keys(result.dayPlacements).forEach(function(dk) {
         (result.dayPlacements[dk] || []).forEach(function(p) {
-          if (p.task && p.task.id === 'gp-pastdue-deadline-001') found = p;
+          if (p.task && p.task.id === 'gp-pastdue-deadline-001') foundOnGrid = p;
         });
       });
     }
-    expect(found).toBeDefined();
-    expect(found._overdue).toBe(true);
+    expect(foundOnGrid).toBeNull();
+
+    // Must be in the unplaced/unscheduled list instead, with a real reason.
+    var unplacedEntry = (result.unplaced || []).find(function(u) {
+      return (u.id || (u.task && u.task.id)) === 'gp-pastdue-deadline-001';
+    });
+    expect(unplacedEntry).toBeTruthy();
+    var unplacedTask = unplacedEntry.task || unplacedEntry;
+    expect(unplacedTask._unplacedReason).toBeTruthy();
+
+    // Deadline contract preserved: still reads genuinely overdue via the
+    // computed read model, never silently exempted like a floating task.
+    var row = await db('tasks_v').where('id', 'gp-pastdue-deadline-001').first();
+    expect(row).toBeTruthy();
+    var task = rowToTask(row, 'America/New_York', null, null);
+    expect(task.overdue).toBe(true);
   });
 
   // NOTE (999.671 re-review 2026-06-16): the cache-path gate (runSchedule.js:2202)

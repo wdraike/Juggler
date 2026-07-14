@@ -179,6 +179,7 @@ When a task cannot be placed, the scheduler sets `_unplacedReason` (one of the c
 | `recurring_split_overflow` | Recurrence overflow | A recurring task generated more instances than the scheduler's per-cycle budget allows; overflow instances are unplaced for that cycle. | R35.6 |
 | `missed` | Preferred time passed | The task's preferred time (e.g., a `time_window` anchor) is already in the past and no later fallback slot was found. | R11.16 (preferred-time-passed path) |
 | `tpc_budget` | Not enough cycle time | The task's `timesPerCycle` budget for the current recurrence cycle is exhausted — the scheduler has already placed the maximum allowed instances for this cycle. | R35.6 (times-per-cycle budget enforcement) |
+| `sched_collision` | (no dedicated label; falls back to humanized code) | Defense-in-depth collision guard (`resolvePlacementCollisions`, runSchedule.js): the task's placement collided with another non-reminder task's time window at the persist boundary and was demoted to unscheduled, independent of whichever upstream mechanism produced the collision. | 999.1568 (David ruling 2026-07-12 part 2) |
 
 _Source file: `shared/scheduler/reasonCodes.js`. New codes MUST be added to that file first and this table updated in the same commit._
 

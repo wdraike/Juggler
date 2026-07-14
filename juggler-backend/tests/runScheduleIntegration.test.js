@@ -620,25 +620,37 @@ describe('BUG-671 regression: floating tasks must never be flagged overdue', () 
 
   // BUG-671-AC3 — GUARD TEST (must remain GREEN before and after fix).
   // A deadline-bearing task whose deadline has passed AND that is UNPLACEABLE
-  // (forced via when='_invalid_window_') MUST appear in dayPlacements with
-  // _overdue=true via the synthesis/isPastDue path.
+  // (forced via when='_invalid_window_') must be treated as genuinely overdue —
+  // NEVER silently exempted the way a floating (no-deadline) task is (BUG-700).
   //
   // STRENGTHENED (999.671 zoe BLOCK): original AC3 used a PLACED task, so the
-  // synthesis loop at runSchedule.js:1815 was never reached — the test stayed
-  // green even under a universal `false &&` suppression. The new version uses
-  // when='_invalid_window_' to force the task through the same synthesis/isPastDue
-  // path the floating task uses. This makes AC3 a real guard: if the fix
-  // over-suppresses (hides deadline overdue), AC3 flips RED.
+  // synthesis loop was never reached — the test stayed green even under a
+  // universal `false &&` suppression. Using when='_invalid_window_' forces the
+  // task through the same synthesis/isPastDue path the floating task uses.
   //
-  // Proof of real guard: replacing bert's `(t.deadline || t.overdue) &&` with
-  // `false &&` at runSchedule.js:1825 causes isPastDue=false for this task →
-  // isOverdueTask=false → synthesis skips it → found===null → AC3 FAILS.
-  test('AC3 (guard): deadline-bearing UNPLACEABLE task past its deadline IS _overdue via synthesis path', async () => {
+  // REVISED (999.1569): this fixture (hasScheduledAt=true, real deadline,
+  // unifiedScheduleV2's D-A pinning pass rewrites in-memory `task.date` to the
+  // deadline's OWN date-key for any genuinely-stillUnplaced one-off task) makes
+  // computeIsPastDue's `t.date < todayKey` branch true regardless of placement
+  // mode — Phase 8 Case B (runSchedule.js ~2059-2094) therefore always routes
+  // this task through `isMovablePastDue` → unscheduled=1/scheduled_at=null, the
+  // SAME branch 999.1569's fixture exercises, not the "pinned in place, still
+  // shown overdue on the grid" branch the original assertion assumed. The
+  // original assertion (`found` in `dayPlacements`) was unknowingly pinned to
+  // 999.1569's bug: pre-fix, the synthesis-loop guard read a stale pre-Phase-1
+  // rawRowById snapshot and synthesized a bogus grid entry for this
+  // already-unscheduled-this-run task; post-fix (999.1569), the guard correctly
+  // sees Case B's own-run write and excludes it from dayPlacements entirely —
+  // exactly the "movable overdue tasks ... must appear only in the Issues
+  // Unscheduled section" invariant already documented at runSchedule.js
+  // (Synthesize placements comment, ~2537-2538). Updated to assert the CORRECT
+  // invariant instead: the task lands in result.unplaced (not the grid), NOT
+  // silently dropped (a real unplaced_reason is set), and its persisted state
+  // still reads genuinely overdue (never exempted the way a floating/no-deadline
+  // task would be per BUG-700) — preserving AC3's original guard intent.
+  test('AC3 (guard): deadline-bearing UNPLACEABLE task past its deadline is genuinely overdue — routed to unplaced (999.1569), never silently exempted like a floating task', async () => {
     if (!available) return;
 
-    // when='_invalid_window_' → no matching time block → scheduler cannot place it
-    // → task goes to result.unplaced → NOT in placedIds → synthesis loop at :1815 fires
-    // → t.deadline is truthy → isPastDue=true → _overdue=true in placement entry.
     await db('task_masters').insert({
       id: 'deadline-past-unplaceable',
       user_id: USER_ID,
@@ -667,11 +679,27 @@ describe('BUG-671 regression: floating tasks must never be flagged overdue', () 
 
     var result = await runScheduleAndPersist(USER_ID);
 
-    // ASSERTION (AC3 real guard): deadline-bearing unplaceable past task MUST appear
-    // with _overdue=true. If the gate over-suppresses (false &&), this fails.
+    // NEVER-MISSING (999.1569): must NOT appear on the calendar grid (it is
+    // unscheduled=1 this run) — the day-end-cram / stale-guard bug is fixed.
     var found = findInPlacements(result.dayPlacements, 'deadline-past-unplaceable');
-    expect(found).not.toBeNull();
-    expect(found.entry._overdue).toBe(true);
+    expect(found).toBeNull();
+
+    // Must be in the unplaced/unscheduled list instead, with a real reason —
+    // not silently dropped (which would also, wrongly, satisfy "not in dayPlacements").
+    var unplacedEntry = (result.unplaced || []).find(function(u) {
+      return (u.id || (u.task && u.task.id)) === 'deadline-past-unplaceable';
+    });
+    expect(unplacedEntry).toBeTruthy();
+    var unplacedTask = unplacedEntry.task || unplacedEntry;
+    expect(unplacedTask._unplacedReason).toBeTruthy();
+
+    // AC3's original guard intent preserved: a deadline-bearing task must read
+    // genuinely overdue (never silently exempted the way BUG-700 exempts a
+    // floating/no-deadline task) via the computed read model.
+    var row = await db('tasks_v').where('id', 'deadline-past-unplaceable').first();
+    expect(row).toBeTruthy();
+    var t = rowToTask(row, TZ, null, null);
+    expect(t.overdue).toBe(true);
   });
 
   // BUG-671-AC4 — GUARD TEST (must remain GREEN before and after fix).

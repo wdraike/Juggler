@@ -310,6 +310,89 @@ function checkPlacementDisjointness(dayPlacements) {
   return violations;
 }
 
+/**
+ * resolvePlacementCollisions — 999.1568 (David ruling 2026-07-12 part 2):
+ * explicit defense-in-depth collision guard, INDEPENDENT of whichever upstream
+ * mechanism produced the collision (root-cause fix is 999.1559's
+ * preferLatestSlot removal; this is the persist-boundary backstop). Two
+ * non-reminder tasks must NEVER occupy the same time window. Detects
+ * violations via a full pairwise per-day scan iterated to a FIXPOINT (one
+ * loser demoted per iteration, then rescan — NOT checkPlacementDisjointness's
+ * adjacent-pair single pass, which misses non-adjacent overlaps in 3+-task
+ * pileups), demoting each LOSING placement out of dayPlacements (mutated IN
+ * PLACE) rather than silently persisting a duplicate-window write.
+ * NEVER-MISSING is preserved by the
+ * caller: a demoted task is never dropped, only moved to unscheduled with an
+ * explicit `unplaced_reason` (REASON_CODES.SCHED_COLLISION) and logged loudly.
+ *
+ * D-C ruling (2026-07-02, sched-audit-dc-rigid.test.js) carve-outs, preserved
+ * exactly:
+ *   - FIXED tasks are user-anchored; the scheduler never moves them. A
+ *     FIXED-vs-FIXED collision is an intentional user double-booking (Test 4,
+ *     "D-C reserves only against SCHEDULER-placed intrusion") — left
+ *     untouched, both stay.
+ *   - In a FIXED-vs-movable collision, FIXED's slot is RESERVED — the movable
+ *     side always loses, never FIXED.
+ *   - Reminders (placement_mode='reminder', dur=0) never collide (brain
+ *     #80498, Test 2) — a reminder on either side of a pair is left alone.
+ * Between two movable (non-FIXED, non-reminder) tasks, the later-starting one
+ * (by sort order, same "b" as checkPlacementDisjointness) loses — a simple,
+ * deterministic tie-break; no priority/recency heuristic is specified by the
+ * ruling.
+ *
+ * @param {Object} dayPlacements  { 'YYYY-MM-DD': [{task, start, dur}] } — MUTATED in place.
+ * @returns {Array<{id, task, date, start, dur}>} losers — one entry per demoted placement.
+ */
+function resolvePlacementCollisions(dayPlacements) {
+  var losers = [];
+  if (!dayPlacements) return losers;
+
+  function isReminder(e) { return e.task && e.task.placementMode === PLACEMENT_MODES.REMINDER; }
+  function isFixed(e) { return e.task && e.task.placementMode === PLACEMENT_MODES.FIXED; }
+  // Touching edges ([600,630] vs [630,660]) are NOT a collision.
+  function overlaps(a, b) { return a.start < b.start + b.dur && b.start < a.start + a.dur; }
+
+  // Fixpoint per day (harrison 999.1568 BLOCK-1): a single pass over the
+  // sorted-ADJACENT-pair violation list leaves residual overlaps whenever 3+
+  // placements mutually overlap — a same-start triple, or a long early task
+  // straddling two later non-adjacent ones — and could leave a FIXED task
+  // still sharing its reserved window with a surviving movable. Full pairwise
+  // scan of the live set, demote ONE loser, rescan; the loop is bounded by
+  // the day's entry count (each iteration removes an entry), so the exempt
+  // FIXED-FIXED double-book / reminder pairs cannot spin it forever.
+  Object.keys(dayPlacements).forEach(function(dateKey) {
+    var live = (dayPlacements[dateKey] || []).slice();
+    if (live.length < 2) return;
+    var guard = live.length + 1;
+    while (guard-- > 0) {
+      var sorted = live.slice().sort(function(a, b) {
+        return a.start - b.start
+          || String(a.task && a.task.id).localeCompare(String(b.task && b.task.id));
+      });
+      var pairA = null, pairB = null;
+      for (var i = 0; i < sorted.length - 1 && !pairA; i++) {
+        for (var j = i + 1; j < sorted.length; j++) {
+          var A = sorted[i], B = sorted[j];
+          if (!overlaps(A, B)) continue;
+          if (isReminder(A) || isReminder(B)) continue;   // reminders never collide
+          if (isFixed(A) && isFixed(B)) continue;          // D-C: user double-booking — both stay
+          pairA = A; pairB = B;
+          break;
+        }
+      }
+      if (!pairA) break; // fixpoint: only exempt (or no) overlaps remain
+      // FIXED never loses; between two movables the later-starting (sort
+      // order, id tie-break) loses.
+      var loserEntry = isFixed(pairA) ? pairB : (isFixed(pairB) ? pairA : pairB);
+      var loserId = loserEntry.task.id;
+      live = live.filter(function(e) { return !(e.task && e.task.id === loserId); });
+      losers.push({ id: loserId, task: loserEntry.task, date: dateKey, start: loserEntry.start, dur: loserEntry.dur });
+    }
+    dayPlacements[dateKey] = live;
+  });
+  return losers;
+}
+
 // R50.0 recurrence-period boundary (isFlexibleTpcRecur + recurringPeriodEndKey) —
 // 999.1198: moved VERBATIM to slices/scheduler/domain/logic/recurringPeriod.js
 // (pure classification + delegation to the missedHelpers SSOT) so the task
@@ -1610,6 +1693,19 @@ async function runScheduleAndPersist(userId, _retries, options) {
   var placementByTaskId = {};
   var dayPlacements = result.dayPlacements;
 
+  // 999.1568 (David ruling 2026-07-12 part 2): defense-in-depth collision
+  // guard — resolve BEFORE placementByTaskId/pendingUpdates are derived from
+  // dayPlacements, so a demoted loser never gets a placement write in the
+  // first place (no duplicate/conflicting pendingUpdates entry for its id).
+  // dayPlacements is mutated in place; collisionLosers is wired to a
+  // dedicated unscheduled write + the response's `unplaced` list below.
+  var collisionLosers = resolvePlacementCollisions(dayPlacements);
+  collisionLosers.forEach(function(loser) {
+    logger.error('[SCHED] collision guard (999.1568): displaced ' + loser.id
+      + ' from ' + loser.date + '@' + loser.start + ' (dur ' + loser.dur + ')'
+      + ' — two non-reminder placements collided this run; marking unscheduled');
+  });
+
   // ── #42: Merge adjacent split-task chunks ──────────────────────────────────
   // After all placements are determined, collapse back-to-back chunks of the
   // same split occurrence into a single extended placement entry. "Back-to-back"
@@ -1647,6 +1743,23 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // Collect all updates, then batch them to minimize lock contention
   var pendingUpdates = []; // { id, dbUpdate }
 
+  // 999.1568: persist each collision loser's demotion. A dedicated single
+  // write per loser — collisionLosers were already excluded from
+  // placementByTaskId above, so no other code path writes a competing
+  // pendingUpdates entry for these ids this run.
+  collisionLosers.forEach(function(loser) {
+    var _collisionUpdate = {
+      unscheduled: 1,
+      scheduled_at: null,
+      unplaced_reason: REASON_CODES.SCHED_COLLISION,
+      unplaced_detail: 'Removed from the grid: this time window collided with another task',
+      updated_at: _runScheduleCommand.clockNow()
+    };
+    if (result.slackByTaskId && loser.id in result.slackByTaskId) {
+      _collisionUpdate.slack_mins = result.slackByTaskId[loser.id];
+    }
+    pendingUpdates.push({ id: loser.id, dbUpdate: _collisionUpdate });
+  });
 
   for (var taskId in placementByTaskId) {
     var placement = placementByTaskId[taskId];
@@ -2548,8 +2661,21 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (placedIds[t.id]) return;
     if (t.generated || t.taskType === 'recurring_template') return;
     // Skip tasks flagged unscheduled — they are in the Unscheduled lane, not the grid.
+    // 999.1569: rawRowById is a pre-Phase-1 snapshot (loaded before Phase 8 ran) and
+    // is NEVER patched with this run's writes. A movable past-due task that Phase 8
+    // Case B (:2069-2094) just queued as unscheduled=1/scheduled_at=null this run
+    // would still read the stale pre-run unscheduled=0 here and fall through to the
+    // "overdue today" day-end cram below — reintroducing, for this run's RESPONSE
+    // only (the DB write is already correct), the 'appear at the latest slot' cram
+    // David's 2026-07-12 ruling outlaws. pendingById (built above, before this loop)
+    // holds every dbUpdate queued so far this run — check it first, falling back to
+    // the raw snapshot only when this run queued no unscheduled write for the task.
     var _rawT = rawRowById[t.id];
-    if (_rawT && _rawT.unscheduled) return;
+    var _pendingT = pendingById[t.id];
+    var _effectiveUnscheduled = (_pendingT && 'unscheduled' in _pendingT)
+      ? _pendingT.unscheduled
+      : (_rawT && _rawT.unscheduled);
+    if (_effectiveUnscheduled) return;
     var st = statuses[t.id] || '';
     var isFinished = st === 'done' || st === 'cancel' || st === 'skip';
     var scheduledMins = t.time ? parseTimeToMinutes(t.time) : null;
@@ -2630,10 +2756,20 @@ async function runScheduleAndPersist(userId, _retries, options) {
   });
   Object.keys(outPlacements).forEach(function(dk) { affectedDates[dk] = true; });
 
+  // 999.1568: surface each collision loser in the response's Unplaced list
+  // (NEVER-MISSING — it was pulled off the grid above, not dropped). Set on
+  // the task object here (never touched by Phase 8, since collisionLosers
+  // was excluded from result.unplaced itself, avoiding double-processing).
+  collisionLosers.forEach(function(loser) {
+    loser.task._unplacedReason = REASON_CODES.SCHED_COLLISION;
+    loser.task._unplacedDetail = 'Removed from the grid: this time window collided with another task';
+  });
+  var unplacedWithCollisions = result.unplaced.concat(collisionLosers.map(function(l) { return l.task; }));
+
   return {
     updated: updated, cleared: cleared, tasks: updatedTasks, score: result.score,
     dayPlacements: outPlacements,
-    unplaced: result.unplaced.filter(function(t) {
+    unplaced: unplacedWithCollisions.filter(function(t) {
       // Keep missed recurring instances (they have _unplacedReason) even if generated
       if (t.generated && !t._unplacedReason) return false;
       return true;
@@ -2726,6 +2862,7 @@ module.exports = {
   computeWindowCloseUtc,
   computeEffectiveDeadline,
   checkPlacementDisjointness,
+  resolvePlacementCollisions,
   recurringPeriodEndKey,
   computeIsPastDue,
   setWeatherProvider,

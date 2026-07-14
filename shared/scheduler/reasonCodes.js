@@ -35,6 +35,11 @@ var REASON_CODES = Object.freeze({
   // computeDepReadyAbs === Infinity) — distinct from a generic capacity
   // no_slot so the UI can tell the user WHICH cause blocked placement.
   DEP_BLOCKED:               'dep_blocked',
+  // 999.1568 (David ruling 2026-07-12 part 2): defense-in-depth collision
+  // guard — this placement was demoted to unscheduled because it collided
+  // with another non-reminder task's time window at the persist boundary,
+  // independent of whichever upstream mechanism produced the collision.
+  SCHED_COLLISION:           'sched_collision',
 });
 
 var REASON_LABELS = Object.freeze({
