@@ -42,6 +42,25 @@
  *   NULL OR task_type='recurring_template', scoped to the user. (Legacy:
  *   runSchedule.js ~324 `trx('tasks_v')…select()`.) `db` may be a trx handle so
  *   the read participates in the caller's transaction snapshot.
+ *
+ * @property {(db: Function, userId: string) => Promise<Object[]>} getTerminalDedupRows
+ *   Read terminal-status (done/cancel/skip/…) `task_instances` rows for the
+ *   user, aliased for the reconcile dedup pass (JUG-SCHEDULER-LEGACY-DB-BYPASS /
+ *   999.1532). (Legacy: `runSchedule.js` ~551 `trx('task_instances')…select(
+ *   'master_id as source_id', 'date', 'scheduled_at', 'occurrence_ordinal',
+ *   'id')`.) `db` may be a trx handle.
+ *
+ * @property {(db: Function, userId: string) => Promise<Object[]>} getRecurringDoneHistory
+ *   Read the latest `done` placement date per recurring master (cross-cycle
+ *   spacing history — see docs/RECURRING-SPACING-DESIGN.md). (Legacy:
+ *   `runSchedule.js` ~590 `trx('task_instances')…max('date as latest_date')
+ *   .groupBy('master_id')`.) `db` may be a trx handle.
+ *
+ * @property {(db: Function, ids: string[]) => Promise<Object[]>} findExistingInstanceIds
+ *   Defensive pre-insert collision check: which of `ids` already exist in
+ *   `task_instances`. (Legacy: `runSchedule.js` ~1453
+ *   `trx('task_instances').whereIn('id', ids).select('id')`.) `db` may be a
+ *   trx handle so the read participates in the caller's transaction.
  */
 
 'use strict';
@@ -68,6 +87,18 @@ TaskProviderPort.prototype.loadSchedulableRows = function loadSchedulableRows(_d
   throw new Error('TaskProviderPort.loadSchedulableRows not implemented');
 };
 
+TaskProviderPort.prototype.getTerminalDedupRows = function getTerminalDedupRows(_db, _userId) {
+  throw new Error('TaskProviderPort.getTerminalDedupRows not implemented');
+};
+
+TaskProviderPort.prototype.getRecurringDoneHistory = function getRecurringDoneHistory(_db, _userId) {
+  throw new Error('TaskProviderPort.getRecurringDoneHistory not implemented');
+};
+
+TaskProviderPort.prototype.findExistingInstanceIds = function findExistingInstanceIds(_db, _ids) {
+  throw new Error('TaskProviderPort.findExistingInstanceIds not implemented');
+};
+
 /**
  * The exact set of methods an adapter MUST expose to satisfy TaskProviderPort.
  * @type {ReadonlyArray<string>}
@@ -76,7 +107,10 @@ var TASK_PROVIDER_PORT_METHODS = Object.freeze([
   'rowToTask',
   'taskToRow',
   'buildSourceMap',
-  'loadSchedulableRows'
+  'loadSchedulableRows',
+  'getTerminalDedupRows',
+  'getRecurringDoneHistory',
+  'findExistingInstanceIds'
 ]);
 
 module.exports = TaskProviderPort;

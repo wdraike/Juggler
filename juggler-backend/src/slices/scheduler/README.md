@@ -106,8 +106,11 @@ Schedule quality scoring. Houses the `scoreSchedule` logic.
 | `taskToRow(task, userId, timezone, existing?)` | Map an in-memory task object back to a DB-shape row. |
 | `buildSourceMap(rows)` | Build the recurring-template source map (instance field inheritance). |
 | `loadSchedulableRows(db, userId)` | Load the scheduler's working set from `tasks_v` (status ''/wip/NULL or recurring_template). |
+| `getTerminalDedupRows(db, userId)` | Terminal-status `task_instances` rows for the reconcile dedup pass (999.1532). |
+| `getRecurringDoneHistory(db, userId)` | Latest `done` placement date per recurring master (spacing history, 999.1532). |
+| `findExistingInstanceIds(db, ids)` | Phase-1 chunk pre-insert collision check (999.1532). |
 
-Contract method list: `['rowToTask', 'taskToRow', 'buildSourceMap', 'loadSchedulableRows']`
+Contract method list: `['rowToTask', 'taskToRow', 'buildSourceMap', 'loadSchedulableRows', 'getTerminalDedupRows', 'getRecurringDoneHistory', 'findExistingInstanceIds']`
 
 ### CalendarProviderPort
 
@@ -138,8 +141,9 @@ shape). Three binding invariants:
 | `now()` | DB clock (`SELECT NOW(3)`) for placement-cache `generatedAt`. Returns a JS Date. |
 | `getScheduleCache(userId)` | Read the `user_config.schedule_cache` placement blob (legacy cal-sync read). Returns the raw row or `null`. |
 | `upsertScheduleCache(userId, cacheJson)` | Upsert the `user_config.schedule_cache` placement blob (update if exists, insert if not — legacy runSchedule upsert). Returns void. |
+| `applySplitDriftFix(driftUpdates)` | Batch drift-fix CASE updates for `split_ordinal`/`split_total`/`dur` (999.1019/999.1532) — a SEPARATE write path from `writeChanged`, never touches `unscheduled`/`unplaced_reason`/`unplaced_detail`. |
 
-Contract method list: `['writeChanged', 'deleteTasksWhere', 'backfillRollingAnchorIfNull', 'now', 'getScheduleCache', 'upsertScheduleCache']`
+Contract method list: `['writeChanged', 'deleteTasksWhere', 'backfillRollingAnchorIfNull', 'now', 'getScheduleCache', 'upsertScheduleCache', 'applySplitDriftFix']`
 
 ### WeatherProviderPort
 

@@ -140,6 +140,24 @@ InMemoryScheduleRepository.prototype.insertTasksBatch = async function insertTas
   });
 };
 
+/**
+ * Batch drift-fix over the in-memory store — mirrors KnexScheduleRepository's
+ * applySplitDriftFix (999.1019 / 999.1532). Only `split_ordinal`/`split_total`/
+ * `dur`/`updated_at` are touched; `unscheduled`/`unplaced_reason`/
+ * `unplaced_detail` are left alone (this is NOT writeChanged).
+ */
+InMemoryScheduleRepository.prototype.applySplitDriftFix = async function applySplitDriftFix(driftUpdates) {
+  var self = this;
+  (driftUpdates || []).forEach(function(u) {
+    var row = self._rows[u.id];
+    if (!row) return;
+    ['split_ordinal', 'split_total', 'dur'].forEach(function(col) {
+      if (u.changes[col] != null) row[col] = u.changes[col];
+    });
+    row.updated_at = self.clock.now();
+  });
+};
+
 module.exports = InMemoryScheduleRepository;
 module.exports.InMemoryScheduleRepository = InMemoryScheduleRepository;
 module.exports.SCHEDULE_REPOSITORY_PORT_METHODS = SCHEDULE_REPOSITORY_PORT_METHODS;

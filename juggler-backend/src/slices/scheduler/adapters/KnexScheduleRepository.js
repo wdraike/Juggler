@@ -300,6 +300,38 @@ KnexScheduleRepository.prototype.insertTasksBatch = function insertTasksBatch(ro
   return new KnexTaskRepository({ db: this.db }).insertTasksBatch(rows);
 };
 
+/**
+ * Batch drift-fix UPDATEs into CASE-WHEN expressions (999.1019), chunked at
+ * `this.chunkSize` (200 — the same chunk constant `writeChanged` uses). This
+ * is a SEPARATE write path from `writeChanged` — it only ever touches
+ * `split_ordinal`/`split_total`/`dur`/`updated_at`, never `unscheduled`/
+ * `unplaced_reason`/`unplaced_detail` (verbatim — runSchedule.js
+ * ~1307-1328's recurring-split-chunk reconcile DRIFT_CHUNK loop, minus the
+ * Knex now-builder — P1: `updated_at` via `this.clock.now()`).
+ * JUG-SCHEDULER-LEGACY-DB-BYPASS (999.1532).
+ */
+KnexScheduleRepository.prototype.applySplitDriftFix = async function applySplitDriftFix(driftUpdates) {
+  var self = this;
+  var trx = this.db;
+  var CHUNK = this.chunkSize;
+  var updates = driftUpdates || [];
+  for (var dci = 0; dci < updates.length; dci += CHUNK) {
+    var driftChunk = updates.slice(dci, dci + CHUNK);
+    var driftIds = driftChunk.map(function(u) { return u.id; });
+    var driftFields = { updated_at: self.clock.now() };
+    ['split_ordinal', 'split_total', 'dur'].forEach(function(col) {
+      var touched = driftChunk.filter(function(u) { return u.changes[col] != null; });
+      if (touched.length === 0) return;
+      var expr = 'CASE id';
+      var bindings = [];
+      touched.forEach(function(u) { expr += ' WHEN ? THEN ?'; bindings.push(u.id, u.changes[col]); });
+      expr += ' ELSE `' + col + '` END';
+      driftFields[col] = trx.raw(expr, bindings);
+    });
+    await trx('task_instances').whereIn('id', driftIds).update(driftFields);
+  }
+};
+
 module.exports = KnexScheduleRepository;
 module.exports.KnexScheduleRepository = KnexScheduleRepository;
 module.exports.SCHEDULE_REPOSITORY_PORT_METHODS = SCHEDULE_REPOSITORY_PORT_METHODS;

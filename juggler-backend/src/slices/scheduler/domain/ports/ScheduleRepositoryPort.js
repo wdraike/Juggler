@@ -84,6 +84,23 @@
  *   ONLY when it is currently NULL — the rolling-anchor backfill
  *   (runSchedule.js ~401-404, the `trx.fn.now()` at 404 corrected to new Date()).
  *   Returns rows updated (0 or 1).
+ *
+ * @typedef {Object} SplitDriftUpdate
+ * @property {string} id  task_instances id to update.
+ * @property {Object} changes  `{ split_ordinal?, split_total?, dur? }` — the
+ *   drift-fixed field values (999.1019). Only fields present (`!= null`) are
+ *   folded into the CASE update; the others are left at their current value.
+ *
+ * @property {(driftUpdates: SplitDriftUpdate[]) => Promise<void>} applySplitDriftFix
+ *   Batch drift-fix UPDATEs into CASE-WHEN expressions, chunked at the
+ *   repository's chunk size (200), for `split_ordinal`/`split_total`/`dur`
+ *   only (`updated_at` via P1 `new Date()`). This is a SEPARATE write path
+ *   from `writeChanged` — it does NOT touch `unscheduled`/`unplaced_reason`/
+ *   `unplaced_detail` (unlike writeChanged's batched CASE path), so routing a
+ *   drift-fix delta through `writeChanged` instead would add unwanted field
+ *   writes. (Legacy: runSchedule.js ~1307-1328 — the recurring-split-chunk
+ *   reconcile pass's DRIFT_CHUNK loop.) JUG-SCHEDULER-LEGACY-DB-BYPASS
+ *   (999.1532).
  */
 
 'use strict';
@@ -104,6 +121,10 @@ ScheduleRepositoryPort.prototype.deleteTasksWhere = function deleteTasksWhere(_u
 
 ScheduleRepositoryPort.prototype.backfillRollingAnchorIfNull = function backfillRollingAnchorIfNull(_masterId, _userId, _anchor) {
   throw new Error('ScheduleRepositoryPort.backfillRollingAnchorIfNull not implemented');
+};
+
+ScheduleRepositoryPort.prototype.applySplitDriftFix = function applySplitDriftFix(_driftUpdates) {
+  throw new Error('ScheduleRepositoryPort.applySplitDriftFix not implemented');
 };
 
 // 999.1217 (W4, SCHEDULER-SPEC.md D6): `now()` (DB-clock read) and
@@ -156,7 +177,8 @@ var SCHEDULE_REPOSITORY_PORT_METHODS = Object.freeze([
   'backfillRollingAnchorIfNull',
   'getUserConfigRows',
   'getLocations',
-  'insertTasksBatch'
+  'insertTasksBatch',
+  'applySplitDriftFix'
 ]);
 
 module.exports = ScheduleRepositoryPort;

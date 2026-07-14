@@ -196,5 +196,18 @@ RunScheduleCommand.prototype.insertTasksBatch = function insertTasksBatch(trx, r
   return this._repo(trx).insertTasksBatch(rows);
 };
 
+/**
+ * Batch drift-fix UPDATEs for split_ordinal/split_total/dur (delegates to the
+ * repository's applySplitDriftFix) — the recurring-split-chunk reconcile
+ * pass's DRIFT_CHUNK loop (runSchedule.js ~1307-1328). JUG-SCHEDULER-LEGACY-
+ * DB-BYPASS (999.1532).
+ * @param {Function} trx caller's transaction handle (T-TX).
+ * @param {Array<{id:string, changes:Object}>} driftUpdates
+ * @returns {Promise<void>}
+ */
+RunScheduleCommand.prototype.applySplitDriftFix = function applySplitDriftFix(trx, driftUpdates) {
+  return this._repo(trx).applySplitDriftFix(driftUpdates);
+};
+
 module.exports = RunScheduleCommand;
 module.exports.RunScheduleCommand = RunScheduleCommand;

@@ -548,38 +548,18 @@ async function runScheduleAndPersist(userId, _retries, options) {
   //    its own connection (db) while the task rows use the transaction (trx)
   //    so the scheduler still sees a consistent snapshot.
   var _loadStart = _clockNowMs();
-  var _p_taskRows = trx('tasks_v').where('user_id', userId)
-    .where(function() {
-      this.where('status', '')
-        // Non-template rows with NULL status (legacy / one-shot tasks never given a status).
-        .orWhere(function() {
-          this.whereNull('status').whereNot('task_type', 'recurring_template');
-        })
-        // R55 / BUG-814: recurring_template rows always have status=NULL in tasks_v
-        // (the view hardcodes NULL for the master branch), so the real cancel/disable
-        // state lives in task_masters.status. Load a template ONLY if its master is
-        // not cancelled/disabled — checked via NOT EXISTS on the master_id join key.
-        // (The prior orWhereNull + whereNotIn was dead: NULL NOT IN (...) never excludes.)
-        .orWhere(function() {
-          this.where('task_type', 'recurring_template')
-            .whereNotExists(function() {
-              this.select(trx.raw('1'))
-                .from('task_masters')
-                .whereRaw('`task_masters`.`id` = `tasks_v`.`master_id`')
-                .whereIn('task_masters.status', ['cancelled', 'disabled']);
-            });
-        });
-    })
-    .select();
+  // H7 (JUG-SCHEDULER-LEGACY-DB-BYPASS / 999.1532): routed through
+  // TaskProviderPort.loadSchedulableRows — the query is byte-identical to
+  // what this file inlined before (the port's own docstring cites this exact
+  // call site as its legacy source; the query was never actually wired up).
+  var _p_taskRows = _taskProvider.loadSchedulableRows(trx, userId);
   // Pull scheduled_at alongside date so we can fall back when date is NULL.
   // Some legacy / partially-created rows end up with NULL date but a valid
   // scheduled_at. Without the fallback, skip/cancel/done on those rows
   // doesn't block expansion of the same occurrence — and a fresh pending
   // instance reappears on the next scheduler run.
-  var _p_terminalDedupRows = trx('task_instances').where('user_id', userId)
-    .whereNotNull('master_id')
-    .whereIn('status', TERMINAL_STATUSES)
-    .select('master_id as source_id', 'date', 'scheduled_at', 'occurrence_ordinal', 'id');
+  // H7 (999.1532): routed through TaskProviderPort.getTerminalDedupRows.
+  var _p_terminalDedupRows = _taskProvider.getTerminalDedupRows(trx, userId);
   // Cross-cycle spacing history: latest `done` placement date per recurring
   // master. Only `done` counts — `skip` / `cancel` mean the user opted out
   // of that slot and shouldn't be treated as the real cadence (else a user
@@ -587,13 +567,8 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // minGap days later). Pending instances are excluded because they include
   // the rows we are about to place; within-run placements contribute via
   // noteMasterPlacement in v2. See docs/RECURRING-SPACING-DESIGN.md.
-  var _p_recurHistory = trx('task_instances').where('user_id', userId)
-    .whereNotNull('master_id')
-    .whereNotNull('date')
-    .where('status', 'done')
-    .select('master_id')
-    .max('date as latest_date')
-    .groupBy('master_id');
+  // H7 (999.1532): routed through TaskProviderPort.getRecurringDoneHistory.
+  var _p_recurHistory = _taskProvider.getRecurringDoneHistory(trx, userId);
   // H7 (999.1193): user_config + locations reads via ScheduleRepositoryPort.
   // On the base connection (db), NOT the trx — same as the legacy
   // loadConfig(userId), whose reads ran on src/db outside the transaction.
@@ -1310,22 +1285,10 @@ async function runScheduleAndPersist(userId, _retries, options) {
     // touches up to three fields (split_ordinal, split_total, dur) — we only
     // emit CASEs for fields that actually vary in the chunk, skipping no-op
     // columns.
-    var DRIFT_CHUNK = 200;
-    for (var dci = 0; dci < toUpdate.length; dci += DRIFT_CHUNK) {
-      var driftChunk = toUpdate.slice(dci, dci + DRIFT_CHUNK);
-      var driftIds = driftChunk.map(function(u) { return u.id; });
-      var driftFields = { updated_at: _runScheduleCommand.clockNow() };
-      ['split_ordinal', 'split_total', 'dur'].forEach(function(col) {
-        var touched = driftChunk.filter(function(u) { return u.changes[col] != null; });
-        if (touched.length === 0) return;
-        var expr = 'CASE id';
-        var bindings = [];
-        touched.forEach(function(u) { expr += ' WHEN ? THEN ?'; bindings.push(u.id, u.changes[col]); });
-        expr += ' ELSE `' + col + '` END';
-        driftFields[col] = trx.raw(expr, bindings);
-      });
-      await trx('task_instances').whereIn('id', driftIds).update(driftFields);
-    }
+    // H7 (999.1532): routed through ScheduleRepositoryPort.applySplitDriftFix
+    // (the CASE-chunking logic moved verbatim into the adapter; this is a
+    // SEPARATE write path from writeChanged — see the port's JSDoc).
+    await _runScheduleCommand.applySplitDriftFix(trx, toUpdate);
     toUpdate.forEach(function(u) { updateById[u.id] = u.changes; });
     allTasks.forEach(function(t) {
       var ch = updateById[t.id];
@@ -1450,9 +1413,9 @@ async function runScheduleAndPersist(userId, _retries, options) {
     // Defensive dedup: detect any IDs already in DB before inserting.
     // Structurally impossible given the existingPendingIds filter above,
     // but guards against future code changes breaking that invariant.
-    var existingChunkCheck = await trx('task_instances')
-      .whereIn('id', chunkInsertRows.map(function(r) { return r.id; }))
-      .select('id');
+    // H7 (999.1532): routed through TaskProviderPort.findExistingInstanceIds.
+    var existingChunkCheck = await _taskProvider.findExistingInstanceIds(trx,
+      chunkInsertRows.map(function(r) { return r.id; }));
     if (existingChunkCheck.length > 0) {
       var existingChunkSet = {};
       existingChunkCheck.forEach(function(r) { existingChunkSet[r.id] = true; });

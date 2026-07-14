@@ -28,6 +28,10 @@
 
 var TASK_PROVIDER_PORT_METHODS =
   require('../domain/ports/TaskProviderPort').TASK_PROVIDER_PORT_METHODS;
+// Same pattern as the calendar slice adapters (GoogleCalendarAdapter.js /
+// MicrosoftCalendarAdapter.js) — slice adapters require lib/task-status
+// directly rather than taking it as a caller-supplied parameter.
+var TERMINAL_STATUSES = require('../../../lib/task-status').TERMINAL_STATUSES;
 
 /**
  * @param {Object} [deps]
@@ -86,6 +90,50 @@ SchedulerTaskProvider.prototype.loadSchedulableRows = function loadSchedulableRo
         });
     })
     .select();
+};
+
+/**
+ * Read terminal-status `task_instances` rows for the reconcile dedup pass
+ * (verbatim — runSchedule.js ~551). Some legacy / partially-created rows end
+ * up with NULL `date` but a valid `scheduled_at`; the caller falls back to
+ * deriving the date key from `scheduled_at` in that case. `db` may be a trx
+ * handle. JUG-SCHEDULER-LEGACY-DB-BYPASS (999.1532).
+ */
+SchedulerTaskProvider.prototype.getTerminalDedupRows = function getTerminalDedupRows(db, userId) {
+  return db('task_instances').where('user_id', userId)
+    .whereNotNull('master_id')
+    .whereIn('status', TERMINAL_STATUSES)
+    .select('master_id as source_id', 'date', 'scheduled_at', 'occurrence_ordinal', 'id');
+};
+
+/**
+ * Cross-cycle spacing history: latest `done` placement date per recurring
+ * master (verbatim — runSchedule.js ~590). Only `done` counts — `skip`/
+ * `cancel` mean the user opted out of that slot and shouldn't be treated as
+ * the real cadence. Pending instances are excluded because they include the
+ * rows about to be placed; within-run placements contribute via
+ * noteMasterPlacement in v2. See docs/RECURRING-SPACING-DESIGN.md. `db` may
+ * be a trx handle. JUG-SCHEDULER-LEGACY-DB-BYPASS (999.1532).
+ */
+SchedulerTaskProvider.prototype.getRecurringDoneHistory = function getRecurringDoneHistory(db, userId) {
+  return db('task_instances').where('user_id', userId)
+    .whereNotNull('master_id')
+    .whereNotNull('date')
+    .where('status', 'done')
+    .select('master_id')
+    .max('date as latest_date')
+    .groupBy('master_id');
+};
+
+/**
+ * Defensive dedup: which of `ids` are already present in `task_instances`
+ * (verbatim — runSchedule.js ~1453 phase-1 chunk pre-insert collision guard).
+ * Structurally impossible given the caller's existingPendingIds filter, but
+ * guards against future code changes breaking that invariant. `db` may be a
+ * trx handle. JUG-SCHEDULER-LEGACY-DB-BYPASS (999.1532).
+ */
+SchedulerTaskProvider.prototype.findExistingInstanceIds = function findExistingInstanceIds(db, ids) {
+  return db('task_instances').whereIn('id', ids).select('id');
 };
 
 module.exports = SchedulerTaskProvider;
