@@ -21,7 +21,7 @@ var { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
 var { rowToTask, safeParseJSON } = require('./task.controller');
 var { localToUtc } = require('../scheduler/dateHelpers');
 var { safeTimezone } = require('juggler-shared/scheduler/dateHelpers');
-var { taskHash, userHash, isoToJugglerDate, toMySQLDate, DEFAULT_TIMEZONE, callWithRateLimit } = require('./cal-sync-helpers');
+var { taskHash, userHash, isoToJugglerDate, toMySQLDate, DEFAULT_TIMEZONE, callWithRateLimit, isEventPast, isStalePastSkipRow } = require('./cal-sync-helpers');
 var sseEmitter = require('../lib/sse-emitter');
 var { acquireLock, releaseLock, refreshLock } = require('../lib/sync-lock');
 var { flushQueueInLock } = require('../lib/task-write-queue');
@@ -1322,9 +1322,28 @@ async function sync(req, res) {
         .where('user_id', userId)
         .where('provider', pid2)
         .whereNotNull('provider_event_id')
-        .select('provider_event_id');
+        .select('id', 'provider_event_id', 'task_id', 'status',
+                'last_pushed_hash', 'last_user_hash', 'event_start', 'event_all_day');
+      // 999.1605 healing: all-day events misclassified as past got a
+      // task_id-NULL skip row that permanently blocks re-ingestion. A skip
+      // row whose all-day date is today-or-later can only be that
+      // misclassification (genuinely past rows only age further into the
+      // past) — delete it immediately (NOT via the end-of-sync buffers, so
+      // the Phase 3b re-ingest below can insert a fresh row for the same
+      // event id without colliding) and leave it out of the skip set.
+      var stalePastSkipIds = [];
       for (var ali = 0; ali < allLedgerForProvider.length; ali++) {
+        if (isStalePastSkipRow(allLedgerForProvider[ali], todayKey)) {
+          stalePastSkipIds.push(allLedgerForProvider[ali].id);
+          continue;
+        }
         existingLedgerEventIds.add(allLedgerForProvider[ali].provider_event_id);
+      }
+      if (stalePastSkipIds.length > 0) {
+        await getDb()('cal_sync_ledger').whereIn('id', stalePastSkipIds).del();
+        logger.warn('[999.1605] healed stale past-skip ledger rows (all-day misclassified as past)', {
+          userId: userId, provider: pid2, count: stalePastSkipIds.length
+        });
       }
 
       var eventIds = Object.keys(pEventsById2);
@@ -1382,13 +1401,11 @@ async function sync(req, res) {
           continue;
         }
 
-        // Check if event is in the past
-        var evStartStr = newEvent.startDateTime;
-        var isPast = false;
-        if (evStartStr) {
-          var evDate = new Date(evStartStr);
-          isPast = evDate < todayStart;
-        }
+        // Check if event is in the past (999.1605: all-day events compare by
+        // calendar date — new Date('YYYY-MM-DD') is UTC midnight, which lands
+        // before local todayStart in negative-offset timezones and skipped
+        // TODAY's all-day events)
+        var isPast = isEventPast(newEvent.startDateTime, !!newEvent.isAllDay, todayKey, todayStart);
 
         if (isPast) {
           ledgerInserts.push({

@@ -117,6 +117,37 @@ function callWithRateLimit(pid, fn) {
   return pid === 'gcal' ? withGCalRateLimit(fn) : fn();
 }
 
+/**
+ * 999.1605: is a provider event entirely before the user's local today?
+ * All-day events carry DATE-ONLY start strings ("2026-07-14"); new Date()
+ * parses those as UTC midnight, which precedes the user's local todayStart
+ * in negative-offset timezones — misclassifying TODAY's all-day events as
+ * past (Phase 3b then skips them permanently). Compare calendar dates for
+ * all-day events, timestamps for timed ones.
+ */
+function isEventPast(startDateTime, isAllDay, todayKey, todayStart) {
+  if (!startDateTime) return false;
+  if (isAllDay) return String(startDateTime).slice(0, 10) < todayKey;
+  return new Date(startDateTime) < todayStart;
+}
+
+/**
+ * 999.1605 healing: a Phase-3b "past skip" ledger row (task_id NULL, no push
+ * hashes, status active) for an ALL-DAY event whose calendar date is today or
+ * later can only exist via the misclassification above — a genuinely past
+ * row's date can never be >= today. Deleting it lets Phase 3b re-ingest the
+ * event. Timed rows were never misclassified, so they are never touched.
+ */
+function isStalePastSkipRow(row, todayKey) {
+  return !row.task_id
+    && !row.last_pushed_hash
+    && !row.last_user_hash
+    && row.status === 'active'
+    && !!row.event_all_day
+    && !!row.event_start
+    && String(row.event_start).slice(0, 10) >= todayKey;
+}
+
 module.exports = {
   DEFAULT_TIMEZONE,
   jugglerDateToISO,
@@ -126,5 +157,7 @@ module.exports = {
   taskHash,
   toMySQLDate,
   withGCalRateLimit,
-  callWithRateLimit
+  callWithRateLimit,
+  isEventPast,
+  isStalePastSkipRow
 };
