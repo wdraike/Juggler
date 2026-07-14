@@ -57,6 +57,15 @@
  *    it never had (a silent MCP-only gap) as a side effect of routing through
  *    facade's lockedBatchUpdate/batchUpdateTxn, which already call
  *    applyRollingAnchor on a done/skip transition.
+ * 4. update_task (999.1570, supersedes the ernie E3 accepted-tradeoff ruling
+ *    2026-07-07): when a single call carries BOTH non-status fields AND a
+ *    status, the two facade calls (updateTask, updateTaskStatus) used to
+ *    commit independently — a failed second call left the row half-updated.
+ *    They now route through facade.updateTaskAndStatus, ONE transaction,
+ *    both-or-neither, same D-B ordering preserved inside it. Single-kind
+ *    updates (only fields, or only status) are unchanged — see facade.js's
+ *    updateTaskAndStatus header for the mechanism and its documented scope
+ *    limits.
  */
 
 const { z } = require('zod');
@@ -404,26 +413,46 @@ function registerTaskTools(server, userId) {
       var statusValue = updateFields.status;
       var nonStatusFields = Object.assign({}, updateFields);
       delete nonStatusFields.status;
+      var hasNonStatusFields = Object.keys(nonStatusFields).length > 0;
 
       var lastResult = null;
-      if (!hasStatus || Object.keys(nonStatusFields).length > 0) {
-        lastResult = await facade.updateTask({
+      if (hasStatus && hasNonStatusFields) {
+        // 999.1570: BOTH kinds of field present — this used to be two
+        // independently-committed facade calls (updateTask then
+        // updateTaskStatus), which left the row half-updated if the second
+        // call failed. facade.updateTaskAndStatus composes both use-cases in
+        // ONE transaction (same D-B ordering preserved inside it) so the pair
+        // is now both-or-neither.
+        lastResult = await facade.updateTaskAndStatus({
           id: id, userId: userId,
-          body: hasStatus ? nonStatusFields : updateFields,
+          nonStatusBody: nonStatusFields, status: statusValue,
           timezoneHeader: tz
         });
         if (lastResult.status >= 400) {
           return { content: [{ type: 'text', text: mapFacadeErrorText(lastResult) }], isError: true };
         }
-      }
-      if (hasStatus) {
-        lastResult = await facade.updateTaskStatus({
-          id: id, userId: userId,
-          body: { status: statusValue },
-          timezoneHeader: tz
-        });
-        if (lastResult.status >= 400) {
-          return { content: [{ type: 'text', text: mapFacadeErrorText(lastResult) }], isError: true };
+      } else {
+        // Only ONE kind of field is present — no second call exists here to
+        // race, so the pre-999.1570 single-call behavior is unchanged.
+        if (!hasStatus) {
+          lastResult = await facade.updateTask({
+            id: id, userId: userId,
+            body: updateFields,
+            timezoneHeader: tz
+          });
+          if (lastResult.status >= 400) {
+            return { content: [{ type: 'text', text: mapFacadeErrorText(lastResult) }], isError: true };
+          }
+        }
+        if (hasStatus) {
+          lastResult = await facade.updateTaskStatus({
+            id: id, userId: userId,
+            body: { status: statusValue },
+            timezoneHeader: tz
+          });
+          if (lastResult.status >= 400) {
+            return { content: [{ type: 'text', text: mapFacadeErrorText(lastResult) }], isError: true };
+          }
         }
       }
 

@@ -1575,6 +1575,118 @@ function deleteTask(input) { return _deleteTask.execute(input); }
 /** updateTaskStatus → UpdateTaskStatus ({ status, body }). */
 function updateTaskStatus(input) { return _updateTaskStatus.execute(input); }
 
+// ── updateTaskAndStatus (999.1570) ───────────────────────────────────────────
+// MCP's update_task tool used to issue TWO independently-committed facade
+// calls when a single caller-supplied body carries BOTH non-status fields AND
+// a `status` field: facade.updateTask (non-status fields) runs and commits,
+// THEN facade.updateTaskStatus (the status transition) runs separately. If
+// the second call failed, the first call's write had ALREADY committed,
+// leaving the task row half-updated with no rollback (formerly pinned as an
+// ACCEPTED tradeoff — ernie E3 / David ruling 2026-07-07 — now superseded:
+// 999.1570 fixes the atomicity while preserving the D-B ruling's observable
+// ORDERING, non-status fields land before the status transition is
+// evaluated, e.g. so a same-call {date, status:'done'} schedules-and-
+// completes together).
+//
+// Mechanism: ONE `repo.runInTransaction` wraps BOTH use-cases' execute()
+// calls. `withTrxRepo` clones the module's singleton `_updateTask`/
+// `_updateTaskStatus` instances (Object.assign over the existing prototype)
+// with `.repo` swapped for the trx-scoped repo `runInTransaction` hands back —
+// reusing the SAME dependency wiring the "USE-CASE CONSTRUCTION" block above
+// already assembled (no second copy of the dep list to drift). Every DB call
+// each use-case makes through `this.repo.*` (fetchTaskWithEventIds,
+// updateTaskById, and UpdateTask's complex-path recurCleanup via its own
+// nested `repo.runInTransaction`, which knex resolves as a SAVEPOINT inside
+// this outer transaction) participates in the SAME commit/rollback boundary.
+// A `status >= 400` result from EITHER step throws `FacadeStepError` to
+// unwind the transaction (rollback) while carrying the {status,body} result
+// back out to the caller unchanged.
+//
+// SCOPE (documented, not silently assumed): the anchor projection
+// (applyRollingAnchor) IS threaded onto this transaction — it writes the
+// same task_masters row step 1 locks, so leaving it on the base pool
+// self-deadlocks (harrison 999.1570 BLOCK-1). Two side-effect collaborators
+// that were ALREADY non-transactional for a single facade.updateTaskStatus
+// call remain outside: handleTemplatePause's instance cascade
+// (recurring_template pause/unpause — hardcoded to `_repo`/`_ledgerWrites`,
+// no db param) and reactivateDoneFrozen's ledger write (KnexLedgerWrites,
+// base pool) — both touch rows this trx does not lock. Threading a trx
+// through those would mean changing collaborators SHARED with
+// lockedBatchUpdate/batchUpdateTxn/the plain single-call path — a materially
+// larger port change than this ticket's lane, and those side effects carried
+// no atomicity guarantee even for a single non-composed call. The row write
+// itself (the specific "half-updated task" the ticket reports) is what this
+// closes.
+function FacadeStepError(result) {
+  Error.call(this, 'updateTaskAndStatus: step rejected (status ' + result.status + ')');
+  this.result = result;
+}
+FacadeStepError.prototype = Object.create(Error.prototype);
+FacadeStepError.prototype.constructor = FacadeStepError;
+
+function withTrxRepo(instance, trxRepo) {
+  var bound = Object.create(Object.getPrototypeOf(instance));
+  Object.assign(bound, instance, { repo: trxRepo });
+  return bound;
+}
+
+/**
+ * updateTaskAndStatus → composed UpdateTask + UpdateTaskStatus in ONE
+ * transaction (999.1570). Called by the MCP update_task tool ONLY when a
+ * single body carries both non-status fields AND a status; the plain
+ * updateTask/updateTaskStatus facade calls remain the path when only one
+ * kind of field is present (no second call exists there to race).
+ * @param {Object} input
+ * @param {string} input.id
+ * @param {string} input.userId
+ * @param {Object} input.nonStatusBody  fields for facade.updateTask (status excluded)
+ * @param {string} input.status        the status for facade.updateTaskStatus
+ * @param {string} [input.timezoneHeader]
+ * @returns {Promise<{ status: number, body: Object }>} the LAST step's result
+ *   (mirrors the pre-999.1570 two-call `lastResult` the MCP tool re-read from).
+ */
+async function updateTaskAndStatus(input) {
+  var id = input.id;
+  var userId = input.userId;
+  var nonStatusBody = input.nonStatusBody;
+  var status = input.status;
+  var timezoneHeader = input.timezoneHeader;
+  var lastResult = null;
+
+  try {
+    await _repo.runInTransaction(async function (trxRepo) {
+      var trxUpdateTask = withTrxRepo(_updateTask, trxRepo);
+      lastResult = await trxUpdateTask.execute({
+        id: id, userId: userId, body: nonStatusBody, timezoneHeader: timezoneHeader
+      });
+      if (lastResult.status >= 400) throw new FacadeStepError(lastResult);
+
+      var trxUpdateTaskStatus = withTrxRepo(_updateTaskStatus, trxRepo);
+      // Thread THIS transaction into the anchor projection (harrison 999.1570
+      // BLOCK-1): step 1 X-locks the template task_masters row whenever the
+      // body carries a TEMPLATE_FIELD (updateTaskById(source_id) runs inside
+      // this trx). UpdateTaskStatus's own call site omits ctx.db, so the
+      // anchor UPDATE would go out on the BASE POOL against that same locked
+      // row — an application-level deadlock InnoDB can't break (blocks until
+      // innodb_lock_wait_timeout, then rolls the whole call back). Same
+      // ctx.db threading batchUpdateTxn uses (ernie-w1-anchor-trx-escape).
+      var _anchorDep = trxUpdateTaskStatus.applyRollingAnchor;
+      trxUpdateTaskStatus.applyRollingAnchor = function (ctx) {
+        return _anchorDep(Object.assign({}, ctx, { db: trxRepo.db }));
+      };
+      lastResult = await trxUpdateTaskStatus.execute({
+        id: id, userId: userId, body: { status: status }, timezoneHeader: timezoneHeader
+      });
+      if (lastResult.status >= 400) throw new FacadeStepError(lastResult);
+    });
+  } catch (err) {
+    if (err instanceof FacadeStepError) return err.result;
+    throw err;
+  }
+
+  return lastResult;
+}
+
 /** batchCreateTasks → BatchCreateTasks ({ status, body }). */
 function batchCreateTasks(input) { return _batchCreateTasks.execute(input); }
 
@@ -1624,6 +1736,9 @@ module.exports = {
   updateTask: updateTask,
   deleteTask: deleteTask,
   updateTaskStatus: updateTaskStatus,
+  // 999.1570: composed one-transaction updateTask+updateTaskStatus — see the
+  // function's own header (above `batchCreateTasks`) for the full contract.
+  updateTaskAndStatus: updateTaskAndStatus,
   batchCreateTasks: batchCreateTasks,
   batchUpdateTasks: batchUpdateTasks,
   reEnableTask: reEnableTask,
