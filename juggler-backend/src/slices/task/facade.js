@@ -1422,10 +1422,13 @@ async function batchUpdateTxn(ctx) {
 }
 
 // takeOwnership ledger detach (verbatim — controller L2403-2405).
+// JUG-FACADE-DB-VIOLATIONS final stage (999.1516): the UPDATE moved to
+// adapters/KnexLedgerWrites.js's detachTaskLedger. ctx.trxRepo.db is still
+// threaded through as the trx handle (same trx-escape-hazard discipline as
+// applyRollingAnchor above), so the write stays atomic with the rest of the
+// caller's runInTransaction block.
 async function detachLedger(ctx) {
-  await ctx.trxRepo.db('cal_sync_ledger')
-    .where({ task_id: ctx.id, user_id: ctx.userId, status: 'active' })
-    .update({ status: 'deleted_local', synced_at: ctx.trxRepo.db.fn.now() });
+  await _ledgerWrites.detachTaskLedger(ctx.trxRepo.db, ctx.userId, ctx.id);
 }
 
 // reEnableTask disabled-instance counter (verbatim — controller L2314-2317).

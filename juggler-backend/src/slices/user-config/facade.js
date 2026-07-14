@@ -190,11 +190,13 @@ function importInsertTask(trxRepo, row) {
 // MergeImportData task-id read (two-mode import / W2) — the EXISTING task ids for
 // the user, read within the merge transaction. task_masters.id is the canonical id
 // space (every task has a master; non-recurring master + instance share the id), so
-// a merge collision check against task_masters.id covers all task kinds. Reads via
-// trxRepo.db (the same knex trx handle the config repo carries), mirroring how
-// importWipeTasks/importInsertTask reach the task tables outside the config port.
+// a merge collision check against task_masters.id covers all task kinds. Same
+// transaction-token construction as importWipeTasks/importInsertTask below
+// (999.1199); the read itself lives on KnexTaskRepository.listMasterIdsForUser
+// (JUG-FACADE-DB-VIOLATIONS final stage/999.1516 — facades carry no direct db access).
 function mergeListTaskIds(trxRepo, userId) {
-  return trxRepo.db('task_masters').where('user_id', userId).pluck('id');
+  var taskRepo = new TaskKnexTaskRepository({ db: trxRepo.db });
+  return taskRepo.listMasterIdsForUser(userId);
 }
 // v7-task → DB-row mapper (data.controller.js:79-125) — verbatim, incl. trx.fn.now()
 // for created_at/updated_at on the IMPORT path. The import insert is a task-table

@@ -472,6 +472,20 @@ KnexTaskRepository.prototype.getMasterById = function getMasterById(masterId, us
 };
 
 /**
+ * ALL task_masters ids for a user, unfiltered. Verbatim relocation of
+ * user-config facade.js's mergeListTaskIds (data.controller.js import-merge
+ * collision check, JUG-FACADE-DB-VIOLATIONS final stage/999.1516) —
+ * task_masters.id is the canonical id space (every task has a master;
+ * non-recurring master + instance share the id), so this covers all task
+ * kinds for the merge-mode import's existing-id collision check.
+ * @param {string} userId
+ * @returns {Promise<string[]>}
+ */
+KnexTaskRepository.prototype.listMasterIdsForUser = function listMasterIdsForUser(userId) {
+  return this.db('task_masters').where('user_id', userId).pluck('id');
+};
+
+/**
  * The `{ id }` rows of a task's split siblings — same (user, master,
  * occurrence_ordinal), excluding `excludeId`. Verbatim relocation of
  * loadSplitSiblings (controller ~1818). 999.354 (recurrence-read fold).

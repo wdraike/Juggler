@@ -84,4 +84,27 @@ KnexLedgerWrites.prototype.reactivateDoneFrozenLedger = function reactivateDoneF
     .update({ status: 'active', synced_at: this.db.fn.now() });
 };
 
+/**
+ * takeOwnership ledger detach — soft-clears ALL active cal_sync_ledger rows for
+ * one task. Verbatim relocation of facade.js's detachLedger (controller
+ * L2403-2405). Unlike clearActiveLedgerForTasks above (batch of task ids, own
+ * `this.db`, nulls task_id), this call does NOT null task_id and runs inside
+ * the CALLER's transaction (JUG-FACADE-DB-VIOLATIONS final stage).
+ *
+ * `dbOrTrx` is REQUIRED (not defaulted) — same trx-escape-hazard discipline as
+ * updateNextStartAnchor above: TakeOwnership.js always invokes this inside
+ * repo.runInTransaction and passes the transaction-bound trxRepo's own `db`
+ * handle, so a silent default to the base pool would let this write escape the
+ * caller's commit/rollback boundary.
+ * @param {Function} dbOrTrx  knex instance or active trx handle
+ * @param {string} userId
+ * @param {string} taskId
+ * @returns {Promise<number>}
+ */
+KnexLedgerWrites.prototype.detachTaskLedger = function detachTaskLedger(dbOrTrx, userId, taskId) {
+  return dbOrTrx('cal_sync_ledger')
+    .where({ task_id: taskId, user_id: userId, status: 'active' })
+    .update({ status: 'deleted_local', synced_at: dbOrTrx.fn.now() });
+};
+
 module.exports = KnexLedgerWrites;

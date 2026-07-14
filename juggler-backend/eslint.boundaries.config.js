@@ -72,11 +72,16 @@ const TASKS_WRITE_RESTRICTION = {
 };
 
 // Direct-db import ban (JUG-NO-SLICE-BOUNDARY-ENFORCEMENT). DB access belongs
-// in slice adapters behind repository ports. Two selectors because the module
-// is reachable two ways: the legacy root module (src/db.js, any `../`-relative
-// depth, incl. `../../src/db`) and the lib module (src/lib/db + the vendored
-// @raike/lib-db it wraps). AST selectors — comments that merely mention
-// require('../../db') (e.g. taskMappers.js:25 header) never match.
+// in slice adapters behind repository ports. Three selectors: the module is
+// reachable two ways via require() — the legacy root module (src/db.js, any
+// `../`-relative depth, incl. `../../src/db`) and the lib module (src/lib/db +
+// the vendored @raike/lib-db it wraps) — plus a third shape that doesn't
+// require() anything: a facade calling `.db(table)` directly on an
+// already-injected repository/trx handle (e.g. `ctx.trxRepo.db('table')`),
+// which bypasses the repository layer just as effectively without ever
+// require()-ing a db module (999.1516 final stage — task/facade.js detachLedger,
+// user-config/facade.js mergeListTaskIds). AST selectors — comments that merely
+// mention require('../../db') (e.g. taskMappers.js:25 header) never match.
 // Grandfathered legacy call sites are listed EXPLICITLY in
 // DB_GRANDFATHERED_FILES below — a ratchet: the list only shrinks, never grows.
 const DB_DIRECT_SELECTORS = [
@@ -97,6 +102,16 @@ const DB_DIRECT_SELECTORS = [
       "owning slice's facade/repository port (adapters are the only DB layer). Legacy sites are " +
       'grandfathered in eslint.boundaries.config.js DB_GRANDFATHERED_FILES; do not add new ones. ' +
       'See JUG-NO-SLICE-BOUNDARY-ENFORCEMENT.'
+  },
+  {
+    selector:
+      "CallExpression[callee.type='MemberExpression'][callee.property.name='db']",
+    message:
+      'Direct query-builder call via `.db(table)` is forbidden in a facade — this reaches ' +
+      "past the repository/adapter layer to build a raw query on an injected repository/trx " +
+      'handle. Add a method to the owning slice\'s repository adapter (construct it over the ' +
+      'same db/trx handle as a transaction token, see KnexTaskRepository/KnexLedgerWrites) ' +
+      'instead of calling `.db(table)` directly. See JUG-FACADE-DB-VIOLATIONS/999.1516.'
   }
 ];
 
@@ -232,7 +247,7 @@ const SLICES = [
   },
   {
     name: 'task',
-    facadeDbClean: true, // purged 2026-07-13 (JUG-FACADE-DB-VIOLATIONS stage 4 — validateTaskReferences → adapters/KnexReferenceValidator.js; handleTemplatePause/anchor writes/cal_sync_ledger sites/user_config read/countDisabledInstances → KnexTaskRepository methods)
+    facadeDbClean: true, // purged 2026-07-13 (JUG-FACADE-DB-VIOLATIONS stage 4 — validateTaskReferences → adapters/KnexReferenceValidator.js; handleTemplatePause/anchor writes/cal_sync_ledger sites/user_config read/countDisabledInstances → KnexTaskRepository methods; final stage — detachLedger's raw ctx.trxRepo.db('cal_sync_ledger') call → adapters/KnexLedgerWrites.js detachTaskLedger, closing the last non-require() .db(table) gap the DB_DIRECT_SELECTORS ratchet now also catches — 999.1516)
     ref: 'JUG-HEX-H3 (W6)',
     facadeFiles: ['**/slices/task/facade.js', '**/slices/task/index.js'],
     extraExempt: ['**/slices/task/application/**/*.js', '**/slices/task/domain/**/*.js'],
@@ -256,7 +271,7 @@ const SLICES = [
   },
   {
     name: 'user-config',
-    facadeDbClean: true, // purged 2026-07-13 (JUG-FACADE-DB-VIOLATIONS stage 2b — adapters/KnexFeatureEventsRepository.js + adapters/KnexImportRowClock.js)
+    facadeDbClean: true, // purged 2026-07-13 (JUG-FACADE-DB-VIOLATIONS stage 2b — adapters/KnexFeatureEventsRepository.js + adapters/KnexImportRowClock.js; final stage — mergeListTaskIds's raw trxRepo.db('task_masters') call → task slice's KnexTaskRepository.listMasterIdsForUser via the facade export, closing the last non-require() .db(table) gap — 999.1516)
     ref: 'JUG-HEX-H4 (W6)',
     facadeFiles: ['**/slices/user-config/facade.js', '**/slices/user-config/index.js'],
     extraExempt: ['**/slices/user-config/application/**/*.js', '**/slices/user-config/domain/**/*.js'],
