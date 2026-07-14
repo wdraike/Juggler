@@ -34,6 +34,7 @@ var P1_DATE_COLUMNS = ['updated_at', 'created_at', 'completed_at', 'scheduled_at
  * @param {Object} [deps.clock] ClockPort (default: process clock).
  * @param {Array<Object>} [deps.userConfigRows] seed raw user_config rows (H7).
  * @param {Array<Object>} [deps.locations] seed raw locations rows (H7).
+ * @param {Array<Object>} [deps.users] seed raw `users` rows `{id, timezone, ...}` (999.1532).
  */
 function InMemoryScheduleRepository(deps) {
   var d = deps || {};
@@ -42,6 +43,7 @@ function InMemoryScheduleRepository(deps) {
   this.writes = []; // audit log of applied dbUpdates (for assertions)
   this._userConfigRows = (d.userConfigRows || []).slice();
   this._locations = (d.locations || []).slice();
+  this._users = (d.users || []).slice();
 }
 
 InMemoryScheduleRepository.prototype._assertDates = function _assertDates(dbUpdate) {
@@ -156,6 +158,17 @@ InMemoryScheduleRepository.prototype.applySplitDriftFix = async function applySp
     });
     row.updated_at = self.clock.now();
   });
+};
+
+/**
+ * Read `{ timezone }` for the user. Seed via deps.users (array of raw
+ * `users` rows). Mirrors `.select('timezone').first()` — only the
+ * `timezone` field is returned, matching the Knex adapter's projection.
+ * H7 (999.1532).
+ */
+InMemoryScheduleRepository.prototype.getUserTimezone = async function getUserTimezone(userId) {
+  var row = this._users.filter(function (r) { return r.id === userId; })[0];
+  return row ? { timezone: row.timezone } : undefined;
 };
 
 module.exports = InMemoryScheduleRepository;

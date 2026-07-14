@@ -16,5 +16,7 @@ module.exports = {
   InMemoryScheduleRepository: require('./InMemoryScheduleRepository'),
   MysqlClockAdapter: require('./MysqlClockAdapter'),
   FakeClockAdapter: require('./FakeClockAdapter'),
-  RedisScheduleCache: require('./RedisScheduleCache')
+  RedisScheduleCache: require('./RedisScheduleCache'),
+  SchedulerQueueRepository: require('./SchedulerQueueRepository'),
+  SchedulerSessionRepository: require('./SchedulerSessionRepository')
 };

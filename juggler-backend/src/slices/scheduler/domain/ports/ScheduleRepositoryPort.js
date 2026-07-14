@@ -101,6 +101,12 @@
  *   writes. (Legacy: runSchedule.js ~1307-1328 — the recurring-split-chunk
  *   reconcile pass's DRIFT_CHUNK loop.) JUG-SCHEDULER-LEGACY-DB-BYPASS
  *   (999.1532).
+ *
+ * @property {(userId: string) => Promise<Object|undefined>} getUserTimezone
+ *   Read `users.timezone` for `userId` (legacy `deriveSchedulePlacements.js`
+ *   ~66 `db('users').where('id', userId).select('timezone').first()`) — used
+ *   to resolve the display timezone for the MCP `get_schedule` read-derivation
+ *   path. JUG-SCHEDULER-LEGACY-DB-BYPASS (999.1532).
  */
 
 'use strict';
@@ -168,6 +174,16 @@ ScheduleRepositoryPort.prototype.insertTasksBatch = function insertTasksBatch(_r
 };
 
 /**
+ * Read `users.timezone` for `userId` (legacy `deriveSchedulePlacements.js`
+ * ~66). H7 (999.1532).
+ * @param {string} userId tenant scope.
+ * @returns {Promise<Object|undefined>} `{ timezone }` row, or undefined if not found.
+ */
+ScheduleRepositoryPort.prototype.getUserTimezone = function getUserTimezone(_userId) {
+  throw new Error('ScheduleRepositoryPort.getUserTimezone not implemented');
+};
+
+/**
  * The exact set of methods an adapter MUST expose to satisfy ScheduleRepositoryPort.
  * @type {ReadonlyArray<string>}
  */
@@ -178,7 +194,8 @@ var SCHEDULE_REPOSITORY_PORT_METHODS = Object.freeze([
   'getUserConfigRows',
   'getLocations',
   'insertTasksBatch',
-  'applySplitDriftFix'
+  'applySplitDriftFix',
+  'getUserTimezone'
 ]);
 
 module.exports = ScheduleRepositoryPort;

@@ -25,6 +25,14 @@ var { getNowInTimezone, DEFAULT_TIMEZONE } = require('juggler-shared/scheduler/g
 var config = require('../lib/config');
 var logger = createLogger('schedulerSession');
 
+// H7 (JUG-SCHEDULER-LEGACY-DB-BYPASS / 999.1532): the 6 inline
+// scheduler_sessions/tasks_v call sites route through SchedulerSessionPort +
+// TaskProviderPort.loadStepperRows — verbatim query moves, no behavior change.
+var SchedulerSessionRepository = require('../slices/scheduler/adapters/SchedulerSessionRepository');
+var _sessionRepo = new SchedulerSessionRepository();
+var SchedulerTaskProvider = require('../slices/scheduler/adapters/SchedulerTaskProvider');
+var _taskProvider = new SchedulerTaskProvider();
+
 // Injectable clock (999.1195): every wall-clock read in this module derives from
 // a ClockPort — MysqlClockAdapter in production (same adapter RunScheduleCommand
 // defaults to), swappable via the _setClock test seam below.
@@ -40,7 +48,7 @@ function newSessionId() {
 
 async function sweep() {
   try {
-    await db('scheduler_sessions').where('expires_at', '<', _clock.now()).delete();
+    await _sessionRepo.deleteExpiredSessions(db, _clock.now());
   } catch (e) {
     logger.warn('[schedulerSession] sweep error:', { error: e });
   }
@@ -75,12 +83,7 @@ async function startSession(userId, options) {
   // status=NULL in the view, so a naive `whereNot('status', 'disabled')`
   // excludes them via SQL three-valued logic — stepper would see zero
   // templates and never expand any recurrings).
-  var tasks = await db('tasks_v').where('user_id', userId)
-    .where(function() {
-      this.where('status', '').orWhereNull('status')
-        .orWhere('task_type', 'recurring_template');
-    })
-    .select();
+  var tasks = await _taskProvider.loadStepperRows(db, userId);
   // 999.1187: single scheduler-config loader (reads the real snake_case
   // user_config keys) shared with runSchedule.js and schedule.routes.js.
   // The previous inline copy read camelCase keys (cfg.timeBlocks, …) that
@@ -116,7 +119,7 @@ async function startSession(userId, options) {
     };
   });
 
-  await db('scheduler_sessions').insert({
+  await _sessionRepo.insertSession(db, {
     session_id: sessionId,
     user_id: userId,
     today_key: todayKey,
@@ -152,16 +155,11 @@ async function startSession(userId, options) {
  * or null if not found / expired. Also touches expires_at to extend TTL.
  */
 async function getSession(sessionId) {
-  var row = await db('scheduler_sessions')
-    .where('session_id', sessionId)
-    .where('expires_at', '>', _clock.now())
-    .first();
+  var row = await _sessionRepo.getActiveSession(db, sessionId, _clock.now());
   if (!row) return null;
 
   // Extend TTL on access.
-  await db('scheduler_sessions')
-    .where('session_id', sessionId)
-    .update({ expires_at: new Date(_clock.now().getTime() + SESSION_TTL_MS) });
+  await _sessionRepo.touchSessionExpiry(db, sessionId, new Date(_clock.now().getTime() + SESSION_TTL_MS));
 
   return {
     sessionId: row.session_id,
@@ -260,7 +258,7 @@ async function getSummary(sessionId) {
 }
 
 async function stopSession(sessionId) {
-  await db('scheduler_sessions').where('session_id', sessionId).delete();
+  await _sessionRepo.deleteSession(db, sessionId);
 }
 
 module.exports = {

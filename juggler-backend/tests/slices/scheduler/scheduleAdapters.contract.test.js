@@ -21,6 +21,8 @@ const ScheduleRepositoryPort = require('../../../src/slices/scheduler/domain/por
 const WeatherProviderPort = require('../../../src/slices/scheduler/domain/ports/WeatherProviderPort');
 const CalendarProviderPort = require('../../../src/slices/scheduler/domain/ports/CalendarProviderPort');
 const ClockPort = require('../../../src/slices/scheduler/domain/ports/ClockPort');
+const ScheduleQueuePort = require('../../../src/slices/scheduler/domain/ports/ScheduleQueuePort');
+const SchedulerSessionPort = require('../../../src/slices/scheduler/domain/ports/SchedulerSessionPort');
 
 const SchedulerTaskProvider = require('../../../src/slices/scheduler/adapters/SchedulerTaskProvider');
 const KnexScheduleRepository = require('../../../src/slices/scheduler/adapters/KnexScheduleRepository');
@@ -28,14 +30,16 @@ const InMemoryScheduleRepository = require('../../../src/slices/scheduler/adapte
 const SchedulerWeatherProvider = require('../../../src/slices/scheduler/adapters/SchedulerWeatherProvider');
 const SchedulerCalendarProvider = require('../../../src/slices/scheduler/adapters/SchedulerCalendarProvider');
 const MysqlClockAdapter = require('../../../src/slices/scheduler/adapters/MysqlClockAdapter');
+const SchedulerQueueRepository = require('../../../src/slices/scheduler/adapters/SchedulerQueueRepository');
+const SchedulerSessionRepository = require('../../../src/slices/scheduler/adapters/SchedulerSessionRepository');
 
 const taskFacade = require('../../../src/slices/task/facade');
 
 describe('H6 W2 — driven ports are defined', () => {
   test('the ports barrel exposes all driven-port contracts', () => {
     expect(Object.keys(ports).sort()).toEqual([
-      'CalendarProviderPort', 'ClockPort', 'ScheduleCachePort',
-      'ScheduleRepositoryPort', 'TaskProviderPort', 'WeatherProviderPort'
+      'CalendarProviderPort', 'ClockPort', 'ScheduleCachePort', 'ScheduleQueuePort',
+      'ScheduleRepositoryPort', 'SchedulerSessionPort', 'TaskProviderPort', 'WeatherProviderPort'
     ]);
   });
 });
@@ -69,6 +73,12 @@ describe('H6 W2 — every adapter implements its port method set', () => {
   test('MysqlClockAdapter implements ClockPort', () => {
     assertImplements(new MysqlClockAdapter(), ClockPort.CLOCK_PORT_METHODS);
   });
+  test('SchedulerQueueRepository implements ScheduleQueuePort', () => {
+    assertImplements(new SchedulerQueueRepository(), ScheduleQueuePort.SCHEDULE_QUEUE_PORT_METHODS);
+  });
+  test('SchedulerSessionRepository implements SchedulerSessionPort', () => {
+    assertImplements(new SchedulerSessionRepository(), SchedulerSessionPort.SCHEDULER_SESSION_PORT_METHODS);
+  });
 });
 
 describe('H6 W2 — SchedulerTaskProvider cuts the task.controller coupling', () => {
@@ -101,6 +111,44 @@ describe('H6 W2 — SchedulerTaskProvider cuts the task.controller coupling', ()
     expect(captured.table).toBe('tasks_v');
     expect(captured.userScope).toEqual({ col: 'user_id', val: 'u-1' });
     expect(captured.subWhere).toBe(true);
+    expect(captured.selected).toBe(true);
+  });
+
+  // 999.1532: loadStepperRows is a DIFFERENT, narrower query than
+  // loadSchedulableRows — it must NOT carry the BUG-814 master-status
+  // exclusion (the stepper has never applied it). This pins the exact
+  // where/orWhere chain so a mutation that reused loadSchedulableRows' logic
+  // (or added the NOT EXISTS branch) fails loud.
+  test('loadStepperRows applies the stepper\'s narrower filter — no BUG-814 exclusion branch', async () => {
+    let captured = { calls: [] };
+    const innerBuilder = {
+      where: function (a, b) { captured.calls.push(['where', a, b]); return innerBuilder; },
+      orWhereNull: function (a) { captured.calls.push(['orWhereNull', a]); return innerBuilder; },
+      orWhere: function (a, b) { captured.calls.push(['orWhere', a, b]); return innerBuilder; }
+    };
+    const fakeDb = function (table) {
+      captured.table = table;
+      const qb = {
+        where: function (a, b) {
+          if (typeof a === 'function') { a.call(innerBuilder); }
+          else { captured.userScope = { col: a, val: b }; }
+          return qb;
+        },
+        select: function () { captured.selected = true; return Promise.resolve([]); }
+      };
+      return qb;
+    };
+    const tp = new SchedulerTaskProvider();
+    await tp.loadStepperRows(fakeDb, 'u-1');
+    expect(captured.table).toBe('tasks_v');
+    expect(captured.userScope).toEqual({ col: 'user_id', val: 'u-1' });
+    // Exact narrower chain — status='' OR status IS NULL OR task_type='recurring_template'.
+    // NO whereNotExists/master-status sub-branch (that belongs only to loadSchedulableRows).
+    expect(captured.calls).toEqual([
+      ['where', 'status', ''],
+      ['orWhereNull', 'status'],
+      ['orWhere', 'task_type', 'recurring_template']
+    ]);
     expect(captured.selected).toBe(true);
   });
 });
@@ -239,5 +287,164 @@ describe('B5 — backfillRollingAnchorIfNull: NULL-only backfill, never overwrit
     expect(calls.whereNull).toBe('next_start');
     expect(calls.update).toEqual({ next_start: '2026-06-10', updated_at: fixedNow });
     expect(result).toBe(1);
+  });
+});
+
+// 999.1532 (JUG-SCHEDULER-LEGACY-DB-BYPASS): ScheduleRepositoryPort.getUserTimezone
+// — the legacy deriveSchedulePlacements.js resolveTimezone read.
+describe('999.1532 — ScheduleRepositoryPort.getUserTimezone (value-level)', () => {
+  test('Knex: selects ONLY the timezone column, scoped by id, via .first()', async () => {
+    const calls = {};
+    const qb = {
+      where: function (col, val) { calls.where = { col, val }; return qb; },
+      select: function (col) { calls.select = col; return qb; },
+      first: function () { calls.first = true; return Promise.resolve({ timezone: 'America/Denver' }); }
+    };
+    const fakeDb = function (table) { calls.table = table; return qb; };
+    const repo = new KnexScheduleRepository({ db: fakeDb, clock: { now: () => new Date() } });
+
+    const result = await repo.getUserTimezone('u-1');
+
+    expect(calls.table).toBe('users');
+    expect(calls.where).toEqual({ col: 'id', val: 'u-1' });
+    // Projection MUST stay narrow (timezone only) — a mutation widening this to
+    // select('*') (e.g. reusing UserRepositoryPort.findById) is a different query.
+    expect(calls.select).toBe('timezone');
+    expect(calls.first).toBe(true);
+    expect(result).toEqual({ timezone: 'America/Denver' });
+  });
+
+  test('InMemory: returns ONLY the timezone field, matching the Knex projection', async () => {
+    const repo = new InMemoryScheduleRepository({
+      users: [{ id: 'u-1', timezone: 'America/Denver', email: 'x@example.com' }]
+    });
+    const result = await repo.getUserTimezone('u-1');
+    // No `email`/other columns leak through — mirrors .select('timezone').first().
+    expect(result).toEqual({ timezone: 'America/Denver' });
+  });
+
+  test('InMemory: unknown user returns undefined (mirrors .first() on no match)', async () => {
+    const repo = new InMemoryScheduleRepository({ users: [] });
+    const result = await repo.getUserTimezone('nope');
+    expect(result).toBeUndefined();
+  });
+});
+
+// 999.1532 (JUG-SCHEDULER-LEGACY-DB-BYPASS): ScheduleQueuePort — the legacy
+// scheduleQueue.js schedule_queue/task_write_queue/tasks_v call sites.
+describe('999.1532 — ScheduleQueuePort read methods (value-level)', () => {
+  test('getQueueRowByUser: schedule_queue scoped by user_id, via .first()', async () => {
+    const calls = {};
+    const qb = {
+      where: function (col, val) { calls.where = { col, val }; return qb; },
+      first: function () { calls.first = true; return Promise.resolve({ user_id: 'u-1', claimed_by: null }); }
+    };
+    const fakeDb = function (table) { calls.table = table; return qb; };
+    const repo = new SchedulerQueueRepository();
+
+    const row = await repo.getQueueRowByUser(fakeDb, 'u-1');
+
+    expect(calls.table).toBe('schedule_queue');
+    expect(calls.where).toEqual({ col: 'user_id', val: 'u-1' });
+    expect(calls.first).toBe(true);
+    expect(row).toEqual({ user_id: 'u-1', claimed_by: null });
+  });
+
+  test('getPendingQueueUsers: unclaimed + 2s anti-race cutoff + orderBy + limit + select(user_id)', async () => {
+    const calls = {};
+    const qb = {
+      whereNull: function (col) { calls.whereNull = col; return qb; },
+      where: function (col, op, val) { calls.where = { col, op, val }; return qb; },
+      orderBy: function (col, dir) { calls.orderBy = { col, dir }; return qb; },
+      limit: function (n) { calls.limit = n; return qb; },
+      select: function (col) { calls.select = col; return Promise.resolve([{ user_id: 'u-1' }]); }
+    };
+    const fakeDb = function (table) { calls.table = table; return qb; };
+    fakeDb.raw = function (sql) { calls.raw = sql; return { __raw: sql }; };
+    const repo = new SchedulerQueueRepository();
+
+    const rows = await repo.getPendingQueueUsers(fakeDb, 50);
+
+    expect(calls.table).toBe('schedule_queue');
+    expect(calls.whereNull).toBe('claimed_at');
+    expect(calls.where).toEqual({ col: 'created_at', op: '<', val: { __raw: 'NOW() - INTERVAL 2 SECOND' } });
+    expect(calls.raw).toBe('NOW() - INTERVAL 2 SECOND');
+    expect(calls.orderBy).toEqual({ col: 'created_at', dir: 'asc' });
+    expect(calls.limit).toBe(50);
+    expect(calls.select).toBe('user_id');
+    expect(rows).toEqual([{ user_id: 'u-1' }]);
+  });
+
+  test('countPendingQueue: the SAME unclaimed + 2s-cutoff WHERE as getPendingQueueUsers, count-shaped', async () => {
+    const calls = {};
+    const qb = {
+      whereNull: function (col) { calls.whereNull = col; return qb; },
+      where: function (col, op, val) { calls.where = { col, op, val }; return qb; },
+      count: function (expr) { calls.count = expr; return Promise.resolve([{ c: 3 }]); }
+    };
+    const fakeDb = function (table) { calls.table = table; return qb; };
+    fakeDb.raw = function (sql) { return { __raw: sql }; };
+    const repo = new SchedulerQueueRepository();
+
+    const result = await repo.countPendingQueue(fakeDb);
+
+    expect(calls.table).toBe('schedule_queue');
+    expect(calls.whereNull).toBe('claimed_at');
+    expect(calls.where).toEqual({ col: 'created_at', op: '<', val: { __raw: 'NOW() - INTERVAL 2 SECOND' } });
+    expect(calls.count).toBe('* as c');
+    expect(result).toEqual([{ c: 3 }]);
+  });
+
+  test('countPendingWrites: task_write_queue, unscoped count', async () => {
+    const calls = {};
+    const qb = { count: function (expr) { calls.count = expr; return Promise.resolve([{ c: 7 }]); } };
+    const fakeDb = function (table) { calls.table = table; return qb; };
+    const repo = new SchedulerQueueRepository();
+
+    const result = await repo.countPendingWrites(fakeDb);
+
+    expect(calls.table).toBe('task_write_queue');
+    expect(calls.count).toBe('* as c');
+    expect(result).toEqual([{ c: 7 }]);
+  });
+
+  test('countDistinctPendingUsers: tasks_v distinct(user_id) — a row list, not a COUNT(*)', async () => {
+    const calls = {};
+    const qb = { distinct: function (col) { calls.distinct = col; return Promise.resolve([{ user_id: 'u-1' }, { user_id: 'u-2' }]); } };
+    const fakeDb = function (table) { calls.table = table; return qb; };
+    const repo = new SchedulerQueueRepository();
+
+    const rows = await repo.countDistinctPendingUsers(fakeDb);
+
+    expect(calls.table).toBe('tasks_v');
+    expect(calls.distinct).toBe('user_id');
+    expect(rows.length).toBe(2);
+  });
+});
+
+// 999.1532 (JUG-SCHEDULER-LEGACY-DB-BYPASS): SchedulerSessionPort — the legacy
+// schedulerSession.js scheduler_sessions CRUD call sites.
+describe('999.1532 — SchedulerSessionPort read methods (value-level)', () => {
+  test('getActiveSession: scheduler_sessions scoped by session_id AND expires_at > now, via .first()', async () => {
+    const calls = {};
+    const qb = {
+      where: function (col, op, val) {
+        if (arguments.length === 2) { calls.sessionWhere = { col, val: op }; }
+        else { calls.expiryWhere = { col, op, val }; }
+        return qb;
+      },
+      first: function () { calls.first = true; return Promise.resolve({ session_id: 's-1' }); }
+    };
+    const fakeDb = function (table) { calls.table = table; return qb; };
+    const repo = new SchedulerSessionRepository();
+    const now = new Date('2026-06-16T12:00:00Z');
+
+    const row = await repo.getActiveSession(fakeDb, 's-1', now);
+
+    expect(calls.table).toBe('scheduler_sessions');
+    expect(calls.sessionWhere).toEqual({ col: 'session_id', val: 's-1' });
+    expect(calls.expiryWhere).toEqual({ col: 'expires_at', op: '>', val: now });
+    expect(calls.first).toBe(true);
+    expect(row).toEqual({ session_id: 's-1' });
   });
 });

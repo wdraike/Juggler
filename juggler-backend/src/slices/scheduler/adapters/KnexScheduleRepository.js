@@ -332,6 +332,14 @@ KnexScheduleRepository.prototype.applySplitDriftFix = async function applySplitD
   }
 };
 
+/**
+ * Read `users.timezone` for the user (verbatim — the legacy
+ * deriveSchedulePlacements.js:66 read). H7 (999.1532).
+ */
+KnexScheduleRepository.prototype.getUserTimezone = function getUserTimezone(userId) {
+  return this.db('users').where('id', userId).select('timezone').first();
+};
+
 module.exports = KnexScheduleRepository;
 module.exports.KnexScheduleRepository = KnexScheduleRepository;
 module.exports.SCHEDULE_REPOSITORY_PORT_METHODS = SCHEDULE_REPOSITORY_PORT_METHODS;

@@ -37,6 +37,11 @@ var crypto = require('crypto');
 var MysqlClockAdapter = require('../slices/scheduler/adapters/MysqlClockAdapter');
 var { createLogger } = require('@raike/lib-logger');
 var logger = createLogger('scheduleQueue');
+// H7 (JUG-SCHEDULER-LEGACY-DB-BYPASS / 999.1532): the 12 inline
+// schedule_queue/task_write_queue/tasks_v call sites route through
+// ScheduleQueuePort — verbatim query moves, no behavior change.
+var SchedulerQueueRepository = require('../slices/scheduler/adapters/SchedulerQueueRepository');
+var _queueRepo = new SchedulerQueueRepository();
 
 // Lazy requires to avoid circular dependency
 var _flushQueueInLock;
@@ -189,10 +194,7 @@ async function enqueueScheduleRun(userId, source, options) {
     // Upsert: on conflict, only update if the row is old enough that we might
     // have lost a claimed worker (crash recovery), otherwise leave it alone.
     // FIX-04: Use INSERT with ON DUPLICATE KEY so we can detect conflicts cleanly.
-    await db('schedule_queue')
-      .insert(row)
-      .onConflict('user_id')
-      .merge(['source', 'created_at']);
+    await _queueRepo.upsertQueueRow(db, row);
   } catch (e) {
     // Conflict resolution failed — log and continue; the poll loop will pick it up
     logger.error('[SCHED-QUEUE] Failed to enqueue for user', { userId, error: e });
@@ -249,9 +251,7 @@ async function dequeueScheduleRun(userId) {
 
   try {
     // Delete the queue row for this user
-    var swept = await db('schedule_queue')
-      .where('user_id', userId)
-      .del();
+    var swept = await _queueRepo.deleteQueueRow(db, userId);
     logger.info('[SCHED-QUEUE] swept ' + swept + ' entry(ies) for ' + userId);
   } catch (e) {
     logger.error('[SCHED-QUEUE] Failed to dequeue for user', { userId, error: e });
@@ -277,19 +277,10 @@ async function tryClaim(userId, instanceId) {
 
   // Try to claim this user's row: either unclaimed, or an expired claim.
   // We use user_id as the WHERE to ensure atomicity (single row UPDATE).
-  var updated = await db('schedule_queue')
-    .where('user_id', userId)
-    .andWhere(function() {
-      this.whereNull('claimed_by')
-          .orWhere('claimed_at', '<', ttlExpiry);
-    })
-    .update({
-      claimed_by: instanceId,
-      claimed_at: claimedAt
-    });
+  var updated = await _queueRepo.claimQueueRow(db, userId, instanceId, claimedAt, ttlExpiry);
 
   if (updated === 0) {
-    var existing = await db('schedule_queue').where('user_id', userId).first();
+    var existing = await _queueRepo.getQueueRowByUser(db, userId);
     if (existing && existing.claimed_by && existing.claimed_by !== instanceId) {
       return { claimed: false, reason: 'already_claimed', by: existing.claimed_by, since: existing.claimed_at };
     }
@@ -297,7 +288,7 @@ async function tryClaim(userId, instanceId) {
   }
 
   // We claimed it — read the row back for callers that need it.
-  var row = await db('schedule_queue').where('user_id', userId).first();
+  var row = await _queueRepo.getQueueRowByUser(db, userId);
   if (!row) {
     return { claimed: false, reason: 'row_missing_after_claim' };
   }
@@ -417,10 +408,7 @@ async function processUser(userId) {
 function startClaimHeartbeat(userId) {
   var hb = setInterval(async function() {
     try {
-      await db('schedule_queue')
-        .where('user_id', userId)
-        .where('claimed_by', INSTANCE_ID)
-        .update({ claimed_at: _clock.now() });
+      await _queueRepo.heartbeatClaim(db, userId, INSTANCE_ID, _clock.now());
     } catch (e) {
       logger.error('[SCHED-QUEUE] Heartbeat failed for user ' + userId, { error: e });
     }
@@ -440,10 +428,7 @@ function clearClaimHeartbeat(hb) {
 
 async function releaseClaim(userId, instanceId) {
   try {
-    await db('schedule_queue')
-      .where('user_id', userId)
-      .where('claimed_by', instanceId)
-      .update({ claimed_by: null, claimed_at: null });
+    await _queueRepo.releaseQueueClaim(db, userId, instanceId);
   } catch (e) {
     logger.error('[SCHED-QUEUE] Failed to release claim for user ' + userId, { error: e });
   }
@@ -457,12 +442,7 @@ async function pollOnce() {
   // DB-only poll: query for unclaimed rows that have been in the queue
   // long enough to avoid racing the enqueue INSERT.
   try {
-    var pending = await db('schedule_queue')
-      .whereNull('claimed_at')
-      .where('created_at', '<', db.raw('NOW() - INTERVAL 2 SECOND'))
-      .orderBy('created_at', 'asc')
-      .limit(MAX_DIRTY_USERS_PER_POLL)
-      .select('user_id');
+    var pending = await _queueRepo.getPendingQueueUsers(db, MAX_DIRTY_USERS_PER_POLL);
 
     for (var j = 0; j < pending.length; j++) {
       await processUser(pending[j].user_id);
@@ -485,18 +465,15 @@ async function pollOnce() {
     // code while pending was still empty — a single diagnostic-log line, no
     // scheduling/data effect; that row is picked up on the next poll tick.
     if (pending.length > 0) {
-      var schedPending = await db('schedule_queue').whereNull('claimed_at').where('created_at', '<', db.raw('NOW() - INTERVAL 2 SECOND')).count('* as c');
-      var writePending = await db('task_write_queue').count('* as c');
-      var total = await db('tasks_v').distinct('user_id');
+      var schedPending = await _queueRepo.countPendingQueue(db);
+      var writePending = await _queueRepo.countPendingWrites(db);
+      var total = await _queueRepo.countDistinctPendingUsers(db);
       logger.info('[SCHED-QUEUE] poll: ' + total.length + ' user(s) with pending entries (schedule=' + schedPending[0].c + ' writes=' + writePending[0].c + ')');
     }
     // Sweep stuck claims: rows claimed > 2 minutes ago are from dead
     // instances (Cloud Run scaled to zero without releasing). Clear them
     // so the health check doesn't report a permanent scheduler error.
-    var swept = await db('schedule_queue')
-      .whereNotNull('claimed_by')
-      .whereRaw('claimed_at < DATE_SUB(NOW(), INTERVAL 120 SECOND)')
-      .update({ claimed_by: null, claimed_at: null });
+    var swept = await _queueRepo.sweepStuckClaims(db);
     if (swept > 0) {
       logger.warn('[SCHED-QUEUE] swept ' + swept + ' stuck claim(s)');
     }

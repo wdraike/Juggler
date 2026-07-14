@@ -209,5 +209,18 @@ RunScheduleCommand.prototype.applySplitDriftFix = function applySplitDriftFix(tr
   return this._repo(trx).applySplitDriftFix(driftUpdates);
 };
 
+/**
+ * Read `{ timezone }` for the user (delegates to the repository's
+ * getUserTimezone) — the legacy `deriveSchedulePlacements.js`
+ * `resolveTimezone` DB read. JUG-SCHEDULER-LEGACY-DB-BYPASS (999.1532).
+ * @param {Function} dbOrTrx caller's db/trx handle (the legacy read ran on
+ *   the base connection, NOT a trx — pass `db` to preserve that).
+ * @param {string} userId tenant scope.
+ * @returns {Promise<Object|undefined>}
+ */
+RunScheduleCommand.prototype.getUserTimezone = function getUserTimezone(dbOrTrx, userId) {
+  return this._repo(dbOrTrx).getUserTimezone(userId);
+};
+
 module.exports = RunScheduleCommand;
 module.exports.RunScheduleCommand = RunScheduleCommand;

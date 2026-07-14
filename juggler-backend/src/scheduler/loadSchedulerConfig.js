@@ -26,6 +26,12 @@
 
 var db = require('../db');
 var constants = require('./constants');
+// H7 (JUG-SCHEDULER-LEGACY-DB-BYPASS / 999.1532): the user_config/locations
+// reads route through the EXISTING ScheduleRepositoryPort methods
+// (getUserConfigRows/getLocations — added in 999.1193, already byte-identical
+// to these two queries) via RunScheduleCommand, instead of a new port.
+var RunScheduleCommand = require('../slices/scheduler/application/RunScheduleCommand');
+var _runScheduleCommand = new RunScheduleCommand();
 
 /**
  * Parse raw user_config rows into a {config_key: parsedValue} map.
@@ -80,8 +86,8 @@ function assembleSchedulerCfg(config, locations) {
  */
 async function loadSchedulerConfig(userId) {
   var [rows, locRows] = await Promise.all([
-    db('user_config').where('user_id', userId).select(),
-    db('locations').where('user_id', userId).orderBy('sort_order')
+    _runScheduleCommand.getUserConfigRows(db, userId),
+    _runScheduleCommand.getLocations(db, userId)
   ]);
   return buildSchedulerCfg(rows, locRows);
 }

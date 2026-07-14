@@ -61,6 +61,17 @@
  *   `task_instances`. (Legacy: `runSchedule.js` ~1453
  *   `trx('task_instances').whereIn('id', ids).select('id')`.) `db` may be a
  *   trx handle so the read participates in the caller's transaction.
+ *
+ * @property {(db: Function, userId: string) => Promise<Object[]>} loadStepperRows
+ *   Load the admin Stepper UI's working set from `tasks_v` (JUG-SCHEDULER-
+ *   LEGACY-DB-BYPASS / 999.1532). DELIBERATELY a DIFFERENT query from
+ *   `loadSchedulableRows`: it does NOT carry the BUG-814 fix that excludes
+ *   recurring_template rows whose master is cancelled/disabled — the stepper
+ *   has never applied that exclusion, so this method preserves the stepper's
+ *   existing (pre-BUG-814-fix) behavior verbatim rather than silently
+ *   changing it by reusing `loadSchedulableRows`. (Legacy: `schedulerSession.js`
+ *   ~78-83 `db('tasks_v')…where(status ''/NULL OR recurring_template)…select()`.)
+ *   `db` is the base connection (the stepper never runs inside a trx).
  */
 
 'use strict';
@@ -99,6 +110,10 @@ TaskProviderPort.prototype.findExistingInstanceIds = function findExistingInstan
   throw new Error('TaskProviderPort.findExistingInstanceIds not implemented');
 };
 
+TaskProviderPort.prototype.loadStepperRows = function loadStepperRows(_db, _userId) {
+  throw new Error('TaskProviderPort.loadStepperRows not implemented');
+};
+
 /**
  * The exact set of methods an adapter MUST expose to satisfy TaskProviderPort.
  * @type {ReadonlyArray<string>}
@@ -110,7 +125,8 @@ var TASK_PROVIDER_PORT_METHODS = Object.freeze([
   'loadSchedulableRows',
   'getTerminalDedupRows',
   'getRecurringDoneHistory',
-  'findExistingInstanceIds'
+  'findExistingInstanceIds',
+  'loadStepperRows'
 ]);
 
 module.exports = TaskProviderPort;

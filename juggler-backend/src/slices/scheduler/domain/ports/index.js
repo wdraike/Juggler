@@ -1,9 +1,11 @@
 /**
- * Scheduler domain ports — barrel re-export (Phase H6 / W2).
+ * Scheduler domain ports — barrel re-export (Phase H6 / W2, extended H7 —
+ * 999.1532).
  *
- * The five driven-port contracts the scheduler depends on. The domain core
- * depends ONLY on these interfaces; the W2 adapters implement them and the W3
- * `RunScheduleCommand` wires concrete adapters to the ports.
+ * The driven-port contracts the scheduler depends on. The domain core
+ * depends ONLY on these interfaces; the adapters implement them and the
+ * application layer (`RunScheduleCommand` / the legacy `src/scheduler/*.js`
+ * entry points) wires concrete adapters to the ports.
  */
 
 'use strict';
@@ -14,5 +16,7 @@ module.exports = {
   ScheduleRepositoryPort: require('./ScheduleRepositoryPort'),
   WeatherProviderPort: require('./WeatherProviderPort'),
   ClockPort: require('./ClockPort'),
-  ScheduleCachePort: require('./ScheduleCachePort')
+  ScheduleCachePort: require('./ScheduleCachePort'),
+  ScheduleQueuePort: require('./ScheduleQueuePort'),
+  SchedulerSessionPort: require('./SchedulerSessionPort')
 };

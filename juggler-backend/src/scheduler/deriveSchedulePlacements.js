@@ -37,6 +37,10 @@ const taskFacade = require('../slices/task/facade');
 const db = require('../db');
 const dateHelpers = require('./dateHelpers');
 const { isTerminalStatus } = require('../lib/task-status');
+// H7 (JUG-SCHEDULER-LEGACY-DB-BYPASS / 999.1532): the users.timezone read
+// routes through ScheduleRepositoryPort.getUserTimezone via RunScheduleCommand.
+const RunScheduleCommand = require('../slices/scheduler/application/RunScheduleCommand');
+const _runScheduleCommand = new RunScheduleCommand();
 var parseTimeToMinutes = dateHelpers.parseTimeToMinutes;
 var utcToLocal = dateHelpers.utcToLocal;
 
@@ -63,7 +67,7 @@ var DEFAULT_TIMEZONE = 'America/New_York';
 async function resolveTimezone(userId, options) {
   if (options && options.timezone) return options.timezone;
   try {
-    var row = await db('users').where('id', userId).select('timezone').first();
+    var row = await _runScheduleCommand.getUserTimezone(db, userId);
     if (row) return row.timezone; // users.timezone is NOT NULL (migration 20260626000000)
   } catch (_e) { /* fall through */ }
   return DEFAULT_TIMEZONE;

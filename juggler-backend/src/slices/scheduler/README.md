@@ -43,7 +43,9 @@ slices/scheduler/
 │   ├── ports/
 │   │   ├── CalendarProviderPort.js      # Driven-port: externally-busy calendar intervals
 │   │   ├── ClockPort.js                 # Driven-port: wall-clock + DB clock for placement cache
+│   │   ├── ScheduleQueuePort.js         # Driven-port: schedule_queue/task_write_queue/tasks_v (999.1532)
 │   │   ├── ScheduleRepositoryPort.js    # Driven-port: delta-write persist seam (S5)
+│   │   ├── SchedulerSessionPort.js      # Driven-port: scheduler_sessions CRUD, Stepper UI (999.1532)
 │   │   ├── TaskProviderPort.js          # Driven-port: task row + mapper source
 │   │   ├── WeatherProviderPort.js       # Driven-port: forecast read for weather-constrained tasks
 │   │   └── index.js
@@ -58,6 +60,8 @@ slices/scheduler/
 │   ├── KnexScheduleRepository.js        # ScheduleRepositoryPort — backed by lib/db (production)
 │   ├── MysqlClockAdapter.js             # ClockPort — process clock + SELECT NOW(3) DB clock
 │   ├── SchedulerCalendarProvider.js     # CalendarProviderPort — delegates to calendar facade
+│   ├── SchedulerQueueRepository.js      # ScheduleQueuePort — schedule_queue/task_write_queue/tasks_v (999.1532)
+│   ├── SchedulerSessionRepository.js    # SchedulerSessionPort — scheduler_sessions CRUD (999.1532)
 │   ├── SchedulerTaskProvider.js         # TaskProviderPort — tasks_v read + task slice mappers
 │   ├── SchedulerWeatherProvider.js      # WeatherProviderPort — delegates to weather slice cache
 │   └── index.js
@@ -109,8 +113,9 @@ Schedule quality scoring. Houses the `scoreSchedule` logic.
 | `getTerminalDedupRows(db, userId)` | Terminal-status `task_instances` rows for the reconcile dedup pass (999.1532). |
 | `getRecurringDoneHistory(db, userId)` | Latest `done` placement date per recurring master (spacing history, 999.1532). |
 | `findExistingInstanceIds(db, ids)` | Phase-1 chunk pre-insert collision check (999.1532). |
+| `loadStepperRows(db, userId)` | Admin Stepper UI's working set from `tasks_v` — a DELIBERATELY narrower filter than `loadSchedulableRows` (no BUG-814 cancelled/disabled-master exclusion; the stepper never applied it) (999.1532). |
 
-Contract method list: `['rowToTask', 'taskToRow', 'buildSourceMap', 'loadSchedulableRows', 'getTerminalDedupRows', 'getRecurringDoneHistory', 'findExistingInstanceIds']`
+Contract method list: `['rowToTask', 'taskToRow', 'buildSourceMap', 'loadSchedulableRows', 'getTerminalDedupRows', 'getRecurringDoneHistory', 'findExistingInstanceIds', 'loadStepperRows']`
 
 ### CalendarProviderPort
 
@@ -142,8 +147,9 @@ shape). Three binding invariants:
 | `getScheduleCache(userId)` | Read the `user_config.schedule_cache` placement blob (legacy cal-sync read). Returns the raw row or `null`. |
 | `upsertScheduleCache(userId, cacheJson)` | Upsert the `user_config.schedule_cache` placement blob (update if exists, insert if not — legacy runSchedule upsert). Returns void. |
 | `applySplitDriftFix(driftUpdates)` | Batch drift-fix CASE updates for `split_ordinal`/`split_total`/`dur` (999.1019/999.1532) — a SEPARATE write path from `writeChanged`, never touches `unscheduled`/`unplaced_reason`/`unplaced_detail`. |
+| `getUserTimezone(userId)` | Read `{ timezone }` for the user — the legacy `deriveSchedulePlacements.js` `resolveTimezone` DB read (999.1532). |
 
-Contract method list: `['writeChanged', 'deleteTasksWhere', 'backfillRollingAnchorIfNull', 'now', 'getScheduleCache', 'upsertScheduleCache', 'applySplitDriftFix']`
+Contract method list: `['writeChanged', 'deleteTasksWhere', 'backfillRollingAnchorIfNull', 'now', 'getScheduleCache', 'upsertScheduleCache', 'applySplitDriftFix']` — plus `getUserConfigRows`/`getLocations`/`insertTasksBatch`/`getUserTimezone` (H7 additions, 999.1193/999.1532); see `ScheduleRepositoryPort.js`'s `SCHEDULE_REPOSITORY_PORT_METHODS` for the authoritative current list.
 
 ### WeatherProviderPort
 
@@ -166,6 +172,51 @@ Never throw into the scheduler from this port.
 | `dbNow(db?)` | DB clock as a JS Date (`SELECT NOW(3)`). Used for placement-cache `generatedAt` so it matches MySQL `updated_at`. |
 
 Contract method list: `['now', 'dbNow']`
+
+### ScheduleQueuePort
+
+Driven-port for `schedule_queue`/`task_write_queue`/`tasks_v` behind the legacy
+`src/scheduler/scheduleQueue.js` DB-backed event queue + poll loop (999.1532). A
+queue row's claim/heartbeat/release/sweep lifecycle is a DISTINCT aggregate from
+task placement and the task read model, hence its own port. `scheduleQueue.js`
+never runs inside a scheduler transaction (atomic single-row UPDATEs are the
+concurrency primitive), so every method takes the caller's `db` handle explicitly
+as its first argument — the same calling convention as `TaskProviderPort`.
+
+| Method | Description |
+|--------|-------------|
+| `upsertQueueRow(db, row)` | Insert-or-merge the per-user queue row (`ON DUPLICATE KEY UPDATE source, created_at`). |
+| `deleteQueueRow(db, userId)` | Delete the queue row for `userId`. Returns rows removed. |
+| `claimQueueRow(db, userId, instanceId, claimedAt, ttlExpiry)` | Atomically claim `userId`'s row (unclaimed or expired). Returns rows updated (0 or 1). |
+| `getQueueRowByUser(db, userId)` | Read the queue row for `userId` (serves both `tryClaim`'s existing-owner check and its post-claim read-back). |
+| `heartbeatClaim(db, userId, instanceId, claimedAt)` | Refresh `claimed_at` for the row currently owned. |
+| `releaseQueueClaim(db, userId, instanceId)` | Clear `claimed_by`/`claimed_at` for the row owned. |
+| `getPendingQueueUsers(db, limit)` | Unclaimed rows older than the 2s anti-race window, oldest first, capped at `limit`. |
+| `countPendingQueue(db)` | Count of unclaimed rows older than the 2s anti-race window (the idle-path diagnostic). |
+| `countPendingWrites(db)` | Count of pending `task_write_queue` rows (diagnostic). |
+| `countDistinctPendingUsers(db)` | Distinct `user_id`s present in `tasks_v` (diagnostic — despite the name, a row list not a COUNT). |
+| `sweepStuckClaims(db)` | Clear claims older than 120s (dead-instance recovery). |
+
+Contract method list: `['upsertQueueRow', 'deleteQueueRow', 'claimQueueRow', 'getQueueRowByUser', 'heartbeatClaim', 'releaseQueueClaim', 'getPendingQueueUsers', 'countPendingQueue', 'countPendingWrites', 'countDistinctPendingUsers', 'sweepStuckClaims']`
+
+### SchedulerSessionPort
+
+Driven-port for `scheduler_sessions` CRUD behind the legacy
+`src/scheduler/schedulerSession.js` DB-backed session store for the admin
+Stepper UI (999.1532). A DISTINCT lifecycle from task placement and the queue's
+claim/heartbeat lifecycle, hence its own port. `schedulerSession.js` never runs
+inside a transaction, so every method takes the caller's `db` handle explicitly
+(same convention as `ScheduleQueuePort`).
+
+| Method | Description |
+|--------|-------------|
+| `deleteExpiredSessions(db, now)` | Delete every session whose `expires_at` is before `now` (background sweeper). Returns rows removed. |
+| `insertSession(db, row)` | Insert a new session row. |
+| `getActiveSession(db, sessionId, now)` | Read the session row scoped to `expires_at > now`. |
+| `touchSessionExpiry(db, sessionId, expiresAt)` | Extend a session's TTL on access. Returns rows updated. |
+| `deleteSession(db, sessionId)` | Delete a session by id. Returns rows removed. |
+
+Contract method list: `['deleteExpiredSessions', 'insertSession', 'getActiveSession', 'touchSessionExpiry', 'deleteSession']`
 
 ---
 
@@ -202,6 +253,18 @@ Implements `WeatherProviderPort`. Delegates to the weather slice cache via
 
 Implements `ClockPort`. `now()` returns `new Date()`; `dbNow(db)` runs
 `SELECT NOW(3)` and parses the result to a JS Date.
+
+### SchedulerQueueRepository
+
+Implements `ScheduleQueuePort` (999.1532). Every query is a verbatim relocation
+of what `scheduleQueue.js` ran inline. Stateless singleton — no constructor deps
+(every method takes `db` per call, matching `SchedulerTaskProvider`).
+
+### SchedulerSessionRepository
+
+Implements `SchedulerSessionPort` (999.1532). Every query is a verbatim
+relocation of what `schedulerSession.js` ran inline. Stateless singleton — same
+calling convention as `SchedulerQueueRepository`.
 
 ---
 
@@ -246,11 +309,18 @@ functions, same signatures). It does not rewrite the scheduler.
 
 ## Legacy Files (H7 pending)
 
-The legacy entry files `src/scheduler/runSchedule.js` and
-`src/scheduler/unifiedScheduleV2.js` **remain outside the slice** and continue
-to exist. The facade fronts them by re-exporting their functions verbatim.
-Thinning/deleting those files, adding the per-slice ESLint boundary rule, and
-closing the remaining inline writes in `runSchedule.js` are H7
+The legacy entry files `src/scheduler/runSchedule.js`,
+`src/scheduler/unifiedScheduleV2.js`, `src/scheduler/scheduleQueue.js`,
+`src/scheduler/schedulerSession.js`, `src/scheduler/loadSchedulerConfig.js`,
+and `src/scheduler/deriveSchedulePlacements.js` **remain outside the slice**
+and continue to exist. The facade fronts `runSchedule.js`/
+`unifiedScheduleV2.js` by re-exporting their functions verbatim; the other
+four now delegate every inline table-level query to the slice ports above
+(999.1532 — `ScheduleQueuePort`/`SchedulerSessionPort`/
+`TaskProviderPort.loadStepperRows`/`ScheduleRepositoryPort.getUserTimezone`/
+the pre-existing `getUserConfigRows`/`getLocations`) while keeping their own
+public function signatures and control flow unchanged. Thinning/deleting
+these files and adding the per-slice ESLint boundary rule are H7
 boundary-hardening work. Callers should use the facade now even though the
 boundary rule is not yet enforced by lint.
 
@@ -342,3 +412,9 @@ The slice adapters delegate to:
 - `slices/weather/facade` — weather cache (`SchedulerWeatherProvider`)
 - `lib/tasks-write` — batch write helpers (`KnexScheduleRepository`)
 - `scheduler/dateHelpers` — date conversion utilities (legacy entry points)
+
+`SchedulerQueueRepository` and `SchedulerSessionRepository` (999.1532) take NO
+connection dependency of their own — every method receives the caller's `db`
+handle as its first argument (the legacy `scheduleQueue.js`/
+`schedulerSession.js` still own `require('../db')` and thread it through,
+unchanged).

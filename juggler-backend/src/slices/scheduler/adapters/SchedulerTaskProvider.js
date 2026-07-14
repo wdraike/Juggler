@@ -136,6 +136,24 @@ SchedulerTaskProvider.prototype.findExistingInstanceIds = function findExistingI
   return db('task_instances').whereIn('id', ids).select('id');
 };
 
+/**
+ * Load the admin Stepper UI's working set from `tasks_v` (verbatim —
+ * schedulerSession.js ~78-83). DELIBERATELY NOT `loadSchedulableRows`: the
+ * stepper's filter has never carried the BUG-814 fix (excluding
+ * recurring_template rows whose master is cancelled/disabled), so this method
+ * preserves that pre-existing, narrower filter rather than silently pulling
+ * in the exclusion via reuse. `db` is the base connection (no trx).
+ * JUG-SCHEDULER-LEGACY-DB-BYPASS (999.1532).
+ */
+SchedulerTaskProvider.prototype.loadStepperRows = function loadStepperRows(db, userId) {
+  return db('tasks_v').where('user_id', userId)
+    .where(function() {
+      this.where('status', '').orWhereNull('status')
+        .orWhere('task_type', 'recurring_template');
+    })
+    .select();
+};
+
 module.exports = SchedulerTaskProvider;
 module.exports.SchedulerTaskProvider = SchedulerTaskProvider;
 module.exports.TASK_PROVIDER_PORT_METHODS = TASK_PROVIDER_PORT_METHODS;
