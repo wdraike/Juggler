@@ -211,8 +211,12 @@ describe('AuthProvider — Double Exchange Prevention', () => {
       expect(require('../../../services/apiClient').setAccessToken).not.toHaveBeenCalled();
       expect(localStorage.getItem('juggler-refresh-token')).toBeNull();
 
-      // Should clean up the URL
-      expect(window.history.replaceState).toHaveBeenCalled();
+      // 999.1594 — the failure must be surfaced via the existing
+      // /auth/callback?error=... "Authentication Failed" screen (App.js
+      // AppContent), not silently wiped to '/' with no explanation.
+      expect(window.history.replaceState).toHaveBeenCalledWith(
+        {}, '', expect.stringMatching(/^\/auth\/callback\?error=/)
+      );
     });
 
     it('should handle network errors during token exchange', async () => {
@@ -235,8 +239,11 @@ describe('AuthProvider — Double Exchange Prevention', () => {
       expect(require('../../../services/apiClient').setAccessToken).not.toHaveBeenCalled();
       expect(localStorage.getItem('juggler-refresh-token')).toBeNull();
 
-      // Should clean up the URL
-      expect(window.history.replaceState).toHaveBeenCalled();
+      // 999.1594 — network errors during the callback exchange must also land
+      // on the visible error screen, not a silent bounce to '/'.
+      expect(window.history.replaceState).toHaveBeenCalledWith(
+        {}, '', expect.stringMatching(/^\/auth\/callback\?error=Network%20error$/)
+      );
     });
   });
 });

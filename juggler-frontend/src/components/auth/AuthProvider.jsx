@@ -96,7 +96,16 @@ export default function AuthProvider({ children }) {
         .catch(err => {
           console.error('Auth callback failed:', err);
           clearAccessToken();
-          window.history.replaceState({}, '', '/');
+          // fail-closed parity with the session-restore catches below — clear the
+          // refresh token too so no auth state survives a failed exchange (law review)
+          localStorage.removeItem('juggler-refresh-token');
+          // 999.1594 — surface the failure via the existing /auth/callback?error=...
+          // "Authentication Failed" screen (App.js AppContent) instead of silently
+          // wiping the query string and landing back on '/' with no explanation.
+          // This is the exact silent-bounce shape that made a backend 403 look like
+          // a dead login button for hours (999.1574 reference incident).
+          var message = (err && err.message) ? err.message : 'exchange_failed';
+          window.history.replaceState({}, '', '/auth/callback?error=' + encodeURIComponent(message));
           setLoading(false);
         });
       return;

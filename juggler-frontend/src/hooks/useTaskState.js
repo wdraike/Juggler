@@ -40,9 +40,22 @@ var SAVE_FIELDS = [
   'preferredTime', 'tz', '_timezone', 'anchorDate', 'nextStart'
 ];
 
-export default function useTaskState() {
+export default function useTaskState(onError) {
   const [taskState, dispatch] = useReducer(taskReducer, TASK_STATE_INIT);
   const [loading, setLoading] = useState(true);
+  // 999.1594 — load/autosave-failure reporter, mirroring useConfig's
+  // onSaveError (999.1225). flushSave (the debounced autosave) and loadTasks
+  // (initial task load) used to swallow rejections (console.error only): a
+  // failed flushSave silently left edits unpersisted with no indication, and
+  // a failed loadTasks silently rendered an empty task list with no
+  // explanation. Held in a ref so the wrapped callbacks (useCallback with
+  // stable deps) always see the caller's latest callback without identity
+  // churn; caller (AppLayout) routes it to showToast.
+  const onErrorRef = useRef(null);
+  onErrorRef.current = onError || null;
+  const reportError = useCallback(function(message, error) {
+    if (onErrorRef.current) onErrorRef.current(message, error);
+  }, []);
   // True once the first loadTasks() has completed. Subsequent calls are
   // silent — they still dispatch INIT with fresh data but never flip the
   // loading state back on, so the AppLayout "Loading tasks…" early-return
@@ -157,6 +170,10 @@ export default function useTaskState() {
         // Placements refresh via SSE schedule:changed — no blocking wait here
       } catch (error) {
         console.error('Save failed:', error);
+        // 999.1594 — the debounced autosave used to fail silently, leaving
+        // edits marked dirty (so the server never got them) with nothing
+        // telling the user their change wasn't actually persisted.
+        reportError('Failed to save your changes — please retry.', error);
       } finally {
         flushPromiseRef.current = null;
         setSaving(false);
@@ -165,7 +182,7 @@ export default function useTaskState() {
 
     flushPromiseRef.current = promise;
     return promise;
-  }, []);
+  }, [reportError]);
   flushSaveRef.current = flushSave;
 
   // Load tasks from API — flushes any pending save first
@@ -198,6 +215,9 @@ export default function useTaskState() {
       return { tasks, config: configRes.data };
     } catch (error) {
       console.error('Failed to load tasks:', error);
+      // 999.1594 — this used to fail silently: the loading spinner just
+      // cleared to an empty task list with no indication the fetch failed.
+      reportError('Failed to load your tasks — please refresh the page.', error);
       return null;
     } finally {
       if (!initialLoadDoneRef.current) {
@@ -205,7 +225,7 @@ export default function useTaskState() {
         initialLoadDoneRef.current = true;
       }
     }
-  }, []);
+  }, [reportError]);
   loadTasksRef.current = loadTasks;
 
   // Debounced save — batches updates

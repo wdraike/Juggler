@@ -102,7 +102,9 @@ export default function AppLayout() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // State
-  var { taskState, dispatch, dispatchPersist, loading, saving, loadTasks, placements, loadPlacements, setStatus, updateTask, addTasks, deleteTask, createTask, taskStateRef, setPlacements, flushNow } = useTaskState();
+  // 999.1594 — load/autosave failures surface as an error toast, mirroring the
+  // 999.1225 useConfig wiring above (same hoisted-showToast-closure reasoning).
+  var { taskState, dispatch, dispatchPersist, loading, saving, loadTasks, placements, loadPlacements, setStatus, updateTask, addTasks, deleteTask, createTask, taskStateRef, setPlacements, flushNow } = useTaskState(function(msg) { if (typeof showToast === 'function') showToast(msg, 'error'); });
   var isMobile = useIsMobile();
   var isCompact = useIsCompact();
   var { weatherByDate, refreshed: weatherRefreshed } = useWeather(config.locations, config.tempUnitPref);
