@@ -1,13 +1,11 @@
 {
   "_doc": "vinatieri quarantine ratchet — known-red suites excluded so the passing set stays a hard gate (pre-push + CI). List may only SHRINK; every entry needs a backlog ticket. 2026-07-13: harrison solo-verified 5 original entries were pool-load flakes and they were UN-quarantined same day; taskControllerUnit + taskPipeline un-quarantined later that day after David ruled 999.1439 (reality-wins) and the pins were reconciled. See .planning/patriots/PLAYBOOK.md § vinatieri.",
   "tickets": {
-    "_rest": "999.1564",
-    "tests/runScheduleIntegration.test.js": "999.1612 (AC4 updated_at guard flakes ONLY under pool load, +1s writer unidentified; solo-green 3x; 3 pool failures 2026-07-13 blocked pushes)"
+    "_rest": "999.1564"
   },
   "patterns": [
     "tests/api/ai-command.test.js",
     "tests/slices/task/adapters/taskRepository.contract.test.js",
-    "tests/slices/user-config/adapters/configRepository.contract.test.js",
-    "tests/runScheduleIntegration.test.js"
+    "tests/slices/user-config/adapters/configRepository.contract.test.js"
   ]
 }

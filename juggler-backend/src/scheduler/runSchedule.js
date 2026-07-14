@@ -247,6 +247,34 @@ function computeEffectiveDeadline(opts) {
 }
 
 /**
+ * 999.1612 — TRUE when a past recurring instance is at/past its EFFECTIVE
+ * deadline (min of timeFlex window-close and R50.0 recurrence-period boundary,
+ * per SCHEDULER-SPEC.md:700 LOCKED ruling, David 2026-06-23):
+ *  (1) timeFlex window: occurrence date + timeFlex minutes (scheduler may still place it late).
+ *  (2) R50.0 recurrence-PERIOD boundary: a flexible-TPC instance may roam within its cycle
+ *      (e.g. a 3×/week task is not missed until the week ends).
+ * The ONE predicate deciding "Phase 9 parks this off-grid (unscheduled=1)".
+ * Phase 8.5's revival sweep MUST skip exactly this population (harrison,
+ * 999.1612 review: t.overdue diverges for weekly/TPC — computeOverdueForRow
+ * keys on the cycle boundary while parking keys on min(windowClose, periodEnd);
+ * sharing this helper makes the partition exact by construction, no fork drift).
+ *
+ * @param {Object} t              task object (timeFlex, recur)
+ * @param {string} effectiveDate  resolved occurrence day (Phase 9's derivation)
+ * @param {Date}   td             parseDate(effectiveDate) — caller already has it
+ * @param {Date}   today          the run's today
+ * @returns {boolean}
+ */
+function recurringPastEffectiveDeadline(t, effectiveDate, td, today) {
+  var flex = t.timeFlex != null ? t.timeFlex : 60;
+  var windowCloseDate = new Date(td.getTime() + flex * 60 * 1000);
+  var periodEndKey = recurringPeriodEndKey(t.recur, effectiveDate);
+  var periodEnd = periodEndKey ? parseDate(periodEndKey) : null;
+  var effectiveDeadline = computeEffectiveDeadline({ periodBoundary: periodEnd, windowClose: windowCloseDate });
+  return !!(effectiveDeadline && today >= effectiveDeadline);
+}
+
+/**
  * AC-840-3 / AC-881-1: Fail-loud disjointness assertion — pure helper.
  * Checks each day's placements for overlapping time slots.
  *
@@ -2195,6 +2223,31 @@ async function runScheduleAndPersist(userId, _retries, options) {
     var raw = rawRowById[t.id];
     if (!raw || !raw.unscheduled) return; // already clear
     if (!raw.scheduled_at) return; // truly nothing to show on calendar
+    // 999.1612 (AC4 flake root cause): a past-incomplete recurring instance
+    // that Phase 9 (David ruling 2026-07-09, runSchedule.js ~2360) has
+    // deliberately pulled OFF the grid (unscheduled=1) is EXACTLY the
+    // unscheduled+scheduled_at combination this sweep otherwise treats as
+    // "didn't fit a fresh placement, keep visible" and revives. Reviving it
+    // here fights that ruling and flip-flops the row between runs (run N:
+    // Phase 9 sets unscheduled=1; run N+1: this sweep clears it back to
+    // null; run N+2: Phase 9 sets it again... an infinite oscillation, not
+    // an idempotent no-op — each flip is a real state change, not just a
+    // redundant updated_at stamp). `t.overdue` (computed pre-run, same
+    // snapshot Phase 8/9 use via `original.overdue`) covers the DAILY case
+    // (computeOverdueForRow's placed-recurring-instance branch ignores the
+    // `unscheduled` flag entirely). For weekly/TPC instances the two deadline
+    // computations DIVERGE (harrison, 999.1612 review: overdue keys on the
+    // cycle boundary; Phase 9 parks on min(windowClose, periodEnd)) — so the
+    // authoritative skip is the SHARED recurringPastEffectiveDeadline
+    // predicate, the exact condition under which Phase 9 parks. Rows here
+    // always have scheduled_at (guard above), so Phase 9's effectiveDate
+    // derivation collapses to t.date (trustworthy when placed — see the
+    // PATH B comment in Phase 9).
+    if (t.overdue) return;
+    if (t.date) {
+      var revTd = parseDate(t.date);
+      if (revTd && revTd < today && recurringPastEffectiveDeadline(t, t.date, revTd, today)) return;
+    }
     // DB-single-source (W1) partition-leak fix (ernie F3): this sweep revives a
     // recurring instance from unplaced (unscheduled=1) to placed-on-calendar and
     // bypasses the placement skip path — clear the reason too, else a row unplaced
@@ -2311,17 +2364,9 @@ async function runScheduleAndPersist(userId, _retries, options) {
         // AC-840-4 (REG-26/F9): use the explicit effective deadline = min(period-boundary, window-close),
         // per SCHEDULER-SPEC.md:700 LOCKED ruling (David 2026-06-23).
         // A past recurring instance stays live (not overdue) while today < effectiveDeadline.
-        //  (1) timeFlex window: occurrence date + timeFlex minutes (scheduler may still place it late).
-        //  (2) R50.0 recurrence-PERIOD boundary: a flexible-TPC instance may roam within its cycle
-        //      (e.g. a 3×/week task is not missed until the week ends).
-        // effectiveDeadline = min(windowClose, periodEnd) — overdue as soon as EITHER has passed, so
-        // the sweep never lags a run where the scheduler already marked this same occurrence MISSED.
-        var flex = t.timeFlex != null ? t.timeFlex : 60;
-        var windowCloseDate = new Date(td.getTime() + flex * 60 * 1000);
-        var periodEndKey = recurringPeriodEndKey(t.recur, effectiveDate);
-        var periodEnd = periodEndKey ? parseDate(periodEndKey) : null;
-        var effectiveDeadline = computeEffectiveDeadline({ periodBoundary: periodEnd, windowClose: windowCloseDate });
-        if (!effectiveDeadline || today < effectiveDeadline) return; // still within effective deadline
+        // Computation extracted to recurringPastEffectiveDeadline (999.1612) so
+        // Phase 8.5's revival skip uses the IDENTICAL predicate — one source, no drift.
+        if (!recurringPastEffectiveDeadline(t, effectiveDate, td, today)) return; // still within effective deadline
         // Leg D (scheduler-recurring-rework §4) — AUTO-MISS REMOVED.
         // A past-incomplete recurring instance is NEVER auto-marked terminal 'missed'
         // by the system (David, 2026-06-24: "there should not be any auto-miss feature").
