@@ -135,7 +135,6 @@ var batchUpdateSchema = z.object({
 var statusUpdateSchema = z.object({
   status: z.enum(['', 'wip', 'done', 'cancel', 'skip', 'pause', 'disabled']),
   completedAt: z.string().optional(),
-  direction: z.string().optional(),
 }).passthrough();
 
 // ─────────────────────────────────────────────────────────────────────────────

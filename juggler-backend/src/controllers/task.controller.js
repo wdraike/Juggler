@@ -140,7 +140,7 @@ async function deleteTask(req, res) {
 }
 
 /**
- * PUT /api/tasks/:id/status — update status + direction
+ * PUT /api/tasks/:id/status — update task status
  */
 async function updateTaskStatus(req, res) {
   try {

@@ -90,7 +90,7 @@ function UpdateTaskStatus(deps) {
  * @param {Object} input
  * @param {string} input.id
  * @param {string} input.userId
- * @param {Object} input.body  `{ status, completedAt?, direction? }`.
+ * @param {Object} input.body  `{ status, completedAt? }`.
  * @param {string} [input.timezoneHeader]
  * @returns {Promise<{ status: number, body: Object }>}
  */

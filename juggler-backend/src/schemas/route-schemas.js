@@ -40,7 +40,6 @@ const batchUpdateRouteSchema = z.object({
 const taskStatusRouteSchema = z.object({
   status: z.enum(['', 'wip', 'done', 'cancel', 'skip', 'pause', 'disabled']),
   completedAt: z.string().optional(),
-  direction: z.string().optional(),
 }).passthrough();
 
 // ── project.routes.js: reorder ──────────────────────────────────────────────
