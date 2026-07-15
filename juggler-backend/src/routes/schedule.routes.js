@@ -45,7 +45,13 @@ var debugLimiter = rateLimit({
  */
 router.post('/run', authenticateJWT, schedulerLimiter, withSyncLock(async function(req, res) {
   try {
-    var opts = { timezone: safeTimezone(req.headers['x-timezone'], DEFAULT_TIMEZONE) };
+    // 999.1633: when the X-Timezone header is present, pass it through (same
+    // behavior as before). When absent, pass no timezone so
+    // runScheduleAndPersist looks up the user's Settings timezone from the DB
+    // instead of defaulting to DEFAULT_TIMEZONE.
+    var opts = {};
+    var _hdrTz = safeTimezone(req.headers['x-timezone'], null);
+    if (_hdrTz) opts.timezone = _hdrTz;
     // Emit schedule:running so the frontend toolbar shows "Scheduling..."
     try { require('../lib/sse-emitter').emit(req.user.id, 'schedule:running', {}); } catch (_e) { /* non-fatal */ }
     var result = await runScheduleAndPersist(req.user.id, undefined, opts);

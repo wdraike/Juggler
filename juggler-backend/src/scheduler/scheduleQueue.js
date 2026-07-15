@@ -325,8 +325,10 @@ async function claimAndRun(userId) {
       // passed here, landing in the _retries slot: `'mcp' < MAX_RETRIES` is
       // false, so transient deadlock retries NEVER fired for queued runs
       // (999.1632 investigation, 2026-07-15). Note queued runs still pass no
-      // options.timezone — Settings-tz threading for background runs is
-      // tracked separately (999.1633).
+      // options.timezone — 999.1633 fixed: runScheduleAndPersist now looks
+      // up the user's Settings timezone from the DB (users.timezone) when
+      // options.timezone is not provided, so background/queued runs schedule
+      // in the user's timezone, not DEFAULT_TIMEZONE.
       _schedResult = await runScheduleAndPersist(userId, 0);
     });
 

@@ -605,8 +605,27 @@ async function runScheduleAndPersist(userId, _retries, options) {
   var retries = _retries || 0;
   var MAX_RETRIES = 3;
 
-  // Timezone from frontend (X-Timezone header) via options, or fallback
-  var TIMEZONE = (options && options.timezone) || DEFAULT_TIMEZONE;
+  // Timezone: explicit pass (X-Timezone header via schedule.routes.js, or test
+  // injection) takes precedence. When not provided (background/queued runs from
+  // scheduleQueue.js processUser → claimAndRun), look up the user's Settings
+  // timezone from the DB (users.timezone, NOT NULL since migration
+  // 20260626000000) so background runs schedule in the user's timezone, not
+  // DEFAULT_TIMEZONE (999.1633 — binding tz=Settings-only ruling 2026-07-06).
+  var TIMEZONE;
+  if (options && options.timezone) {
+    TIMEZONE = options.timezone;
+  } else {
+    try {
+      var _tzRow = await _runScheduleCommand.getUserTimezone(db, userId);
+      if (_tzRow && _tzRow.timezone) {
+        TIMEZONE = _tzRow.timezone;
+      } else {
+        TIMEZONE = DEFAULT_TIMEZONE;
+      }
+    } catch (_e) {
+      TIMEZONE = DEFAULT_TIMEZONE;
+    }
+  }
 
   try {
   return await db.transaction(async function(trx) {
