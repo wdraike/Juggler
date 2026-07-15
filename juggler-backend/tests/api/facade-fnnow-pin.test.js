@@ -180,14 +180,18 @@ describe('FIX-4.2 PIN — synced_at / next_start write fn.now() (legacy, out of 
     } else {
       // If the rolling-anchor branch did not fire for this fixture shape, fall
       // back to the SOURCE proof so the pin is never a silent no-op (zoe guard).
+      // RETARGETED (999.1516 stage 4, 14a799e0): the anchor-write .update({...})
+      // moved from facade.js into adapters/KnexLedgerWrites.js and stamps
+      // updated_at via the threaded handle (dbOrTrx.fn.now()) — same site,
+      // same fn.now()-never-new-Date() intent.
       const fs = require('fs');
       const path = require('path');
-      const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'slices', 'task', 'facade.js'), 'utf8');
+      const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'slices', 'task', 'adapters', 'KnexLedgerWrites.js'), 'utf8');
       const codeOnly = src
         .replace(/\/\*[\s\S]*?\*\//g, '')
         .replace(/\/\/[^\n]*/g, '');
       // next_start update site stamps updated_at via fn.now() (NOT new Date()).
-      expect(codeOnly).toMatch(/next_start:[^}]*updated_at:\s*getDb\(\)\.fn\.now\(\)/);
+      expect(codeOnly).toMatch(/next_start:[^}]*updated_at:\s*dbOrTrx\.fn\.now\(\)/);
     }
   });
 
@@ -218,6 +222,14 @@ describe('FIX-4.2 PIN — synced_at / next_start write fn.now() (legacy, out of 
     // dropped and the site now writes `next_start: GREATEST(...)` instead — same
     // call site, same fn.now()-on-updated_at behavior. The assertion's INTENT
     // (fn.now(), never new Date(), on this site) is unchanged.
-    expect(codeOnly).toMatch(/next_start:[^}]*updated_at:\s*getDb\(\)\.fn\.now\(\)/);
+    // RETARGETED again (999.1516 stage 4, 14a799e0): the write site moved from
+    // facade.js into adapters/KnexLedgerWrites.js with a threaded dbOrTrx
+    // handle — assert against the adapter source now.
+    const ledgerSrc = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'slices', 'task', 'adapters', 'KnexLedgerWrites.js'), 'utf8');
+    const ledgerCodeOnly = ledgerSrc
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\/\/[^\n]*/g, '');
+    expect(ledgerCodeOnly).toMatch(/next_start:[^}]*updated_at:\s*dbOrTrx\.fn\.now\(\)/);
+    expect(ledgerCodeOnly).not.toMatch(/new Date\(\)/);
   });
 });
