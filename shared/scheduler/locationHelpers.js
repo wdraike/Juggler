@@ -92,13 +92,44 @@ function resolveDayLocation(dateStr, cfg, blocks) {
   return { id: best, name: best.charAt(0).toUpperCase() + best.slice(1), icon: best === "home" ? "\uD83C\uDFE0" : "\uD83C\uDFE2", note: "" };
 }
 
+// ANY-LOCATION tool resolution (David ruling, 999.1599, 2026-07-15): a
+// location-'anywhere' task (t.location.length === 0 after migrateTask — the
+// data model has no separate "anywhere" vs "no location constraint" state,
+// see importBuildTaskRow) isn't tied to whichever location the CURRENT
+// candidate slot happens to resolve to, so a required tool is available iff
+// ANY location in the tool matrix owns it — union across the matrix, not the
+// single toolMatrix[dayLocId] lookup. This still fails closed: an empty/
+// unconfigured tool matrix (no location owns anything) yields false, same as
+// before — this is NOT "always available regardless" (explicitly ruled out).
+function isToolAvailableAnywhere(tool, toolMatrix) {
+  if (!toolMatrix) return false;
+  var locIds = Object.keys(toolMatrix);
+  for (var i = 0; i < locIds.length; i++) {
+    var list = toolMatrix[locIds[i]];
+    if (list && list.indexOf(tool) !== -1) return true;
+  }
+  return false;
+}
+
+// Location-constrained tasks (t.location.length > 0) keep the original
+// single-resolved-location check — the earlier location guard already
+// pinned dayLocId to one of the task's allowed locations, so that IS the
+// location the task will actually be at during this slot.
+function isToolAvailableAt(tool, dayLocId, toolMatrix) {
+  var available = (toolMatrix && toolMatrix[dayLocId]) || [];
+  return available.indexOf(tool) !== -1;
+}
+
 function canTaskRun(task, dayLocId, toolMatrix) {
   var t = migrateTask(task);
   if (t.location.length > 0 && t.location.map(function(l) { return l.toLowerCase(); }).indexOf((dayLocId || '').toLowerCase()) === -1) return false;
   if (t.tools && t.tools.length > 0) {
-    var available = (toolMatrix && toolMatrix[dayLocId]) || [];
+    var anywhere = t.location.length === 0;
     for (var i = 0; i < t.tools.length; i++) {
-      if (available.indexOf(t.tools[i]) === -1) return false;
+      var ok = anywhere
+        ? isToolAvailableAnywhere(t.tools[i], toolMatrix)
+        : isToolAvailableAt(t.tools[i], dayLocId, toolMatrix);
+      if (!ok) return false;
     }
   }
   return true;
@@ -131,13 +162,18 @@ function whyCannotRun(task, dayLocId, toolMatrix) {
     };
   }
   if (t.tools && t.tools.length > 0) {
-    var available = (toolMatrix && toolMatrix[dayLocId]) || [];
+    var anywhere = t.location.length === 0;
     for (var i = 0; i < t.tools.length; i++) {
-      if (available.indexOf(t.tools[i]) === -1) {
+      var ok = anywhere
+        ? isToolAvailableAnywhere(t.tools[i], toolMatrix)
+        : isToolAvailableAt(t.tools[i], dayLocId, toolMatrix);
+      if (!ok) {
         return {
           ok: false,
           cause: 'tool_conflict',
-          detail: 'Needs ' + t.tools[i] + '; not available at ' + dayLocId
+          detail: anywhere
+            ? 'Needs ' + t.tools[i] + '; not available at any configured location'
+            : 'Needs ' + t.tools[i] + '; not available at ' + dayLocId
         };
       }
     }

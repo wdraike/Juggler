@@ -88,13 +88,20 @@ function allWorkDayCfg() {
 
 describe('AC2.3 — tool_conflict reason code and detail', () => {
 
+  // Location-CONSTRAINED (location:['work'], added 999.1599, David ruling 2026-07-15):
+  // ANY-LOCATION union tool semantics apply only to location:[] "anywhere" tasks —
+  // this whole describe block's fixtures used location:[] before 999.1599, which now
+  // correctly PLACES (personal_pc exists at home in DEFAULT_TOOL_MATRIX, and an anywhere
+  // task isn't tied to the arbitrarily-resolved dayLocId; see
+  // tests/unit/scheduler/anywhere-tool-resolution-999-1599.test.js). Pinning location to
+  // 'work' here keeps these AC2.3 tests exercising genuine tool_conflict.
   test('AC2.3-a: task needing personal_pc on all-biz day → _unplacedReason="tool_conflict"', () => {
     // personal_pc not in DEFAULT_TOOL_MATRIX.work; all slots forced to 'work'.
     // Clamp to TODAY only via deadline+earliestStart so the scheduler cannot roll forward
     // to weekend home slots.
     // SELF-MUTATION: remove the tool check in findEarliestSlot → task gets placed → isUnplaced=false → FAILS.
     var task = makeTask({
-      id: 'ac23-a', location: [], tools: ['personal_pc'],
+      id: 'ac23-a', location: ['work'], tools: ['personal_pc'],
       date: TODAY, deadline: TODAY, earliestStart: TODAY
     });
     var result = run([task], allWorkDayCfg());
@@ -106,7 +113,7 @@ describe('AC2.3 — tool_conflict reason code and detail', () => {
   test('AC2.3-b: _unplacedDetail names the missing tool', () => {
     // SELF-MUTATION: remove detail assignment in applyPlacementFailReason → detail empty/undefined → FAILS.
     var task = makeTask({
-      id: 'ac23-b', location: [], tools: ['personal_pc'],
+      id: 'ac23-b', location: ['work'], tools: ['personal_pc'],
       date: TODAY, deadline: TODAY, earliestStart: TODAY
     });
     var result = run([task], allWorkDayCfg());
@@ -121,7 +128,7 @@ describe('AC2.3 — tool_conflict reason code and detail', () => {
   test('AC2.3-c: _unplacedDetail names the resolved location (work)', () => {
     // AC2.3 spec: "detail names the missing tool + location".
     var task = makeTask({
-      id: 'ac23-c', location: [], tools: ['personal_pc'],
+      id: 'ac23-c', location: ['work'], tools: ['personal_pc'],
       date: TODAY, deadline: TODAY, earliestStart: TODAY
     });
     var result = run([task], allWorkDayCfg());
@@ -437,8 +444,9 @@ describe('AC2.7 — R11.16: every unplaced item carries non-null _unplacedReason
   });
 
   test('AC2.7-c: tool-conflict-only task — both fields set', () => {
+    // Location-CONSTRAINED (999.1599, David ruling 2026-07-15) — see AC2.3 block comment.
     var task = makeTask({
-      id: 'ac27-tool-only', location: [], tools: ['personal_pc'],
+      id: 'ac27-tool-only', location: ['work'], tools: ['personal_pc'],
       date: TODAY, deadline: TODAY, earliestStart: TODAY
     });
     var result = run([task], allWorkDayCfg());

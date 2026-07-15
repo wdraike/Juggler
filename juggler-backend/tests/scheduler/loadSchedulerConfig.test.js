@@ -73,4 +73,26 @@ describe('loadSchedulerConfig (999.1187)', function() {
     var cfg = assembleSchedulerCfg(parseUserConfigRows([row('timeBlocks', TIME_BLOCKS)]), []);
     expect(cfg.timeBlocks).toBe(constants.DEFAULT_TIME_BLOCKS);
   });
+
+  // 999.1599 (harrison review 2026-07-15): a present-but-EMPTY tool_matrix ('{}' —
+  // a row that EXISTS but has zero location keys) is truthy in JS, so the plain
+  // `config.tool_matrix || DEFAULT_TOOL_MATRIX` idiom silently skipped the default.
+  // This is the actual root cause of the "Submit Weekly UI Claim" dev-DB repro
+  // (999.1599): user 019f5bc6's tool_matrix row persisted as '{}' (traced to
+  // ImportData.js:113's `data.toolMatrix || {}` for an import with no toolMatrix
+  // data), so EVERY location's tool lookup failed — not just 'home'. There is no
+  // distinguishable "user explicitly cleared it" signal anywhere in the write path
+  // (UpdateConfig validates only key/size, not tool_matrix semantics) — an empty
+  // object and an absent row both mean "nothing configured yet" and must both fall
+  // back to the default (matches this function's own doc comment).
+  test('999.1599: present-but-EMPTY tool_matrix ({}) falls back to DEFAULT_TOOL_MATRIX, same as an absent row', function() {
+    var cfg = assembleSchedulerCfg(parseUserConfigRows([row('tool_matrix', {})]), []);
+    expect(cfg.toolMatrix).toBe(constants.DEFAULT_TOOL_MATRIX);
+  });
+
+  test('999.1599: a genuinely non-empty tool_matrix is NOT overridden (only empty-object triggers the fallback)', function() {
+    var cfg = assembleSchedulerCfg(parseUserConfigRows([row('tool_matrix', { home: [] })]), []);
+    expect(cfg.toolMatrix).toEqual({ home: [] });
+    expect(cfg.toolMatrix).not.toBe(constants.DEFAULT_TOOL_MATRIX);
+  });
 });

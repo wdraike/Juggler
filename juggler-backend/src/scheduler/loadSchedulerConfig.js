@@ -56,7 +56,26 @@ function parseUserConfigRows(rows) {
 function assembleSchedulerCfg(config, locations) {
   return {
     timeBlocks: config.time_blocks || constants.DEFAULT_TIME_BLOCKS,
-    toolMatrix: config.tool_matrix || constants.DEFAULT_TOOL_MATRIX,
+    // 999.1599 (harrison review, 2026-07-15): a present-but-EMPTY tool_matrix
+    // ('{}' — no location keys at all) is truthy in JS, so the plain `||`
+    // idiom above (correct for absent/null/undefined) silently skipped the
+    // default here — the ONE case this function's own doc comment says
+    // should NOT happen ("config-absence defaults... not silent data
+    // fallbacks"). An empty object has no distinguishable "explicitly
+    // cleared by the user" signal anywhere in the write path (UpdateConfig
+    // validates keys/size only, never tool_matrix semantics; ImportData.js:113
+    // writes '{}' whenever import data carries no toolMatrix at all) — so
+    // there is no real state to preserve by treating it specially; both
+    // "row absent" and "row present but empty" mean the same thing
+    // ("nothing configured yet") and both must fall back to the default.
+    // Root cause of the "Submit Weekly UI Claim" dev-DB repro (999.1599):
+    // tool_matrix persisted as '{}' for that user, so EVERY tool lookup
+    // (at every location, not just 'home') failed — DEFAULT_TOOL_MATRIX
+    // owns 'phone' at home/work/transit/downtown/gym, so falling back
+    // correctly resolves the reported symptom outright.
+    toolMatrix: (config.tool_matrix && Object.keys(config.tool_matrix).length > 0)
+      ? config.tool_matrix
+      : constants.DEFAULT_TOOL_MATRIX,
     locSchedules: config.loc_schedules || {},
     locScheduleDefaults: config.loc_schedule_defaults || {},
     locScheduleOverrides: config.loc_schedule_overrides || {},

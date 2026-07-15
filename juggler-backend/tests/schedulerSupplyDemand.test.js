@@ -155,13 +155,20 @@ describe('Category A: Capacity Crunch', () => {
     // personal_pc is only available at home (default tool matrix)
     // Biz blocks (480-1020) are "work" location → no personal_pc there
     // Task pinned to today with only biz-time left should go to home blocks
+    // location:['home'] (explicit, added 999.1599 David ruling 2026-07-15): this task's
+    // OWN intent ("requires home block") is a location constraint, not an unconstrained
+    // ("anywhere") one — location:['home'] expresses that correctly and keeps the tool
+    // check pinned to the resolved dayLocId. An unconstrained (location:[]) task needing
+    // personal_pc would now correctly place in biz hours too (ANY-LOCATION union — the
+    // matrix owns personal_pc at home regardless of which location the slot resolves
+    // to); see tests/unit/scheduler/anywhere-tool-resolution-999-1599.test.js.
     const tasks = [
       // Block morning (home block 360-480) with fixed event
       makeTask({ id: 'block_morn', placementMode: 'fixed', date: TODAY, time: '6:00 AM', dur: 120, datePinned: true }),
       // Block evening (home block 1020-1260) with fixed event
       makeTask({ id: 'block_eve', placementMode: 'fixed', date: TODAY, time: '5:00 PM', dur: 240, datePinned: true }),
       // Task needing personal_pc — only night block (1260-1380) at home remains
-      makeTask({ id: 'needs_pc', tools: ['personal_pc'], dur: 60, date: TODAY }),
+      makeTask({ id: 'needs_pc', location: ['home'], tools: ['personal_pc'], dur: 60, date: TODAY }),
     ];
 
     const result = run(tasks);

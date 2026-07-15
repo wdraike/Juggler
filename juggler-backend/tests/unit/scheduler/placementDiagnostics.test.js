@@ -124,13 +124,21 @@ describe('I1 CHARACTERIZATION — canTaskRun (current boolean API, must not regr
   });
 
   // canTaskRun returns FALSE when required tool is missing at the resolved location.
-  test('CHAR-A4: canTaskRun returns false (boolean) when required tool is unavailable at dayLocId', () => {
+  test('CHAR-A4: canTaskRun returns false (boolean) when required tool is unavailable at dayLocId (location-constrained task)', () => {
     // personal_pc is at HOME only (DEFAULT_TOOL_MATRIX.home includes 'personal_pc').
     // At WORK: DEFAULT_TOOL_MATRIX.work does NOT include 'personal_pc'.
-    // SELF-MUTATION: removing the tools check at locationHelpers.js:98-103 → returns true
+    // Location-CONSTRAINED (location:['work']) so ANY-LOCATION semantics (999.1599,
+    // David ruling 2026-07-15 — applies ONLY to location-'anywhere'/location:[] tasks)
+    // does not fire here; dayLocId is already pinned to one of the task's allowed
+    // locations, so only that location's tools are checked, unchanged from before.
+    // Prior to 999.1599 this fixture used location:[] ("anywhere") — that shape now
+    // correctly returns true (personal_pc IS available somewhere — home — in the
+    // matrix, and an anywhere task isn't tied to the arbitrarily-resolved dayLocId);
+    // see anywhere-tool-resolution-999-1599.test.js for that behavior.
+    // SELF-MUTATION: removing the tools check at locationHelpers.js:126-134 → returns true
     // regardless of tool availability → this test FAILS.
     var result = locationHelpers.canTaskRun(
-      makeTask({ location: [], tools: ['personal_pc'] }),
+      makeTask({ location: ['work'], tools: ['personal_pc'] }),
       'work',
       DEFAULT_TOOL_MATRIX
     );
@@ -176,14 +184,15 @@ describe('I1 CHARACTERIZATION — canTaskRun (current boolean API, must not regr
     expect(result).toBe(true);
   });
 
-  test('CHAR-A9: canTaskRunAtMin returns false for personal_pc task at biz slot (work loc)', () => {
+  test('CHAR-A9: canTaskRunAtMin returns false for personal_pc task at biz slot (work loc, location-constrained)', () => {
     // Monday biz slot (hour 10 = minute 600): resolves to "work";
-    // personal_pc not in work tool matrix → false.
+    // personal_pc not in work tool matrix → false. Location-CONSTRAINED (['work']) so
+    // ANY-LOCATION semantics (999.1599) doesn't apply — see CHAR-A4 comment above.
     const MONDAY = '2026-06-22'; // Monday
     const MON_CFG = makeCfg();
     const MON_BLOCKS = timeBlockHelpers.getBlocksForDate(MONDAY, DEFAULT_TIME_BLOCKS, MON_CFG);
     var result = locationHelpers.canTaskRunAtMin(
-      makeTask({ location: [], tools: ['personal_pc'] }),
+      makeTask({ location: ['work'], tools: ['personal_pc'] }),
       MONDAY, 600, MON_CFG, DEFAULT_TOOL_MATRIX, MON_BLOCKS
     );
     expect(result).toBe(false);
@@ -201,13 +210,34 @@ describe('I1 CHARACTERIZATION — findEarliestSlot failure (current bare null re
     expect(isUnplaced).toBe(true);
   });
 
-  test('CHAR-B2: personal_pc task on all-biz day → goes to unplaced (tool conflict)', () => {
+  test('CHAR-B2: personal_pc task on all-biz day → goes to unplaced (tool conflict, location-constrained)', () => {
     // Force ALL hours on TODAY to 'work' via hourLocationOverrides.
     // personal_pc is only in DEFAULT_TOOL_MATRIX.home, not .work → every slot rejected.
     // Constrain the search window to TODAY only by setting deadline=TODAY + earliestStart=TODAY
     // (both handled via the task's deadline/earliestStart string fields → deadlineDate clamping
     // in findEarliestSlot prevents roll-forward to the weekend where home slots would be found).
-    // SELF-MUTATION: remove hourLocationOverrides → some slots return "home" → task placed → FAILS.
+    // Location-CONSTRAINED (location:['work']) so ANY-LOCATION semantics (999.1599, David
+    // ruling 2026-07-15 — anywhere/location:[] tasks only) doesn't apply: the task is pinned
+    // to 'work', which genuinely lacks personal_pc, so it stays unplaced regardless of the
+    // fix. (Prior to 999.1599 this fixture used location:[] — an anywhere task — which now
+    // correctly PLACES via the union check since personal_pc exists at home; see
+    // anywhere-tool-resolution-999-1599.test.js for that scheduler-level case.)
+    // harrison review 2026-07-15 (999.1599): TODAY is Saturday (a home day per
+    // DEFAULT_TIME_BLOCKS/DEFAULT_WEEKEND_BLOCKS) — a location:['work'] task is
+    // ALREADY unplaceable there by location_mismatch alone, with or without
+    // hourLocationOverrides. The bare isUnplaced===true assertion below was
+    // tautological: removing hourLocationOverrides did NOT make the test fail
+    // ("differently" or otherwise) as the SELF-MUTATION note claimed — the task
+    // stayed unplaced via location_mismatch either way, so the fixture no longer
+    // exercised the tool_conflict path it's named for. Asserting the specific
+    // reason code makes hourLocationOverrides load-bearing again: WITH it, every
+    // TODAY slot resolves to 'work' (location matches → tool check runs →
+    // personal_pc absent at work → tool_conflict); WITHOUT it, Saturday's home
+    // blocks make dayLocId 'home' → location_mismatch (task wants 'work') →
+    // the assertion below would fail on the wrong reason code.
+    // SELF-MUTATION: remove hourLocationOverrides → dayLocId resolves 'home' on
+    // Saturday → _unplacedReason becomes 'location_mismatch', not 'tool_conflict'
+    // → this test's reason-code assertion FAILS.
     var cfg = makeCfg({
       hourLocationOverrides: (function() {
         var h = {};
@@ -217,14 +247,15 @@ describe('I1 CHARACTERIZATION — findEarliestSlot failure (current bare null re
       })()
     });
     var task = makeTask({
-      id: 'char-b2', location: [], tools: ['personal_pc'],
+      id: 'char-b2', location: ['work'], tools: ['personal_pc'],
       date: TODAY,
       deadline: TODAY,       // clamps deadlineDate → latestIdx = indexOfDate(TODAY)
       earliestStart: TODAY   // clamps earliestIdx → earliestStartDate = TODAY
     });
     var result = run([task], cfg);
-    var isUnplaced = (result.unplaced || []).some(function(t) { return t && t.id === 'char-b2'; });
-    expect(isUnplaced).toBe(true);
+    var unplacedItem = (result.unplaced || []).find(function(t) { return t && t.id === 'char-b2'; });
+    expect(unplacedItem).toBeDefined();
+    expect(unplacedItem._unplacedReason).toBe('tool_conflict');
   });
 
   test('CHAR-B3: impossible-location task carries a specific _unplacedReason (impl landed)', () => {
@@ -286,20 +317,23 @@ describe('I1 RED — AC1.1: whyCannotRun returns structured failure cause (paral
     expect(result.detail).toMatch(/home/);
   });
 
-  test('RED-AC1.1-c: tool unavailable → result.cause === "tool_conflict"', () => {
+  test('RED-AC1.1-c: tool unavailable → result.cause === "tool_conflict" (location-constrained)', () => {
     // personal_pc not available at 'work' (only at 'home' per DEFAULT_TOOL_MATRIX).
+    // Location-CONSTRAINED (['work']) so ANY-LOCATION semantics (999.1599, David ruling
+    // 2026-07-15 — anywhere/location:[] tasks only) doesn't apply — see CHAR-A4 comment.
     var result = locationHelpers.whyCannotRun(
-      makeTask({ location: [], tools: ['personal_pc'] }),
+      makeTask({ location: ['work'], tools: ['personal_pc'] }),
       'work',
       DEFAULT_TOOL_MATRIX
     );
     expect(result).toMatchObject({ ok: false, cause: 'tool_conflict' });
   });
 
-  test('RED-AC1.1-d: tool conflict → result.detail names the missing tool and the resolved location', () => {
+  test('RED-AC1.1-d: tool conflict → result.detail names the missing tool and the resolved location (location-constrained)', () => {
     // AC1.1: "naming the missing tool + resolved location"
+    // Location-CONSTRAINED (['work']) — see RED-AC1.1-c comment.
     var result = locationHelpers.whyCannotRun(
-      makeTask({ location: [], tools: ['personal_pc'] }),
+      makeTask({ location: ['work'], tools: ['personal_pc'] }),
       'work',
       DEFAULT_TOOL_MATRIX
     );
@@ -375,7 +409,7 @@ describe('I1 RED — AC1.2: tryPlaceQueued/findEarliestSlot returns {slot:null, 
     expect(unplacedItem._unplacedDetail.length).toBeGreaterThan(0);
   });
 
-  test('RED-AC1.2-b: tool conflict → {slot:null, failReason:"tool_conflict"}', () => {
+  test('RED-AC1.2-b: tool conflict → {slot:null, failReason:"tool_conflict"} (location-constrained)', () => {
     // All slots forced to 'work' (hourLocationOverrides) but task needs 'personal_pc'
     // (only at home) → every candidate slot rejected with tool_conflict.
     //
@@ -387,6 +421,11 @@ describe('I1 RED — AC1.2: tryPlaceQueued/findEarliestSlot returns {slot:null, 
     // With all TODAY hours overridden to 'work', personal_pc is unavailable everywhere →
     // unplaced with _unplacedReason='tool_conflict'.
     // Converted from test.failing — RED→GREEN transition confirmed 2026-06-20.
+    // Location-CONSTRAINED (location:['work'], added 999.1599, David ruling 2026-07-15):
+    // ANY-LOCATION union semantics apply only to location:[] "anywhere" tasks — this fixture
+    // is pinned to 'work' so the tool check stays single-location and this scenario keeps
+    // testing genuine tool_conflict (personal_pc is real absent at 'work'). The location:[]
+    // shape now correctly PLACES instead (see anywhere-tool-resolution-999-1599.test.js).
     var cfg = makeCfg({
       hourLocationOverrides: (function() {
         var h = {};
@@ -396,7 +435,7 @@ describe('I1 RED — AC1.2: tryPlaceQueued/findEarliestSlot returns {slot:null, 
       })()
     });
     var result = run([makeTask({
-      id: 'red-ac12-b', location: [], tools: ['personal_pc'],
+      id: 'red-ac12-b', location: ['work'], tools: ['personal_pc'],
       generated: true,    // day-locks the task to TODAY (isGenerated && anchorMin==null)
       deadline: TODAY     // secondary guard: no ignoreDeadline extension past TODAY
     })], cfg);
@@ -476,9 +515,14 @@ describe('I1 RED — AC1.2: tryPlaceQueued/findEarliestSlot returns {slot:null, 
     // → length < 2 → hard guard → FAILS.
     // SELF-MUTATION: changing the reason engine to emit 'no_slot' for tool conflicts →
     // mix-002 reason !== 'tool_conflict' → FAILS.
+    // mix-002 is location-CONSTRAINED (location:['work'], added 999.1599, David ruling
+    // 2026-07-15): ANY-LOCATION union semantics apply only to location:[] "anywhere"
+    // tasks, so this fixture must stay pinned to 'work' to keep exercising a genuine
+    // tool_conflict (personal_pc really is absent at 'work') rather than now correctly
+    // placing via the union check.
     var tasks = [
       makeTask({ id: 'mix-001', location: ['nowhere'], generated: true, deadline: TODAY }),
-      makeTask({ id: 'mix-002', tools: ['personal_pc'], generated: true, deadline: TODAY })
+      makeTask({ id: 'mix-002', location: ['work'], tools: ['personal_pc'], generated: true, deadline: TODAY })
     ];
     var cfg = makeCfg({
       hourLocationOverrides: (function() {

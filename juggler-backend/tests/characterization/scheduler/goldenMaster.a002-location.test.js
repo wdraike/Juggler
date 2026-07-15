@@ -220,11 +220,18 @@ describe('A-002 LOCATION GATING — hourLocationOverrides discriminates slots', 
     recurring: false, split: false, datePinned: false, generated: false,
     section: '', flexWhen: false
   };
-  // printer available only at "work" via DEFAULT_TOOL_MATRIX
+  // printer available only at "work" via DEFAULT_TOOL_MATRIX. Location-CONSTRAINED
+  // (location:['work'], not location:[]) so this stays a pure LOCATION-GATING fixture
+  // (matching the describe block's stated purpose) and its frozen literals below are
+  // unaffected by the 999.1599 ANY-LOCATION tool-resolution ruling (David, 2026-07-15),
+  // which changes tool resolution ONLY for location:[] "anywhere" tasks — see
+  // tests/unit/scheduler/anywhere-tool-resolution-999-1599.test.js for that new behavior
+  // (an anywhere printer-tool task would now place earlier, since printer is available
+  // "anywhere" per the matrix union rather than gated to the resolved dayLocId).
   const printerTask = {
     id: 'a002-printer-001', text: 'Printer-tool task', dur: 30, pri: 'P3',
     date: TODAY, status: '', when: 'morning,lunch,afternoon,evening,night',
-    dayReq: 'any', dependsOn: [], location: [], tools: ['printer'],
+    dayReq: 'any', dependsOn: [], location: ['work'], tools: ['printer'],
     recurring: false, split: false, datePinned: false, generated: false,
     section: '', flexWhen: false
   };
