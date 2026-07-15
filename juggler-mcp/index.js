@@ -200,6 +200,7 @@ server.tool(
     placementMode: z.enum(['reminder', 'all_day', 'fixed', 'time_window', 'time_blocks', 'anytime']).optional(),
     split: z.boolean().optional(),
     splitMin: z.number().optional(),
+    recur: z.object({ type: z.string(), days: z.string().optional(), every: z.number().optional() }).optional(),
     recurStart: z.string().optional().describe('Recurrence anchor date (YYYY-MM-DD or M/D). REQUIRED when setting recur to "biweekly", "interval", "rolling", or a "timesPerCycle" pattern selecting fewer than all days.'),
     datePinned: z.boolean().optional(),
     status: z.string().optional(),

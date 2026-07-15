@@ -154,6 +154,22 @@ describe('tool registration', function () {
   test('999.1567: update_task schema exposes recurStart', function () {
     expect(mockToolRegistry.update_task.schema.recurStart).toBeDefined();
   });
+
+  // 999.1637: update_task had recurStart (999.1567) but no `recur` field at
+  // all — recurStart is meaningless without a recur object to attach to, and
+  // a caller could never change a task's recurrence pattern via update_task
+  // through this stdio server. Assert presence AND shape parity with the
+  // sibling create_task/create_tasks schemas in this same file (not a
+  // divergent reinvention).
+  test('999.1637: update_task schema exposes recur', function () {
+    expect(mockToolRegistry.update_task.schema.recur).toBeDefined();
+  });
+
+  test('999.1637: update_task recur shape matches create_task recur shape', function () {
+    var updateRecurShape = mockToolRegistry.update_task.schema.recur._def.innerType.shape;
+    var createRecurShape = mockToolRegistry.create_task.schema.recur._def.innerType.shape;
+    expect(Object.keys(updateRecurShape).sort()).toEqual(Object.keys(createRecurShape).sort());
+  });
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
