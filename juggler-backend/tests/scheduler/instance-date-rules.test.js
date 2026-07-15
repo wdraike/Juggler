@@ -571,6 +571,19 @@ describe('R8-DB: implied_deadline recompute-on-move', () => {
   afterAll(async () => { await teardownTestDB(); });
 
   it('recomputes implied_deadline when a past-placed rolling instance forward-rolls to today', async () => {
+    // MODE-2 (persist) runScheduler IGNORES the todayKey/nowMins args and runs
+    // runScheduleAndPersist on the REAL clock — this test was hour-of-day
+    // dependent (green 20:11 EDT, red 22:45 EDT and 00:15 EDT on identical
+    // code, 2026-07-14/15): late at night the forward-rolled instance takes a
+    // write path that skips the 999.990 recompute. Freeze the scheduler clock
+    // at 05:00 on the fixture's own TODAY (same _setClock seam as
+    // runScheduleIntegration's 999.1427 precedent) so the test deterministically
+    // pins the placed-branch recompute at any wall-clock hour. The late-night
+    // non-recompute path is a separate finding (DIGEST 2026-07-15).
+    const { _setClock } = require('../../src/scheduler/runSchedule');
+    const { FakeClockAdapter } = require('../helpers/clock');
+    const prevClock = _setClock(new FakeClockAdapter({ startTime: TODAY + 'T05:00:00-04:00' }));
+    try {
     const master = await createTask({
       text: 'R8 rolling recompute-on-move',
       dur: 30,
@@ -603,6 +616,7 @@ describe('R8-DB: implied_deadline recompute-on-move', () => {
     // NEW anchor's cycle window (OCC+intervalDays=7), not the original insert.
     expect(toDateStr(inst.implied_deadline)).not.toBe('2000-01-01');
     expect(toDateStr(inst.implied_deadline)).toBe(addDays(newAnchor, 7));
+    } finally { _setClock(prevClock); }
   });
 });
 
