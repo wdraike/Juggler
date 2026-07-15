@@ -1,5 +1,9 @@
 {
-  "_doc": "vinatieri quarantine ratchet — known-red suites excluded so the passing set stays a hard gate (pre-push + CI). List may only SHRINK; every entry needs a backlog ticket. 2026-07-13: harrison solo-verified 5 original entries were pool-load flakes and they were UN-quarantined same day; taskControllerUnit + taskPipeline un-quarantined later that day after David ruled 999.1439 (reality-wins) and the pins were reconciled. See .planning/patriots/PLAYBOOK.md § vinatieri. 2026-07-14 (999.1564): the final 3 entries (ai-command, taskRepository.contract, configRepository.contract) all verified GREEN solo x2 in an isolated pool slot — no product-side bug found. List is now empty.",
-  "tickets": {},
-  "patterns": []
+  "_doc": "vinatieri quarantine ratchet — known-red suites excluded so the passing set stays a hard gate (pre-push + CI). List may only SHRINK; every entry needs a backlog ticket. 2026-07-13: harrison solo-verified 5 original entries were pool-load flakes and they were UN-quarantined same day; taskControllerUnit + taskPipeline un-quarantined later that day after David ruled 999.1439 (reality-wins) and the pins were reconciled. See .planning/patriots/PLAYBOOK.md § vinatieri. 2026-07-14 (999.1564): the final 3 entries (ai-command, taskRepository.contract, configRepository.contract) all verified GREEN solo x2 in an isolated pool slot — no product-side bug found. List is now empty. 2026-07-15 (999.1981, P0-ci-integrity): mcp-getusertimezone-dedup-characterization is red on origin/main HEAD (confirmed pre-existing, unrelated to 999.1626 — verified in an isolated scratch checkout + fresh pool slot, reproduced deterministically twice) — quarantined so unrelated work can ship while 999.1981 tracks the real fix.",
+  "tickets": {
+    "mcp-getusertimezone-dedup-characterization.db.test.js": "999.1981"
+  },
+  "patterns": [
+    "tests/mcp-getusertimezone-dedup-characterization.db.test.js"
+  ]
 }
