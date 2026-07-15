@@ -33,6 +33,12 @@ var { localToUtc } = require('../../../scheduler/dateHelpers');
 var { PLACEMENT_MODES } = require('../../../lib/placementModes');
 var { _isAllDayTaskBackend } = require('../../../lib/isAllDayTaskBackend');
 var { isTerminalStatus } = require('../../../lib/task-status');
+var { loggers } = require('../../../lib/logger');
+
+// Fallback used before any calendarList discovery has ever succeeded for this
+// user (brand-new connection + a transient discovery failure) — reproduces
+// the pre-999.1626 primary-only behavior rather than fetching nothing.
+var PRIMARY_ONLY_CALENDAR = [{ id: null, calendar_id: 'primary', display_name: null, sync_direction: 'full', ingest_mode: 'task' }];
 
 var providerId = 'gcal';
 
@@ -77,34 +83,157 @@ async function getValidAccessToken(user) {
 }
 
 /**
- * Fetch events from GCal and normalize to unified shape.
- * Also saves the nextSyncToken to the user record for future lightweight checks.
+ * Get enabled GCal calendars from user_calendars table, falling back to
+ * primary-only when no rows exist yet (999.1626 — mirrors
+ * AppleCalendarAdapter.getEnabledCalendars).
  */
-async function listEvents(token, timeMin, timeMax, userId) {
-  var result = await gcalApi.listEvents(token, timeMin, timeMax);
-  var events = (result && result.items) || [];
+async function getEnabledCalendars(userId) {
+  // ORDER BY calendar_id: 999.1626 harrison WARN — iteration order MUST be
+  // deterministic. It feeds (a) which calendar's nextSyncToken gets persisted
+  // (see listEvents — only meaningful when length===1, but still), and (b)
+  // which calendar "wins" when the SAME event id appears on 2+ calendars
+  // (shared/invite copies — event ids are unique per-calendar, NOT globally;
+  // see facade.js gatherProviderSyncData's eventsById construction).
+  var calendars = await getDb()('user_calendars')
+    .where({ user_id: userId, provider: 'gcal', enabled: true })
+    .orderBy('calendar_id', 'asc');
 
-  // Store the sync token for future lightweight change detection
-  if (result.nextSyncToken && userId) {
-    await getDb()('users').where('id', userId).update({ gcal_sync_token: result.nextSyncToken });
+  if (calendars.length > 0) {
+    return calendars;
   }
 
-  return events
-    .filter(function(e) { return e.status !== 'cancelled'; })
-    .filter(function(e) {
-      // 999.1014: guard against a null/undefined element in attendees (would
-      // otherwise throw reading a.self on it).
-      var self = Array.isArray(e.attendees) && e.attendees.find(function(a) { return a && a.self === true; });
-      return !(self && self.responseStatus === 'declined');
-    })
-    .map(normalizeEvent);
+  return PRIMARY_ONLY_CALENDAR;
+}
+
+/**
+ * Discover the user's full Google calendarList and auto-provision any
+ * calendar juggler hasn't seen before into user_calendars (provider='gcal'),
+ * defaulting NEW rows to enabled=true (999.1626 — David ruling 2026-07-15:
+ * opt-out beats opt-in for correctness; a silently-missed secondary/shared
+ * calendar was the bug being killed, toggles in Settings handle noise
+ * calendars). Existing rows are left untouched — a user's own enabled=false
+ * toggle is never overwritten by rediscovery. Best-effort: any failure here
+ * degrades to "use whatever is already enabled" rather than blocking the pull.
+ */
+async function discoverCalendars(token, userId) {
+  try {
+    var remote = await gcalApi.listCalendarList(token);
+    if (!remote || remote.length === 0) return;
+
+    var existing = await getDb()('user_calendars').where({ user_id: userId, provider: 'gcal' });
+    var existingIds = {};
+    existing.forEach(function(r) { existingIds[r.calendar_id] = true; });
+
+    var toInsert = remote
+      .filter(function(c) { return c && c.id && !existingIds[c.id]; })
+      .map(function(c) {
+        return {
+          user_id: userId,
+          provider: 'gcal',
+          calendar_id: c.id,
+          display_name: c.summary || null,
+          enabled: true,
+          sync_direction: 'full',
+          ingest_mode: 'task'
+        };
+      });
+
+    if (toInsert.length > 0) {
+      await getDb()('user_calendars').insert(toInsert);
+    }
+  } catch (e) {
+    loggers.calAdapterGcal.warn('Calendar discovery failed (non-fatal — pull continues with already-enabled calendars)', {
+      userId: userId,
+      error: e.message
+    });
+  }
+}
+
+/**
+ * Fetch events from EVERY enabled GCal calendar and normalize to unified
+ * shape (999.1626 — was primary-only). Also saves the nextSyncToken to the
+ * user record for future lightweight checks — but ONLY when there is
+ * exactly ONE enabled calendar (999.1626 harrison BLOCK/WARN review): a
+ * single global gcal_sync_token column cannot represent 2+ calendars'
+ * cursors, and hasChanges() below refuses to trust it once more than one
+ * calendar is enabled. Storing it in that case would be silently-wrong dead
+ * weight (previously sourced from calendars[0] with no deterministic order,
+ * so an arbitrary secondary calendar's cursor could clobber primary's).
+ */
+async function listEvents(token, timeMin, timeMax, userId) {
+  if (userId) {
+    await discoverCalendars(token, userId);
+  }
+  var calendars = userId ? await getEnabledCalendars(userId) : PRIMARY_ONLY_CALENDAR;
+
+  var allEvents = [];
+  var hasPartialFailure = false;
+  var syncTokenToStore = null;
+
+  for (var i = 0; i < calendars.length; i++) {
+    var cal = calendars[i];
+    try {
+      var result = await gcalApi.listEvents(token, timeMin, timeMax, cal.calendar_id);
+      var items = (result && result.items) || [];
+      var normalized = items
+        .filter(function(e) { return e.status !== 'cancelled'; })
+        .filter(function(e) {
+          // 999.1014: guard against a null/undefined element in attendees (would
+          // otherwise throw reading a.self on it).
+          var self = Array.isArray(e.attendees) && e.attendees.find(function(a) { return a && a.self === true; });
+          return !(self && self.responseStatus === 'declined');
+        })
+        .map(normalizeEvent)
+        .map(function(ne) { ne._calendarId = cal.calendar_id; return ne; });
+      allEvents = allEvents.concat(normalized);
+
+      // Store the sync token for future lightweight change detection — ONLY
+      // when this is the lone enabled calendar (see doc comment above).
+      if (calendars.length === 1 && result && result.nextSyncToken) {
+        syncTokenToStore = result.nextSyncToken;
+      }
+    } catch (e) {
+      hasPartialFailure = true;
+      loggers.calAdapterGcal.error('Error fetching calendar', {
+        calendarId: cal.display_name || cal.calendar_id,
+        error: e
+      });
+    }
+  }
+
+  if (syncTokenToStore && userId) {
+    await getDb()('users').where('id', userId).update({ gcal_sync_token: syncTokenToStore });
+  }
+
+  if (hasPartialFailure) {
+    allEvents._hasPartialFailure = true;
+  }
+  return allEvents;
 }
 
 /**
  * Lightweight check: ask Google if anything changed since the last sync.
  * Uses the stored sync token. Returns { hasChanges, nextSyncToken }.
+ *
+ * 999.1626 harrison BLOCK fix: with 2+ enabled calendars there is no single
+ * sync token that can represent "anything changed on ANY enabled calendar"
+ * (see listEvents — a token is only ever persisted for the lone-calendar
+ * case). Trusting a primary-only check here while a secondary/shared
+ * calendar is also enabled would let a new event on THAT calendar report
+ * hasChanges:false — the frontend poll (AppLayout.jsx checkAndSync) never
+ * fires the real multi-calendar pull, silently deferring the event until
+ * the next full-sync trigger (app reload / manual sync). That is exactly
+ * the "silent, permanent" miss this ticket exists to kill, merely narrowed
+ * from "forever" to "until reload". Correctness over call-cost: always
+ * report changed so the real pull runs every poll for these users. Users
+ * with a single enabled calendar (the common case) keep the cheap check.
  */
 async function hasChanges(token, user) {
+  var calendars = await getEnabledCalendars(user.id);
+  if (calendars.length > 1) {
+    return { hasChanges: true };
+  }
+
   var syncToken = user.gcal_sync_token;
   if (!syncToken) return { hasChanges: true }; // No token yet — need full sync
 
@@ -429,6 +558,8 @@ module.exports = {
   providerId,
   isConnected,
   getValidAccessToken,
+  getEnabledCalendars,
+  discoverCalendars,
   listEvents,
   hasChanges,
   getEvents,

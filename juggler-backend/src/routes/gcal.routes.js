@@ -16,4 +16,10 @@ router.get('/callback', gcalController.callback); // No auth — browser redirec
 router.post('/disconnect', authenticateJWT, gcalController.disconnect);
 router.post('/auto-sync', authenticateJWT, gcalController.setAutoSync);
 
+// 999.1626: per-calendar selection — mirrors apple-cal.routes.js's
+// calendars/refresh-calendars/calendars/:id trio.
+router.get('/calendars', authenticateJWT, gcalController.getCalendars);
+router.get('/refresh-calendars', authenticateJWT, gcalController.refreshCalendars);
+router.put('/calendars/:id', authenticateJWT, gcalController.updateCalendar);
+
 module.exports = router;

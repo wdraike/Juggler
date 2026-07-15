@@ -272,6 +272,59 @@ async function setGcalAutoSync(userId, enabled) {
   return { autoSync: value };
 }
 
+// ── GCal per-calendar selection (999.1626) ──
+// Backend toggle mechanism mirroring appleGetCalendars/appleUpdateCalendar/
+// appleRefreshCalendars below — deliberately GET-list + PUT-toggle rather than
+// a bespoke UI: no frontend Settings surface was built for this leg (see
+// backlog close evidence for 999.1626); these three endpoints ARE the
+// documented API contract for a future Settings panel to bind to, and are
+// directly usable today via curl/Postman for support/debugging.
+
+async function gcalGetCalendars(userId) {
+  var calendars = await accountRepo.findUserCalendars(userId, 'gcal');
+  return { status: 200, body: { calendars: calendars } };
+}
+
+async function gcalUpdateCalendar(userId, calendarId, body) {
+  var row = await accountRepo.findUserCalendarByIdForUser(calendarId, userId);
+
+  if (!row) {
+    return { status: 404, body: { error: 'Calendar not found' } };
+  }
+
+  var updates = { updated_at: accountRepo.now() };
+  if (body.enabled !== undefined) updates.enabled = body.enabled;
+  if (body.syncDirection) updates.sync_direction = body.syncDirection;
+  if (body.ingestMode) updates.ingest_mode = body.ingestMode;
+
+  await accountRepo.updateUserCalendarById(calendarId, updates);
+
+  var updated = await accountRepo.findUserCalendarById(calendarId);
+  return { status: 200, body: { calendar: updated } };
+}
+
+async function gcalRefreshCalendars(userId, user) {
+  if (!user.gcal_refresh_token) {
+    return { status: 400, body: { error: 'Google Calendar not connected. Please connect first.' } };
+  }
+
+  var token;
+  try {
+    token = await getAdapter('gcal').getValidAccessToken(user);
+  } catch (e) {
+    return { status: 401, body: { error: 'Failed to connect. Your Google Calendar authorization may have expired.', detail: e.message } };
+  }
+
+  // GoogleCalendarAdapter.discoverCalendars is best-effort by design (same
+  // path the automatic pull-sync uses) — it never throws, logging+returning
+  // on failure so a calendarList hiccup degrades to "whatever is already
+  // enabled" rather than blocking the request.
+  await GoogleCalendarAdapter.discoverCalendars(token, userId);
+
+  var allCalendars = await accountRepo.findUserCalendars(userId, 'gcal');
+  return { status: 200, body: { calendars: allCalendars } };
+}
+
 // ── MSFT Calendar operations ──
 
 async function getMsftStatus(user) {
@@ -998,7 +1051,18 @@ async function gatherProviderSyncData(user, userId, windowStart, windowEnd, tz, 
 
       var eventsById = {};
       for (var ei = 0; ei < events.length; ei++) {
-        eventsById[events[ei].id] = events[ei];
+        // 999.1626 harrison WARN: a provider event id is unique PER CALENDAR,
+        // NOT globally — the same invited meeting can appear with the SAME
+        // id on multiple calendars the user has enabled (shared calendars /
+        // meeting invite copies). FIRST write wins so the surviving event
+        // (and therefore its _calendarId -> ingest_mode resolution at
+        // cal-sync.controller.js) is deterministic run-to-run, not
+        // "whichever calendar happened to iterate last" — adapters now
+        // return calendars in a stable order (e.g.
+        // GoogleCalendarAdapter.getEnabledCalendars ORDER BY calendar_id).
+        if (!eventsById[events[ei].id]) {
+          eventsById[events[ei].id] = events[ei];
+        }
         // Apple events: provider_event_id stores the CalDAV URL, not the UID —
         // index by _url too so ledger lookups work regardless of which key was stored.
         if (events[ei]._url && !eventsById[events[ei]._url]) {
@@ -1270,6 +1334,19 @@ async function gatherProviderSyncData(user, userId, windowStart, windowEnd, tz, 
         calIngestModeMap[c.calendar_id] = c.ingest_mode || 'task';
       });
     } catch (_e) { /* ignore — label is display-only */ }
+  }
+  // 999.1626: GCal now pulls from every enabled calendar (not just primary),
+  // each pulled event tagged newEvent._calendarId — extend the SAME shared
+  // map so a GCal calendar's ingest_mode is honored at pull-new branching,
+  // mirroring the Apple block above exactly.
+  if (providerData.gcal) {
+    try {
+      var gcalCals = await srcDb('user_calendars')
+        .where({ user_id: userId, provider: 'gcal', enabled: true });
+      gcalCals.forEach(function(c) {
+        calIngestModeMap[c.calendar_id] = c.ingest_mode || 'task';
+      });
+    } catch (_e) { /* ignore — falls back to 'task' default at read site */ }
   }
   var calendarLabels = { apple: appleCalendarLabel };
 
@@ -1649,6 +1726,9 @@ module.exports = {
   gcalCallback: gcalCallback,
   gcalDisconnect: gcalDisconnect,
   setGcalAutoSync: setGcalAutoSync,
+  gcalGetCalendars: gcalGetCalendars,
+  gcalUpdateCalendar: gcalUpdateCalendar,
+  gcalRefreshCalendars: gcalRefreshCalendars,
   getMsftStatus: getMsftStatus,
   msftConnect: msftConnect,
   msftCallback: msftCallback,

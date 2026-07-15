@@ -64,12 +64,47 @@ async function setAutoSync(req, res) {
   }
 }
 
+// 999.1626: per-calendar selection (list / toggle / discover) — backend
+// counterpart to appleCalController's getCalendars/updateCalendar/refreshCalendars.
+async function getCalendars(req, res) {
+  try {
+    var result = await facade.gcalGetCalendars(req.user.id);
+    res.status(result.status).json(result.body);
+  } catch (error) {
+    logger.error('GCal get-calendars error:', error);
+    res.status(500).json({ error: 'Failed to get calendars' });
+  }
+}
+
+async function updateCalendar(req, res) {
+  try {
+    var result = await facade.gcalUpdateCalendar(req.user.id, req.params.id, req.body);
+    res.status(result.status).json(result.body);
+  } catch (error) {
+    logger.error('GCal update-calendar error:', error);
+    res.status(500).json({ error: 'Failed to update calendar' });
+  }
+}
+
+async function refreshCalendars(req, res) {
+  try {
+    var result = await facade.gcalRefreshCalendars(req.user.id, req.user);
+    res.status(result.status).json(result.body);
+  } catch (error) {
+    logger.error('GCal refresh-calendars error:', error);
+    res.status(500).json({ error: 'Failed to refresh calendars' });
+  }
+}
+
 module.exports = {
   getStatus,
   connect,
   callback,
   disconnect,
   setAutoSync,
+  getCalendars,
+  updateCalendar,
+  refreshCalendars,
   // Test-only: direct access to markCodeUsed for unit testing without HTTP stack
   _internal: { markCodeUsed: facade.gcalMarkCodeUsed }
 };

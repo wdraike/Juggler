@@ -85,10 +85,11 @@ async function calendarFetch(accessToken, path, options = {}) {
   }
 }
 
-async function listEvents(accessToken, timeMin, timeMax) {
+async function listEvents(accessToken, timeMin, timeMax, calendarId) {
   var allItems = [];
   var pageToken = null;
   var nextSyncToken = null;
+  var calId = calendarId || 'primary'; // 999.1626: caller may target any calendar, default preserves legacy behavior
 
   var maxPages = 20; // Cap to prevent runaway pagination
   var page = 0;
@@ -102,7 +103,7 @@ async function listEvents(accessToken, timeMin, timeMax) {
     });
     if (pageToken) params.append('pageToken', pageToken);
 
-    var data = await calendarFetch(accessToken, '/calendars/primary/events?' + params.toString());
+    var data = await calendarFetch(accessToken, '/calendars/' + encodeURIComponent(calId) + '/events?' + params.toString());
     if (data && data.items) {
       allItems = allItems.concat(data.items);
     }
@@ -112,6 +113,35 @@ async function listEvents(accessToken, timeMin, timeMax) {
   } while (pageToken && page < maxPages);
 
   return { items: allItems, nextSyncToken: nextSyncToken };
+}
+
+/**
+ * Enumerate every calendar on the user's Google account (calendarList.list),
+ * not just the primary one — 999.1626: pull sync silently, permanently
+ * missed events living on any secondary/shared calendar because listEvents
+ * hit /calendars/primary/events unconditionally with no discovery step.
+ *
+ * minAccessRole=reader excludes freeBusyReader-only entries (those calendars
+ * cannot return event details via events.list — only free/busy blocks).
+ */
+async function listCalendarList(accessToken) {
+  var allItems = [];
+  var pageToken = null;
+  var maxPages = 10;
+  var page = 0;
+  do {
+    var params = new URLSearchParams({ maxResults: '250', minAccessRole: 'reader' });
+    if (pageToken) params.append('pageToken', pageToken);
+
+    var data = await calendarFetch(accessToken, '/users/me/calendarList?' + params.toString());
+    if (data && data.items) {
+      allItems = allItems.concat(data.items);
+    }
+    pageToken = data && data.nextPageToken ? data.nextPageToken : null;
+    page++;
+  } while (pageToken && page < maxPages);
+
+  return allItems;
 }
 
 /**
@@ -238,6 +268,7 @@ module.exports = {
   getTokensFromCode,
   refreshAccessToken,
   listEvents,
+  listCalendarList,
   checkForChanges,
   insertEvent,
   patchEvent,

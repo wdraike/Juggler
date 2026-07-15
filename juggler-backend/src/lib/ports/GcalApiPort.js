@@ -9,8 +9,8 @@
  * API v3 consumed by the calendar hex slice's `GoogleCalendarAdapter` — so
  * it exposes EXACTLY that surface: `createOAuth2Client` / `getAuthUrl` /
  * `getTokensFromCode` / `refreshAccessToken` / `listEvents` /
- * `checkForChanges` / `insertEvent` / `patchEvent` / `deleteEvent` /
- * `batchRequest`.
+ * `listCalendarList` / `checkForChanges` / `insertEvent` / `patchEvent` /
+ * `deleteEvent` / `batchRequest`.
  *
  * ── BINDING INVARIANTS ──────────────────────────────────────────────────────
  *
@@ -42,8 +42,14 @@
  * @property {(oauth2Client: OAuth2Client, refreshToken: string) => Promise<Object>} refreshAccessToken
  *   Exchange a refresh token for fresh credentials.
  *
- * @property {(accessToken: string, timeMin: string, timeMax: string) => Promise<{items: Array<Object>, nextSyncToken: (string|null)}>} listEvents
- *   List events in a time range, paginating up to the cap (INVARIANT GC-3).
+ * @property {(accessToken: string, timeMin: string, timeMax: string, calendarId?: string) => Promise<{items: Array<Object>, nextSyncToken: (string|null)}>} listEvents
+ *   List events in a time range for the given calendar (default 'primary'),
+ *   paginating up to the cap (INVARIANT GC-3).
+ *
+ * @property {(accessToken: string) => Promise<Array<Object>>} listCalendarList
+ *   999.1626: enumerate every calendar on the account (calendarList.list,
+ *   minAccessRole=reader) — the discovery step GoogleCalendarAdapter uses to
+ *   pull from secondary/shared calendars, not just primary.
  *
  * @property {(accessToken: string, syncToken: string) => Promise<{hasChanges: boolean, changedCount?: number, nextSyncToken?: string, tokenInvalid?: boolean}>} checkForChanges
  *   Lightweight sync-token change check (INVARIANT GC-2).
@@ -85,8 +91,12 @@ GcalApiPort.prototype.refreshAccessToken = function refreshAccessToken(_oauth2Cl
   throw new Error('GcalApiPort.refreshAccessToken not implemented');
 };
 
-GcalApiPort.prototype.listEvents = function listEvents(_accessToken, _timeMin, _timeMax) {
+GcalApiPort.prototype.listEvents = function listEvents(_accessToken, _timeMin, _timeMax, _calendarId) {
   throw new Error('GcalApiPort.listEvents not implemented');
+};
+
+GcalApiPort.prototype.listCalendarList = function listCalendarList(_accessToken) {
+  throw new Error('GcalApiPort.listCalendarList not implemented');
 };
 
 GcalApiPort.prototype.checkForChanges = function checkForChanges(_accessToken, _syncToken) {
@@ -119,6 +129,7 @@ var GCAL_API_PORT_METHODS = Object.freeze([
   'getTokensFromCode',
   'refreshAccessToken',
   'listEvents',
+  'listCalendarList',
   'checkForChanges',
   'insertEvent',
   'patchEvent',
