@@ -74,7 +74,12 @@
 'use strict';
 
 process.env.NODE_ENV = 'test';
-process.env.REDIS_URL = 'redis://localhost:6479';
+// Pool/CI runs inject their slot's REDIS_URL — honor it. Pin the fixed
+// test-bed :6479 ONLY when unset (bare `npx jest` on a dev shell). The old
+// unconditional pin stomped the injected env: the suite silently escaped its
+// pool slot locally and dialed a nonexistent localhost in the CI container
+// (run 29382813936).
+if (!process.env.REDIS_URL) process.env.REDIS_URL = 'redis://localhost:6479';
 // H13: PAYMENT_SERVICE_URL fallback — NOT setting it here so the fallback
 // path ('http://localhost:5020') is exercised for product-discovery/plan fetch.
 // Individual tests that need a specific URL override via module-level mock.

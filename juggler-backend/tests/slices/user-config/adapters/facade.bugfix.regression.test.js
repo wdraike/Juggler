@@ -61,7 +61,12 @@
 
 process.env.NODE_ENV = 'test';
 process.env.PRODUCT_LABEL = 'juggler';
-process.env.REDIS_URL = 'redis://localhost:6479';
+// Pool/CI runs inject their slot's REDIS_URL — honor it. Pin the fixed
+// test-bed :6479 ONLY when unset (bare `npx jest` on a dev shell). The old
+// unconditional pin stomped the injected env: the suite silently escaped its
+// pool slot locally and dialed a nonexistent localhost in the CI container
+// (run 29382813936).
+if (!process.env.REDIS_URL) process.env.REDIS_URL = 'redis://localhost:6479';
 process.env.INTERNAL_SERVICE_KEY = 'test-key-b1b2';
 
 var path = require('path');

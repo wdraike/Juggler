@@ -40,7 +40,12 @@
 // ── TASK 2: pin Redis to test-bed :6479 BEFORE any require that reads REDIS_URL
 // lib/cache/index.js reads REDIS_URL at require() time to choose the adapter.
 // Setting it here (before any require below) ensures the module never sees :6379.
-process.env.REDIS_URL = 'redis://localhost:6479';
+// Pool/CI runs inject their slot's REDIS_URL — honor it. Pin the fixed
+// test-bed :6479 ONLY when unset (bare `npx jest` on a dev shell). The old
+// unconditional pin stomped the injected env: the suite silently escaped its
+// pool slot locally and dialed a nonexistent localhost in the CI container
+// (run 29382813936).
+if (!process.env.REDIS_URL) process.env.REDIS_URL = 'redis://localhost:6479';
 
 // ── Mock the entire lib/cache module so the controller's `cache` singleton is
 // our spy.  The mock is set up before any require() of the controller.
