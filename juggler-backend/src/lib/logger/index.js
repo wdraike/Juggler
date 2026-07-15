@@ -452,6 +452,7 @@ module.exports = {
   // undefined → `X.warn/error is not a function` crashes (cal-sync retry path,
   // data export, ai-usage-queue). Surfaced by the test de-rot (clusters W5/W7/W8).
   libCalAdapterLogger: loggers.libCalAdapter,
+  calAdapterAppleLogger: loggers.calAdapterApple,
   dataControllerLogger: loggers.dataController,
   aiUsageQueueLogger: loggers.aiUsageQueue,
   libUsageReporterLogger: loggers.libUsageReporter,
