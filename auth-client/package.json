@@ -5,8 +5,7 @@
   "main": "auth-client.js",
   "exports": {
     ".": "./auth-client.js",
-    "./mcp-auth": "./mcp-auth.js",
-    "./service-auth": "./service-auth.js"
+    "./mcp-auth": "./mcp-auth.js"
   },
   "dependencies": {
     "express": "^4.21.0",
