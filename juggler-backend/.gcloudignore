@@ -8,3 +8,8 @@ scripts
 tests
 Juggler.code-workspace
 .playwright-mcp
+
+# Service-auth dev keypair (999.1948) — never bake into a deployed image;
+# prod loads SERVICE_RSA_PRIVATE_KEY/PUBLIC_KEY/KID from Secret Manager env vars.
+src/keys/
+**/src/keys/
