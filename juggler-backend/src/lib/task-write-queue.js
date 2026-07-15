@@ -17,16 +17,15 @@ var { createLogger } = require('@raike/lib-logger');
 var logger = createLogger('task-write-queue');
 // 999.1199: lib/tasks-write is internal to slices/task/adapters (eslint
 // boundary) now — obtained via the task slice facade's exported
-// KnexTaskRepository class (getKnexTaskRepository() below), NOT a direct
-// require(). Lazy require (same idiom as getAcquireLock/getSseEmitter/getCache
-// below) because task/facade.js itself requires THIS module at load time
-// (taskWriteQueue.isLocked/enqueueWrite/splitFields) — a top-level require
-// here would close a load-order cycle.
-var _KnexTaskRepository;
-function getKnexTaskRepository() {
-  if (!_KnexTaskRepository) _KnexTaskRepository = require('../slices/task/facade').KnexTaskRepository;
-  return _KnexTaskRepository;
-}
+// KnexTaskRepository class, NOT a direct require(). 999.1628: a lazy require
+// of slices/task/facade here is STILL a graph edge for check-require-cycles.js
+// (lazy requires count), and task/facade.js itself top-level-requires THIS
+// module (taskWriteQueue.isLocked/enqueueWrite/splitFields) — that closed the
+// cycle task-write-queue -> slices/task/facade -> task-write-queue. Read
+// KnexTaskRepository from the dependency-free lib/task-repository-trigger seam
+// instead (facade.js registers itself there at load) — see that module's
+// header for the full inversion rationale.
+var { getKnexTaskRepository } = require('./task-repository-trigger');
 // 999.1198: the mutation→schedule trigger comes from the dependency-free
 // scheduleTrigger seam (scheduleQueue registers itself there at load), not a
 // lazy require of scheduler/scheduleQueue — that lazy require papered over the

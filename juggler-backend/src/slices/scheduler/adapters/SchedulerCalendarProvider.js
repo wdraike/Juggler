@@ -10,6 +10,17 @@
  * time directly without re-coupling to the cal-sync controller.
  *
  * No live behavior change in W2 — this is the forward-looking port boundary.
+ *
+ * 999.1628: `_facade()`'s default resolution reads the calendar facade from the
+ * dependency-free lib/calendar-facade-trigger seam (calendar/facade.js registers
+ * itself there at its own load) instead of `require('../../calendar/facade')`
+ * directly — that direct require (even lazy — still a graph edge for
+ * check-require-cycles.js) closed the cycle calendar/facade -> scheduler/facade
+ * -> adapters/index -> SchedulerCalendarProvider -> calendar/facade
+ * (gatherProviderSyncData requires scheduler/facade for ConstraintSolver, which
+ * pulls in this adapter via the barrel). See that seam module's header for the
+ * full inversion rationale. The `deps.calendarFacade` injection path (unit
+ * tests / future busy-query wiring) is unchanged.
  */
 
 'use strict';
@@ -19,10 +30,12 @@ var CALENDAR_PROVIDER_PORT_METHODS =
 
 /**
  * @param {Object} [deps]
- * @param {Object} [deps.calendarFacade] the calendar slice facade (default: the
- *   real `slices/calendar/facade`). Injectable for unit tests / future busy-query
- *   wiring. Resolved LAZILY (the calendar facade pulls in adapters; lazy keeps the
- *   scheduler load light when busy-query is unused — the H6 default path).
+ * @param {Object} [deps.calendarFacade] the calendar slice facade (default: read
+ *   from the calendar-facade-trigger seam, populated by the real
+ *   `slices/calendar/facade` at ITS load). Injectable for unit tests / future
+ *   busy-query wiring. Resolved LAZILY — the seam read is deferred to first use
+ *   so constructing a SchedulerCalendarProvider never requires the calendar
+ *   facade to already be registered (the H6 default path never calls `_facade()`).
  */
 function SchedulerCalendarProvider(deps) {
   var d = deps || {};
@@ -31,7 +44,7 @@ function SchedulerCalendarProvider(deps) {
 
 SchedulerCalendarProvider.prototype._facade = function _facade() {
   if (!this._calendarFacade) {
-    this._calendarFacade = require('../../calendar/facade');
+    this._calendarFacade = require('../../../lib/calendar-facade-trigger').getCalendarFacade();
   }
   return this._calendarFacade;
 };

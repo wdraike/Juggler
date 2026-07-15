@@ -1363,3 +1363,15 @@ module.exports = {
   // 999.1025 sub-leg 2: cal-sync controller "Phase 1" gather facade method
   gatherProviderSyncData: gatherProviderSyncData,
 };
+
+// 999.1628 (CalendarFacadeTriggerPort inversion): register this facade with
+// the dependency-free lib/calendar-facade-trigger seam so cross-slice
+// consumers (SchedulerCalendarProvider's forward-looking busy-query seam) can
+// reach it without a require() edge back into this file — that lazy require
+// closed the cycle calendar/facade -> scheduler/facade -> adapters/index ->
+// SchedulerCalendarProvider -> calendar/facade (gatherProviderSyncData
+// requires scheduler/facade for ConstraintSolver, which pulls in the adapter
+// barrel). Load-time registration: every production entrypoint (app.js's
+// route mounting) loads this facade well before any scheduler run could
+// construct a SchedulerCalendarProvider.
+require('../../lib/calendar-facade-trigger').registerCalendarFacade(module.exports);

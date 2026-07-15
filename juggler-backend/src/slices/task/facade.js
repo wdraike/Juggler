@@ -1794,3 +1794,13 @@ module.exports = {
   // controllers/billing-webhooks.controller.js.
   enforceDowngradeLimits: require('./adapters/DowngradeLimitsEnforcer').enforceDowngradeLimits,
 };
+
+// 999.1628 (TaskRepositoryTriggerPort inversion): register KnexTaskRepository
+// with the dependency-free lib/task-repository-trigger seam. lib/task-write-queue
+// reads it from there instead of lazy-requiring this facade — that lazy require
+// was still a graph edge (check-require-cycles.js counts them) and closed the
+// cycle task-write-queue -> slices/task/facade -> task-write-queue. Load-time
+// registration: every production entrypoint loads this facade before any
+// write-queue flush can fire (e.g. controllers/cal-sync.controller.js requires
+// it directly for its own KnexTaskRepository use).
+require('../../lib/task-repository-trigger').registerKnexTaskRepository(KnexTaskRepository);
