@@ -133,6 +133,27 @@ describe('tool registration', function () {
     var itemShape = mockToolRegistry.create_tasks.schema.tasks.element.shape;
     expect(itemShape.deadline.description).toMatch(/must not already be in the past/i);
   });
+
+  // 999.1567 (harrison BLOCK-1): juggler-mcp is a SEPARATE, LIVE stdio MCP
+  // server with its OWN zod schemas (forwards to the REST API, whose
+  // task.schema.js is .passthrough() — the facade's _requireRecurStartIfAnchor
+  // requirement was unsatisfiable for a ClimbRS caller through THIS server
+  // exactly the way it was for juggler-backend's tasks.js before this fix).
+  // Schema-shape checks (not just handler behavior) so a future removal of
+  // `recurStart` from these shapes fails a test, not just silently strips the
+  // field via zod's default unknown-key stripping.
+  test('999.1567: create_task schema exposes recurStart', function () {
+    expect(mockToolRegistry.create_task.schema.recurStart).toBeDefined();
+  });
+
+  test('999.1567: create_tasks batch item schema exposes recurStart', function () {
+    var itemShape = mockToolRegistry.create_tasks.schema.tasks.element.shape;
+    expect(itemShape.recurStart).toBeDefined();
+  });
+
+  test('999.1567: update_task schema exposes recurStart', function () {
+    expect(mockToolRegistry.update_task.schema.recurStart).toBeDefined();
+  });
 });
 
 // ═════════════════════════════════════════════════════════════════════════════

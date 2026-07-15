@@ -76,7 +76,6 @@ const { PLACEMENT_MODES } = require('../../lib/placementModes');
 const facade = require('../../slices/task/facade');
 const getUserTimezone = require('../getUserTimezone');
 const { isAnchorDependentRecur } = require('juggler-shared/scheduler/expandRecurring');
-const dateHelpers = require('juggler-shared/scheduler/dateHelpers');
 
 // Shared Zod fields for task input (used by create_task, create_tasks, update_task)
 var taskInputFields = {
@@ -115,6 +114,7 @@ var taskInputFields = {
     timesPerCycle: z.number().optional().describe('Target count per cycle (e.g. 3 for "3x per week"). Only used when fewer than all selected days are required.'),
     fillPolicy: z.enum(['keep', 'backfill']).optional().describe('When a session in a times-per-cycle recurrence is skipped: "keep" (default) leaves it skipped; "backfill" tells the scheduler to pick a new date to hit the target count.')
   }).optional().describe('Recurrence pattern'),
+  recurStart: z.string().optional().describe('Recurrence anchor date (YYYY-MM-DD or M/D) that cycle boundaries are computed from. REQUIRED when recur.type is "biweekly", "interval", "rolling", or a "timesPerCycle" pattern that selects fewer than all days — these types drift day-to-day without a stable anchor. Not needed for self-describing patterns (daily, weekly by day-of-week, monthly by calendar day).'),
   placementMode: z.enum(['anytime', 'time_window', 'time_blocks', 'fixed', 'all_day', 'reminder']).optional().describe('Scheduling mode. Inferred from date/time presence when omitted: time set → fixed; date only → all_day; neither → anytime.'),
   marker: z.boolean().optional().describe('Non-blocking reminder event — shows on calendar at its time but does not prevent tasks from being scheduled in the same slot. Use for events you want to see but not block time for (e.g. TV game windows, reminders). Can have status and dependencies like regular tasks.'),
   flexWhen: z.boolean().optional().describe('Allow the scheduler to relax this task\'s "when" time-of-day preference if it can\'t be placed within those windows. When false (default), the task stays unplaced if its when windows are full.'),
@@ -138,37 +138,29 @@ function applyAllDayBackstop(fields) {
   }
 }
 
-// ── recurStart default for anchor-dependent recur (cookie BLOCK-1, jug-mcp-facade WI-2) ──
+// ── recurStart for anchor-dependent recur (999.1567, David ruling 2026-07-15) ──
 // CreateTask.js sets _requireRecurStartIfAnchor=true, so the facade hard-rejects a
 // biweekly/interval/times-per-cycle recur (isAnchorDependentRecur) with no recurStart.
 // The OLD MCP path never required it — recur_start persisted null and the scheduler's
-// getAnchor (expandRecurring.js) fell back recur_start -> src.date -> startDate. The MCP
-// zod schema exposes NO recurStart field, so a ClimbRS caller has no way to satisfy the
-// facade's new requirement. Default it here to the SAME value getAnchor's src.date
-// fallback would have produced: the task's derived local date (from date/scheduledAt in
-// the user's timezone), else today's local date if neither is present. Boundary-correct
-// home is the MCP adapter, NOT CreateTask.js (which deliberately reproduces the HTTP/UI
-// reject for all callers — do not touch it).
-function defaultRecurStartIfAnchorDependent(task, tz) {
-  if (task.recurStart !== undefined && task.recurStart !== null && String(task.recurStart).trim() !== '') return;
-  if (!isAnchorDependentRecur(task.recur)) return;
-  var derivedDate = null;
-  if (task.date !== undefined) {
-    derivedDate = dateHelpers.toDateISO(task.date) || null;
-  } else if (task.scheduledAt !== undefined) {
-    // Pass a real Date object, not the raw ISO string: the MCP schema's scheduledAt
-    // already carries a trailing 'Z' ('2026-08-04T14:00:00.000Z'), but utcToLocal's
-    // string-handling branch assumes a MySQL-style space-separated string with NO
-    // trailing 'Z' and appends one itself (`.replace(' ','T')+'Z'`) — double-Z on an
-    // already-Z-terminated ISO string produces Invalid Date and silently falls
-    // through to the today-fallback below (telly WARN jug-mcp-facade-recurstart-scheduledat-bug).
-    derivedDate = dateHelpers.utcToLocal(new Date(task.scheduledAt), tz).date;
-  }
-  if (!derivedDate) {
-    derivedDate = dateHelpers.utcToLocal(new Date(), tz).date;
-  }
-  task.recurStart = derivedDate;
-}
+// getAnchor (expandRecurring.js) fell back recur_start -> src.date -> startDate.
+//
+// RULED (supersedes the prior cookie BLOCK-1 fix, which defaulted recurStart HERE in
+// the adapter — that silent default is REJECTED): "EXPOSE recurStart in the MCP zod
+// schema — requirement STAYS, callers supply it. No adapter default. ClimbRS-side
+// calls adapt via the served schema; batch/update paths get the same requirement for
+// consistency." `recurStart` is now a field on `taskInputFields` (above) — a caller
+// that omits it for an anchor-dependent recur gets the SAME 400 create_task/
+// create_tasks/CreateTask.js/BatchCreateTasks.js have always produced; there is no
+// fallback value computed on the caller's behalf.
+//
+// update_task: UpdateTask.js's shared facade does NOT set _requireRecurStartIfAnchor
+// (deliberately — a partial PATCH that doesn't touch `recurStart` at all must not
+// clobber an existing anchor; see taskValidation.js's existing-aware "cannot be
+// cleared" branch). To give the MCP update_task tool the SAME hard-require contract
+// as create (per the ruling) WITHOUT changing that shared partial-update semantic for
+// the HTTP API / juggler frontend, the requirement is enforced HERE, in update_task's
+// OWN pre-facade validateTaskInput call below (MCP-adapter-scoped, matching the
+// boundary-correct pattern this file already uses for its other MCP-only guards).
 
 // ── facade error -> MCP free-text translator ──────────────────────────────────
 // behavior_contract: MCP's free-text isError strings must stay byte-identical
@@ -257,7 +249,6 @@ function registerTaskTools(server, userId) {
       var tz = await getUserTimezone(userId);
       var task = Object.assign({}, params);
       applyAllDayBackstop(task);
-      defaultRecurStartIfAnchorDependent(task, tz);
 
       // create_task's OWN AND-based fixed-mode guard (date+time BOTH required,
       // unlike validateTaskInput's OR-based check above) — reachable whenever
@@ -318,7 +309,6 @@ function registerTaskTools(server, userId) {
         var task = Object.assign({}, t);
         if (!task.id) task.id = uuidv7();
         applyAllDayBackstop(task);
-        defaultRecurStartIfAnchorDependent(task, tz);
         return task;
       });
 
@@ -395,7 +385,15 @@ function registerTaskTools(server, userId) {
       var valInputFields = _uFixedExemptByExisting
         ? Object.assign({}, fields, { scheduledAt: _uExisting.scheduled_at })
         : fields;
-      var valErrors = validateTaskInput(valInputFields);
+      // 999.1567 (David ruling 2026-07-15): update_task gets the SAME
+      // recurStart-required-for-anchor contract create_task/create_tasks have
+      // (_requireRecurStartIfAnchor) — set HERE, on this adapter's OWN
+      // pre-facade validateTaskInput call, not on UpdateTask.js's shared
+      // facade (which stays existing-aware/partial-PATCH-safe for the HTTP
+      // API — see the recurStart comment block above create_task). Harmless
+      // when body.recur is absent or non-anchor-dependent (isAnchorDependentRecur
+      // gates the whole check inside validateTaskInput).
+      var valErrors = validateTaskInput(Object.assign({}, valInputFields, { _requireRecurStartIfAnchor: true }));
       if (valErrors.length > 0) {
         return { content: [{ type: 'text', text: 'Validation error: ' + valErrors.join('; ') }], isError: true };
       }
@@ -617,6 +615,26 @@ function registerTaskTools(server, userId) {
           var _bExisting = existingById[u.id];
           if (!_bHasDate && !_bHasTime && !_bHasScheduledAt && !(_bExisting && _bExisting.scheduled_at)) {
             txErrors.push({ id: u.id, error: 'Validation error: placementMode "fixed" requires a date, time, or scheduledAt' });
+          }
+        }
+        // 999.1567 (harrison WARN-2): batch_update_tasks must NOT be a
+        // back-door around update_task's new recurStart requirement — a
+        // caller could otherwise dodge the guard just by wrapping the same
+        // update in a 1-item batch. BatchUpdateTasks.js's OWN internal
+        // validateTaskInput call (999.1396) does NOT set
+        // _requireRecurStartIfAnchor (existing-aware, HTTP-facing — left
+        // untouched here, same as update_task's facade). Reproduced as a
+        // narrow, hand-written pre-check (NOT a raw validateTaskInput(u) call
+        // — that would re-run the fixed-mode cross-field check EXISTING-BLIND
+        // and reintroduce the 999.1396 false-reject this same handler already
+        // fixed via existingById above) mirroring taskValidation.js's
+        // _requireRecurStartIfAnchor branch exactly, MCP-adapter-scoped like
+        // update_task's guard (tasks.js update_task handler above) so the
+        // HTTP API's batch-update semantics are unchanged.
+        if (isAnchorDependentRecur(u.recur)) {
+          var _bRecurStart = u.recurStart;
+          if (_bRecurStart === undefined || _bRecurStart === null || String(_bRecurStart).trim() === '') {
+            txErrors.push({ id: u.id, error: 'Validation error: Recurrence start date is required for biweekly, interval, or times-per-cycle patterns' });
           }
         }
       });
