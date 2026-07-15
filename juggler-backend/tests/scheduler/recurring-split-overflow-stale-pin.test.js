@@ -466,7 +466,7 @@ describe('BUG-1 (sched-chunk-collision-lockbypass) — genuine RECURRING_SPLIT_O
 // gap will flip it RED as a tripwire — at which point runSchedule.js
 // :2001-2003 coverage per zoe-scso-1 becomes achievable and should be added
 // then (mirroring the fixture shape investigated here).
-describe('zoe-scso-1 DISPOSITION (documented unreachable) — a pre-existing multi-chunk rolling occurrence loses its split-ness the moment it forward-rolls, before overflow classification ever runs', function () {
+describe('zoe-scso-1 (999.1561 FIX) — rolling forward-roll NOW preserves split-ness: multi-chunk occurrence keeps split_total and sibling survives', function () {
   var USER_ID2 = 'bug1-overflow-fr-u1';
   var MASTER_ID2 = 'bug1-overflow-fr-master-1';
   var ANCHOR2 = '2026-06-01';
@@ -538,7 +538,7 @@ describe('zoe-scso-1 DISPOSITION (documented unreachable) — a pre-existing mul
     await db('users').where('id', USER_ID2).del();
   }, 30000);
 
-  test('rolling forward-roll collapses the existing 2-chunk occurrence to a single (split_total=1) row and deletes the sibling BEFORE overflow classification — confirming RECURRING_SPLIT_OVERFLOW + forwardRollDeadlineById can never co-occur on today\'s code', async function () {
+  test('rolling forward-roll NOW preserves the 2-chunk occurrence (split_total stays 2, sibling survives) — 999.1561 fix to expandRecurring rolling path + forward-roll IIFE', async function () {
     var { runScheduleAndPersist, _setClock } = require('../../src/scheduler/runSchedule');
     var { FakeClockAdapter } = require('../helpers/clock');
     var prevClock = _setClock(new FakeClockAdapter({ startTime: FROZEN_DAY + 'T05:00:00-04:00' }));
@@ -550,20 +550,18 @@ describe('zoe-scso-1 DISPOSITION (documented unreachable) — a pre-existing mul
 
     var rows = await db('task_instances').where({ user_id: USER_ID2, master_id: MASTER_ID2 }).select();
 
-    // The sibling was deleted as a "stale duplicate" (999.1490 exception) —
-    // NOT preserved as a genuine second chunk of the same split occurrence.
+    // 999.1561 FIX: the sibling now SURVIVES (previously deleted as a "stale
+    // duplicate" because the forward-roll IIFE + expandRecurring's rolling
+    // path both dropped split/splitMin, collapsing split_total to 1).
     var siblingRow = rows.find(function (r) { return r.id === SIBLING_CHUNK_ID2; });
-    expect(siblingRow).toBeUndefined();
+    expect(siblingRow).toBeTruthy();
 
-    // The primary survives, but its split_total has been drift-fixed back
-    // to 1 (not the originally-seeded 2) — it is no longer classifiable as
-    // a split chunk at all, regardless of whether it places or overflows.
+    // The primary survives with its split_total preserved at 2 (not
+    // drift-fixed back to 1) — it remains a genuine multi-chunk occurrence.
     var primaryRow = rows.find(function (r) { return r.id === OCC_PRIMARY_ID2; });
     expect(primaryRow).toBeTruthy();
-    expect(Number(primaryRow.split_total)).toBe(1);
-    // Consequently it can never carry unplaced_reason=recurring_split_overflow
-    // (unifiedScheduleV2.js requires splitTotal>1 to stamp that reason) —
-    // this is the unreachability zoe-scso-1 asked us to prove.
-    expect(primaryRow.unplaced_reason).not.toBe(REASON_CODES.RECURRING_SPLIT_OVERFLOW);
+    expect(Number(primaryRow.split_total)).toBe(2);
+    // The sibling also carries split_total=2.
+    expect(Number(siblingRow.split_total)).toBe(2);
   }, 30000);
 });

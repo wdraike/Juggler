@@ -1067,7 +1067,14 @@ async function runScheduleAndPersist(userId, _retries, options) {
         pri: t.pri,
         dayReq: 'any',
         when: t.when,
-        placement_mode: t.placementMode || t.placement_mode
+        placement_mode: t.placementMode || t.placement_mode,
+        // 999.1561: carry split/splitMin so the chunk-fanout step
+        // (:1219 `if (occ.split)`) preserves multi-chunk rows. Without
+        // these, the synthetic occurrence collapses to split_total=1
+        // and deletes sibling chunk rows before
+        // RECURRING_SPLIT_OVERFLOW classification can run.
+        split: t.split,
+        splitMin: t.splitMin
       });
       logger.info('[SCHED] roll-fwd: master ' + t.id + ' stranded at ' + stranded.date + ' → synthetic target ' + timeInfo.todayKey + ' (cycle ends ' + _frPeriodEndKey + ')');
     });

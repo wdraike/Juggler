@@ -713,6 +713,11 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
         dayReq: 'any',
         when: src.when,
         placement_mode: src.placement_mode,
+        // 999.1561: carry split/splitMin so the chunk-fanout step
+        // preserves multi-chunk rows (the non-rolling path at :823
+        // already copies these; the rolling path was missing them).
+        split: src.split,
+        splitMin: src.splitMin,
         occurrence_ordinal: nextOrdBySource[src.id]
       });
       // R5: emit ONLY the single active instance per run. The next is projected on a
