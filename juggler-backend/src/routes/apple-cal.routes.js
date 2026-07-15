@@ -10,14 +10,15 @@ var { authenticateJWT } = require('../middleware/jwt-auth');
 var { validate } = require('../middleware/validate');
 var {
   appleCalConnectSchema,
-  appleCalSelectSchema,
   appleCalSelectCalendarsSchema,
   appleCalAutoSyncSchema,
 } = require('../schemas/route-schemas');
 
 router.get('/status', authenticateJWT, appleCalController.getStatus);
 router.post('/connect', authenticateJWT, validate(appleCalConnectSchema), appleCalController.connect);
-router.post('/select-calendar', authenticateJWT, validate(appleCalSelectSchema), appleCalController.selectCalendar);
+// 999.1241: deprecated singular /select-calendar removed — FE only calls
+// plural /select-calendars (CalSyncPanel). The singular route's controller
+// is retained for reference but no longer wired.
 router.post('/select-calendars', authenticateJWT, validate(appleCalSelectCalendarsSchema), appleCalController.selectCalendars);
 router.get('/calendars', authenticateJWT, appleCalController.getCalendars);
 router.get('/refresh-calendars', authenticateJWT, appleCalController.refreshCalendars);
