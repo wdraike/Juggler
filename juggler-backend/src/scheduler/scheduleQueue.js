@@ -320,8 +320,14 @@ async function claimAndRun(userId) {
     await runWithLock(userId, async function() {
       // Flush any pending writes before scheduler reads task state
       await flushQueueInLock(userId);
-      // Run the scheduler
-      _schedResult = await runScheduleAndPersist(userId, row.source);
+      // Run the scheduler. Signature is (userId, _retries, options) — seed
+      // retries with 0. row.source (a provenance string like 'mcp') used to be
+      // passed here, landing in the _retries slot: `'mcp' < MAX_RETRIES` is
+      // false, so transient deadlock retries NEVER fired for queued runs
+      // (999.1632 investigation, 2026-07-15). Note queued runs still pass no
+      // options.timezone — Settings-tz threading for background runs is
+      // tracked separately (999.1633).
+      _schedResult = await runScheduleAndPersist(userId, 0);
     });
 
     // Success: sweep the queue and notify frontend with the changeset

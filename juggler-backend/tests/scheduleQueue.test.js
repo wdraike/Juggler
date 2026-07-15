@@ -101,8 +101,12 @@ describe('scheduleQueue', () => {
     clearDebounce('user1');
     await processUser('user1');
     expect(runScheduleAndPersist).toHaveBeenCalledTimes(1);
-    // runScheduleAndPersist is called with (userId, source)
-    expect(runScheduleAndPersist).toHaveBeenCalledWith('user1', expect.anything());
+    // runScheduleAndPersist's signature is (userId, _retries, options). The
+    // queue used to pass row.source (a provenance STRING like 'mcp') into the
+    // _retries slot — making `retries < MAX_RETRIES` false, so transient
+    // deadlock retries NEVER fired for queued runs (found in the 999.1632
+    // UTC-parity investigation, 2026-07-15). Pin the numeric seed.
+    expect(runScheduleAndPersist).toHaveBeenCalledWith('user1', 0);
   });
 
   test('different users run independently', async () => {
