@@ -10,6 +10,11 @@ var { rowToTask, buildSourceMap } = require('../src/controllers/task.controller'
 var { DEFAULT_TIME_BLOCKS, DEFAULT_TOOL_MATRIX } = require('../src/scheduler/constants');
 var tasksWrite = require('../src/lib/tasks-write');
 var { assertDbAvailable } = require('./helpers/requireDB');
+// 999.1632: anchor fixture "today"/"today+/-N" to the PRODUCT's own clock
+// (getNowInTimezone) instead of process-local `new Date()` getters / raw
+// `toISOString()` UTC slicing — the process TZ (UTC in CI) and America/
+// New_York's calendar day disagree during a daily window regardless of TZ.
+var schedClock = require('./helpers/schedulerClock');
 
 var available = false;
 var USER_ID = 'run-sched-test-001';
@@ -484,12 +489,14 @@ describe('BUG-671 regression: floating tasks must never be flagged overdue', () 
   var STALE_DATE_UTC = '2026-06-10 00:00:00'; // 6+ days before leg authoring date
   var STALE_DATE_KEY = '2026-06-10';           // YYYY-MM-DD form used by scheduler
 
-  // Helper: get today's key from the real clock (YYYY-MM-DD in UTC).
-  // Tests run against the real scheduler clock; we can't freeze it here.
+  // Helper: get today's key from the real clock. 999.1632: must be the SAME
+  // "today" runScheduleAndPersist uses (getNowInTimezone(TZ)) — a raw UTC
+  // calendar day disagrees with America/New_York's for a ~4-5h daily window
+  // (NY midnight is 04:00/05:00 UTC), which flaked `scheduledDate >= today`
+  // below regardless of process TZ. Tests run against the real scheduler
+  // clock; we can't freeze it here.
   function todayKey() {
-    var d = new Date();
-    var m = d.getUTCMonth() + 1, day = d.getUTCDate();
-    return d.getUTCFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
+    return schedClock.todayKey(TZ);
   }
 
   // Helper: find a task's entry in dayPlacements (searches all date keys)
@@ -1750,10 +1757,11 @@ describe('BUG-142 regression: past recurring instance auto-miss (Plan C)', () =>
     // A subsequent placement pass then assigns a real slot.
     var row = await db('tasks_v').where('id', 'b142-nonrecur-ac4').first();
     expect(row).toBeTruthy();
-    // After the run, scheduled_at must be >= today (rolled forward)
-    var today = new Date();
-    var y2 = today.getUTCFullYear(), m2 = today.getUTCMonth() + 1, d2 = today.getUTCDate();
-    var todayKey = y2 + '-' + (m2 < 10 ? '0' : '') + m2 + '-' + (d2 < 10 ? '0' : '') + d2;
+    // After the run, scheduled_at must be >= today (rolled forward). 999.1632:
+    // must be the SAME "today" runScheduleAndPersist uses (getNowInTimezone(TZ))
+    // — a raw UTC calendar day disagrees with America/New_York's for a ~4-5h
+    // daily window (NY midnight is 04:00/05:00 UTC).
+    var todayKey = schedClock.todayKey(TZ);
     var scheduledDate = (row.scheduled_at || '').slice(0, 10);
     expect(scheduledDate >= todayKey).toBe(true); // rolled forward to today or later
   });
@@ -1896,10 +1904,11 @@ describe('§8 preserve-path: flexible-TPC past scheduled_at → forward-rolled o
 
     // Use today-3 as the dead anchor so the recurrence period end (anchor+7 = today+4)
     // is still in the future — the instance is within-period and eligible for forward-roll.
-    var now = new Date();
-    var pastDate = new Date(now);
-    pastDate.setDate(pastDate.getDate() - 3);
-    var pastDateKey = pastDate.toISOString().slice(0, 10);      // YYYY-MM-DD
+    // 999.1632: anchored to the PRODUCT's today (getNowInTimezone(TZ)), not
+    // process-local `new Date()` + toISOString() UTC slicing — the previous
+    // form mixed a process-TZ day-arithmetic step with a UTC-formatted result,
+    // disagreeing with America/New_York's calendar day under TZ=UTC.
+    var pastDateKey = schedClock.dateFromToday(-3, TZ);          // YYYY-MM-DD
     var pastScheduledAt = pastDateKey + ' 14:00:00';            // 2pm UTC on dead day
 
     var instId = tmplId + '-' + pastDateKey.replace(/-/g, '');

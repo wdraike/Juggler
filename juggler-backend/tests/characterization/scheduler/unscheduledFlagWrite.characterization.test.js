@@ -127,6 +127,10 @@ var RunScheduleCommand = require('../../../src/slices/scheduler/application/RunS
 // from src/slices/scheduler/adapters/) — CommonJS caches it, so spying a method here is observed
 // by the repository's `this.tasksWrite.updateTaskById(...)` call.
 var tasksWrite = require('../../../src/lib/tasks-write');
+// 999.1632: anchor fixture "today+N" to the PRODUCT's own clock
+// (getNowInTimezone) instead of process-local `new Date()` getters — the
+// process TZ (UTC in CI) can disagree with America/New_York's calendar day.
+var { dateFromToday } = require('../../helpers/schedulerClock');
 
 var USER_ID = 'unschedflag-test-u1';
 var TZ = 'America/New_York';
@@ -171,10 +175,7 @@ beforeEach(async () => {
 });
 
 function futureISO(daysAhead) {
-  var d = new Date();
-  d.setDate(d.getDate() + daysAhead);
-  var y = d.getFullYear(), m = d.getMonth() + 1, day = d.getDate();
-  return y + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
+  return dateFromToday(daysAhead, TZ);
 }
 
 async function seedOrphanMaster(overrides) {

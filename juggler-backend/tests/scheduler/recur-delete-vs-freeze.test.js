@@ -70,6 +70,10 @@ var { DEFAULT_TIME_BLOCKS, DEFAULT_TOOL_MATRIX } = require('../../src/scheduler/
 var tasksWrite = require('../../src/lib/tasks-write');
 var { rowToTask } = require('../../src/slices/task/domain/mappers/taskMappers');
 var { getNowInTimezone } = require('../../../shared/scheduler/getNowInTimezone');
+// 999.1632: anchor fixture "today"/"yesterday"/"tomorrow" to the PRODUCT's own
+// clock (getNowInTimezone) instead of process-local `new Date()` getters — the
+// process TZ (UTC in CI) can disagree with America/New_York's calendar day.
+var schedClock = require('../helpers/schedulerClock');
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -79,24 +83,14 @@ var { getNowInTimezone } = require('../../../shared/scheduler/getNowInTimezone')
  * value (dateStrings:true trap).
  */
 function yesterdayISO() {
-  var d = new Date();
-  d.setDate(d.getDate() - 1);
-  var y = d.getFullYear();
-  var m = d.getMonth() + 1;
-  var day = d.getDate();
-  return y + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
+  return schedClock.yesterdayKey(TZ);
 }
 
 /**
  * Return tomorrow's date as ISO string 'YYYY-MM-DD'.
  */
 function tomorrowISO() {
-  var d = new Date();
-  d.setDate(d.getDate() + 1);
-  var y = d.getFullYear();
-  var m = d.getMonth() + 1;
-  var day = d.getDate();
-  return y + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
+  return schedClock.tomorrowKey(TZ);
 }
 
 /**
@@ -339,10 +333,11 @@ describe('AC1 same-day — recurring instance dated TODAY and INCOMPLETE survive
    * `< today` grandfather; they are deleted.
    */
   it('AC1 same-day: today-dated pending instance excluded from desired survives', async () => {
-    var today = new Date();
-    var todayISO = today.getFullYear() + '-' +
-      (today.getMonth() + 1 < 10 ? '0' : '') + (today.getMonth() + 1) + '-' +
-      (today.getDate() < 10 ? '0' : '') + today.getDate();
+    // 999.1632: must agree with the SAME "today" runScheduleAndPersist uses
+    // (getNowInTimezone(TZ)) — a process-local `new Date()` "today" can land
+    // on the product's tomorrow (recur_start), which this fixture requires
+    // to stay excluded from expandRecurring's desired occurrences.
+    var todayISO = schedClock.todayKey(TZ);
 
     // Use recur_start=tomorrow so expandRecurring generates no instance for today.
     var master = await seedMaster({

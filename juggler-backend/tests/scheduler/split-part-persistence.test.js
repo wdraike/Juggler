@@ -44,6 +44,10 @@ var knexLib = require('knex');
 var db = require('../../src/db');
 var { runScheduleAndPersist } = require('../../src/scheduler/runSchedule');
 var { DEFAULT_TIME_BLOCKS, DEFAULT_TOOL_MATRIX } = require('../../src/scheduler/constants');
+// 999.1632: anchor fixture "today"/"yesterday" to the PRODUCT's own clock
+// (getNowInTimezone) instead of process-local `new Date()` getters — the
+// process TZ (UTC in CI) can disagree with America/New_York's calendar day.
+var { todayKey: schedTodayKey, yesterdayKey: schedYesterdayKey } = require('../helpers/schedulerClock');
 
 var USER_ID = 'splitpart-test-u1';
 var TZ = 'America/New_York';
@@ -52,8 +56,7 @@ var MASTER_ID = 'splitpart-master-1';
 var dbAvailable = false;
 
 function todayISO() {
-  var d = new Date();
-  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  return schedTodayKey(TZ);
 }
 
 async function cleanup() {
@@ -175,13 +178,17 @@ describe('999.841 — split chunks persist as separate rows (not merge-deleted)'
   //     never-hard-delete a past incomplete recurring instance)
   it('a PAST (yesterday) pending split occurrence keeps all 4 chunk rows after a run', async () => {
     await seedSplitMaster();
-    var y = new Date(); y.setDate(y.getDate() - 1);
-    var yISO = y.getFullYear() + '-' + String(y.getMonth() + 1).padStart(2, '0') + '-' + String(y.getDate()).padStart(2, '0');
+    var yISO = schedYesterdayKey(TZ);
+    // Sibling ids follow the product convention (runSchedule.js:1222):
+    // primaryId (split_ordinal 1) carries no suffix; chunks 2..N are
+    // primaryId + '-' + splitOrdinal. split_group = primaryId when >1 chunk.
+    var primaryId = MASTER_ID + '-y-1';
     // Seed 4 pending chunks for yesterday (so1 placed, so2-4 split parts).
     for (var k = 1; k <= 4; k++) {
+      var chunkId = k === 1 ? primaryId : primaryId + '-' + k;
       await db('task_instances').insert({
-        id: MASTER_ID + '-y-' + k, user_id: USER_ID, master_id: MASTER_ID,
-        occurrence_ordinal: 50, split_ordinal: k, split_total: 4, split_group: MASTER_ID + '-y',
+        id: chunkId, user_id: USER_ID, master_id: MASTER_ID,
+        occurrence_ordinal: 50, split_ordinal: k, split_total: 4, split_group: primaryId,
         dur: 60, status: '', date: yISO,
         scheduled_at: k === 1 ? yISO + ' 09:00:00' : null,
         unscheduled: k === 1 ? null : 1,
