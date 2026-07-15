@@ -22,7 +22,7 @@ const taskCreateSchema = z.object({
   project: z.string().max(100).optional(),
   location: z.array(z.any()).optional(),
   tools: z.array(z.string()).optional(),
-  recur: z.string().max(200).optional().nullable(),
+  recur: z.union([z.string().max(200), z.object({}).passthrough()]).optional().nullable(),
   split: z.boolean().optional(),
   dependsOn: z.array(z.string().uuid()).optional(),
   url: z.string().url().max(2048).optional().nullable(),
