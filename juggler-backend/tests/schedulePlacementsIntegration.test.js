@@ -189,7 +189,18 @@ describe('deriveSchedulePlacements', () => {
     });
     // Use runScheduleAndPersist directly: overdue injection (snap + _overdue flag) is in
     // runScheduleAndPersist, not in deriveSchedulePlacements (read-only helper).
-    var result = await runScheduleAndPersist(USER_ID, undefined, { timezone: 'America/New_York' });
+    // Freeze the scheduler clock at 14:00 ET on the fixture's own todayKey —
+    // the comment above ('always < nowMins at afternoon test-run time') was an
+    // ASSUMPTION, not a guarantee: between 00:00 and 01:00 ET the 1:00 AM
+    // scheduled_at is NOT yet past (CI run 29389096405 failed at 00:39 EDT).
+    // Same _setClock seam as runScheduleIntegration's 999.1427 precedent.
+    var _setClock = require('../src/scheduler/runSchedule')._setClock;
+    var FakeClockAdapter = require('./helpers/clock').FakeClockAdapter;
+    var prevClock = _setClock(new FakeClockAdapter({ startTime: todayKey + 'T14:00:00-04:00' }));
+    var result;
+    try {
+      result = await runScheduleAndPersist(USER_ID, undefined, { timezone: 'America/New_York' });
+    } finally { _setClock(prevClock); }
     var placements = (result.dayPlacements && result.dayPlacements[todayKey]) || [];
     var placement = placements.find(function(p) { return p.task && p.task.id === 'gp-snap-001'; });
     expect(placement).toBeDefined();
