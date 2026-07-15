@@ -57,17 +57,18 @@ export default function SettingsPanel({ onClose, darkMode, config, allProjectNam
           borderBottom: `1px solid ${theme.border}`, overflowX: 'auto'
         }} role="tablist" aria-label="Settings tabs">
           {TABS.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)} title={t.tip} role="tab" aria-selected={tab === t.id} aria-label={t.label} style={{
-            border: 'none', borderRadius: 6, padding: '5px 12px', cursor: 'pointer',
-            background: tab === t.id ? theme.accent : 'transparent',
-            color: tab === t.id ? '#FDFAF5' : theme.textSecondary,
-            fontSize: 12, fontWeight: tab === t.id ? 600 : 400, fontFamily: 'inherit',
-            whiteSpace: 'nowrap'
-          }}>
-            <HelpIcon text={t.tip} theme={theme} style={{ display: 'inline-flex', marginRight: 4, verticalAlign: 'middle' }}>
-              <span>{t.label}</span>
-            </HelpIcon>
-          </button>
+          <span key={t.id} style={{ display: 'inline-flex', alignItems: 'center' }}>
+            <button onClick={() => setTab(t.id)} title={t.tip} role="tab" aria-selected={tab === t.id} aria-label={t.label} style={{
+              border: 'none', borderRadius: 6, padding: '5px 12px', cursor: 'pointer',
+              background: tab === t.id ? theme.accent : 'transparent',
+              color: tab === t.id ? '#FDFAF5' : theme.textSecondary,
+              fontSize: 12, fontWeight: tab === t.id ? 600 : 400, fontFamily: 'inherit',
+              whiteSpace: 'nowrap'
+            }}>
+              {t.label}
+            </button>
+            <HelpIcon text={t.tip} theme={theme} style={{ display: 'inline-flex', verticalAlign: 'middle' }} />
+          </span>
           ))}
         </div>
 

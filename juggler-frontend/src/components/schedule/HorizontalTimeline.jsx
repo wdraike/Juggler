@@ -282,6 +282,7 @@ export default function HorizontalTimeline({
               onMouseEnter={hw ? function(e) { setHoveredHour(hour); setHoveredPos({ x: e.clientX, y: e.clientY }); } : undefined}
               onMouseMove={hw ? function(e) { setHoveredPos({ x: e.clientX, y: e.clientY }); } : undefined}
               onMouseLeave={hw ? function() { setHoveredHour(null); setHoveredPos(null); } : undefined}
+              title={hw ? formatHour(hour) + ' — ' + weatherCodeLabel(hw.code) + (hw.temp != null ? ', ' + Math.round(hw.temp) + '°' + unit : '') : undefined}
             >
               <span>{formatHour(hour)}</span>
               {locIcon(locId) && <span style={{ fontSize: isMobile ? 10 : 12, opacity: 0.7, lineHeight: 1 }}>{locIcon(locId)}</span>}

@@ -406,7 +406,7 @@ export default function CalendarGrid({
               onMouseEnter={hw ? function(e) { setHoveredHour(hour); setHoveredPos({ x: e.clientX, y: e.clientY }); } : undefined}
               onMouseMove={hw ? function(e) { setHoveredPos({ x: e.clientX, y: e.clientY }); } : undefined}
               onMouseLeave={hw ? function() { setHoveredHour(null); setHoveredPos(null); } : undefined}
-              title={onHourLocationOverride ? 'Click to change location for ' + formatHour(hour) : undefined}
+              title={onHourLocationOverride ? 'Click to change location for ' + formatHour(hour) : hw ? formatHour(hour) + ' — ' + weatherCodeLabel(hw.code) + ', ' + Math.round(hw.temp) + '°' + ((schedCfg && schedCfg.temperatureUnit) || 'F') : undefined}
               style={{ position: 'absolute', top: i * hourHeight, left: 0, width: '100%', textAlign: 'center', pointerEvents: (onHourLocationOverride || hw) ? 'auto' : 'none', cursor: onHourLocationOverride ? 'pointer' : 'default', overflow: 'visible' }}
             >
               {/* Precip bar segment on left edge */}
