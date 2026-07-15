@@ -86,11 +86,20 @@ describe('REASON_CODES — enum string values (output contract)', () => {
     expect(REASON_CODES.TPC_BUDGET).toBe('tpc_budget');
   });
 
-  test('REASON_CODES contains exactly 12 entries (no undocumented codes)', () => {
+  test('SCHED_COLLISION value is exactly "sched_collision"', () => {
+    // Persist-boundary collision guard demotion (999.1568, R11.23).
+    // Documented WITHOUT a dedicated REASON_LABELS entry — labelFor falls back
+    // to the humanized code ('Sched collision') per the R11.23 taxonomy table.
+    expect(REASON_CODES.SCHED_COLLISION).toBe('sched_collision');
+  });
+
+  test('REASON_CODES contains exactly 13 entries (no undocumented codes)', () => {
     // Guards against silent addition of undocumented codes without updating REQUIREMENTS.md.
     // If a new code is legitimately added: update REQUIREMENTS.md, SPEC, and increment this count.
     // 10 → 12: DEP_BLOCKED (999.1084) + SPACING_BLOCKED (999.874) added.
-    expect(Object.keys(REASON_CODES).length).toBe(12);
+    // 12 → 13: SCHED_COLLISION (999.1568, R11.23) — added in 18dc6a74 which
+    // documented R11.23 but missed this count; caught by the pool run 2026-07-14.
+    expect(Object.keys(REASON_CODES).length).toBe(13);
   });
 
   test('REASON_CODES is frozen (immutable — cannot be monkey-patched at runtime)', () => {
