@@ -10,11 +10,6 @@
 
 var crypto = require('crypto');
 const getDb = () => require('../db');
-// 999.1199: lib/tasks-write is internal to slices/task/adapters (eslint
-// boundary) now — obtained via the task slice facade's exported
-// KnexTaskRepository class instead of a direct require (see the write-phase
-// transaction below).
-var { KnexTaskRepository } = require('../slices/task/facade');
 var { getConnectedAdapters } = require('../slices/calendar/facade');
 var calendarFacade = require('../slices/calendar/facade');
 var { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
@@ -23,14 +18,19 @@ var { localToUtc } = require('../scheduler/dateHelpers');
 var { safeTimezone } = require('juggler-shared/scheduler/dateHelpers');
 var { taskHash, userHash, isoToJugglerDate, toMySQLDate, DEFAULT_TIMEZONE, callWithRateLimit, isEventPast, isStalePastSkipRow } = require('./cal-sync-helpers');
 var sseEmitter = require('../lib/sse-emitter');
-var { acquireLock, releaseLock, refreshLock } = require('../lib/sync-lock');
-var { flushQueueInLock } = require('../lib/task-write-queue');
 var { PLACEMENT_MODES } = require('../lib/placementModes');
 var { isTerminalStatus } = require('../lib/task-status');
 // 999.1025 sub-leg 2: the ConstraintSolver.effectiveDuration duration-
 // correction pass (999.1217/D6) moved into gatherProviderSyncData in
 // slices/calendar/facade.js along with the rest of sync()'s Phase 1 — no
 // longer needed at this scope. See that function's JSDoc for the boundary.
+// 999.1025 sub-leg 3: the Write Phase (lock acquire/retry, flush, conflict
+// detection, the 7-step transaction, lock release) moved into
+// runSyncWritePhase in slices/calendar/facade.js along with the rest of that
+// phase — KnexTaskRepository (999.1199 eslint-boundary import) and the
+// lib/sync-lock (acquireLock/releaseLock/refreshLock) and
+// lib/task-write-queue (flushQueueInLock) requires moved with it; no longer
+// needed at this scope. See that function's JSDoc for the boundary.
 var { isAllDayTaskBackend } = require('../lib/isAllDayTaskBackend');
 var { handleTerminalTaskSync } = require('../lib/cal-sync-helpers');
 const { createLogger } = require('@raike/lib-logger');
@@ -1608,259 +1608,32 @@ async function sync(req, res) {
     }
 
     // === Write Phase: Acquire lock, flush pending writes, then apply ===
-    emitProgress('finalize', 'Saving changes...', 85);
-
-    if (Date.now() - syncStart > 300000) {
-      logger.warn('[CAL-SYNC] Sync exceeded 5-minute timeout — aborting before write phase');
-      emitProgress('done', 'Sync timed out — please try again', 100);
+    // 999.1025 sub-leg 3: extracted verbatim into the calendar slice facade
+    // (REFACTOR mode — no behavior change). See runSyncWritePhase's JSDoc in
+    // slices/calendar/facade.js for the exact boundary this call replaces
+    // (previously inlined here) and the earlyReturn contract.
+    var writeResult = await calendarFacade.runSyncWritePhase(userId, {
+      taskInserts: taskInserts,
+      taskUpdates: taskUpdates,
+      taskDeletes: taskDeletes,
+      ledgerUpdates: ledgerUpdates,
+      ledgerInserts: ledgerInserts,
+      historyInserts: historyInserts,
+      ledgerRecords: ledgerRecords,
+      tasksById: tasksById,
+      providerIds: providerIds,
+      providerData: providerData
+    }, syncStart, emitProgress);
+    if (writeResult.earlyReturn === 'timeout') {
       return res.status(200).json(Object.assign({}, stats, { error: 'sync_timeout' }));
     }
-
-    // Acquire per-user lock for the write phase only. During the API fetch
-    // phase above, user/MCP edits flowed normally. Now we lock so the
-    // scheduler doesn't start while we write.
-    var MAX_LOCK_ATTEMPTS = 8;
-    var lockResult = null;
-    for (var lockAttempt = 0; lockAttempt < MAX_LOCK_ATTEMPTS; lockAttempt++) {
-      lockResult = await acquireLock(userId);
-      if (lockResult.acquired) {
-        // === Fix Bug #5: Re-read ledger after lock to detect concurrent sync changes ===
-        // Another sync may have inserted ledger rows between our Phase 1 read and lock.
-        var postLockLedger = await getDb()('cal_sync_ledger')
-          .where('user_id', userId)
-          .where(function() {
-            this.where('status', 'active')
-              .orWhere(function() {
-                this.where('status', 'deleted_local').whereNotNull('provider_event_id');
-              });
-          })
-          .select();
-
-        // Dedupe: merge post-read rows, keeping newer (by updated_at or computed_at)
-        var seenById = {};
-        // eslint-disable-next-line no-redeclare
-        for (var pli = 0; pli < ledgerRecords.length; pli++) {
-          seenById[ledgerRecords[pli].id] = ledgerRecords[pli];
-        }
-        for (var pli2 = 0; pli2 < postLockLedger.length; pli2++) {
-          var newRow = postLockLedger[pli2];
-          var existing = seenById[newRow.id];
-          if (!existing) {
-            ledgerRecords.push(newRow);
-            seenById[newRow.id] = newRow;
-          }
-        }
-
-        break;
-      }
-      var backoffMs = Math.min(1000 * Math.pow(1.5, lockAttempt), 10000) + Math.floor(Math.random() * 500);
-      await new Promise(function(r) { setTimeout(r, backoffMs); });
-    }
-    if (!lockResult || !lockResult.acquired) {
-      logger.error('[CAL-SYNC] could not acquire lock for write phase after ' + MAX_LOCK_ATTEMPTS + ' attempts');
-      sseEmitter.emit(userId, 'sync:lock_conflict', { error: 'Scheduler is busy', retryAfter: 30 });
+    if (writeResult.earlyReturn === 'lock_busy') {
       return res.status(409).json({ error: 'Scheduler is busy. Try again in a few seconds.', retryAfter: 30 });
     }
-    var lockToken = lockResult.token;
-    var lockStart = Date.now();
-    var writePhaseLockLost = false;
-    var lockHeartbeat = setInterval(function() {
-      if (Date.now() - lockStart > 120000) {
-        clearInterval(lockHeartbeat);
-        writePhaseLockLost = true;
-        logger.warn('[CAL-SYNC] Write-phase heartbeat stopped — held over 120s, allowing expiry');
-        return;
-      }
-      refreshLock(userId, lockToken).then(function(ok) {
-        if (!ok) {
-          writePhaseLockLost = true;
-          clearInterval(lockHeartbeat);
-          logger.warn('[CAL-SYNC] Write-phase lock lost — refresh returned 0 rows');
-        }
-      }).catch(function(err) {
-        writePhaseLockLost = true;
-        clearInterval(lockHeartbeat);
-        logger.error('[CAL-SYNC] Write-phase lock refresh failed:', err.message);
-      });
-    }, 10000);
-
-    try {
-
-    // Flush any pending user/MCP writes so conflict detection sees fresh data
-    await flushQueueInLock(userId);
-
-    // Snapshot watermark BEFORE writing so we can detect what we touched
-    var syncStartWatermark = (await getDb()('tasks_v')
-      .where('user_id', userId)
-      .max('updated_at as max_ts')
-      .first()) || { max_ts: null };
-    var preSyncMaxUpdatedAt = syncStartWatermark.max_ts;
-
-    // Conflict detection: if a task was modified by user/MCP during the API
-    // phase, skip our update for that task to avoid clobbering their edit.
-    // Runs inside lock so the data is stable.
-    var conflictSkipIds = new Set();
-    var taskIdsToCheck = taskUpdates.map(function(u) { return u.id; });
-    if (taskIdsToCheck.length > 0) {
-      var freshRows = await getDb()('tasks_v')
-        .whereIn('id', taskIdsToCheck)
-        .select('id', 'updated_at');
-      var freshById = {};
-      freshRows.forEach(function(r) { freshById[r.id] = r.updated_at; });
-      for (var ci = 0; ci < taskUpdates.length; ci++) {
-        var tu = taskUpdates[ci];
-        var origTask = tasksById[tu.id];
-        if (origTask) {
-          if (!freshById[tu.id]) {
-            // Task was deleted between the API-phase snapshot and the write phase —
-            // skip the DB write so we don't update a non-existent row.
-            conflictSkipIds.add(tu.id);
-          } else {
-            var origTime = new Date(String(origTask._updated_at).replace(' ', 'T') + 'Z').getTime();
-            var freshTime = new Date(String(freshById[tu.id]).replace(' ', 'T') + 'Z').getTime();
-            if (!isNaN(origTime) && !isNaN(freshTime) && freshTime > origTime) {
-              conflictSkipIds.add(tu.id);
-            }
-          }
-        }
-      }
-    }
-
-    // Abort if the lock was lost during conflict detection
-    if (writePhaseLockLost) {
-      logger.error('[CAL-SYNC] Aborting write phase — lock lost before transaction');
-      emitProgress('error', 'Sync aborted — lock lost', 0);
+    if (writeResult.earlyReturn === 'lock_lost') {
       return res.status(503).json({ error: 'Sync lock lost. Please retry.', retryAfter: 5 });
     }
-
-    await getDb().transaction(async function(trx) {
-      var now = getDb().fn.now();
-      // 999.1199: lib/tasks-write is internal to slices/task/adapters (eslint
-      // boundary) now. `taskRepo` is a transaction-token wrapper — a
-      // KnexTaskRepository constructed over this SAME trx — whose `.tasksWrite`
-      // property is the raw passthrough. Kept as raw passthrough (not the
-      // P1-asserting port methods) because `now` here is a Knex `fn.now()` raw
-      // (MySQL server clock), not a JS Date — exactly what the W4 golden
-      // masters pin bit-for-bit; the strict port would reject it outright.
-      var taskRepo = new KnexTaskRepository({ db: trx });
-
-      // 1. Task inserts (new tasks from provider events) — bulk insert
-      if (taskInserts.length > 0) {
-        for (var wi = 0; wi < taskInserts.length; wi++) {
-          taskInserts[wi].created_at = now;
-          taskInserts[wi].updated_at = now;
-        }
-        await taskRepo.tasksWrite.insertTasksBatch(trx, taskInserts);
-      }
-
-      // 2. Task updates (event IDs, field changes from provider)
-      // Merge multiple updates for the same task into one write
-      var mergedTaskUpdates = {};
-      for (var wu = 0; wu < taskUpdates.length; wu++) {
-        var upd = taskUpdates[wu];
-        if (conflictSkipIds.has(upd.id)) continue;
-        if (!mergedTaskUpdates[upd.id]) mergedTaskUpdates[upd.id] = {};
-        Object.assign(mergedTaskUpdates[upd.id], upd.fields);
-      }
-      var mergedIds = Object.keys(mergedTaskUpdates);
-      for (var wm = 0; wm < mergedIds.length; wm++) {
-        var mid = mergedIds[wm];
-        mergedTaskUpdates[mid].updated_at = now;
-        await taskRepo.tasksWrite.updateTaskById(trx, mid, mergedTaskUpdates[mid], userId);
-      }
-
-      // 3. Task deletes (remote-deleted events past miss threshold)
-      for (var wd = 0; wd < taskDeletes.length; wd++) {
-        var del = taskDeletes[wd];
-        // Transfer dependencies first
-        for (var wdt = 0; wdt < del.dependencyTransfers.length; wdt++) {
-          var dt = del.dependencyTransfers[wdt];
-          await taskRepo.tasksWrite.updateTaskById(trx, dt.id, {
-            depends_on: dt.newDepsJson, updated_at: now
-          }, userId);
-        }
-        await taskRepo.tasksWrite.deleteTaskById(trx, del.id, userId);
-      }
-
-      // 4. Ledger updates — group rows with identical field sets so they execute as
-      // batched WHERE IN queries instead of one UPDATE per row.
-      var ledgerGroups = {}; // sig -> { fields, ids[] }
-      for (var wl = 0; wl < ledgerUpdates.length; wl++) {
-        var lu = ledgerUpdates[wl];
-        lu.fields.synced_at = now;
-        // Stable sig: sort keys, represent Knex Raw objects (getDb().fn.now()) as sentinel
-        var sigParts = Object.keys(lu.fields).sort().map(function(k) {
-          var v = lu.fields[k];
-          return k + '=' + (v !== null && typeof v === 'object' ? '__raw__' : JSON.stringify(v));
-        });
-        var sig = sigParts.join('|');
-        if (!ledgerGroups[sig]) ledgerGroups[sig] = { fields: lu.fields, ids: [] };
-        ledgerGroups[sig].ids.push(lu.id);
-      }
-      var groupSigs = Object.keys(ledgerGroups);
-      for (var wg = 0; wg < groupSigs.length; wg++) {
-        var grp = ledgerGroups[groupSigs[wg]];
-        await trx('cal_sync_ledger').whereIn('id', grp.ids).update(grp.fields);
-      }
-
-      // 5. Ledger inserts — dedup by (user_id, provider, task_id) then bulk insert.
-      // Within-run dedup: last entry wins (handles split-replacement / partial-failure cases).
-      // Cross-run dedup: INSERT IGNORE silently drops rows that violate the DB-level
-      // unique constraint on active_task_key (concurrent sync runs pushing the same task).
-      if (ledgerInserts.length > 0) {
-        var seenLedgerKeys = {};
-        var dedupedLedgerInserts = [];
-        for (var wli = 0; wli < ledgerInserts.length; wli++) {
-          ledgerInserts[wli].synced_at = now;
-          ledgerInserts[wli].created_at = now;
-          if (ledgerInserts[wli].origin === 'juggler' && ledgerInserts[wli].status === 'active') {
-            ledgerInserts[wli].last_pushed_at = now;
-          }
-          var lKey = ledgerInserts[wli].user_id + '|' + ledgerInserts[wli].provider + '|' + ledgerInserts[wli].task_id;
-          seenLedgerKeys[lKey] = wli; // last entry wins
-        }
-        var winnerIdxs = Object.values(seenLedgerKeys);
-        for (var wli2 = 0; wli2 < winnerIdxs.length; wli2++) {
-          dedupedLedgerInserts.push(ledgerInserts[winnerIdxs[wli2]]);
-        }
-        await trx('cal_sync_ledger').insert(dedupedLedgerInserts).onConflict().ignore();
-      }
-
-      // 6. Sync history inserts — bulk insert
-      if (historyInserts.length > 0) {
-        for (var wh = 0; wh < historyInserts.length; wh++) {
-          historyInserts[wh].created_at = now;
-        }
-        await trx('sync_history').insert(historyInserts);
-      }
-
-      // [FIX D-09] Prune fully-resolved orphan ledger rows — no task, no event, no purpose
-      await trx('cal_sync_ledger')
-        .where({ user_id: userId, status: 'deleted_local' })
-        .whereNull('provider_event_id')
-        .whereNull('task_id')
-        .del();
-
-      // [FIX D-13] Prune sync_history rows older than 3 days
-      await trx('sync_history')
-        .where('user_id', userId)
-        .where('created_at', '<', trx.raw('NOW() - INTERVAL 3 DAY'))
-        .del();
-
-      // 7. Update last-synced timestamps for all providers
-      var userUpdate = { updated_at: now };
-      for (var pi3 = 0; pi3 < providerIds.length; pi3++) {
-        var syncedCol = providerData[providerIds[pi3]].adapter.getLastSyncedColumn();
-        userUpdate[syncedCol] = now;
-      }
-      await trx('users').where('id', userId).update(userUpdate);
-    });
-
-    } finally {
-      // Release the write-phase lock
-      clearInterval(lockHeartbeat);
-      await releaseLock(userId, lockToken);
-    }
+    var preSyncMaxUpdatedAt = writeResult.preSyncMaxUpdatedAt;
 
     // === Phase 5: Build the affected-task-id list and notify ===
     // (runs AFTER lock release so scheduler can pick up)

@@ -1286,6 +1286,319 @@ async function gatherProviderSyncData(user, userId, windowStart, windowEnd, tz, 
   };
 }
 
+// ── 999.1025 sub-leg 3: cal-sync controller "Write Phase" facade method ──
+// sync() (cal-sync.controller.js) previously ran the write-phase lock
+// acquire/retry loop, the post-lock ledger re-read (Fix Bug #5), flushing
+// pending user/MCP queue writes, conflict detection against fresh DB state,
+// the 7-step buffered-mutation transaction, and lock release INLINE, under
+// the `// === Write Phase: Acquire lock, flush pending writes, then apply
+// ===` marker. This re-exposes the SAME exact logic behind the facade
+// boundary — no behavior change (REFACTOR mode). The controller's sync()
+// becomes a thin caller: it still owns the HTTP response and the
+// early-return decision (this function signals which case fired via
+// `earlyReturn`, matching gatherProviderSyncData's contract shape but with
+// three distinct reasons since the original inline code had three different
+// early-return status codes/bodies).
+
+/**
+ * Run sync()'s Write Phase for cal-sync.controller.js — acquire the per-user
+ * write lock (retry/backoff), re-read the ledger post-lock to catch
+ * concurrent syncs, flush pending user/MCP writes, run conflict detection
+ * against fresh DB state, apply every buffered mutation from Phases 1-3 in
+ * one transaction (task inserts/updates/deletes, ledger updates/inserts,
+ * sync_history inserts, stale-row pruning, per-provider last-synced
+ * timestamps), then release the lock.
+ *
+ * @param {string} userId - req.user.id
+ * @param {Object} buffers - the mutation buffers + lookups Phases 1-3 built
+ *   (mutated in place — same objects the caller reads after return):
+ *   taskInserts, taskUpdates, taskDeletes, ledgerUpdates, ledgerInserts,
+ *   historyInserts, ledgerRecords, tasksById, providerIds, providerData
+ * @param {number} syncStart - Date.now() at the top of sync(), backing the
+ *   5-minute abort-before-write-phase check
+ * @param {Function} emitProgress - the controller's SSE progress emitter,
+ *   (phase, detail, pct, extra) => void
+ * @returns {Promise<Object>} one of:
+ *   `{ earlyReturn: 'timeout' }` — caller must
+ *     `return res.status(200).json(Object.assign({}, stats, { error: 'sync_timeout' }))`
+ *   `{ earlyReturn: 'lock_busy' }` — caller must
+ *     `return res.status(409).json({ error: 'Scheduler is busy. Try again in a few seconds.', retryAfter: 30 })`
+ *   `{ earlyReturn: 'lock_lost' }` — caller must
+ *     `return res.status(503).json({ error: 'Sync lock lost. Please retry.', retryAfter: 5 })`
+ *   `{ earlyReturn: false, preSyncMaxUpdatedAt }` — success, caller continues to Phase 5
+ */
+async function runSyncWritePhase(userId, buffers, syncStart, emitProgress) {
+  var taskInserts = buffers.taskInserts;
+  var taskUpdates = buffers.taskUpdates;
+  var taskDeletes = buffers.taskDeletes;
+  var ledgerUpdates = buffers.ledgerUpdates;
+  var ledgerInserts = buffers.ledgerInserts;
+  var historyInserts = buffers.historyInserts;
+  var ledgerRecords = buffers.ledgerRecords;
+  var tasksById = buffers.tasksById;
+  var providerIds = buffers.providerIds;
+  var providerData = buffers.providerData;
+
+  emitProgress('finalize', 'Saving changes...', 85);
+
+  if (Date.now() - syncStart > 300000) {
+    logger.warn('[CAL-SYNC] Sync exceeded 5-minute timeout — aborting before write phase');
+    emitProgress('done', 'Sync timed out — please try again', 100);
+    return { earlyReturn: 'timeout' };
+  }
+
+  // Acquire per-user lock for the write phase only. During the API fetch
+  // phase above, user/MCP edits flowed normally. Now we lock so the
+  // scheduler doesn't start while we write.
+  var MAX_LOCK_ATTEMPTS = 8;
+  var lockResult = null;
+  for (var lockAttempt = 0; lockAttempt < MAX_LOCK_ATTEMPTS; lockAttempt++) {
+    lockResult = await syncLock.acquireLock(userId);
+    if (lockResult.acquired) {
+      // === Fix Bug #5: Re-read ledger after lock to detect concurrent sync changes ===
+      // Another sync may have inserted ledger rows between our Phase 1 read and lock.
+      var postLockLedger = await srcDb('cal_sync_ledger')
+        .where('user_id', userId)
+        .where(function() {
+          this.where('status', 'active')
+            .orWhere(function() {
+              this.where('status', 'deleted_local').whereNotNull('provider_event_id');
+            });
+        })
+        .select();
+
+      // Dedupe: merge post-read rows, keeping newer (by updated_at or computed_at)
+      var seenById = {};
+      for (var pli = 0; pli < ledgerRecords.length; pli++) {
+        seenById[ledgerRecords[pli].id] = ledgerRecords[pli];
+      }
+      for (var pli2 = 0; pli2 < postLockLedger.length; pli2++) {
+        var newRow = postLockLedger[pli2];
+        var existing = seenById[newRow.id];
+        if (!existing) {
+          ledgerRecords.push(newRow);
+          seenById[newRow.id] = newRow;
+        }
+      }
+
+      break;
+    }
+    var backoffMs = Math.min(1000 * Math.pow(1.5, lockAttempt), 10000) + Math.floor(Math.random() * 500);
+    await new Promise(function(r) { setTimeout(r, backoffMs); });
+  }
+  if (!lockResult || !lockResult.acquired) {
+    logger.error('[CAL-SYNC] could not acquire lock for write phase after ' + MAX_LOCK_ATTEMPTS + ' attempts');
+    var sseEmitter = require('../../lib/sse-emitter');
+    sseEmitter.emit(userId, 'sync:lock_conflict', { error: 'Scheduler is busy', retryAfter: 30 });
+    return { earlyReturn: 'lock_busy' };
+  }
+  var lockToken = lockResult.token;
+  var lockStart = Date.now();
+  var writePhaseLockLost = false;
+  var lockHeartbeat = setInterval(function() {
+    if (Date.now() - lockStart > 120000) {
+      clearInterval(lockHeartbeat);
+      writePhaseLockLost = true;
+      logger.warn('[CAL-SYNC] Write-phase heartbeat stopped — held over 120s, allowing expiry');
+      return;
+    }
+    syncLock.refreshLock(userId, lockToken).then(function(ok) {
+      if (!ok) {
+        writePhaseLockLost = true;
+        clearInterval(lockHeartbeat);
+        logger.warn('[CAL-SYNC] Write-phase lock lost — refresh returned 0 rows');
+      }
+    }).catch(function(err) {
+      writePhaseLockLost = true;
+      clearInterval(lockHeartbeat);
+      logger.error('[CAL-SYNC] Write-phase lock refresh failed:', err.message);
+    });
+  }, 10000);
+
+  try {
+
+  // Flush any pending user/MCP writes so conflict detection sees fresh data
+  var { flushQueueInLock } = require('../../lib/task-write-queue');
+  await flushQueueInLock(userId);
+
+  // Snapshot watermark BEFORE writing so we can detect what we touched
+  var syncStartWatermark = (await srcDb('tasks_v')
+    .where('user_id', userId)
+    .max('updated_at as max_ts')
+    .first()) || { max_ts: null };
+  var preSyncMaxUpdatedAt = syncStartWatermark.max_ts;
+
+  // Conflict detection: if a task was modified by user/MCP during the API
+  // phase, skip our update for that task to avoid clobbering their edit.
+  // Runs inside lock so the data is stable.
+  var conflictSkipIds = new Set();
+  var taskIdsToCheck = taskUpdates.map(function(u) { return u.id; });
+  if (taskIdsToCheck.length > 0) {
+    var freshRows = await srcDb('tasks_v')
+      .whereIn('id', taskIdsToCheck)
+      .select('id', 'updated_at');
+    var freshById = {};
+    freshRows.forEach(function(r) { freshById[r.id] = r.updated_at; });
+    for (var ci = 0; ci < taskUpdates.length; ci++) {
+      var tu = taskUpdates[ci];
+      var origTask = tasksById[tu.id];
+      if (origTask) {
+        if (!freshById[tu.id]) {
+          // Task was deleted between the API-phase snapshot and the write phase —
+          // skip the DB write so we don't update a non-existent row.
+          conflictSkipIds.add(tu.id);
+        } else {
+          var origTime = new Date(String(origTask._updated_at).replace(' ', 'T') + 'Z').getTime();
+          var freshTime = new Date(String(freshById[tu.id]).replace(' ', 'T') + 'Z').getTime();
+          if (!isNaN(origTime) && !isNaN(freshTime) && freshTime > origTime) {
+            conflictSkipIds.add(tu.id);
+          }
+        }
+      }
+    }
+  }
+
+  // Abort if the lock was lost during conflict detection
+  if (writePhaseLockLost) {
+    logger.error('[CAL-SYNC] Aborting write phase — lock lost before transaction');
+    emitProgress('error', 'Sync aborted — lock lost', 0);
+    return { earlyReturn: 'lock_lost' };
+  }
+
+  var { KnexTaskRepository } = require('../task/facade');
+
+  await srcDb.transaction(async function(trx) {
+    var now = srcDb.fn.now();
+    // 999.1199: lib/tasks-write is internal to slices/task/adapters (eslint
+    // boundary) now. `taskRepo` is a transaction-token wrapper — a
+    // KnexTaskRepository constructed over this SAME trx — whose `.tasksWrite`
+    // property is the raw passthrough. Kept as raw passthrough (not the
+    // P1-asserting port methods) because `now` here is a Knex `fn.now()` raw
+    // (MySQL server clock), not a JS Date — exactly what the W4 golden
+    // masters pin bit-for-bit; the strict port would reject it outright.
+    var taskRepo = new KnexTaskRepository({ db: trx });
+
+    // 1. Task inserts (new tasks from provider events) — bulk insert
+    if (taskInserts.length > 0) {
+      for (var wi = 0; wi < taskInserts.length; wi++) {
+        taskInserts[wi].created_at = now;
+        taskInserts[wi].updated_at = now;
+      }
+      await taskRepo.tasksWrite.insertTasksBatch(trx, taskInserts);
+    }
+
+    // 2. Task updates (event IDs, field changes from provider)
+    // Merge multiple updates for the same task into one write
+    var mergedTaskUpdates = {};
+    for (var wu = 0; wu < taskUpdates.length; wu++) {
+      var upd = taskUpdates[wu];
+      if (conflictSkipIds.has(upd.id)) continue;
+      if (!mergedTaskUpdates[upd.id]) mergedTaskUpdates[upd.id] = {};
+      Object.assign(mergedTaskUpdates[upd.id], upd.fields);
+    }
+    var mergedIds = Object.keys(mergedTaskUpdates);
+    for (var wm = 0; wm < mergedIds.length; wm++) {
+      var mid = mergedIds[wm];
+      mergedTaskUpdates[mid].updated_at = now;
+      await taskRepo.tasksWrite.updateTaskById(trx, mid, mergedTaskUpdates[mid], userId);
+    }
+
+    // 3. Task deletes (remote-deleted events past miss threshold)
+    for (var wd = 0; wd < taskDeletes.length; wd++) {
+      var del = taskDeletes[wd];
+      // Transfer dependencies first
+      for (var wdt = 0; wdt < del.dependencyTransfers.length; wdt++) {
+        var dt = del.dependencyTransfers[wdt];
+        await taskRepo.tasksWrite.updateTaskById(trx, dt.id, {
+          depends_on: dt.newDepsJson, updated_at: now
+        }, userId);
+      }
+      await taskRepo.tasksWrite.deleteTaskById(trx, del.id, userId);
+    }
+
+    // 4. Ledger updates — group rows with identical field sets so they execute as
+    // batched WHERE IN queries instead of one UPDATE per row.
+    var ledgerGroups = {}; // sig -> { fields, ids[] }
+    for (var wl = 0; wl < ledgerUpdates.length; wl++) {
+      var lu = ledgerUpdates[wl];
+      lu.fields.synced_at = now;
+      // Stable sig: sort keys, represent Knex Raw objects (srcDb.fn.now()) as sentinel
+      var sigParts = Object.keys(lu.fields).sort().map(function(k) {
+        var v = lu.fields[k];
+        return k + '=' + (v !== null && typeof v === 'object' ? '__raw__' : JSON.stringify(v));
+      });
+      var sig = sigParts.join('|');
+      if (!ledgerGroups[sig]) ledgerGroups[sig] = { fields: lu.fields, ids: [] };
+      ledgerGroups[sig].ids.push(lu.id);
+    }
+    var groupSigs = Object.keys(ledgerGroups);
+    for (var wg = 0; wg < groupSigs.length; wg++) {
+      var grp = ledgerGroups[groupSigs[wg]];
+      await trx('cal_sync_ledger').whereIn('id', grp.ids).update(grp.fields);
+    }
+
+    // 5. Ledger inserts — dedup by (user_id, provider, task_id) then bulk insert.
+    // Within-run dedup: last entry wins (handles split-replacement / partial-failure cases).
+    // Cross-run dedup: INSERT IGNORE silently drops rows that violate the DB-level
+    // unique constraint on active_task_key (concurrent sync runs pushing the same task).
+    if (ledgerInserts.length > 0) {
+      var seenLedgerKeys = {};
+      var dedupedLedgerInserts = [];
+      for (var wli = 0; wli < ledgerInserts.length; wli++) {
+        ledgerInserts[wli].synced_at = now;
+        ledgerInserts[wli].created_at = now;
+        if (ledgerInserts[wli].origin === 'juggler' && ledgerInserts[wli].status === 'active') {
+          ledgerInserts[wli].last_pushed_at = now;
+        }
+        var lKey = ledgerInserts[wli].user_id + '|' + ledgerInserts[wli].provider + '|' + ledgerInserts[wli].task_id;
+        seenLedgerKeys[lKey] = wli; // last entry wins
+      }
+      var winnerIdxs = Object.values(seenLedgerKeys);
+      for (var wli2 = 0; wli2 < winnerIdxs.length; wli2++) {
+        dedupedLedgerInserts.push(ledgerInserts[winnerIdxs[wli2]]);
+      }
+      await trx('cal_sync_ledger').insert(dedupedLedgerInserts).onConflict().ignore();
+    }
+
+    // 6. Sync history inserts — bulk insert
+    if (historyInserts.length > 0) {
+      for (var wh = 0; wh < historyInserts.length; wh++) {
+        historyInserts[wh].created_at = now;
+      }
+      await trx('sync_history').insert(historyInserts);
+    }
+
+    // [FIX D-09] Prune fully-resolved orphan ledger rows — no task, no event, no purpose
+    await trx('cal_sync_ledger')
+      .where({ user_id: userId, status: 'deleted_local' })
+      .whereNull('provider_event_id')
+      .whereNull('task_id')
+      .del();
+
+    // [FIX D-13] Prune sync_history rows older than 3 days
+    await trx('sync_history')
+      .where('user_id', userId)
+      .where('created_at', '<', trx.raw('NOW() - INTERVAL 3 DAY'))
+      .del();
+
+    // 7. Update last-synced timestamps for all providers
+    var userUpdate = { updated_at: now };
+    for (var pi3 = 0; pi3 < providerIds.length; pi3++) {
+      var syncedCol = providerData[providerIds[pi3]].adapter.getLastSyncedColumn();
+      userUpdate[syncedCol] = now;
+    }
+    await trx('users').where('id', userId).update(userUpdate);
+  });
+
+  } finally {
+    // Release the write-phase lock
+    clearInterval(lockHeartbeat);
+    await syncLock.releaseLock(userId, lockToken);
+  }
+
+  return { earlyReturn: false, preSyncMaxUpdatedAt: preSyncMaxUpdatedAt };
+}
+
 module.exports = {
   // initializer (thin, side-effect-free)
   initialize: initialize,
@@ -1362,6 +1675,9 @@ module.exports = {
 
   // 999.1025 sub-leg 2: cal-sync controller "Phase 1" gather facade method
   gatherProviderSyncData: gatherProviderSyncData,
+
+  // 999.1025 sub-leg 3: cal-sync controller "Write Phase" facade method
+  runSyncWritePhase: runSyncWritePhase,
 };
 
 // 999.1628 (CalendarFacadeTriggerPort inversion): register this facade with

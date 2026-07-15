@@ -102,7 +102,16 @@ var mockMakeStubRegistry = function () {
         calIngestModeMap: {},
         calendarLabels: {}
       };
-    }
+    },
+    // 999.1025 sub-leg 3: cal-sync.controller.js's Write Phase (lock
+    // acquire/retry, flush, conflict detection, the 7-step transaction —
+    // including THIS suite's D-09/D-11/D-13 prune queries — lock release)
+    // now lives on the real facade (see slices/calendar/facade.js:
+    // runSyncWritePhase). Unlike gatherProviderSyncData above, this function
+    // has no dependency on the mocked adapter registry — it operates purely
+    // on the buffers Phases 1-3 built and the real DB, so the real
+    // implementation is used unmodified rather than a hand-rolled stand-in.
+    runSyncWritePhase: jest.requireActual('../../src/slices/calendar/facade').runSyncWritePhase
   };
 };
 jest.mock('../../src/slices/calendar/facade', () => mockMakeStubRegistry());
