@@ -57,15 +57,26 @@ jest.mock('../src/lib/sync-lock', function () {
 // out of this module at require-time, so the spy has to be in place first for
 // their closures to capture the jest.fn() reference (destructuring after a
 // post-hoc spyOn would still point at the original function).
+// 999.1981: the MCP tool files now call getUserTimezone (src/mcp/getUserTimezone.js)
+// instead of safeTimezone directly (jug-mcp-facade WI-1 dedup). getUserTimezone
+// requires 'juggler-shared/scheduler/dateHelpers' (module alias), not the
+// relative path — so BOTH paths must be mocked for the spy to intercept.
 jest.mock('../../shared/scheduler/dateHelpers', function () {
   var actual = jest.requireActual('../../shared/scheduler/dateHelpers');
+  return Object.assign({}, actual, { safeTimezone: jest.fn(actual.safeTimezone) });
+});
+jest.mock('juggler-shared/scheduler/dateHelpers', function () {
+  var actual = jest.requireActual('juggler-shared/scheduler/dateHelpers');
   return Object.assign({}, actual, { safeTimezone: jest.fn(actual.safeTimezone) });
 });
 
 var { registerTaskTools } = require('../src/mcp/tools/tasks');
 var { registerDataTools } = require('../src/mcp/tools/data');
 var { registerScheduleTools } = require('../src/mcp/tools/schedule');
-var dateHelpers = require('../../shared/scheduler/dateHelpers');
+// 999.1981: use the juggler-shared alias path — getUserTimezone.js requires
+// via this alias, so the mock that intercepts its safeTimezone calls is the
+// one registered for 'juggler-shared/scheduler/dateHelpers'.
+var dateHelpers = require('juggler-shared/scheduler/dateHelpers');
 
 function captureHandlers(registerFn, userId) {
   var handlers = {};
