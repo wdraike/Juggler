@@ -147,7 +147,7 @@ export default function LoginPage() {
           {/* Logo wordmark */}
           <div style={{ marginBottom: 8 }}>
             <span style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700, color: '#1A2B4A', fontSize: 48, letterSpacing: '-0.01em' }}>Raike</span>
-            <span style={{ fontFamily: "'Cormorant Garamond', serif", fontStyle: 'italic', fontWeight: 300, color: GOLD_TEXT, fontSize: 60, lineHeight: 1, margin: '0 2px' }}>&amp;</span>
+            <span style={{ fontFamily: "'EB Garamond', serif", fontStyle: 'italic', fontWeight: 300, color: GOLD_TEXT, fontSize: 60, lineHeight: 1, margin: '0 2px' }}>&amp;</span>
             <span style={{ fontFamily: "'Playfair Display', serif", fontWeight: 400, color: '#1A2B4A', fontSize: 48, letterSpacing: '-0.01em' }}>Sons</span>
           </div>
 
@@ -156,7 +156,7 @@ export default function LoginPage() {
 
           {/* Tagline */}
           <p style={{
-            fontFamily: "'Cormorant Garamond', serif",
+            fontFamily: "'EB Garamond', serif",
             fontStyle: 'italic', fontSize: 14,
             fontWeight: 300, color: BRONZE_TEXT,
             letterSpacing: '0.08em',
@@ -189,7 +189,7 @@ export default function LoginPage() {
 
           {/* Product tagline */}
           <p style={{
-            fontFamily: "'Cormorant Garamond', serif",
+            fontFamily: "'EB Garamond', serif",
             fontStyle: 'italic', fontSize: 18,
             fontWeight: 300, color: GOLD_TEXT,
             letterSpacing: '0.02em',
@@ -366,7 +366,7 @@ export default function LoginPage() {
               </div>
               <div style={{
                 marginTop: 20, fontSize: 12, color: '#8A8070',
-                fontFamily: "'Cormorant Garamond', serif", fontStyle: 'italic'
+                fontFamily: "'EB Garamond', serif", fontStyle: 'italic'
               }}>
                 Works with Claude Code, Claude Desktop, Cursor, and any tool that speaks MCP.
               </div>
@@ -483,7 +483,7 @@ export default function LoginPage() {
             ClimbRS gets you rising.
           </h2>
           <p style={{
-            textAlign: 'center', fontFamily: "'Cormorant Garamond', serif",
+            textAlign: 'center', fontFamily: "'EB Garamond', serif",
             fontStyle: 'italic', fontSize: 15, color: GOLD_TEXT, marginBottom: 24
           }}>
             RS = Raike &amp; Sons. Always.
@@ -510,7 +510,7 @@ export default function LoginPage() {
                 }}>Strive</span>
               </div>
               <div style={{
-                fontFamily: "'Cormorant Garamond', serif",
+                fontFamily: "'EB Garamond', serif",
                 fontStyle: 'italic', fontSize: 14, color: GOLD_TEXT, marginBottom: 12
               }}>Never stops striving.</div>
               <p style={{ fontSize: 13, color: '#5C5A55', lineHeight: 1.6 }}>
@@ -541,7 +541,7 @@ export default function LoginPage() {
                 }}>Climbers</span>
               </div>
               <div style={{
-                fontFamily: "'Cormorant Garamond', serif",
+                fontFamily: "'EB Garamond', serif",
                 fontStyle: 'italic', fontSize: 14, color: GOLD_TEXT, marginBottom: 12
               }}>Always climbing.</div>
               <p style={{ fontSize: 13, color: '#5C5A55', lineHeight: 1.6 }}>
@@ -602,7 +602,7 @@ export default function LoginPage() {
           textAlign: 'center', paddingBottom: 32, fontSize: 11, color: '#5C5A55'
         }}>
           <span style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700, color: BRONZE_TEXT }}>Raike</span>
-          <span style={{ fontFamily: "'Cormorant Garamond', serif", fontStyle: 'italic', color: GOLD_TEXT, fontSize: 13 }}> &amp; </span>
+          <span style={{ fontFamily: "'EB Garamond', serif", fontStyle: 'italic', color: GOLD_TEXT, fontSize: 13 }}> &amp; </span>
           <span style={{ fontFamily: "'Playfair Display', serif", fontWeight: 400, color: BRONZE_TEXT }}>Sons</span>
           <span style={{ margin: '0 8px', color: '#E8E0D0' }}>&mdash;</span>
           <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 9, letterSpacing: '0.3em', textTransform: 'uppercase', color: GOLD_TEXT }}>Est. 2025</span>
