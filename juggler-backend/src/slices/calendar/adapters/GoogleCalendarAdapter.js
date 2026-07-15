@@ -13,7 +13,18 @@
 
 var crypto = require('crypto');
 // W5 (juggler-hex-h2): route through lib/db's shared singleton (single pool).
-var db = require('../../../lib/db').getDefaultDb();
+// 999.1534: db is lazily resolved and injectable via setDb() for unit tests,
+// matching the KnexTaskRepository injection pattern (d.db || singleton).
+// Default resolves lib/db's shared singleton (same pool, same behavior);
+// setDb(mockDb) overrides before first DB access, avoiding the live singleton.
+var _db;
+function getDb() {
+  if (!_db) _db = require('../../../lib/db').getDefaultDb();
+  return _db;
+}
+function setDb(d) {
+  _db = d;
+}
 var gcalApi = require('../../../lib/gcal-api');
 // 999.1192: pure date transforms come from the slice's own domain module, not
 // the HTTP-layer controllers/cal-sync-helpers (which now shims to the same fns).
@@ -47,7 +58,7 @@ async function getValidAccessToken(user) {
 
   var update = {
     gcal_access_token: credentials.access_token,
-    updated_at: db.fn.now()
+    updated_at: getDb().fn.now()
   };
   if (credentials.expiry_date) {
     update.gcal_token_expiry = new Date(credentials.expiry_date);
@@ -60,7 +71,7 @@ async function getValidAccessToken(user) {
     update.gcal_refresh_token = credentials.refresh_token;
   }
 
-  await db('users').where('id', user.id).update(update);
+  await getDb()('users').where('id', user.id).update(update);
 
   return credentials.access_token;
 }
@@ -75,7 +86,7 @@ async function listEvents(token, timeMin, timeMax, userId) {
 
   // Store the sync token for future lightweight change detection
   if (result.nextSyncToken && userId) {
-    await db('users').where('id', userId).update({ gcal_sync_token: result.nextSyncToken });
+    await getDb()('users').where('id', userId).update({ gcal_sync_token: result.nextSyncToken });
   }
 
   return events
@@ -101,7 +112,7 @@ async function hasChanges(token, user) {
 
   // If Google returned a new sync token with no changes, save it
   if (!result.hasChanges && result.nextSyncToken && result.nextSyncToken !== syncToken) {
-    await db('users').where('id', user.id).update({ gcal_sync_token: result.nextSyncToken });
+    await getDb()('users').where('id', user.id).update({ gcal_sync_token: result.nextSyncToken });
   }
 
   return result;
@@ -176,7 +187,7 @@ function applyEventToTaskFields(event, tz, currentTask) {
   var fields = {
     text: event.title,
     dur: event.durationMinutes,
-    updated_at: db.fn.now()
+    updated_at: getDb().fn.now()
   };
 
   if (jd.date) {
@@ -433,5 +444,6 @@ module.exports = {
   eventHash,
   buildEventBody,
   getEventIdColumn,
-  getLastSyncedColumn
+  getLastSyncedColumn,
+  setDb
 };

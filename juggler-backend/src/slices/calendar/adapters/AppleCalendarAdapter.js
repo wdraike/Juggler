@@ -17,7 +17,18 @@
 
 var crypto = require('crypto');
 // W5 (juggler-hex-h2): route through lib/db's shared singleton (single pool).
-var db = require('../../../lib/db').getDefaultDb();
+// 999.1534: db is lazily resolved and injectable via setDb() for unit tests,
+// matching the KnexTaskRepository injection pattern (d.db || singleton).
+// Default resolves lib/db's shared singleton (same pool, same behavior);
+// setDb(mockDb) overrides before first DB access, avoiding the live singleton.
+var _db;
+function getDb() {
+  if (!_db) _db = require('../../../lib/db').getDefaultDb();
+  return _db;
+}
+function setDb(d) {
+  _db = d;
+}
 var appleCalApi = require('../../../lib/apple-cal-api');
 var { decrypt } = require('../../../lib/credential-encrypt');
 // 999.1192: pure date transform comes from the slice's own domain module, not
@@ -53,7 +64,7 @@ async function getValidAccessToken(user) {
  * Get enabled calendars from user_calendars table, falling back to legacy single URL.
  */
 async function getEnabledCalendars(userId) {
-  var calendars = await db('user_calendars')
+  var calendars = await getDb()('user_calendars')
     .where({ user_id: userId, provider: 'apple', enabled: true });
 
   if (calendars.length > 0) {
@@ -61,7 +72,7 @@ async function getEnabledCalendars(userId) {
   }
 
   // Fallback: legacy single-calendar from users table
-  var user = await db('users').where('id', userId).first();
+  var user = await getDb()('users').where('id', userId).first();
   if (user && user.apple_cal_calendar_url) {
     return [{
       id: null,
@@ -98,7 +109,7 @@ async function listEvents(client, timeMin, timeMax, userId) {
   // exclude events the signed-in Apple ID has declined. CalDAV has no
   // per-user "self" flag; match ATTENDEE email against the account's own
   // Apple ID (apple_cal_username, apple-cal-api.js:parseVEvents attendees[]).
-  var userRow = await db('users').where('id', userId).select('apple_cal_username').first();
+  var userRow = await getDb()('users').where('id', userId).select('apple_cal_username').first();
   // At least one enabled Apple calendar was just confirmed above, so
   // apple_cal_username missing here is a data-integrity gap (not an expected
   // "not connected" case) — log it rather than silently disabling the filter.
@@ -144,7 +155,7 @@ async function listEvents(client, timeMin, timeMax, userId) {
       if (remoteCal && (remoteCal.syncToken || remoteCal.ctag)) {
         // Store sync token per calendar — use the first one for legacy compat
         if (j === 0) {
-          await db('users').where('id', userId).update({
+          await getDb()('users').where('id', userId).update({
             apple_cal_sync_token: remoteCal.syncToken || remoteCal.ctag
           });
         }
@@ -176,7 +187,7 @@ async function hasChanges(client, user) {
   );
 
   if (!result.hasChanges && result.syncToken && result.syncToken !== syncToken) {
-    await db('users').where('id', user.id).update({
+    await getDb()('users').where('id', user.id).update({
       apple_cal_sync_token: result.syncToken
     });
   }
@@ -249,7 +260,7 @@ function applyEventToTaskFields(event, tz, currentTask) {
   var fields = {
     text: event.title,
     dur: event.durationMinutes,
-    updated_at: db.fn.now()
+    updated_at: getDb().fn.now()
   };
 
   if (jd.date) {
@@ -388,5 +399,6 @@ module.exports = {
   applyEventToTaskFields,
   eventHash,
   getEventIdColumn,
-  getLastSyncedColumn
+  getLastSyncedColumn,
+  setDb
 };

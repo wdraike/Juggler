@@ -13,7 +13,18 @@
 
 var crypto = require('crypto');
 // W5 (juggler-hex-h2): route through lib/db's shared singleton (single pool).
-var db = require('../../../lib/db').getDefaultDb();
+// 999.1534: db is lazily resolved and injectable via setDb() for unit tests,
+// matching the KnexTaskRepository injection pattern (d.db || singleton).
+// Default resolves lib/db's shared singleton (same pool, same behavior);
+// setDb(mockDb) overrides before first DB access, avoiding the live singleton.
+var _db;
+function getDb() {
+  if (!_db) _db = require('../../../lib/db').getDefaultDb();
+  return _db;
+}
+function setDb(d) {
+  _db = d;
+}
 var msftCalApi = require('../../../lib/msft-cal-api');
 // 999.1192: pure date transforms come from the slice's own domain module, not
 // the HTTP-layer controllers/cal-sync-helpers (which now shims to the same fns).
@@ -109,7 +120,7 @@ async function getValidAccessToken(user) {
 
   var update = {
     msft_cal_access_token: credentials.accessToken,
-    updated_at: db.fn.now()
+    updated_at: getDb().fn.now()
   };
   if (credentials.expiresOn) {
     update.msft_cal_token_expiry = new Date(credentials.expiresOn);
@@ -118,7 +129,7 @@ async function getValidAccessToken(user) {
     update.msft_cal_refresh_token = credentials.refreshToken;
   }
 
-  await db('users').where('id', user.id).update(update);
+  await getDb()('users').where('id', user.id).update(update);
 
   return credentials.accessToken;
 }
@@ -155,14 +166,14 @@ async function hasChanges(token, user) {
   } catch (err) {
     // 410 = delta token expired; clear it so next sync does full fetch
     if (err.statusCode === 410 || err.status === 410 || (err.message && err.message.includes('syncStateNotFound'))) {
-      await db('users').where('id', user.id).update({ msft_cal_delta_link: null });
+      await getDb()('users').where('id', user.id).update({ msft_cal_delta_link: null });
       return { hasChanges: true, tokenInvalid: true };
     }
     throw err;
   }
 
   if (!result.hasChanges && result.deltaLink && result.deltaLink !== deltaLink) {
-    await db('users').where('id', user.id).update({ msft_cal_delta_link: result.deltaLink });
+    await getDb()('users').where('id', user.id).update({ msft_cal_delta_link: result.deltaLink });
   }
 
   return result;
@@ -254,7 +265,7 @@ function applyEventToTaskFields(event, tz, currentTask) {
   var fields = {
     text: event.title,
     dur: event.durationMinutes,
-    updated_at: db.fn.now()
+    updated_at: getDb().fn.now()
   };
 
   if (jd.date) {
@@ -504,5 +515,6 @@ module.exports = {
   eventHash,
   buildMsftEventBody,
   getEventIdColumn,
-  getLastSyncedColumn
+  getLastSyncedColumn,
+  setDb
 };
