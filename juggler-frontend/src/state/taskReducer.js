@@ -49,6 +49,19 @@ export default function taskReducer(state, action) {
           return Object.keys(patch).length > 0 ? Object.assign({}, t, patch) : t;
         });
       }
+      // 999.1571 (harrison WARN-1) — carry over _addFailed phantoms. A
+      // preserved-but-unsaved bulk-add failure exists only client-side; the
+      // server payload can never contain it, so without this a full reload
+      // (SSE schedule:changed without changeset, version-bump poll, etc.)
+      // silently re-discarded the user's work and left retryAddTasks a
+      // no-op. If the server DOES return the id (commit succeeded but the
+      // response was lost), the server row wins and the flag drops.
+      var initIds = {};
+      tasks.forEach(function(t) { initIds[t.id] = true; });
+      var carriedPhantoms = state.tasks.filter(function(t) {
+        return t._addFailed && !initIds[t.id];
+      });
+      if (carriedPhantoms.length > 0) tasks = tasks.concat(carriedPhantoms);
       return {
         statuses: merged,
         tasks: tasks,
@@ -114,6 +127,20 @@ export default function taskReducer(state, action) {
         _dirtyStatuses: state._dirtyStatuses,
         _dirtyTaskIds: state._dirtyTaskIds
       };
+    case 'SET_ADD_FAILED': {
+      // 999.1571 — flags tasks from a rejected BULK addTasks() POST as
+      // `_addFailed` instead of removing them (see useTaskState.js addTasks/
+      // retryAddTasks). `failed: false` clears the flag on a successful
+      // (re)send without touching any other task field.
+      var addFailedSet = {};
+      (action.ids || []).forEach(function(id) { addFailedSet[id] = true; });
+      return Object.assign({}, state, {
+        tasks: state.tasks.map(function(t) {
+          if (!addFailedSet[t.id]) return t;
+          return Object.assign({}, t, { _addFailed: !!action.failed });
+        })
+      });
+    }
     case 'REMOVE_TASKS': {
       // Remove multiple tasks by ID (e.g., scheduler deleted recurring instances)
       var removeSet = {};

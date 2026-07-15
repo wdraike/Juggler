@@ -239,3 +239,50 @@ describe('WARN2 (fix-loop iter2) taskReducer: CLEAR_DIRTY_STATUS must not drop a
     expect(afterClear._dirtyTaskIds['inst-1']).toEqual({ dur: true });
   });
 });
+
+// ---------------------------------------------------------------------------
+// INIT — _addFailed phantom carry-over (999.1571, harrison WARN-1)
+// A preserved-but-unsaved bulk-add failure exists ONLY client-side; a full
+// INIT reload must not silently drop it (that would re-discard the user's
+// work and turn retryAddTasks into a no-op).
+// ---------------------------------------------------------------------------
+
+describe('taskReducer — INIT _addFailed carry-over (999.1571 WARN-1)', () => {
+  test('INIT preserves _addFailed phantoms absent from the server payload (fields intact)', () => {
+    const state = {
+      ...TASK_STATE_INIT,
+      tasks: [
+        { id: 'ph-1', text: 'Edited before retry', dur: 45, _addFailed: true },
+        { id: 'srv-1', text: 'stale local copy' },
+      ],
+    };
+    const next = taskReducer(state, {
+      type: 'INIT',
+      tasks: [{ id: 'srv-1', text: 'fresh server copy' }],
+      statuses: {},
+    });
+    const phantom = next.tasks.find((t) => t.id === 'ph-1');
+    expect(phantom).toBeTruthy();
+    expect(phantom._addFailed).toBe(true);
+    expect(phantom.text).toBe('Edited before retry');
+    expect(phantom.dur).toBe(45);
+    // Server-known row still comes from the payload, untouched by carry-over.
+    expect(next.tasks.find((t) => t.id === 'srv-1').text).toBe('fresh server copy');
+  });
+
+  test('INIT lets the server row WIN when it contains the phantom id (commit-succeeded-response-lost) — flag drops, no duplicate', () => {
+    const state = {
+      ...TASK_STATE_INIT,
+      tasks: [{ id: 'ph-1', text: 'local flagged copy', _addFailed: true }],
+    };
+    const next = taskReducer(state, {
+      type: 'INIT',
+      tasks: [{ id: 'ph-1', text: 'server accepted it after all' }],
+      statuses: {},
+    });
+    const rows = next.tasks.filter((t) => t.id === 'ph-1');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].text).toBe('server accepted it after all');
+    expect(rows[0]._addFailed).toBeUndefined();
+  });
+});

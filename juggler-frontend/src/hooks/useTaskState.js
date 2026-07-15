@@ -148,6 +148,10 @@ export default function useTaskState(onError) {
         const updates = savingIds.map(function(id) {
           var t = taskMap[id];
           if (!t) return null;
+          // 999.1571 (harrison WARN-2) — same reasoning as updateTask: a
+          // phantom's PUT is a silent 0-row no-op; its row (with edits)
+          // persists via retryAddTasks instead.
+          if (t._addFailed) return null;
           var dirtyFieldMap = savedFields[id] || {};
           // Build partial update with only dirty fields + id
           var partial = { id: t.id };
@@ -329,6 +333,15 @@ export default function useTaskState(onError) {
     var mySeq = (writeSeqRef.current[id] || 0) + 1;
     writeSeqRef.current[id] = mySeq;
     dispatch({ type: 'UPDATE_TASK', id, fields });
+    // 999.1571 (harrison WARN-2) — an _addFailed phantom does not exist on
+    // the server: PUT /tasks/batch would UPDATE 0 rows, return 200, and the
+    // edit would be silently treated as saved. Keep the edit local (the
+    // UPDATE_TASK above) — it persists via retryAddTasks, whose POST reads
+    // the current (edited) task row.
+    if (prevTask && prevTask._addFailed) {
+      dispatch({ type: 'CLEAR_DIRTY_TASKS', ids: [id], savedFields: { [id]: fields } });
+      return true;
+    }
     // Cancel any pending debounced save
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
     // Immediately save to API — placements refresh via SSE schedule:changed
@@ -361,26 +374,80 @@ export default function useTaskState(onError) {
     }
   }, []);
 
+  // 999.1571 — shared POST /tasks/batch attempt used by both addTasks (fresh
+  // optimistic add) and retryAddTasks (resend of a previously-failed subset).
+  // `preserveOnFailure` decides the failure UX:
+  //   - true  (genuinely BULK adds, N>1, and all retries): keep the tasks in
+  //     state flagged `_addFailed` instead of discarding the user's work, and
+  //     surface ONE aggregate "N of M tasks failed to save" message — see
+  //     ticket 999.1571 (residual bulk-failure UX left by 999.1544's
+  //     silent-swallow fix: a rejected bulk ICS/AI add used to REMOVE_TASKS
+  //     every optimistically-added task with no way back).
+  //   - false (a lone single-task addTasks call, N=1 — e.g. one AI 'add' op)
+  //     keeps the pre-999.1571 rollback-on-failure behavior unchanged, since
+  //     AppLayout.aiOpsRollback.test.jsx ratifies that specific last-write-
+  //     wins single-task contract (ernie-1544-i1) and this lane does not
+  //     touch it.
+  const attemptAddBatch = useCallback(async (tasksToSave, opts, preserveOnFailure) => {
+    var ids = tasksToSave.map(function(t) { return t.id; });
+    try {
+      markSelfWrite(ids);
+      await apiClient.post('/tasks/batch', { tasks: tasksToSave });
+      // Placements refresh via SSE schedule:changed
+      // (harrison INFO) Only dispatch the clear when something is actually
+      // flagged — a fresh successful bulk add otherwise pays a redundant
+      // tasks-array identity change + derivePlacements re-run.
+      if (preserveOnFailure) {
+        var anyFlagged = ((taskStateRef.current && taskStateRef.current.tasks) || []).some(function(t) {
+          return ids.indexOf(t.id) >= 0 && t._addFailed;
+        });
+        if (anyFlagged) dispatch({ type: 'SET_ADD_FAILED', ids: ids, failed: false });
+      }
+    } catch (error) {
+      console.error('Failed to add tasks:', error);
+      var serverMsg = error && error.response && error.response.data && error.response.data.error;
+      if (preserveOnFailure) {
+        // Keep the tasks visible/editable instead of vanishing them — see
+        // header note. ponytail 999.1571: a UI badge/styling for
+        // `_addFailed` tasks is a follow-up; this lane's minimal-viable fix
+        // is preserve + aggregate toast + retry (below), all reachable from
+        // existing state without any component changes.
+        dispatch({ type: 'SET_ADD_FAILED', ids: ids, failed: true });
+        var aggregateMsg = ids.length + ' of ' + ids.length + ' tasks failed to save' +
+          (serverMsg ? ' (' + serverMsg + ')' : '');
+        if (typeof opts.onError === 'function') opts.onError(aggregateMsg, error);
+      } else {
+        // The server rejected the single-task add — roll back the optimistic
+        // add so the UI does not keep showing a task that was never persisted.
+        dispatch({ type: 'REMOVE_TASKS', ids: ids });
+        // Surface the failure instead of swallowing it (JUG-UI-FEEDBACK-STANDARD).
+        if (typeof opts.onError === 'function') {
+          opts.onError(serverMsg || 'Could not add tasks — change reverted', error);
+        }
+      }
+    }
+  }, []);
+
   const addTasks = useCallback(async (tasks, opts = {}) => {
     // 999.1544 — same bug shape as createTask (identical bulk path): roll back
     // the optimistic add on a rejected POST /tasks/batch and surface the error.
     dispatch({ type: 'ADD_TASKS', tasks });
-    try {
-      markSelfWrite(tasks.map(function(t) { return t.id; }));
-      await apiClient.post('/tasks/batch', { tasks });
-      // Placements refresh via SSE schedule:changed
-    } catch (error) {
-      console.error('Failed to add tasks:', error);
-      // The server rejected the batch add — roll back the optimistic add so
-      // the UI does not keep showing tasks that were never persisted.
-      dispatch({ type: 'REMOVE_TASKS', ids: tasks.map(function(t) { return t.id; }) });
-      // Surface the failure instead of swallowing it (JUG-UI-FEEDBACK-STANDARD).
-      if (typeof opts.onError === 'function') {
-        var serverMsg = error && error.response && error.response.data && error.response.data.error;
-        opts.onError(serverMsg || 'Could not add tasks — change reverted', error);
-      }
-    }
-  }, []);
+    await attemptAddBatch(tasks, opts, tasks.length > 1);
+  }, [attemptAddBatch]);
+
+  // 999.1571 AC-c — retry the failed subset of a previous bulk addTasks()
+  // call. Cheap by construction: the tasks are already sitting in state
+  // (preserved, not removed) flagged `_addFailed`, so this just re-runs the
+  // same POST /tasks/batch attempt for exactly those ids. A retry is always
+  // `preserveOnFailure` — a task only ever reaches `_addFailed` via the bulk
+  // (N>1) path above, so a re-failure must not silently vanish it either.
+  const retryAddTasks = useCallback(async (ids, opts = {}) => {
+    var tasksToRetry = ((taskStateRef.current && taskStateRef.current.tasks) || []).filter(function(t) {
+      return ids.indexOf(t.id) >= 0 && t._addFailed;
+    });
+    if (tasksToRetry.length === 0) return;
+    await attemptAddBatch(tasksToRetry, opts, true);
+  }, [attemptAddBatch]);
 
   const deleteTask = useCallback(async (id, opts) => {
     // Cancel any pending save that has stale dependsOn data
@@ -826,6 +893,7 @@ export default function useTaskState(onError) {
     setStatus,
     updateTask,
     addTasks,
+    retryAddTasks,
     deleteTask,
     createTask,
     taskStateRef,
