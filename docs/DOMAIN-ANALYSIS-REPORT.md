@@ -168,7 +168,7 @@
 |---|--------|-----|------|--------------|
 | 7 | **R17.1 — MCP protocol-level tests** | No tests in `juggler-mcp/` directory. | **Low** — function-level tests cover code paths; protocol compliance is stable. | Add integration tests via MCP client connecting to juggler-mcp server. |
 | 8 | **R15.2 — Quota TOCTOU fix** | quotaTOCTOU.test.js is a RED regression test (pre-fix) — should be GREEN after atomicity fix. | **Low** — TOCTOU race is unlikely in single-instance; fix is planned. | Monitor for GREEN status after bert's fix. |
-| 9 | **R22.5 — Feature gate 403 assertion** | No explicit test that data.import/data.export feature-gating returns 403. | **Low** — covered implicitly by other feature-gate tests. | Add explicit test: user without data.export → GET /api/data/export → 403. |
+| 9 | **R22.5 — Feature gate 403 assertion** | No explicit test that data.export feature-gating returns 403 (import is free on all tiers per David ruling 2026-07-13). | **Low** — covered implicitly by other feature-gate tests. | Add explicit test: user without data.export → GET /api/data/export → 403. |
 
 ---
 
