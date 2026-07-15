@@ -134,6 +134,20 @@ function TaskCard({ task, status, onStatusChange, onDelete, onExpand, darkMode, 
           </span>
         )}
         <div style={{ flex: '1 1 0%', minWidth: 0 }} />
+        {task._addFailed && (
+          // 999.1631: bulk-add tasks preserved after a rejected POST
+          // /tasks/batch (999.1571 SET_ADD_FAILED) — visible marker so the
+          // user knows this row isn't actually persisted yet. Clears itself
+          // once retryAddTasks succeeds (the flag is unset).
+          <span style={{
+            fontSize: 9, fontWeight: 700, flexShrink: 0,
+            background: theme.redBg, color: theme.redText,
+            border: '1px solid ' + theme.redBorder,
+            borderRadius: 3, padding: '1px 5px', letterSpacing: 0.2
+          }} title="Failed to save — use Retry on the notification, or edit to try again">
+            {'⚠'} Not saved
+          </span>
+        )}
         {isOverdue && (
           <span style={{
             fontSize: 9, fontWeight: 700, flexShrink: 0,

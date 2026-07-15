@@ -104,7 +104,7 @@ export default function AppLayout() {
   // State
   // 999.1594 — load/autosave failures surface as an error toast, mirroring the
   // 999.1225 useConfig wiring above (same hoisted-showToast-closure reasoning).
-  var { taskState, dispatch, dispatchPersist, loading, saving, loadTasks, placements, loadPlacements, setStatus, updateTask, addTasks, deleteTask, createTask, taskStateRef, setPlacements, flushNow } = useTaskState(function(msg) { if (typeof showToast === 'function') showToast(msg, 'error'); });
+  var { taskState, dispatch, dispatchPersist, loading, saving, loadTasks, placements, loadPlacements, setStatus, updateTask, addTasks, retryAddTasks, deleteTask, createTask, taskStateRef, setPlacements, flushNow } = useTaskState(function(msg) { if (typeof showToast === 'function') showToast(msg, 'error'); });
   var isMobile = useIsMobile();
   var isCompact = useIsCompact();
   var { weatherByDate, refreshed: weatherRefreshed } = useWeather(config.locations, config.tempUnitPref);
@@ -1209,13 +1209,28 @@ export default function AppLayout() {
 
     // For new tasks, use addTasks which does POST /tasks/batch + loadPlacements
     if (addedTasks.length > 0) {
-      addTasks(addedTasks, {
-        onError: function(msg) { showToast(msg, 'error'); } // 999.1544
-      });
+      var addedIds = addedTasks.map(function(t) { return t.id; });
+      // 999.1631 — a bulk (N>1) failure is preserved, not rolled back
+      // (999.1571), so give the aggregate error toast a real Retry action
+      // that re-POSTs exactly the failed subset via retryAddTasks. N=1 stays
+      // on the pre-existing rollback path (no _addFailed phantom exists to
+      // retry), matching AppLayout.aiOpsRollback.test.jsx's ratified contract.
+      // onBulkAddError re-attaches the Retry action on a re-failure too, so a
+      // flaky retry doesn't strand the user without a way to try again.
+      var onBulkAddError = function(msg) {
+        var retryAction = addedTasks.length > 1 ? {
+          label: 'Retry',
+          onClick: function() {
+            retryAddTasks(addedIds, { onError: onBulkAddError });
+          }
+        } : undefined;
+        showToast(msg, 'error', retryAction); // 999.1544 / 999.1631
+      };
+      addTasks(addedTasks, { onError: onBulkAddError });
     }
 
     showToast(msg || 'AI: ' + ops.length + ' changes applied', 'success');
-  }, [allTasks, statuses, config, pushUndo, dispatchPersist, showToast, addTasks]);
+  }, [allTasks, statuses, config, pushUndo, dispatchPersist, showToast, addTasks, retryAddTasks]);
 
   if (loading) {
     return (
