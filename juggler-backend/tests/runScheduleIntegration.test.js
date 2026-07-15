@@ -261,10 +261,31 @@ describe('runScheduleAndPersist: empty-when eligible for biz1 (999.1410)', () =>
 // ═══════════════════════════════════════════════════════════════
 
 describe('runScheduleAndPersist: recurring instances', () => {
+  // Same wall-clock trap the 999.1427 comment above documents: these two tests
+  // ran the scheduler on the REAL clock and asserted today's instance got
+  // PLACED (scheduled_at truthy / not unscheduled). Late in the evening
+  // (observed 23:15 EDT, vinatieri pool gate 2026-07-15) today genuinely has
+  // no remaining capacity, so the instance is correctly unscheduled per
+  // NEVER-MISSING — the assertion, not the product, was time-of-day-flaky.
+  // Freeze the scheduler clock at 05:00 on a fixed weekday (full empty day)
+  // like the biz1 test above.
+  var RECUR_FROZEN_DAY = '2026-07-20'; // Monday
+
+  function withFrozenClock(fn) {
+    var { _setClock } = require('../src/scheduler/runSchedule');
+    var { FakeClockAdapter } = require('./helpers/clock');
+    var prevClock = _setClock(new FakeClockAdapter({ startTime: RECUR_FROZEN_DAY + 'T05:00:00-04:00' }));
+    return Promise.resolve()
+      .then(fn)
+      .finally(function() { _setClock(prevClock); });
+  }
+
   test('expands recurring templates into instances', async () => {
     if (!available) return;
-    await seedTemplate({ id: 'tmpl-expand', text: 'Daily task', dur: 20 });
-    await runScheduleAndPersist(USER_ID);
+    await withFrozenClock(async function() {
+      await seedTemplate({ id: 'tmpl-expand', text: 'Daily task', dur: 20 });
+      await runScheduleAndPersist(USER_ID);
+    });
 
     var instances = await db('tasks_v')
       .where({ user_id: USER_ID, source_id: 'tmpl-expand', task_type: 'recurring_instance' });
@@ -276,8 +297,10 @@ describe('runScheduleAndPersist: recurring instances', () => {
 
   test('recurring instances are NOT marked as unscheduled', async () => {
     if (!available) return;
-    await seedTemplate({ id: 'tmpl-nouns', text: 'No unscheduled', dur: 20 });
-    await runScheduleAndPersist(USER_ID);
+    await withFrozenClock(async function() {
+      await seedTemplate({ id: 'tmpl-nouns', text: 'No unscheduled', dur: 20 });
+      await runScheduleAndPersist(USER_ID);
+    });
 
     var unscheduled = await db('tasks_v')
       .where({ user_id: USER_ID, source_id: 'tmpl-nouns', unscheduled: 1 });
