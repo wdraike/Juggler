@@ -11,10 +11,15 @@ import html2canvas from 'html2canvas';
 import { useAuth } from '../auth/AuthProvider';
 import { createBugReporterClient } from 'bug-reporter-client';
 import { getAccessToken } from '../../services/apiClient';
+import { services } from '../../proxy-config';
 import AnnotationCanvas from './AnnotationCanvas';
 
+// 999.1351: Direct cross-origin call to bug-reporter-service via env-aware
+// URL (ruling option (b)). In proxied envs, services.bugs.backend resolves to
+// https://bugs.raikegroup.com; on localhost, http://localhost:5030.
+// Old baseUrl:'/api' relied on dev proxy and 404'd in prod.
 var bugReporter = createBugReporterClient({
-  baseUrl: '/api',
+  baseUrl: (services.bugs && services.bugs.backend ? services.bugs.backend : '') + '/api',
   getToken: getAccessToken,
   sourceApp: 'juggler'
 });
