@@ -27,6 +27,13 @@ const { createRemoteJWKSet, jwtVerify } = require('jose');
 const express = require('express');
 
 // ─── JWKS verification (shared singleton) ────────────────────────
+//
+// 999.1551: The `process.env.AUTH_JWKS_URL || <dev default>` read below is
+// intentional and must stay as a direct env read. This is a SHARED library
+// (npm package "auth-client", subpath "./mcp-auth") consumed by multiple
+// services. It cannot import any single service's config module without
+// breaking other consumers. The dev-only localhost fallback is overridden
+// in production by each consuming service setting AUTH_JWKS_URL.
 
 let _jwks = null;
 
@@ -57,6 +64,12 @@ function getJWKS() {
  *   mcpEndpoint    - MCP endpoint path (default: '/mcp' for Strivers, '/api/mcp' for Climbrs)
  */
 function createOAuthProxyRoutes(app, options) {
+  // 999.1551: The env-var fallbacks below are intentional. This is a shared
+  // library consumed by multiple services, so it cannot import any service's
+  // config module. The options object IS the config-injection mechanism:
+  // consuming services pass explicit values, and the `process.env.X || <dev
+  // default>` chain only fires when the caller omits an option. The localhost
+  // defaults are dev-only; production services pass options or set the env vars.
   var publicUrl = options.publicUrl || process.env.PUBLIC_URL || '';
   var authServiceUrl = options.authServiceUrl || process.env.AUTH_SERVICE_URL || 'http://localhost:5010';
   var authPublicUrl = options.authPublicUrl || process.env.AUTH_SERVICE_PUBLIC_URL || authServiceUrl;
