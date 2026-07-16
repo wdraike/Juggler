@@ -277,7 +277,14 @@ describe('Sync Pull: Calendar -> Strive', () => {
     expect(ledger.last_pulled_hash).toBeTruthy();
   }));
 
-  testWithCreds(() => hasGCalCredentials(), 'duplicate prevention: event with same text+date not imported twice', requireDB(async () => {
+  // 999.1627 (David ruling 2026-07-15): provider_event_id is the SOLE dedup
+  // identity for incoming provider events — a title+date match against an
+  // unrelated existing task is now only a non-destructive "possible
+  // duplicate" hint, not silent absorption. This test previously asserted
+  // the OLD (swallowing) behavior ("should have linked, not duplicated");
+  // updated to assert the new contract: the event gets its OWN task/ledger
+  // row, never hijacking the pre-existing task's identity.
+  testWithCreds(() => hasGCalCredentials(), 'title+date collision: event gets its own task, does not hijack an unrelated existing task (999.1627)', requireDB(async () => {
     user = await seedTestUser();
 
     var tomorrowDate = new Date();
@@ -306,17 +313,17 @@ describe('Sync Pull: Calendar -> Strive', () => {
     var res = mockRes();
     await sync(req, res);
 
-    // Should have linked, not duplicated
-    var allTasks = await db('tasks_v')
-      .where({ user_id: TEST_USER_ID })
-      .where('text', 'Test Event Duplicate Check');
-    expect(allTasks.length).toBe(1);
-
-    // Ledger should reference the existing task
+    // Ledger must reference a NEW task for the manually-created event — never
+    // the pre-existing, unrelated task (that was the swallow bug).
     var ledger = await db('cal_sync_ledger')
       .where({ user_id: TEST_USER_ID, provider_event_id: event.id }).first();
     expect(ledger).toBeTruthy();
-    expect(ledger.task_id).toBe(task.id);
+    expect(ledger.task_id).not.toBe(task.id);
+
+    // The pre-existing task's own ledger identity is untouched by this event.
+    var hijacked = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, task_id: task.id, provider_event_id: event.id });
+    expect(hijacked.length).toBe(0);
   }));
 
 });

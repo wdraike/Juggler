@@ -1498,32 +1498,24 @@ async function sync(req, res) {
           var jd = isoToJugglerDate(newEvent.startDateTime, newEvent.startTimezone || tz);
           var evDur = newEvent.isAllDay ? 0 : newEvent.durationMinutes;
 
-          // Skip if a task with same text and date already exists
-          var dupTask = allTasks.find(function(t) {
+          // 999.1627 (David ruling 2026-07-15): provider_event_id is the SOLE
+          // dedup identity for incoming provider events — already enforced
+          // above this point (existingLedgerEventIds.has(evId) skip for
+          // events with any known ledger row; the existingTask check for
+          // events already linked via the task's own event-id column). By
+          // the time we reach here, this event id is NOT already known.
+          // A title+date collision with a different task is therefore only
+          // a NON-DESTRUCTIVE "possible duplicate" hint — it must NOT
+          // suppress creating this event's own task/ledger row (that used
+          // to silently swallow the event into an unrelated task, discarding
+          // its own time and provider_event_id). Recurring titles like
+          // "Lunch" collide routinely; a visible duplicate task beats an
+          // invisibly hijacked one. The hint is recorded via the existing
+          // sync_history logSyncAction pattern below (action
+          // 'possible_duplicate') — no new schema/UI.
+          var possibleDupTask = allTasks.find(function(t) {
             return t.text === newEvent.title && t.date === jd.date;
           });
-          if (dupTask) {
-            ledgerInserts.push({
-              user_id: userId,
-              provider: pid2,
-              task_id: dupTask.id,
-              provider_event_id: newEvent.id,
-              origin: JUGGLER_ORIGIN,
-              last_pushed_hash: taskHash(dupTask),
-              last_user_hash: userHash(dupTask),
-              last_pulled_hash: pAdapter2.eventHash(newEvent),
-              event_summary: newEvent.title,
-              event_start: newEvent.startDateTime || null,
-              event_end: newEvent.endDateTime || null,
-              event_all_day: newEvent.isAllDay ? 1 : 0,
-              last_modified_at: toMySQLDate(newEvent.lastModified),
-              provider_etag: newEvent._etag || null,
-              task_updated_at: dupTask._updated_at || null,
-              event_url: newEvent.eventUrl || null,
-              status: 'active'
-            });
-            continue;
-          }
 
           var newTaskId = pid2 + '_' + crypto.randomBytes(8).toString('hex');
 
@@ -1588,6 +1580,17 @@ async function sync(req, res) {
             detail: 'New task from ' + pid2,
             calendarName: calendarLabels[pid2] || null
           });
+          // 999.1627: non-destructive possible-duplicate hint (see comment
+          // above possibleDupTask) — logged AFTER the real 'created' action
+          // so the new task/ledger row always exists first.
+          if (possibleDupTask) {
+            logSyncAction(pid2, 'possible_duplicate', {
+              taskId: newTaskId, taskText: newEvent.title, eventId: newEvent.id,
+              detail: 'Title/date matches existing task "' + possibleDupTask.text +
+                '" (' + possibleDupTask.id + ') — created as a separate task; review for a possible duplicate.',
+              calendarName: calendarLabels[pid2] || null
+            });
+          }
         } catch (e) {
           var errObj3 = { phase: 'pull_new', provider: pid2, eventId: evId, error: e.message };
           pStats2.errors.push(errObj3);
