@@ -215,6 +215,10 @@ const writeRateLimiter = rateLimit({
 });
 
 // OAuth proxy + discovery routes (auth-service handles Google SSO, etc.)
+// ⚠️ RETIREMENT CANDIDATE (999.1579): createOAuthProxyRoutes() is superseded by
+// API-key auth (brain #59595, reaffirmed brain #997). Routes remain pending
+// David's ruling on claude.ai hosted-connector consequence. Do NOT build new
+// MCP integrations on this OAuth flow — use API keys instead.
 // Dev mode: auto-approve OAuth for MCP client testing
 // 999.951: startup guard — refuse to start if NODE_ENV=development is set on a
 // production-like target (DB_PORT=3307 or CLOUD_SQL_CONNECTION_NAME).

@@ -1,6 +1,16 @@
 /**
  * Shared MCP Authentication Module for Raike Applications
  *
+ * ⚠️ PARTIAL DEPRECATION (999.1579): `createOAuthProxyRoutes()` below is a
+ * RETIREMENT CANDIDATE — superseded by auth-service-issued API keys (brain
+ * #59595, reaffirmed brain #997). Routes remain mounted pending David's ruling
+ * on the claude.ai hosted-connector consequence. See
+ * auth-service/docs/api/oauth-mcp-flow.md § "claude.ai hosted-connector consequence".
+ *
+ * `authenticateMcpRequest()` is NOT deprecated — it is the API-key-aware auth
+ * function used by both juggler and resume-optimizer MCP transports. Only the
+ * OAuth proxy routes are the retirement target.
+ *
  * Provides unified OAuth proxy routes and MCP request authentication
  * for all apps that expose MCP endpoints (Strivers, Climbrs, etc.).
  *
