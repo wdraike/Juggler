@@ -1876,7 +1876,7 @@ module.exports = { sync, hasChanges, getSyncHistory, audit, withinCdnGrace };
 // controller at boot, before any task mutation can fire the trigger.
 require('../lib/cal-sync-trigger').registerCalSyncTrigger(function (args) {
   return sync(
-    { user: { id: args.userId }, body: {} },
+    { user: { id: args.userId }, body: {}, query: { trigger: 'auto' } },
     { json: function () {}, status: function () { return { json: function () {} }; } }
   );
 });
