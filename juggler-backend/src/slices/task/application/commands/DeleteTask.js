@@ -215,8 +215,15 @@ DeleteTask.prototype.execute = async function execute(input) {
 
   // ── No explicit scope: legacy behavior ────────────────────────────────────
   // recurring_instance soft-skip (handler L1520-1528)
+  // 999.1988/999.1989: snap scheduled_at to now if unscheduled — the DB CHECK
+  // constraint chk_task_instances_terminal_scheduled rejects status='skip' with
+  // NULL scheduled_at (same snap-then-write pattern as UpdateTaskStatus D-B).
   if (isRecurringInstance) {
-    await this.repo.updateTaskById(id, { status: 'skip' }, userId);
+    var softSkipUpdate = { status: 'skip' };
+    if (!task.scheduled_at) {
+      softSkipUpdate.scheduled_at = new Date();
+    }
+    await this.repo.updateTaskById(id, softSkipUpdate, userId);
     await this.cache.invalidateTasks(userId);
     this.enqueueScheduleRun(userId, 'api:deleteTask:softSkip', [id]);
     return { status: 200, body: { message: 'Recurring instance skipped', id: id, softDelete: true } };

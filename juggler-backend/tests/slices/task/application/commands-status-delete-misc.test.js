@@ -279,6 +279,26 @@ describe('DeleteTask (deleteTask)', function () {
     });
   });
 
+  // 999.1988/999.1989: soft-skip on an UNSCHEDULED recurring instance must snap
+  // scheduled_at to now — the DB CHECK constraint chk_task_instances_terminal_scheduled
+  // rejects status='skip' with NULL scheduled_at.
+  test('recurring_instance: soft-skip on unscheduled instance snaps scheduled_at to now (999.1988/999.1989)', function () {
+    var repo = new InMemoryTaskRepository({ rows: [
+      { id: 'ri-unsched', user_id: USER, task_type: 'recurring_instance', source_id: 'm1', master_id: 'm1', status: '', scheduled_at: null, updated_at: new Date() }
+    ] });
+    var trigger = H.makeTriggerSpy();
+    var uc = new DeleteTask(deleteDeps(repo, trigger));
+    return uc.execute({ id: 'ri-unsched', userId: USER }).then(function (out) {
+      expect(out.status).toBe(200);
+      expect(out.body.softDelete).toBe(true);
+      return repo.fetchTaskWithEventIds('ri-unsched', USER).then(function (r) {
+        expect(r.status).toBe('skip');
+        expect(r.scheduled_at).toBeTruthy(); // must be non-null for CHECK constraint
+        expect(r.scheduled_at instanceof Date).toBe(true);
+      });
+    });
+  });
+
   test('cascade=recurring: runs cascadeRecurringDelete in a transaction + 200 "Recurring deleted"', function () {
     // R55 soft-cancel contract: cascadeRecurringDelete no longer hard-deletes rows.
     // Instead it soft-cancels (status='cancelled') pending instances and the template.

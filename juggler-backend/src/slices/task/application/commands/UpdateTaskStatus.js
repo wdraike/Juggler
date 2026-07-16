@@ -275,7 +275,15 @@ UpdateTaskStatus.prototype.execute = async function execute(input) {
     });
     for (var si = 0; si < siblings.length; si++) {
       siblingIds.push(siblings[si].id);
-      await this.repo.updateTaskById(siblings[si].id, update, userId);
+      // 999.1988: ensure unscheduled siblings get scheduled_at snapped to now
+      // when receiving a terminal status — same CHECK constraint defense as the
+      // primary write's snap-to-now. Sibling may have a different scheduled_at
+      // from the primary instance.
+      var siblingUpdate = Object.assign({}, update);
+      if (TERMINAL_REQUIRES_SCHEDULE.indexOf(status) !== -1 && !siblings[si].scheduled_at && !siblingUpdate.scheduled_at) {
+        siblingUpdate.scheduled_at = new Date();
+      }
+      await this.repo.updateTaskById(siblings[si].id, siblingUpdate, userId);
     }
   }
 
