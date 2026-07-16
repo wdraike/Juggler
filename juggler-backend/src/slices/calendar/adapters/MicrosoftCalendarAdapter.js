@@ -32,6 +32,16 @@ var { jugglerDateToISO, isoToJugglerDate, computeDurationMinutes } = require('..
 var { localToUtc } = require('../../../scheduler/dateHelpers');
 var { PLACEMENT_MODES } = require('../../../lib/placementModes');
 var { isTerminalStatus } = require('../../../lib/task-status');
+var { loggers } = require('../../../lib/logger');
+
+// Fallback used before any calendar-list discovery has ever succeeded for
+// this user (brand-new connection + a transient discovery failure) —
+// reproduces the pre-999.1977 default-calendar-only behavior rather than
+// fetching nothing. calendar_id 'primary' is a LOCAL sentinel (not a real
+// Graph id) that lib/msft-cal-api.js's listEvents recognizes as "use
+// /me/calendarView with no /calendars/{id} segment" — mirrors
+// GoogleCalendarAdapter.js's PRIMARY_ONLY_CALENDAR (999.1626).
+var PRIMARY_ONLY_CALENDAR = [{ id: null, calendar_id: 'primary', display_name: null, sync_direction: 'full', ingest_mode: 'task' }];
 
 var providerId = 'msft';
 
@@ -135,28 +145,145 @@ async function getValidAccessToken(user) {
 }
 
 /**
- * Fetch events from Microsoft Calendar and normalize to unified shape.
+ * Get enabled MSFT calendars from user_calendars table, falling back to
+ * the default-calendar-only sentinel when no rows exist yet (999.1977 —
+ * mirrors GoogleCalendarAdapter.getEnabledCalendars).
  */
-async function listEvents(token, timeMin, timeMax, _userId) {
-  var result = await msftCalApi.listEvents(token, timeMin, timeMax);
-  var events = (result && result.items) || [];
-  return events
-    .filter(function(e) {
-      // 999.1012: parity with GoogleCalendarAdapter's declined-self-invite
-      // filter. Microsoft Graph exposes the signed-in user's own RSVP directly
-      // via event.responseStatus.response ('$select' includes responseStatus,
-      // see lib/msft-cal-api.js) — no attendees array scan needed.
-      var rs = e && e.responseStatus;
-      return !(rs && rs.response === 'declined');
-    })
-    .map(normalizeEvent);
+async function getEnabledCalendars(userId) {
+  // ORDER BY calendar_id: same determinism requirement as GCal (999.1626
+  // harrison WARN) — iteration order feeds which calendar "wins" when the
+  // SAME event id appears on 2+ calendars (facade.js gatherProviderSyncData's
+  // eventsById construction, first-write-wins).
+  var calendars = await getDb()('user_calendars')
+    .where({ user_id: userId, provider: 'msft', enabled: true })
+    .orderBy('calendar_id', 'asc');
+
+  if (calendars.length > 0) {
+    return calendars;
+  }
+
+  return PRIMARY_ONLY_CALENDAR;
+}
+
+/**
+ * Discover the user's full Microsoft calendar list and auto-provision any
+ * calendar juggler hasn't seen before into user_calendars (provider='msft'),
+ * defaulting NEW rows to enabled=true (999.1977 — mirrors
+ * GoogleCalendarAdapter.discoverCalendars / David ruling 2026-07-15: opt-out
+ * beats opt-in). Existing rows are left untouched — a user's own enabled=false
+ * toggle is never overwritten by rediscovery. Best-effort: any failure here
+ * degrades to "use whatever is already enabled" rather than blocking the pull.
+ */
+async function discoverCalendars(token, userId) {
+  try {
+    var remote = await msftCalApi.listCalendarList(token);
+    if (!remote || remote.length === 0) return;
+
+    var existing = await getDb()('user_calendars').where({ user_id: userId, provider: 'msft' });
+    var existingIds = {};
+    existing.forEach(function(r) { existingIds[r.calendar_id] = true; });
+
+    var toInsert = remote
+      .filter(function(c) { return c && c.id && !existingIds[c.id]; })
+      .map(function(c) {
+        return {
+          user_id: userId,
+          provider: 'msft',
+          calendar_id: c.id,
+          display_name: c.name || null,
+          enabled: true,
+          sync_direction: 'full',
+          ingest_mode: 'task'
+        };
+      });
+
+    if (toInsert.length > 0) {
+      await getDb()('user_calendars').insert(toInsert);
+    }
+  } catch (e) {
+    loggers.calAdapterMsft.warn('Calendar discovery failed (non-fatal — pull continues with already-enabled calendars)', {
+      userId: userId,
+      error: e.message
+    });
+  }
+}
+
+/**
+ * Fetch events from EVERY enabled MSFT calendar and normalize to unified
+ * shape (999.1977 — was default-calendar-only, same bug 999.1626 fixed for
+ * GCal).
+ *
+ * Unlike GoogleCalendarAdapter.listEvents, this does NOT attempt to persist
+ * any sync-token/delta-link here: lib/msft-cal-api.js's listEvents hits
+ * /me/calendarView (or /me/calendars/{id}/calendarView), which returns no
+ * @odata.deltaLink — only the dedicated .../events/delta endpoint does, and
+ * this adapter's pull path does not call it. There is therefore nothing
+ * produced by this call to gate on calendar count the way GCal's
+ * nextSyncToken is; the "exactly 1 enabled calendar" gate that matters for
+ * MSFT lives entirely in hasChanges() below (msft_cal_delta_link).
+ */
+async function listEvents(token, timeMin, timeMax, userId) {
+  if (userId) {
+    await discoverCalendars(token, userId);
+  }
+  var calendars = userId ? await getEnabledCalendars(userId) : PRIMARY_ONLY_CALENDAR;
+
+  var allEvents = [];
+  var hasPartialFailure = false;
+
+  for (var i = 0; i < calendars.length; i++) {
+    var cal = calendars[i];
+    try {
+      var result = await msftCalApi.listEvents(token, timeMin, timeMax, cal.calendar_id);
+      var items = (result && result.items) || [];
+      var normalized = items
+        .filter(function(e) {
+          // 999.1012: parity with GoogleCalendarAdapter's declined-self-invite
+          // filter. Microsoft Graph exposes the signed-in user's own RSVP directly
+          // via event.responseStatus.response ('$select' includes responseStatus,
+          // see lib/msft-cal-api.js) — no attendees array scan needed.
+          var rs = e && e.responseStatus;
+          return !(rs && rs.response === 'declined');
+        })
+        .map(normalizeEvent)
+        .map(function(ne) { ne._calendarId = cal.calendar_id; return ne; });
+      allEvents = allEvents.concat(normalized);
+    } catch (e) {
+      hasPartialFailure = true;
+      loggers.calAdapterMsft.error('Error fetching calendar', {
+        calendarId: cal.display_name || cal.calendar_id,
+        error: e
+      });
+    }
+  }
+
+  if (hasPartialFailure) {
+    allEvents._hasPartialFailure = true;
+  }
+  return allEvents;
 }
 
 /**
  * Lightweight check: ask Microsoft if anything changed since the last sync.
  * Uses delta link. Returns { hasChanges, deltaLink }.
+ *
+ * 999.1977 (mirrors 999.1626 harrison BLOCK fix): with 2+ enabled calendars
+ * there is no single delta link that can represent "anything changed on ANY
+ * enabled calendar" (see listEvents doc comment above — no delta link is ever
+ * captured from the pull path in the first place). Trusting a stale/single
+ * delta link here while a secondary/shared calendar is also enabled would let
+ * a new event on THAT calendar report hasChanges:false — the frontend poll
+ * never fires the real multi-calendar pull, silently deferring the event
+ * until the next full-sync trigger. Correctness over call-cost: always report
+ * changed so the real pull runs every poll for these users. Users with a
+ * single enabled calendar (the common case) keep the cheap check.
  */
 async function hasChanges(token, user) {
+  var calendars = await getEnabledCalendars(user.id);
+  if (calendars.length > 1) {
+    return { hasChanges: true };
+  }
+
   var deltaLink = user.msft_cal_delta_link;
   if (!deltaLink) return { hasChanges: true }; // No delta link yet — need full sync
 
@@ -500,6 +627,8 @@ module.exports = {
   providerId,
   isConnected,
   getValidAccessToken,
+  getEnabledCalendars,
+  discoverCalendars,
   listEvents,
   hasChanges,
   getEvents,

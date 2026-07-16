@@ -16,4 +16,10 @@ router.get('/callback', msftCalController.callback); // No auth — browser redi
 router.post('/disconnect', authenticateJWT, msftCalController.disconnect);
 router.post('/auto-sync', authenticateJWT, msftCalController.setAutoSync);
 
+// 999.1977: per-calendar selection — mirrors gcal.routes.js's
+// calendars/refresh-calendars/calendars/:id trio (999.1626).
+router.get('/calendars', authenticateJWT, msftCalController.getCalendars);
+router.get('/refresh-calendars', authenticateJWT, msftCalController.refreshCalendars);
+router.put('/calendars/:id', authenticateJWT, msftCalController.updateCalendar);
+
 module.exports = router;

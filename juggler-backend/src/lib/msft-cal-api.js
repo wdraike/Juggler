@@ -160,7 +160,7 @@ async function getUserInfo(accessToken) {
   return { email: (me && (me.mail || me.userPrincipalName)) || null };
 }
 
-async function listEvents(accessToken, startDateTime, endDateTime) {
+async function listEvents(accessToken, startDateTime, endDateTime, calendarId) {
   var allItems = [];
   var params = new URLSearchParams({
     startDateTime: startDateTime,
@@ -170,7 +170,13 @@ async function listEvents(accessToken, startDateTime, endDateTime) {
     '$select': 'id,subject,start,end,isAllDay,showAs,lastModifiedDateTime,body,type,seriesMasterId,isCancelled,sensitivity,responseStatus'
   });
 
-  var path = '/me/calendarView?' + params.toString();
+  // 999.1977: caller may target any calendar by id; omitted/'primary' preserves
+  // legacy behavior (the default calendar via /me/calendarView, no /calendars/{id}
+  // segment) — mirrors gcal-api.js's calendarId default, adapted to Graph's URL shape.
+  var basePath = (calendarId && calendarId !== 'primary')
+    ? '/me/calendars/' + encodeURIComponent(calendarId) + '/calendarView'
+    : '/me/calendarView';
+  var path = basePath + '?' + params.toString();
 
   do {
     var data = await graphFetch(accessToken, path);
@@ -190,6 +196,45 @@ async function listEvents(accessToken, startDateTime, endDateTime) {
   } while (path);
 
   return { items: allItems };
+}
+
+/**
+ * Enumerate every calendar in the user's Microsoft account (/me/calendars),
+ * not just the default one — 999.1977: pull sync silently, permanently
+ * missed events living on any secondary/shared calendar because listEvents
+ * hit /me/calendarView (default-calendar-only) unconditionally with no
+ * discovery step. Mirrors gcal-api.js's listCalendarList (999.1626).
+ *
+ * Microsoft Graph has no minAccessRole-equivalent filter for /me/calendars:
+ * every item returned is one the signed-in user already has at least read
+ * access to (their own calendar folders + calendars shared TO them); `canEdit`
+ * distinguishes write access but nothing here is free/busy-only the way
+ * Google's freeBusyReader entries are, so no extra filtering is needed to
+ * match GCal's minAccessRole=reader semantics.
+ */
+async function listCalendarList(accessToken) {
+  var allItems = [];
+  var params = new URLSearchParams({ '$top': '250', '$select': 'id,name,isDefaultCalendar,canEdit' });
+  var path = '/me/calendars?' + params.toString();
+
+  do {
+    var data = await graphFetch(accessToken, path);
+    if (data && data.value) {
+      allItems = allItems.concat(data.value);
+    }
+    if (data && data['@odata.nextLink']) {
+      var nextUrl = data['@odata.nextLink'];
+      if (nextUrl.startsWith(GRAPH_BASE)) {
+        path = nextUrl.substring(GRAPH_BASE.length);
+      } else {
+        break;
+      }
+    } else {
+      path = null;
+    }
+  } while (path);
+
+  return allItems;
 }
 
 async function insertEvent(accessToken, event) {
@@ -295,6 +340,7 @@ module.exports = {
   refreshAccessToken,
   getUserInfo,
   listEvents,
+  listCalendarList,
   checkForChanges,
   insertEvent,
   patchEvent,

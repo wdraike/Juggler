@@ -64,12 +64,47 @@ async function setAutoSync(req, res) {
   }
 }
 
+// 999.1977: per-calendar selection (list / toggle / discover) — mirrors
+// gcalController's getCalendars/updateCalendar/refreshCalendars (999.1626).
+async function getCalendars(req, res) {
+  try {
+    var result = await facade.msftGetCalendars(req.user.id);
+    res.status(result.status).json(result.body);
+  } catch (error) {
+    logger.error('MsftCal get-calendars error:', error);
+    res.status(500).json({ error: 'Failed to get calendars' });
+  }
+}
+
+async function updateCalendar(req, res) {
+  try {
+    var result = await facade.msftUpdateCalendar(req.user.id, req.params.id, req.body);
+    res.status(result.status).json(result.body);
+  } catch (error) {
+    logger.error('MsftCal update-calendar error:', error);
+    res.status(500).json({ error: 'Failed to update calendar' });
+  }
+}
+
+async function refreshCalendars(req, res) {
+  try {
+    var result = await facade.msftRefreshCalendars(req.user.id, req.user);
+    res.status(result.status).json(result.body);
+  } catch (error) {
+    logger.error('MsftCal refresh-calendars error:', error);
+    res.status(500).json({ error: 'Failed to refresh calendars' });
+  }
+}
+
 module.exports = {
   getStatus,
   connect,
   callback,
   disconnect,
   setAutoSync,
+  getCalendars,
+  updateCalendar,
+  refreshCalendars,
   // Test-only: direct access to markCodeUsed for unit testing without HTTP stack
   _internal: { markCodeUsed: facade.msftMarkCodeUsed }
 };

@@ -368,6 +368,58 @@ async function getMsftStatus(user) {
   };
 }
 
+// ── MSFT per-calendar selection (999.1977) ──
+// Backend toggle mechanism mirroring gcalGetCalendars/gcalUpdateCalendar/
+// gcalRefreshCalendars above (999.1626) — deliberately GET-list + PUT-toggle
+// rather than a bespoke UI: no frontend Settings surface was built for this
+// leg either (same deferral). These three endpoints ARE the documented API
+// contract for a future Settings panel to bind to.
+
+async function msftGetCalendars(userId) {
+  var calendars = await accountRepo.findUserCalendars(userId, 'msft');
+  return { status: 200, body: { calendars: calendars } };
+}
+
+async function msftUpdateCalendar(userId, calendarId, body) {
+  var row = await accountRepo.findUserCalendarByIdForUser(calendarId, userId);
+
+  if (!row) {
+    return { status: 404, body: { error: 'Calendar not found' } };
+  }
+
+  var updates = { updated_at: accountRepo.now() };
+  if (body.enabled !== undefined) updates.enabled = body.enabled;
+  if (body.syncDirection) updates.sync_direction = body.syncDirection;
+  if (body.ingestMode) updates.ingest_mode = body.ingestMode;
+
+  await accountRepo.updateUserCalendarById(calendarId, updates);
+
+  var updated = await accountRepo.findUserCalendarById(calendarId);
+  return { status: 200, body: { calendar: updated } };
+}
+
+async function msftRefreshCalendars(userId, user) {
+  if (!user.msft_cal_refresh_token) {
+    return { status: 400, body: { error: 'Microsoft Calendar not connected. Please connect first.' } };
+  }
+
+  var token;
+  try {
+    token = await getAdapter('msft').getValidAccessToken(user);
+  } catch (e) {
+    return { status: 401, body: { error: 'Failed to connect. Your Microsoft Calendar authorization may have expired.', detail: e.message } };
+  }
+
+  // MicrosoftCalendarAdapter.discoverCalendars is best-effort by design (same
+  // path the automatic pull-sync uses) — it never throws, logging+returning
+  // on failure so a calendar-list hiccup degrades to "whatever is already
+  // enabled" rather than blocking the request.
+  await MicrosoftCalendarAdapter.discoverCalendars(token, userId);
+
+  var allCalendars = await accountRepo.findUserCalendars(userId, 'msft');
+  return { status: 200, body: { calendars: allCalendars } };
+}
+
 async function msftConnect(user) {
   var pkce = msftCalApi.generatePkce();
   var state = await new SignJWT({ userId: user.id, cv: pkce.codeVerifier })
@@ -1348,6 +1400,19 @@ async function gatherProviderSyncData(user, userId, windowStart, windowEnd, tz, 
       });
     } catch (_e) { /* ignore — falls back to 'task' default at read site */ }
   }
+  // 999.1977: MSFT now pulls from every enabled calendar too (same fix as
+  // 999.1626 for GCal), each pulled event tagged newEvent._calendarId —
+  // extend the SAME shared map so an MSFT calendar's ingest_mode is honored
+  // at pull-new branching, mirroring the GCal block immediately above.
+  if (providerData.msft) {
+    try {
+      var msftCals = await srcDb('user_calendars')
+        .where({ user_id: userId, provider: 'msft', enabled: true });
+      msftCals.forEach(function(c) {
+        calIngestModeMap[c.calendar_id] = c.ingest_mode || 'task';
+      });
+    } catch (_e) { /* ignore — falls back to 'task' default at read site */ }
+  }
   var calendarLabels = { apple: appleCalendarLabel };
 
   return {
@@ -1734,6 +1799,9 @@ module.exports = {
   msftCallback: msftCallback,
   msftDisconnect: msftDisconnect,
   setMsftAutoSync: setMsftAutoSync,
+  msftGetCalendars: msftGetCalendars,
+  msftUpdateCalendar: msftUpdateCalendar,
+  msftRefreshCalendars: msftRefreshCalendars,
   msftMarkCodeUsed: msftMarkCodeUsed,
   gcalMarkCodeUsed: gcalMarkCodeUsed,
   appleGetStatus: appleGetStatus,

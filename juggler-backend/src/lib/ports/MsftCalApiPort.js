@@ -9,8 +9,8 @@
  * consumed by the calendar hex slice's `MicrosoftCalendarAdapter` — so it
  * exposes EXACTLY that surface: `generatePkce` / `getAuthUrl` /
  * `getTokensFromCode` / `refreshAccessToken` / `getUserInfo` / `listEvents`
- * / `checkForChanges` / `insertEvent` / `patchEvent` / `deleteEvent` /
- * `batchRequest`.
+ * / `listCalendarList` / `checkForChanges` / `insertEvent` / `patchEvent` /
+ * `deleteEvent` / `batchRequest`.
  *
  * ── BINDING INVARIANTS ──────────────────────────────────────────────────────
  *
@@ -49,8 +49,15 @@
  * @property {(accessToken: string) => Promise<{email: (string|null)}>} getUserInfo
  *   Fetch the signed-in account's identity (INVARIANT MC-4).
  *
- * @property {(accessToken: string, startDateTime: string, endDateTime: string) => Promise<{items: Array<Object>}>} listEvents
- *   List events in a time range, following @odata.nextLink pagination.
+ * @property {(accessToken: string, startDateTime: string, endDateTime: string, calendarId?: string) => Promise<{items: Array<Object>}>} listEvents
+ *   List events in a time range for the given calendar (default: the account's
+ *   default calendar via /me/calendarView), following @odata.nextLink pagination.
+ *
+ * @property {(accessToken: string) => Promise<Array<Object>>} listCalendarList
+ *   999.1977: enumerate every calendar in the account (/me/calendars) — the
+ *   discovery step MicrosoftCalendarAdapter uses to pull from secondary/shared
+ *   calendars, not just the default one (mirrors GcalApiPort.listCalendarList,
+ *   999.1626).
  *
  * @property {(accessToken: string, deltaLink: string) => Promise<{hasChanges: boolean, changedCount?: number, deltaLink?: string, tokenInvalid?: boolean}>} checkForChanges
  *   Lightweight delta-query change check (INVARIANT MC-3).
@@ -96,8 +103,12 @@ MsftCalApiPort.prototype.getUserInfo = function getUserInfo(_accessToken) {
   throw new Error('MsftCalApiPort.getUserInfo not implemented');
 };
 
-MsftCalApiPort.prototype.listEvents = function listEvents(_accessToken, _startDateTime, _endDateTime) {
+MsftCalApiPort.prototype.listEvents = function listEvents(_accessToken, _startDateTime, _endDateTime, _calendarId) {
   throw new Error('MsftCalApiPort.listEvents not implemented');
+};
+
+MsftCalApiPort.prototype.listCalendarList = function listCalendarList(_accessToken) {
+  throw new Error('MsftCalApiPort.listCalendarList not implemented');
 };
 
 MsftCalApiPort.prototype.checkForChanges = function checkForChanges(_accessToken, _deltaLink) {
@@ -131,6 +142,7 @@ var MSFT_CAL_API_PORT_METHODS = Object.freeze([
   'refreshAccessToken',
   'getUserInfo',
   'listEvents',
+  'listCalendarList',
   'checkForChanges',
   'insertEvent',
   'patchEvent',
