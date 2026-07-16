@@ -57,10 +57,23 @@
  *        provider pull (999.1025 sub-leg jug-syncharness, zoe WARN
  *        zoe-syncharness-conflictskip-unpinned — see NOTE at axis O below)
  *
+ *   P  — Apple/CalDAV CDN-grace miss suppression (999.1025 inc. 2): the FIRST
+ *        golden scenario on the apple provider. Pins withinCdnGrace()'s wiring
+ *        into the miss ladder (cal-sync.controller.js:722) — an Apple-ONLY
+ *        branch (CDN_GRACE_MS={apple:120s}; gcal/msft have none) unreachable by
+ *        axes A-O. A just-pushed-but-not-yet-visible Apple event is treated as
+ *        CDN lag within 120s (miss suppressed) and as a real miss after
+ *        (miss_count 0->1). Guards the Apple-soak Bug-#2 catastrophic-delete
+ *        class. Companion DB-free source pin: W5-apple-flow-invariants.
+ *
  * AXES DELIBERATELY NOT COVERED (documented, with reasons):
- *   - Apple/CalDAV flows (multi-calendar user_calendars model, CDN grace,
- *     ctag): owned by apple-cal-*.test.js unit suites + W0 C1 source pin.
- *     Simulating the CalDAV URL-keyed store is an extraction-phase follow-up.
+ *   - Remaining Apple/CalDAV flows — push/create (eventUrl storage),
+ *     _url dual-key pull dedup, ETag external-edit fallback, delete-by-URL:
+ *     the inline branches are pinned DB-free by W5-apple-flow-invariants
+ *     (source inspection); simulating the CalDAV URL-keyed store end-to-end in
+ *     this golden harness (Apple events carrying distinct _url/_etag, createEvent
+ *     returning a CalDAV URL) is the next Apple golden increment. Axis P above
+ *     needs neither (its event is absent), so it lands first.
  *
  * RUN (test-bed pool; NEVER bare npx jest against a dev .env):
  *   cd test-bed && scripts/run-suite.sh juggler -- --testPathPattern='W4-sync-goldenMaster'
@@ -134,6 +147,14 @@ var NO_PROVIDERS = {
 };
 var GCAL_ONLY = Object.assign({}, NO_PROVIDERS, { gcal_refresh_token: 'w4-fake-gcal-refresh' });
 var GCAL_MSFT = Object.assign({}, GCAL_ONLY, { msft_cal_refresh_token: 'w4-fake-msft-refresh' });
+// Apple connects on username+password presence (facade isConnected); the sim
+// mocks getValidAccessToken/listEvents so the CalDAV client/decrypt never run.
+var APPLE_ONLY = Object.assign({}, NO_PROVIDERS, {
+  apple_cal_username: 'w4-fake-apple-user',
+  apple_cal_password: 'w4-fake-apple-pass',
+  apple_cal_server_url: 'https://caldav.icloud.com',
+  apple_cal_calendar_url: 'https://caldav.icloud.com/w4/calendars/home/'
+});
 
 var sim = new H.ProviderSim();
 var deps;
@@ -173,6 +194,20 @@ async function editTask(id, fields) {
 async function seedUserConfig(key, valueObj) {
   await db('user_config').insert({
     user_id: TEST_USER_ID, config_key: key, config_value: JSON.stringify(valueObj)
+  });
+}
+
+/** Seed an enabled Apple full-sync calendar (user_calendars). Apple's effective
+ *  sync mode is derived from user_calendars.sync_direction, NOT
+ *  cal_sync_settings.mode (controller isIngestOnly('apple') -> !appleHasFullSync),
+ *  so without this row Apple is treated as ingest-only. Idempotent + defensive
+ *  (destroyTestUser cascades user_calendars on the users delete). */
+async function seedAppleFullSyncCalendar() {
+  await db('user_calendars').where('user_id', TEST_USER_ID).del();
+  await db('user_calendars').insert({
+    user_id: TEST_USER_ID, provider: 'apple',
+    calendar_id: 'https://caldav.icloud.com/w4/calendars/home/',
+    display_name: 'Home', enabled: 1, sync_direction: 'full'
   });
 }
 
@@ -904,4 +939,99 @@ test('O — write-phase conflict-skip: concurrent edit survives untouched, concu
   expect(deletedMaster).toBeUndefined();
 
   H.checkGolden('O-write-phase-conflict-skip', [run1, run2]);
+});
+
+// ─── P: Apple CalDAV CDN-grace miss suppression (first Apple flow axis) ──────
+//
+// FIRST golden-master scenario on the Apple/CalDAV provider (999.1025 inc. 2).
+// Pins the wiring of withinCdnGrace() into sync()'s miss ladder — the
+// Apple-ONLY branch (cal-sync.controller.js:722, `else if (withinCdnGrace(
+// ledger, pid))`) that treats a just-pushed-but-not-yet-visible Apple event as
+// CDN lag rather than a deletion. CDN_GRACE_MS = { apple: 120*1000 } (:50); GCal
+// and MSFT have NO grace (grace 0), so no gcal/msft golden (axes A-O) can reach
+// this branch — proven complementarily by axis E, where a gcal missing event
+// increments miss_count on the very first sync. Without this branch, Apple
+// CalDAV's >62s CDN propagation lag causes just-pushed events to read as
+// missing and the task is hard-deleted after MISS_THRESHOLD(3) syncs (Apple
+// soak Bug #2 class). W5-apple-flow-invariants pins the same branch DB-free via
+// source inspection; THIS scenario pins the end-to-end DB effect.
+//
+// SETUP mirrors axes E2/K: a seeded, HASH-MATCHING active ledger + a task
+// whose remote event is absent from the sim store, so the run enters the
+// "task && !event" miss ladder. The task is unchanged (taskHash/userHash match
+// the ledger), so neither the first-miss (:766) nor the repush (:748) branch
+// fires — the ONLY variable is whether withinCdnGrace short-circuits the miss.
+//   run1: last_pushed_at 30s before FIXED_NOW  -> WITHIN 120s grace -> miss suppressed.
+//   run2: script.advanceClockMs jumps the (faked) clock +200s past the grace
+//         window (the axis-M mechanism; 200s < the 300s sync_timeout budget,
+//         so no timeout) -> grace EXPIRED -> miss_count 0 -> 1.
+//
+// DETERMINISM NOTE (Apple-specific — a REAL characterization finding, not a
+// test artifact; see W5 A1-5): withinCdnGrace does a raw, unguarded
+// `new Date(ledger.last_pushed_at)` on the tz-less mysql2 dateString it reads
+// back (cal-sync.controller.js:53) — no localToUtc/parseDbUtc — so the SAME
+// literal string parses to a DIFFERENT instant depending on the process host
+// TZ (confirmed live on an America/New_York host: ~4h drift vs the intended
+// UTC instant). A hardcoded literal (e.g. '2026-06-16 11:59:30', intending
+// "30s before FIXED_NOW") would therefore make this golden non-portable
+// across machines. Fix: seed last_pushed_at via localDbTimestamp(ms) below,
+// which formats using the SAME LOCAL getters `new Date(str)` will later
+// re-derive from on THIS SAME host — round-tripping correctly through
+// withinCdnGrace's exact (buggy-if-non-UTC) parse on any machine. This pins
+// the CURRENT wiring behavior (grace suppresses/expires the miss at the right
+// relative offset) without requiring the test process to run under any
+// specific TZ. (last_pushed_at is in the harness's VOLATILE_COLS, so its
+// literal value never appears in the committed golden JSON either way.)
+function localDbTimestamp(ms) {
+  var d = new Date(ms);
+  function p2(n) { return String(n).padStart(2, '0'); }
+  return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + ' ' +
+    p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds());
+}
+
+test('P — Apple CDN grace: a missing just-pushed event is NOT counted as a miss within the 120s window, but is after it expires', async () => {
+  await seedTestUser(APPLE_ONLY);
+  await seedAppleFullSyncCalendar();
+  var task = await seedTask('w4p-1', '2026-06-17 14:00:00');
+  await stabilizeTaskTimestamps();
+
+  // Seeded ledger: a prior sync pushed this (unchanged) task to Apple and
+  // recorded last_pushed_at 30s before FIXED_NOW. The event is NOT in the sim
+  // store (missing). Hashes match the task AS-IS so the miss ladder's
+  // content-changed branches never fire.
+  await makeLedgerRow({
+    provider: 'apple', origin: 'juggler', status: 'active',
+    task_id: 'w4p-1', provider_event_id: 'ev-apple-w4p-1',
+    last_pushed_hash: taskHash(task), last_user_hash: userHash(task), last_pulled_hash: userHash(task),
+    event_start: '2026-06-17T14:00:00.000Z',
+    last_modified_at: '2026-06-10 00:00:00',
+    last_pushed_at: localDbTimestamp(H.FIXED_NOW.getTime() - 30000), // 30s before FIXED_NOW -> within 120s grace
+    task_updated_at: H.FIXED_PAST, synced_at: H.FIXED_PAST, created_at: H.FIXED_PAST,
+    miss_count: 0
+  });
+
+  var run1 = await run('apple missing event WITHIN cdn grace');
+
+  // Hard invariant: grace ACTIVE -> miss_count untouched, task alive.
+  var missChangedRun1 = ((run1.dbDelta.cal_sync_ledger || {}).changed || []).some(function (c) {
+    return c.changes && c.changes.miss_count;
+  });
+  expect(missChangedRun1).toBe(false);
+  expect((run1.dbDelta.tasks_v || {}).removed).toBeUndefined();
+
+  // Jump the faked clock +200s (past the 120s grace, under the 300s timeout).
+  sim.script('apple').advanceClockMs = 200000;
+  await stabilizeTaskTimestamps();
+
+  var run2 = await run('apple missing event AFTER cdn grace expires');
+
+  // Hard invariant: grace EXPIRED -> miss_count 0 -> 1 (still below
+  // MISS_THRESHOLD 3, so the task is NOT deleted).
+  var missTo1 = ((run2.dbDelta.cal_sync_ledger || {}).changed || []).some(function (c) {
+    return c.changes && c.changes.miss_count && c.changes.miss_count[1] === 1;
+  });
+  expect(missTo1).toBe(true);
+  expect((run2.dbDelta.tasks_v || {}).removed).toBeUndefined();
+
+  H.checkGolden('P-apple-cdn-grace-flow', [run1, run2]);
 });

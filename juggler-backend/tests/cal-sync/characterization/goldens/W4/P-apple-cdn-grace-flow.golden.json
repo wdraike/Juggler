@@ -1,0 +1,274 @@
+[
+  {
+    "label": "apple missing event WITHIN cdn grace",
+    "statusCode": 200,
+    "body": {
+      "pushed": 0,
+      "pulled": 0,
+      "skipped": 0,
+      "deleted_local": 0,
+      "deleted_remote": 0,
+      "errors": [],
+      "providers": {
+        "apple": {
+          "pushed": 0,
+          "pulled": 0,
+          "skipped": 0,
+          "deleted_local": 0,
+          "deleted_remote": 0,
+          "errors": []
+        }
+      },
+      "syncRunId": "<UUID>",
+      "summary": []
+    },
+    "providerCalls": {
+      "apple": [
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        },
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        },
+        {
+          "method": "listEvents",
+          "args": {
+            "token": "tok-apple",
+            "timeMin": "2026-06-16T04:00:00.000Z",
+            "timeMax": "2026-08-15T12:00:00.000Z"
+          }
+        }
+      ]
+    },
+    "sse": [
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "fetch",
+          "detail": "Fetching events...",
+          "pct": 5,
+          "provider": "apple",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "fetch",
+          "detail": "Fetched 0 events",
+          "pct": 15,
+          "provider": "apple",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "ledger",
+          "detail": "Checking for changes...",
+          "pct": 20,
+          "provider": "apple",
+          "calendar": "Home"
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "push",
+          "detail": "Syncing tasks...",
+          "pct": 50,
+          "provider": "apple",
+          "calendar": "Home"
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "finalize",
+          "detail": "Saving changes...",
+          "pct": 85,
+          "provider": null,
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "finalize",
+          "detail": "Finalizing...",
+          "pct": 95,
+          "provider": null,
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "done",
+          "detail": "Sync complete — no changes",
+          "pct": 100,
+          "provider": null,
+          "calendar": null
+        }
+      }
+    ],
+    "enqueues": [],
+    "dbDelta": {
+      "users": {
+        "changed": [
+          {
+            "key": "user",
+            "changes": {
+              "apple_cal_last_synced_at": [
+                null,
+                "<TS>"
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "label": "apple missing event AFTER cdn grace expires",
+    "statusCode": 200,
+    "body": {
+      "pushed": 0,
+      "pulled": 0,
+      "skipped": 0,
+      "deleted_local": 0,
+      "deleted_remote": 0,
+      "errors": [],
+      "providers": {
+        "apple": {
+          "pushed": 0,
+          "pulled": 0,
+          "skipped": 0,
+          "deleted_local": 0,
+          "deleted_remote": 0,
+          "errors": []
+        }
+      },
+      "syncRunId": "<UUID>",
+      "summary": []
+    },
+    "providerCalls": {
+      "apple": [
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        },
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        },
+        {
+          "method": "listEvents",
+          "args": {
+            "token": "tok-apple",
+            "timeMin": "2026-06-16T04:00:00.000Z",
+            "timeMax": "2026-08-15T12:00:00.000Z"
+          }
+        }
+      ]
+    },
+    "sse": [
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "fetch",
+          "detail": "Fetching events...",
+          "pct": 5,
+          "provider": "apple",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "fetch",
+          "detail": "Fetched 0 events",
+          "pct": 15,
+          "provider": "apple",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "ledger",
+          "detail": "Checking for changes...",
+          "pct": 20,
+          "provider": "apple",
+          "calendar": "Home"
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "push",
+          "detail": "Syncing tasks...",
+          "pct": 50,
+          "provider": "apple",
+          "calendar": "Home"
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "finalize",
+          "detail": "Saving changes...",
+          "pct": 85,
+          "provider": null,
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "finalize",
+          "detail": "Finalizing...",
+          "pct": 95,
+          "provider": null,
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "done",
+          "detail": "Sync complete — no changes",
+          "pct": 100,
+          "provider": null,
+          "calendar": null
+        }
+      }
+    ],
+    "enqueues": [],
+    "dbDelta": {
+      "cal_sync_ledger": {
+        "changed": [
+          {
+            "key": "<L1>",
+            "changes": {
+              "miss_count": [
+                0,
+                1
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+]
