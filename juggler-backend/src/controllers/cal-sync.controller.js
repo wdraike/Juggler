@@ -32,9 +32,10 @@ var { isTerminalStatus } = require('../lib/task-status');
 // lib/task-write-queue (flushQueueInLock) requires moved with it; no longer
 // needed at this scope. See that function's JSDoc for the boundary.
 var { isAllDayTaskBackend } = require('../lib/isAllDayTaskBackend');
-var { handleTerminalTaskSync } = require('../lib/cal-sync-helpers');
 // 999.1025 inc. 3 — pure miss-ladder use-case (decisions in, effects out).
 var { decideMissingEventSync } = require('../slices/calendar/domain/missing-event-decision');
+// 999.1025 inc. 4 — pure terminal-status use-case (decisions in, effects out).
+var { decideTerminalTaskSync } = require('../slices/calendar/domain/terminal-task-decision');
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('cal-sync.controller');
 
@@ -55,6 +56,26 @@ function withinCdnGrace(ledger, pid) {
   var grace = CDN_GRACE_MS[pid] || 0;
   if (!grace || !ledger.last_pushed_at) return false;
   return (Date.now() - new Date(ledger.last_pushed_at).getTime()) < grace;
+}
+
+// 999.1025 inc. 4 — the terminal-decision's delete EFFECT, isolated as its own
+// small (impure) applier function so it's mockable/testable at this seam
+// without a DB (mirrors the sibling delete blocks in sync()). Moved verbatim
+// from the old handleTerminalTaskSync (lib/cal-sync-helpers.js): swallow
+// 404/410 (event already deleted elsewhere), rethrow anything else, then hand
+// back the decision's already-computed mutation buffers unchanged.
+async function applyTerminalDelete(pAdapter, pToken, throttleFn, decision) {
+  try {
+    await pAdapter.deleteEvent(pToken, decision.deleteTarget);
+    await throttleFn();
+  } catch (e) {
+    if (!e.message.includes('404') && !e.message.includes('410')) throw e;
+  }
+  return {
+    taskUpdates: decision.taskUpdates,
+    ledgerUpdates: decision.ledgerUpdates,
+    statsDelta: decision.statsDelta
+  };
 }
 
 var PROVIDER_NAMES = { gcal: 'Google Calendar', msft: 'Microsoft Calendar', apple: 'Apple Calendar' };
@@ -392,19 +413,34 @@ async function sync(req, res) {
           }
 
           // --- Terminal status handling (done/cancel/skip/pause) ---
+          // Decision is PURE (999.1025 inc. 4): decideTerminalTaskSync returns a
+          // descriptor; the deleteEvent/throttle effect (and its 404/410 swallow)
+          // is applied HERE at the call site, matching the sibling delete blocks
+          // above. deleteTarget preserves `event._url || ledger.provider_event_id`
+          // exactly (axis T).
           if (task && event && ledger.origin === JUGGLER_ORIGIN && calCompletedBehavior !== 'keep' && !isIngestOnly(pid)) {
-            var terminalResult = await handleTerminalTaskSync(
-              task, event, ledger, pAdapter, pToken, calCompletedBehavior, isIngestOnly(pid), JUGGLER_ORIGIN, throttle
-            );
-            
-            if (terminalResult.taskUpdates.length > 0) {
-              taskUpdates = taskUpdates.concat(terminalResult.taskUpdates);
-              ledgerUpdates = ledgerUpdates.concat(terminalResult.ledgerUpdates);
-              pStats.deleted_local = (pStats.deleted_local || 0) + (terminalResult.stats.deleted_local || 0);
-              stats.deleted_local = (stats.deleted_local || 0) + (terminalResult.stats.deleted_local || 0);
-              continue; // Skip to next iteration if event was deleted
+            var terminalDecision = decideTerminalTaskSync({
+              task: task, event: event, ledger: ledger,
+              calCompletedBehavior: calCompletedBehavior,
+              isIngestOnly: isIngestOnly(pid),
+              JUGGLER_ORIGIN: JUGGLER_ORIGIN,
+              eventIdColumn: pAdapter.getEventIdColumn()
+            });
+
+            if (terminalDecision.action === 'delete') {
+              // effect isolated in applyTerminalDelete (999.1025 inc. 4 — mockable
+              // seam, DB-free unit-testable). decideTerminalTaskSync never emits
+              // logs (same as the old handleTerminalTaskSync), so there is
+              // nothing to forward to logSyncAction here — behavior-identical.
+              var applied = await applyTerminalDelete(pAdapter, pToken, throttle, terminalDecision);
+              taskUpdates = taskUpdates.concat(applied.taskUpdates);
+              ledgerUpdates = ledgerUpdates.concat(applied.ledgerUpdates);
+              pStats.deleted_local = (pStats.deleted_local || 0) + (applied.statsDelta.deleted_local || 0);
+              stats.deleted_local = (stats.deleted_local || 0) + (applied.statsDelta.deleted_local || 0);
+              continue; // Skip to next iteration — event was deleted
             }
-            // 'update' mode for done tasks: fall through to regular push so ✓ prefix + transparency propagate
+            // action 'update' (done + behavior!=delete) or 'none': fall through to
+            // regular push so ✓ prefix + transparency propagate to the calendar.
           }
 
           // [FIX D-03] done_frozen guard — skip push for already-frozen rows
@@ -1751,7 +1787,7 @@ async function audit(req, res) {
   }
 }
 
-module.exports = { sync, hasChanges, getSyncHistory, audit, withinCdnGrace };
+module.exports = { sync, hasChanges, getSyncHistory, audit, withinCdnGrace, applyTerminalDelete };
 
 // 999.1192 (CalSyncTriggerPort inversion): register the HTTP-shaped sync entry
 // with the lib/cal-sync-trigger seam. The task slice's skip/cancel outbound

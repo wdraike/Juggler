@@ -382,10 +382,11 @@ test('D — terminal tasks: done (behavior=update) and cancel', async () => {
 
 test('D2 — terminal done with calCompletedBehavior=delete: event is deleted (999.1455 fix)', async () => {
   // Fixed 999.1455: cal-sync.controller.js call site was passing the
-  // isIngestOnly FUNCTION itself (always truthy) into handleTerminalTaskSync,
-  // whose first guard was
-  // `if (!task || !event || ledger.origin !== JUGGLER_ORIGIN || isIngestOnly) return {…empty…}`
-  // (src/lib/cal-sync-helpers.js:26). The helper therefore ALWAYS no-opped, and
+  // isIngestOnly FUNCTION itself (always truthy) into what was then
+  // handleTerminalTaskSync (since 999.1025 inc. 4: decideTerminalTaskSync,
+  // src/slices/calendar/domain/terminal-task-decision.js), whose first guard was
+  // `if (!task || !event || ledger.origin !== JUGGLER_ORIGIN || isIngestOnly) return {…empty…}`.
+  // The decision therefore ALWAYS no-opped, and
   // calCompletedBehavior='delete' did NOT delete the event for a done task —
   // the done task was repushed (checkmark path) exactly like behavior='update'.
   // Fix: call site now passes isIngestOnly(pid) (the boolean result), so the
@@ -1224,8 +1225,10 @@ test('S — Apple ETag external-edit: a moved event with NO lastModified but a c
 // ─── T: Apple delete-by-URL (done + calCompletedBehavior=delete) ─────────────
 //
 // Apple deleteEvent/updateEvent must target the CalDAV URL, not the VEVENT UID:
-// handleTerminalTaskSync (lib/cal-sync-helpers.js:44) calls
-// `deleteEvent(pToken, event._url || ledger.provider_event_id)`. A done task
+// decideTerminalTaskSync (src/slices/calendar/domain/terminal-task-decision.js)
+// computes `deleteTarget = event._url || ledger.provider_event_id`, and the
+// controller's applyTerminalDelete (cal-sync.controller.js) calls
+// `deleteEvent(pToken, deleteTarget)`. A done task
 // with calCompletedBehavior=delete therefore deletes the event by its `_url`.
 // This is axis D2's Apple twin — the golden proves the delete call carries the
 // URL, so a rewrite that targets the VEVENT UID (`event.id`) instead breaks it.
