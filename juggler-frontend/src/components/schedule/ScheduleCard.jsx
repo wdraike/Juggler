@@ -184,7 +184,7 @@ export default React.memo(function ScheduleCard({ item, status, splitProgress, o
         {compact ? (
           <span style={{ fontSize: 10, color: theme.badgeText, fontWeight: 700, display: 'flex', gap: 3, alignItems: 'center' }}>
             {statusIcon && <span>{statusIcon}</span>}
-            {timeRange && <span style={{ fontSize: 9, fontWeight: 600, color: theme.textMuted }}>{timeRange}</span>}
+            {timeRange && <span style={{ fontSize: 9, fontWeight: 600, color: theme.textMuted, flexShrink: 0, whiteSpace: 'nowrap' }}>{timeRange}</span>}
             {isBlocked && <span style={{ color: theme.redText }} title="Blocked — waiting on incomplete dependencies">{'\uD83D\uDEAB'}</span>}
           </span>
         ) : (
@@ -199,7 +199,7 @@ export default React.memo(function ScheduleCard({ item, status, splitProgress, o
                 {splitProgress.done + '/' + splitProgress.total + ' done'}
               </span>
             )}
-            {timeRange && <span style={{ fontSize: 9, fontWeight: 600, color: theme.textMuted }}>{timeRange}</span>}
+            {timeRange && <span style={{ fontSize: 9, fontWeight: 600, color: theme.textMuted, flexShrink: 0 }}>{timeRange}</span>}
             <div style={{ flex: 1 }} />
             {typeBadges.length > 0 && (
               <span style={{ fontSize: 9, display: 'flex', gap: 1, alignItems: 'center' }}>
