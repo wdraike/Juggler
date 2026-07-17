@@ -183,7 +183,7 @@ export default function TaskBlock({ item, status, top, height, col, totalCols, o
             )}
             <span style={{
               fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap', textDecoration: isDone ? 'line-through' : 'none'
+              whiteSpace: 'nowrap', textDecoration: (isDone && status !== 'pause') ? 'line-through' : 'none'
             }}>
               {(function(){ var ic = getTaskIcon(t.text); return ic ? <span style={{marginRight:2,flexShrink:0}}>{ic}</span> : null; })()}{t.text}
             </span>

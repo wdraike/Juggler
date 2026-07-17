@@ -30,7 +30,7 @@ export default React.memo(function ScheduleCard({ item, status, splitProgress, o
   var weatherResult = hasWeatherRestrictions(task) ? checkWeatherMatch(task, weatherDay) : null;
   var priColor = PRI_COLORS[task.pri] || PRI_COLORS.P3;
   var isDone = isTerminalStatus(status);
-  var isCompletedLook = isDone;
+  var isCompletedLook = isDone && status !== 'pause';
   // juggler-cal-history Plan E — past-fade (D-10).
   var scTodayKey = formatDateKey(new Date());
   var scIsPast = !!task.scheduledAt && formatDateKey(new Date(task.scheduledAt)) < scTodayKey;
