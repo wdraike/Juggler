@@ -247,6 +247,40 @@ it('TC-P007: project select has id=task-project-select paired with a htmlFor lab
   expect(label).toHaveTextContent('Project');
 });
 
+// 999.2031: A manually-created task pushed to Google Calendar (origin='juggler',
+// gcalEventId set) must NOT show "Calendar event" in the delete slot — that label
+// is for tasks PULLED FROM a provider (origin != 'juggler'). The gcalEventId alone
+// is not sufficient provenance; calSyncOrigin distinguishes push vs pull.
+describe('TaskDetailHeader — provenance-aware delete slot (999.2031)', () => {
+  const INGEST_SETTINGS = { gcal: { mode: 'ingest', frequency: 120 } };
+
+  it('shows 🗑 Delete (not "Calendar event") for a juggler-origin task pushed to gcal', () => {
+    render(<TaskDetailHeader
+      task={{ ...BASE_TASK, gcalEventId: 'evt_123', calSyncOrigin: 'juggler' }}
+      status="todo" TH={TH} darkMode={false}
+      onSave={() => {}} onClose={() => {}} onDelete={() => {}} onStatusChange={() => {}}
+      isDirty={false} saveStatus={null} isCreate={false} isMobile={false}
+      calSyncSettings={INGEST_SETTINGS}
+      text="Fix Slate Wall" project="" pri="P3" dur={90} notes="" url=""
+    />);
+    expect(screen.getByText(/Delete/)).toBeInTheDocument();
+    expect(screen.queryByText('Calendar event')).not.toBeInTheDocument();
+  });
+
+  it('shows "Calendar event" for a gcal-origin task in ingest mode', () => {
+    render(<TaskDetailHeader
+      task={{ ...BASE_TASK, gcalEventId: 'evt_456', calSyncOrigin: 'gcal' }}
+      status="todo" TH={TH} darkMode={false}
+      onSave={() => {}} onClose={() => {}} onDelete={() => {}} onStatusChange={() => {}}
+      isDirty={false} saveStatus={null} isCreate={false} isMobile={false}
+      calSyncSettings={INGEST_SETTINGS}
+      text="Synced meeting" project="" pri="P3" dur={30} notes="" url=""
+    />);
+    expect(screen.getByText('Calendar event')).toBeInTheDocument();
+    expect(screen.queryByText(/Delete/)).not.toBeInTheDocument();
+  });
+});
+
 // SPEC (juggler-recur-lifecycle-redesign) FR-2/AC3 — UI half of the reopen date
 // gate, parallel `VALID_TRANSITIONS`-style map inline in TaskDetailHeader (see
 // docs/architecture/TASK-STATE-MATRIX.md:78-87, "a parallel map in

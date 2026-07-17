@@ -32,8 +32,15 @@ export default function TaskDetailHeader({
   var deleteSlot = null;
   if (!isCreate && onDelete) {
     var css = calSyncSettings || {};
-    var isIngestBlocked = (task.gcalEventId && css.gcal && css.gcal.mode === 'ingest')
-                       || (task.msftEventId && css.msft && css.msft.mode === 'ingest');
+    // 999.2031: provenance-aware — a task Juggler created and pushed to a
+    // calendar (calSyncOrigin='juggler') is NOT a "Calendar event" even though
+    // it carries a provider event id. Only tasks PULLED FROM a provider
+    // (calSyncOrigin !== 'juggler') are ingest-blocked from deletion.
+    var isProviderOrigin = task.calSyncOrigin && task.calSyncOrigin !== 'juggler';
+    var isIngestBlocked = isProviderOrigin && (
+      (task.gcalEventId && css.gcal && css.gcal.mode === 'ingest') ||
+      (task.msftEventId && css.msft && css.msft.mode === 'ingest')
+    );
     deleteSlot = isIngestBlocked
       ? <span style={{ fontSize: 10, color: TH.textMuted, fontStyle: 'italic' }}>Calendar event</span>
       : <button onClick={() => onDelete(task.id)} style={{
