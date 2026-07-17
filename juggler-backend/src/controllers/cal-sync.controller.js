@@ -36,6 +36,10 @@ var { isAllDayTaskBackend } = require('../lib/isAllDayTaskBackend');
 var { decideMissingEventSync } = require('../slices/calendar/domain/missing-event-decision');
 // 999.1025 inc. 4 — pure terminal-status use-case (decisions in, effects out).
 var { decideTerminalTaskSync } = require('../slices/calendar/domain/terminal-task-decision');
+// 999.1025 inc. 5 — pure past-non-done-cleanup use-case (decisions in, effects
+// out). Its delete effect is byte-identical to the terminal path, so it is
+// applied through the SHARED applyTerminalDelete applier below.
+var { decidePastCleanupSync } = require('../slices/calendar/domain/past-cleanup-decision');
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('cal-sync.controller');
 
@@ -387,29 +391,32 @@ async function sync(req, res) {
           // Exception: ingest-only providers pull event changes into the task. ===
 
           // --- Past non-done juggler-origin cleanup ---
+          // Decision is PURE (999.1025 inc. 5): decidePastCleanupSync returns a
+          // descriptor; the deleteEvent/throttle effect (and its 404/410 swallow)
+          // is applied HERE via the SHARED applyTerminalDelete applier — the
+          // delete effect is byte-identical to the terminal-delete path
+          // (deleteTarget = event._url || ledger.provider_event_id, same buffers,
+          // same statsDelta.deleted_local). The boundary distinction
+          // (recurring_instance uses `now`, one-off/chain uses `todayStart`) now
+          // lives inside the decision. This branch emits no sync_history log.
           if (task && event && ledger.origin === JUGGLER_ORIGIN && task._scheduled_at && !isIngestOnly(pid)) {
-            var taskScheduledAt = task._scheduled_at instanceof Date ? task._scheduled_at : new Date(String(task._scheduled_at).replace(' ', 'T') + 'Z');
-            // For recurring instances: use `now` so today's past-time slots are cleaned
-            // up once their window has passed — keeps external calendar consistent with
-            // Juggler's UI (which hides past-time events from today's view).
-            // For one-off/chain tasks: use `todayStart` (previous-day boundary only) so
-            // a task still in-progress doesn't lose its calendar event mid-session.
-            var pastBoundary = task.taskType === 'recurring_instance' ? now : todayStart;
-            var taskIsPast = taskScheduledAt < pastBoundary;
-            var taskNotDone = task.status !== 'done' && task.status !== 'skip';
-            if (taskIsPast && taskNotDone) {
-              try {
-                await pAdapter.deleteEvent(pToken, event._url || ledger.provider_event_id);
-                await throttle();
-              } catch (e3) {
-                if (!e3.message.includes('404') && !e3.message.includes('410')) throw e3;
-              }
-              taskUpdates.push({ id: task.id, fields: { [pAdapter.getEventIdColumn()]: null } });
-              ledgerUpdates.push({ id: ledger.id, fields: { status: 'deleted_local', provider_event_id: null } });
-              pStats.deleted_local++;
-              stats.deleted_local++;
+            var pastCleanupDecision = decidePastCleanupSync({
+              task: task, event: event, ledger: ledger,
+              now: now, todayStart: todayStart,
+              isIngestOnly: isIngestOnly(pid),
+              JUGGLER_ORIGIN: JUGGLER_ORIGIN,
+              eventIdColumn: pAdapter.getEventIdColumn()
+            });
+
+            if (pastCleanupDecision.action === 'delete') {
+              var appliedPast = await applyTerminalDelete(pAdapter, pToken, throttle, pastCleanupDecision);
+              taskUpdates = taskUpdates.concat(appliedPast.taskUpdates);
+              ledgerUpdates = ledgerUpdates.concat(appliedPast.ledgerUpdates);
+              pStats.deleted_local = (pStats.deleted_local || 0) + (appliedPast.statsDelta.deleted_local || 0);
+              stats.deleted_local = (stats.deleted_local || 0) + (appliedPast.statsDelta.deleted_local || 0);
               continue;
             }
+            // action 'none': not past-due-and-unfinished — fall through unchanged.
           }
 
           // --- Terminal status handling (done/cancel/skip/pause) ---
