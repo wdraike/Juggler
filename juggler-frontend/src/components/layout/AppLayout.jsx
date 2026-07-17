@@ -18,13 +18,12 @@ import useDragDrop from '../../hooks/useDragDrop';
 import useIsMobile from '../../hooks/useIsMobile';
 import useIsCompact from '../../hooks/useIsCompact';
 import { getTheme } from '../../theme/colors';
-import { formatDateKey, getWeekStart, parseDate, parseTimeToMinutes } from '../../scheduler/dateHelpers';
+import { formatDateKey, getWeekStart, parseDate } from '../../scheduler/dateHelpers';
 import { evaluateFutureCompletionGuard } from '../../utils/futureCompletionGuard';
 import { DAY_NAMES, applyDefaults } from '../../state/constants';
 import { useAuth } from '../auth/AuthProvider';
 import { useTimezone } from '../../hooks/useTimezone';
 import { getNowInTimezone, buildServerClock, formatMinsAmPm } from '../../utils/timezone';
-import { isAllDayTask } from '../../utils/isAllDayTask';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 
 // Views
@@ -57,7 +56,8 @@ import AppFooter from './AppFooter';
 import apiClient from '../../services/apiClient';
 import ImpersonationBanner from '../admin/ImpersonationBanner';
 import useWeather from '../../hooks/useWeather';
-import { computeConflictBuckets } from '../../scheduler/conflictBuckets';
+import useCalSyncState from '../../hooks/useCalSyncState';
+import useDerivedTaskData from '../../hooks/useDerivedTaskData';
 
 // 999.103: browser tab titles in the shared Raike & Sons format ("View — StriveRS").
 // Maps the viewMode id (NavigationBar VIEWS) → the human label used in the tab.
@@ -111,46 +111,27 @@ export default function AppLayout() {
   var [headerCompact, setHeaderCompact] = useState(isCompact);
   var { toast, toastHistory, showToast } = useToast();
 
-  // 999.1242: single-flight guard + non-silent failure for the automatic
-  // schedule-run kicks (initial mount + first weather refresh). Overlapping
-  // auto-kicks used to collide server-side (HTTP 409 'Scheduler is busy') and
-  // every failure was silently swallowed — the user kept looking at a stale
-  // schedule with no indicator or retry.
-  //   - single-flight: only one auto-kick may be in flight at a time;
-  //   - 409 (another run holds the scheduler lock): ONE bounded retry after
-  //     the server-suggested retryAfter delay (same contract CalSyncPanel's
-  //     lock-conflict handler consumes, incl. its `|| 30` default);
-  //   - any other failure: surfaced with the toast pattern CalSyncPanel uses.
-  var scheduleRunInFlightRef = useRef(false);
-  var kickScheduleRun = useCallback(function kick(isRetry) {
-    if (scheduleRunInFlightRef.current) return Promise.resolve(null); // single-flight
-    scheduleRunInFlightRef.current = true;
-    return apiClient.post('/schedule/run').then(function(res) {
-      scheduleRunInFlightRef.current = false;
-      if (res.data?.dayPlacements) {
-        loadPlacements();
-      }
-      return res;
-    }).catch(function(err) {
-      scheduleRunInFlightRef.current = false;
-      var status = err && err.response && err.response.status;
-      if (status === 409 && !isRetry) {
-        var retryAfterSec = (err.response.data && err.response.data.retryAfter) || 30;
-        setTimeout(function() { kick(true); }, retryAfterSec * 1000);
-      } else {
-        showToast('Schedule refresh failed — showing the last saved schedule', 'error');
-      }
-      return null;
-    });
-  }, [loadPlacements, showToast]);
+  // Calendar sync state + effects extracted to useCalSyncState hook (999.965).
+  // editingRef is defined below (expandedTasks length > 0 etc.) but the hook
+  // reads it via a ref that we set before any effect fires — refs are set
+  // during render (synchronously) so the hook's mount effects see the right
+  // value even though editingRef.current is assigned further down.
+  var editingRef = useRef(false);
 
-  var weatherRefreshedRef = useRef(false);
-  useEffect(function() {
-    if (!weatherRefreshed) return;
-    if (weatherRefreshedRef.current) return; // already triggered once this session
-    weatherRefreshedRef.current = true;
-    kickScheduleRun();
-  }, [weatherRefreshed, kickScheduleRun]);
+  var calSync = useCalSyncState(showToast, loadPlacements, config, editingRef);
+  var {
+    kickScheduleRun, setSchedulerReady, schedulerRunning,
+    gcalAutoSync, setGcalAutoSync, gcalLastSyncedAt, setGcalLastSyncedAt,
+    gcalSyncing, setGcalSyncing,
+    msftCalAutoSync, setMsftCalAutoSync, msftCalLastSyncedAt, setMsftCalLastSyncedAt,
+    msftCalSyncing, setMsftCalSyncing,
+    appleCalAutoSync, setAppleCalAutoSync, appleCalLastSyncedAt, setAppleCalLastSyncedAt,
+    appleCalSyncing, setAppleCalSyncing,
+    appleCalConnected, setAppleCalConnected,
+    calSyncProgress,
+    setWeatherRefreshedAndKick,
+  } = calSync;
+
   var { pushUndo, popUndo, canUndo } = useUndo(taskStateRef, dispatch, dispatchPersist);
   // Single-step undo affordance — pops the most recent action off the undo
   // stack (same path as Ctrl/Cmd+Z) and toasts the result. 999.1227: the
@@ -237,20 +218,6 @@ export default function AppLayout() {
   var [completionPickerTask, setCompletionPickerTask] = useState(null); // task being marked done
   // Pending recurrence-day conflict confirmation from drag-drop
   var [recurDayConfirm, setRecurDayConfirm] = useState(null);
-  var [gcalAutoSync, setGcalAutoSync] = useState(false);
-  var [gcalLastSyncedAt, setGcalLastSyncedAt] = useState(null);
-  var [gcalSyncing, setGcalSyncing] = useState(false);
-  var [msftCalAutoSync, setMsftCalAutoSync] = useState(false);
-  var [msftCalLastSyncedAt, setMsftCalLastSyncedAt] = useState(null);
-  var [msftCalSyncing, setMsftCalSyncing] = useState(false);
-  var [appleCalAutoSync, setAppleCalAutoSync] = useState(false);
-  var [appleCalLastSyncedAt, setAppleCalLastSyncedAt] = useState(null);
-  var [appleCalSyncing, setAppleCalSyncing] = useState(false);
-  var [appleCalConnected, setAppleCalConnected] = useState(null);
-  var [calSyncProgress, setCalSyncProgress] = useState(null); // { phase, detail, pct, provider, calendar }
-  var [schedulerRunning, setSchedulerRunning] = useState(false);
-  var editingRef = useRef(false);
-  var [schedulerReady, setSchedulerReady] = useState(false);
   var [deleteConfirmTask, setDeleteConfirmTask] = useState(null);
   // bert bird-w6-002 BLOCK fix: holds the cal_locked CAL_LOCKED_DELETE_BLOCKED 403
   // message when a series-delete is rejected, keeping RecurringDeleteDialog open with
@@ -307,31 +274,6 @@ export default function AppLayout() {
     });
   }, []);
 
-  // Handle ?gcal=connected or ?msftcal=connected redirect from OAuth callback
-  useEffect(() => {
-    var params = new URLSearchParams(window.location.search);
-    if (params.get('gcal') === 'connected') {
-      showToast('Google Calendar connected!', 'success');
-      params.delete('gcal');
-      var newUrl = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
-      window.history.replaceState({}, '', newUrl);
-      if (window.opener) {
-        window.opener.postMessage('gcal-connected', '*');
-        window.close();
-      }
-    }
-    if (params.get('msftcal') === 'connected') {
-      showToast('Microsoft Calendar connected!', 'success');
-      params.delete('msftcal');
-      var newUrl2 = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
-      window.history.replaceState({}, '', newUrl2);
-      if (window.opener) {
-        window.opener.postMessage('msftcal-connected', '*');
-        window.close();
-      }
-    }
-  }, []);
-
   // Show contextual toast when a calendar-synced task rejects edits
   useEffect(() => {
     var handleReadonly = function(e) {
@@ -343,196 +285,12 @@ export default function AppLayout() {
     };
   }, [showToast]);
 
-  // Fetch GCal + MsftCal status on mount
-  useEffect(() => {
-    apiClient.get('/gcal/status')
-      .then(function(r) {
-        setGcalAutoSync(!!r.data.autoSync);
-        setGcalLastSyncedAt(r.data.lastSyncedAt || null);
-        if (r.data.tokenExpired) {
-          showToast('Google Calendar connection expired. Please reconnect in Calendar Sync settings.', 'error');
-        }
-      })
-      .catch(function() { /* not connected */ });
-    apiClient.get('/msft-cal/status')
-      .then(function(r) {
-        setMsftCalAutoSync(!!r.data.autoSync);
-        setMsftCalLastSyncedAt(r.data.lastSyncedAt || null);
-        if (r.data.tokenExpired) {
-          showToast('Microsoft Calendar connection expired. Please reconnect in Calendar Sync settings.', 'error');
-        }
-      })
-      .catch(function() { /* not connected */ });
-    apiClient.get('/apple-cal/status')
-      .then(function(r) {
-        setAppleCalConnected(!!r.data.connected);
-        setAppleCalAutoSync(!!r.data.autoSync);
-        setAppleCalLastSyncedAt(r.data.lastSyncedAt || null);
-      })
-      .catch(function() { setAppleCalConnected(false); });
-  }, []);
-
-  // Combined calendar auto-sync: configurable frequency, full sync only when changes detected
-  // Waits for initial scheduler run to complete before starting any external syncs.
-  // Extract primitives here so useEffect deps are stable numbers, not an object reference
-  // (an inline object in the dep array causes the effect to restart every render).
-  var gcalFreq = ((config.calSyncSettings || {}).gcal || {}).frequency || 0;
-  var msftFreq = ((config.calSyncSettings || {}).msft || {}).frequency || 0;
-  var appleFreq = ((config.calSyncSettings || {}).apple || {}).frequency || 0;
-  useEffect(() => {
-    var gcalAuto = gcalAutoSync || gcalFreq > 0;
-    var msftAuto = msftCalAutoSync || msftFreq > 0;
-    var appleAuto = appleCalAutoSync || appleFreq > 0;
-    if (!gcalAuto && !msftAuto && !appleAuto) return;
-    if (!schedulerReady) return;
-
-    function runFullSync() {
-      setGcalSyncing(true);
-      setMsftCalSyncing(true);
-      setAppleCalSyncing(true);
-      apiClient.post('/cal/sync?trigger=auto').then(function(r) {
-        var errors = r.data.errors || [];
-        var hasTokenExpiry = errors.some(function(e) { return e.tokenExpired; });
-        var nonTokenErrors = errors.filter(function(e) { return !e.tokenExpired; });
-
-        if (hasTokenExpiry) {
-          showToast('Calendar connection expired. Please reconnect in Calendar Sync settings.', 'error');
-        } else if (nonTokenErrors.length > 0) {
-          showToast('Calendar sync completed with ' + nonTokenErrors.length + ' error(s). Open Calendar Sync for details.', 'error');
-        }
-
-        // Only update last-synced timestamp if there were no errors
-        if (errors.length === 0) {
-          var now = new Date().toISOString();
-          if (gcalAutoSync) setGcalLastSyncedAt(now);
-          if (msftCalAutoSync) setMsftCalLastSyncedAt(now);
-          if (appleCalAutoSync) setAppleCalLastSyncedAt(now);
-        }
-        // Intentionally no loadTasks() here: the backend emits
-        // tasks:changed / schedule:changed over SSE when cal-sync touches
-        // rows, and the surgical handlers in useTaskState apply the
-        // deltas without re-dispatching INIT. The old full refresh here
-        // was legacy from before the SSE pipeline existed.
-      }).catch(function(e) {
-        if (e.response?.status === 409) {
-          // Lock held — skip silently, the interval will retry later
-          return;
-        }
-        var hasTokenExpiry = e.response?.data?.errors?.some(function(err) { return err.tokenExpired; });
-        if (hasTokenExpiry) {
-          showToast('Calendar connection expired. Please reconnect in Calendar Sync settings.', 'error');
-        } else {
-          var msg = e.response?.data?.error || e.message;
-          showToast('Calendar sync failed: ' + (msg || 'unknown error'), 'error');
-        }
-      }).finally(function() {
-        setGcalSyncing(false);
-        setMsftCalSyncing(false);
-        setAppleCalSyncing(false);
-      });
-    }
-
-    function checkAndSync() {
-      if (editingRef.current) return;
-
-      // Lightweight check first — only full sync if something changed
-      apiClient.get('/cal/has-changes').then(function(r) {
-        if (r.data.hasChanges) {
-          runFullSync();
-        }
-      }).catch(function() {
-        // If the check fails, fall back to a full sync
-        runFullSync();
-      });
-    }
-
-    // Initial sync on load (full sync to catch up)
-    var initialTimer = setTimeout(runFullSync, 5000);
-    // Use the shortest active provider frequency for the poll interval
-    var activeFreqs = [];
-    if (gcalAuto && gcalFreq > 0) activeFreqs.push(gcalFreq);
-    if (msftAuto && msftFreq > 0) activeFreqs.push(msftFreq);
-    if (appleAuto && appleFreq > 0) activeFreqs.push(appleFreq);
-    var intervalMs = activeFreqs.length > 0 ? Math.min.apply(null, activeFreqs) * 1000 : 2 * 60 * 1000;
-    var intervalId = setInterval(checkAndSync, intervalMs);
-
-    return function() {
-      clearTimeout(initialTimer);
-      clearInterval(intervalId);
-    };
-  }, [gcalAutoSync, msftCalAutoSync, appleCalAutoSync, schedulerReady, gcalFreq, msftFreq, appleFreq]);
-
-  // Listen for sync:progress SSE events (shared with CalSyncPanel + HeaderBar)
+  // Weather-refresh → kick schedule run (extracted to useCalSyncState hook).
+  // The hook owns the weatherRefreshedRef + kick; this effect bridges the
+  // parent's `weatherRefreshed` prop to the hook's setWeatherRefreshedAndKick.
   useEffect(function() {
-    var attached = null;
-    function handleSyncProgress(e) {
-      try {
-        var data = JSON.parse(e.data);
-        setCalSyncProgress(data);
-        // Toast on fetch completion (shows event count per provider)
-        if (data.phase === 'fetch' && data.detail && data.detail.indexOf('Fetched') >= 0) {
-          var fetchLabel = data.provider === 'gcal' ? 'Google' : data.provider === 'msft' ? 'Microsoft' : data.provider === 'apple' ? 'Apple' : 'Calendar';
-          showToast(fetchLabel + ': ' + data.detail, 'info');
-        }
-        // Toast on completion with summary
-        if (data.phase === 'done') {
-          showToast(data.detail || 'Sync complete', 'success');
-          setTimeout(function() { setCalSyncProgress(null); }, 2000);
-        }
-      } catch (err) { /* ignore */ }
-    }
-    // Poll until the event source appears (created asynchronously by useTaskState)
-    var poll = setInterval(function() {
-      var es = window.__jugglerEventSource;
-      if (es && !attached) {
-        attached = es;
-        es.addEventListener('sync:progress', handleSyncProgress);
-        clearInterval(poll);
-      }
-    }, 500);
-    // Also check immediately
-    var es = window.__jugglerEventSource;
-    if (es) {
-      attached = es;
-      es.addEventListener('sync:progress', handleSyncProgress);
-      clearInterval(poll);
-    }
-    return function() {
-      clearInterval(poll);
-      if (attached) attached.removeEventListener('sync:progress', handleSyncProgress);
-    };
-  }, []);
-
-  // Listen for schedule:running / schedule:changed SSE events so the toolbar
-  // can show a "Scheduling..." indicator during a run. schedule:running fires
-  // at the start of a queue-processed run; schedule:changed fires on
-  // completion (including lock-failure + error paths), clearing the flag.
-  useEffect(function() {
-    var attached = null;
-    function handleRunning() { setSchedulerRunning(true); }
-    function handleChanged() { setSchedulerRunning(false); }
-    function attach(es) {
-      es.addEventListener('schedule:running', handleRunning);
-      es.addEventListener('schedule:changed', handleChanged);
-    }
-    var poll = setInterval(function() {
-      var es = window.__jugglerEventSource;
-      if (es && !attached) {
-        attached = es;
-        attach(es);
-        clearInterval(poll);
-      }
-    }, 500);
-    var es = window.__jugglerEventSource;
-    if (es) { attached = es; attach(es); clearInterval(poll); }
-    return function() {
-      clearInterval(poll);
-      if (attached) {
-        attached.removeEventListener('schedule:running', handleRunning);
-        attached.removeEventListener('schedule:changed', handleChanged);
-      }
-    };
-  }, []);
+    setWeatherRefreshedAndKick(weatherRefreshed);
+  }, [weatherRefreshed, setWeatherRefreshedAndKick]);
 
   // Derived dates
   var today = useMemo(() => {
@@ -565,7 +323,16 @@ export default function AppLayout() {
     });
   }, [selectedDate]);
 
-  // Schedule config bundle
+  // Derived task data extracted to useDerivedTaskData hook (999.965).
+  var _derived = useDerivedTaskData(allTasks, statuses, placements, userTimezone, serverClock, today, projectFilter, search);
+  var {
+    dayPlacements, unplaced, backlogTasks, schedulerWarnings,
+    filteredDayPlacements, blockedTaskIds, pastDueIds, fixedIds,
+    unplacedIds, issuesCount, tasksByDate,
+    unplacedCount, blockedCount, pastDueCount, fixedCount,
+  } = _derived;
+
+  // Schedule config bundle (kept inline — tightly coupled to config prop)
   var schedCfg = useMemo(() => ({
     timeBlocks: config.timeBlocks,
     locSchedules: config.locSchedules,
@@ -580,221 +347,6 @@ export default function AppLayout() {
     scheduleTemplates: config.scheduleTemplates,
     temperatureUnit: config.tempUnitPref || 'F'
   }), [config.timeBlocks, config.locSchedules, config.locScheduleDefaults, config.locScheduleOverrides, config.hourLocationOverrides, config.toolMatrix, config.splitDefault, config.splitMinDefault, config.schedFloor, config.schedCeiling, config.scheduleTemplates, config.tempUnitPref]);
-
-  // Placements come from the backend scheduler API. Re-key to canonical ISO
-  // "YYYY-MM-DD" in case a stale backend (pre-ISO-refactor) returns legacy
-  // "M/D" keys — protects against the "nothing scheduled" state you'd see
-  // during a partial deploy where frontend and backend are out of sync.
-  var dayPlacements = useMemo(function() {
-    var src = placements.dayPlacements || {};
-    var keys = Object.keys(src);
-    if (keys.length === 0) return src;
-    // Detect legacy M/D keys; if none, return the original map unchanged.
-    var hasLegacy = keys.some(function(k) { return /^\d{1,2}\/\d{1,2}$/.test(k); });
-    if (!hasLegacy) return src;
-    var out = {};
-    var now = new Date();
-    keys.forEach(function(k) {
-      var iso = k.match(/^(\d{4})-\d{2}-\d{2}$/);
-      var md = k.match(/^(\d{1,2})\/(\d{1,2})$/);
-      var normalized = k;
-      if (md) {
-        var mo = Number(md[1]), dy = Number(md[2]);
-        // Current year unless the month is more than 6 months behind — then next year.
-        // Mirrors shared/scheduler/dateHelpers.inferYear.
-        var currentMonth = now.getMonth() + 1;
-        var year = (mo < currentMonth - 6) ? now.getFullYear() + 1 : now.getFullYear();
-        normalized = year + '-' + (mo < 10 ? '0' : '') + mo + '-' + (dy < 10 ? '0' : '') + dy;
-      }
-      out[normalized] = (out[normalized] || []).concat(src[k] || []);
-    });
-    return out;
-  }, [placements.dayPlacements]);
-  var unplaced = placements.unplaced;
-  // Filter phantom unplaced entries — entries with no text or that can't be
-  // matched to a loaded task are stale cache references. Also exclude recurring
-  // templates which are blueprints, not schedulable tasks.
-  if (unplaced && unplaced.length > 0) {
-    unplaced = unplaced.filter(function(t) {
-      if (!t || !t.id) return false;
-      if (!t.text) return false; // phantom entry
-      if (t.taskType === 'recurring_template') return false;
-      return true;
-    });
-  }
-  // Backlog: active tasks with no date. Tracked separately from unplaced —
-  // these aren't scheduling failures, they're intentionally undated tasks.
-  var _unplacedIdSet = {};
-  (unplaced || []).forEach(function(t) { if (t && t.id) _unplacedIdSet[t.id] = true; });
-  var backlogTasks = allTasks.filter(function(t) {
-    if (!t || !t.id || _unplacedIdSet[t.id]) return false;
-    if (t.taskType === 'recurring_template') return false;
-    var st = statuses[t.id] || '';
-    if (st === 'done' || st === 'cancel' || st === 'cancelled' || st === 'skip' || st === 'disabled' || st === 'pause') return false;
-    return !t.scheduledAt && !t.date;
-  });
-  var schedulerWarnings = placements.warnings || [];
-
-  // Filtered placements for grid views (projectFilter, search)
-  var filteredDayPlacements = useMemo(function() {
-    if (!projectFilter && !search) return dayPlacements;
-    var searchLower = search ? search.toLowerCase() : '';
-    var result = {};
-    var keys = Object.keys(dayPlacements);
-    for (var i = 0; i < keys.length; i++) {
-      var arr = dayPlacements[keys[i]];
-      var filtered = arr.filter(function(p) {
-        if (!p.task) return true;
-        if (projectFilter && (p.task.project || '') !== projectFilter) return false;
-        if (searchLower) {
-          var text = ((p.task.text || '') + ' ' + (p.task.project || '') + ' ' + (p.task.notes || '')).toLowerCase();
-          if (text.indexOf(searchLower) === -1) return false;
-        }
-        return true;
-      });
-      result[keys[i]] = filtered;
-    }
-    return result;
-  }, [dayPlacements, projectFilter, search]);
-
-  // Blocked tasks: tasks whose dependencies are not all done AND whose
-  // date is today or in the past (future tasks with pending deps are expected)
-  // Blocked tasks: open tasks with at least one overdue undone dependency
-  var blockedTaskIds = useMemo(() => {
-    var ids = new Set();
-    var today = getNowInTimezone(userTimezone, serverClock).todayDate;
-    var taskMap = {};
-    visibleTasks.forEach(function(t) { taskMap[t.id] = t; });
-    visibleTasks.forEach(t => {
-      if (!t.dependsOn || t.dependsOn.length === 0) return;
-      var st = statuses[t.id] || '';
-      if (st === 'done' || st === 'cancel' || st === 'cancelled' || st === 'skip') return;
-      var hasOverdueDep = t.dependsOn.some(function(depId) {
-        if ((statuses[depId] || '') === 'done') return false;
-        var dep = taskMap[depId];
-        if (!dep) return true; // missing dep counts as overdue
-        // Overdue if dep's date or due date is in the past
-        var depDate = dep.date && dep.date !== 'TBD' ? parseDate(dep.date) : null;
-        var depDue = dep.deadline ? parseDate(dep.deadline) : null;
-        return (depDate && depDate < today) || (depDue && depDue < today);
-      });
-      if (hasOverdueDep) ids.add(t.id);
-    });
-    return ids;
-  }, [visibleTasks, statuses, serverClock, userTimezone]);
-
-  // Past-due tasks: due date or scheduled date in the past, still open.
-  // Recurring instances ARE eligible — an evening-medication task still
-  // pending at 8 PM is overdue even if its day-level deadline hasn't rolled
-  // to tomorrow. Detection paths:
-  //   (a) day-level deadline before today
-  //   (b) scheduled date before today
-  //   (c) intraday, ONLY for tasks the scheduler can't re-place:
-  //       tasks with placementMode:'fixed'. Flexible tasks
-  //       (the default) are auto-placed into later slots by the scheduler,
-  //       so an apparent-past `task.time` just means "last run's placement"
-  //       and should not be flagged.
-  //   (d) scheduler emitted _unplacedReason === 'missed' (lives on unplaced[])
-  function isTimeLocked(t) {
-    if (t.placementMode === 'fixed' || t.placement_mode === 'fixed') return true;
-    return false;
-  }
-  var pastDueIds = useMemo(() => {
-    var ids = new Set();
-    var now = getNowInTimezone(userTimezone, serverClock);
-    var today = now.todayDate;
-    var nowMins = now.nowMins;
-    var todayKey = now.todayKey;
-    // (d) ingest scheduler-reported misses from the unplaced list
-    (unplaced || []).forEach(u => {
-      if (u && u.id && u._unplacedReason === 'missed') ids.add(u.id);
-    });
-    visibleTasks.forEach(t => {
-      var st = statuses[t.id] || '';
-      if (st === 'done' || st === 'cancel' || st === 'cancelled' || st === 'skip') return;
-      // (a) day-level deadline passed
-      if (t.deadline) {
-        var dd = parseDate(t.deadline);
-        if (dd && dd < today) { ids.add(t.id); return; }
-      }
-      // (b) scheduled date passed
-      if (t.date && t.date !== 'TBD') {
-        var td = parseDate(t.date);
-        if (td && td < today) { ids.add(t.id); return; }
-        // (c) intraday — only for time-locked tasks (fixed/rigid). Flexible
-        // tasks will be re-placed at a later slot by the scheduler.
-        if (t.date === todayKey && t.time && isTimeLocked(t)) {
-          var startMins = parseTimeToMinutes(t.time);
-          if (startMins != null) {
-            var dur = Number(t.dur) || 0;
-            if (startMins + dur <= nowMins) ids.add(t.id);
-          }
-        }
-      }
-    });
-    return ids;
-  }, [visibleTasks, statuses, userTimezone, serverClock, unplaced]);
-
-  // Fixed tasks: placement_mode='fixed' (post-Phase 9 enum redesign)
-  var fixedIds = useMemo(() => {
-    var ids = new Set();
-    allTasks.forEach(t => {
-      var st = statuses[t.id] || '';
-      if (st === 'done' || st === 'cancel' || st === 'cancelled' || st === 'skip') return;
-      if (t.placementMode === 'fixed' || t.placement_mode === 'fixed') ids.add(t.id);
-    });
-    return ids;
-  }, [allTasks, statuses]);
-
-  var unplacedCount = unplaced.length;
-  var blockedCount = blockedTaskIds.size;
-  var pastDueCount = pastDueIds.size;
-  var fixedCount = fixedIds.size;
-  // The Issues indicator lights whenever the Issues page has anything actionable
-  // (David, 2026-06-24: "when there are issues the issue tab should show an
-  // indicator"). Derive the badge from the SAME computation the Issues page uses
-  // (scheduler/conflictBuckets.js) so the number can never disagree with what the
-  // page actually shows — the badge = the page's "Action Required" count (overdue
-  // + unplaced + scheduler warnings). Past-scheduled-date, blocked-by-deps, and
-  // backlog are informational, not action-required, so they don't light the badge.
-  var issuesCount = useMemo(
-    () => computeConflictBuckets({
-      allTasks: visibleTasks, statuses, unplaced,
-      backlog: backlogTasks, schedulerWarnings, today
-    }).actionCount,
-    [visibleTasks, statuses, unplaced, backlogTasks, schedulerWarnings, today]
-  );
-
-  // Unplaced task IDs set for fast lookup
-  var unplacedIds = useMemo(() => {
-    var ids = new Set();
-    unplaced.forEach(u => ids.add(u.id || u.task?.id || u));
-    return ids;
-  }, [unplaced]);
-
-  // Recurring recurring expansion is handled server-side in runSchedule.js
-
-  // Tasks by date map — includes multiday all-day tasks on every date in their range (999.096)
-  var tasksByDate = useMemo(() => {
-    var map = {};
-    allTasks.forEach(t => {
-      var key = t.date || 'TBD';
-      if (!map[key]) map[key] = [];
-      map[key].push(t);
-      // Multiday all-day task: add to every date in [date, endDate] range
-      if (isAllDayTask(t) && t.endDate && t.date && t.endDate > t.date) {
-        var start = new Date(t.date + 'T00:00:00');
-        var end = new Date(t.endDate + 'T00:00:00');
-        for (var d = new Date(start.getTime() + 86400000); d <= end; d.setDate(d.getDate() + 1)) {
-          var dk = formatDateKey(d);
-          if (!map[dk]) map[dk] = [];
-          // Avoid duplicate if the task was already added via its own date
-          if (dk !== key) map[dk].push(t);
-        }
-      }
-    });
-    return map;
-  }, [allTasks]);
 
   // Now minutes (ET) — update every minute
   var [nowMins, setNowMins] = useState(() => {
