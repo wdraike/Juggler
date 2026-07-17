@@ -46,6 +46,7 @@ module.exports = {
   // queries
   GetConfig: require('./queries/GetConfig'),
   GetProjects: require('./queries/GetProjects'),
+  ListProjects: require('./queries/ListProjects'),
   GetLocations: require('./queries/GetLocations'),
   GetTools: require('./queries/GetTools'),
   GetFeatureCatalog: require('./queries/GetFeatureCatalog'),

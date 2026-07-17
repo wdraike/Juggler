@@ -19,13 +19,104 @@ var path = require('path');
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Top-level mock for the user-config slice facade (loaded at require time by the
-// MCP config tools / index module).
+// MCP config tools / index module). 999.1404: the config tools now route all 5
+// handlers through the facade (getAllConfig, listProjects, createProject,
+// updateProject, deleteProject) instead of calling db() directly. The facade
+// mock returns per-user data from the same in-memory stores the db mock owns,
+// so the per-client authorization tests (User A vs User B) still exercise the
+// userId scoping that prevents cross-user data leakage.
 jest.mock('../../src/slices/user-config/facade', function () {
-  return {
+  var USER_A = 'user-a-001';
+  var USER_B = 'user-b-002';
+
+  var stores = {
+    config: {},
+    location: {},
+    tool: {},
+    project: {}
+  };
+
+  function reset() {
+    stores.config = {};
+    stores.location = {};
+    stores.tool = {};
+    stores.project = {};
+
+    stores.config[USER_A] = [
+      { config_key: 'preferences', config_value: JSON.stringify({ splitDefault: true }) },
+      { config_key: 'time_blocks', config_value: JSON.stringify([{ start: '09:00', end: '17:00' }]) }
+    ];
+    stores.location[USER_A] = [
+      { location_id: 'loc-1', name: 'Home', icon: 'home', sort_order: 0 }
+    ];
+    stores.tool[USER_A] = [
+      { tool_id: 'tool-1', name: 'Laptop', icon: 'laptop', sort_order: 0 }
+    ];
+    stores.project[USER_A] = [
+      { id: 1, name: 'Project A', color: '#ff0000', icon: null, sort_order: 0 }
+    ];
+
+    stores.config[USER_B] = [
+      { config_key: 'preferences', config_value: JSON.stringify({ splitDefault: false }) }
+    ];
+    stores.location[USER_B] = [
+      { location_id: 'loc-2', name: 'Office', icon: 'office', sort_order: 0 }
+    ];
+    stores.tool[USER_B] = [
+      { tool_id: 'tool-2', name: 'Phone', icon: 'phone', sort_order: 0 }
+    ];
+    stores.project[USER_B] = [
+      { id: 2, name: 'Project B', color: '#00ff00', icon: null, sort_order: 0 }
+    ];
+  }
+
+  function buildConfig(userId) {
+    var config = {};
+    (stores.config[userId] || []).forEach(function (row) {
+      var val;
+      try { val = JSON.parse(row.config_value); } catch (e) { val = row.config_value; }
+      config[row.config_key] = val;
+    });
+    return {
+      locations: (stores.location[userId] || []).map(function (l) { return { id: l.location_id, name: l.name, icon: l.icon }; }),
+      tools: (stores.tool[userId] || []).map(function (t) { return { id: t.tool_id, name: t.name, icon: t.icon }; }),
+      projects: (stores.project[userId] || []).map(function (p) { return { id: p.id, name: p.name, color: p.color, icon: p.icon }; }),
+      toolMatrix: config.tool_matrix || null,
+      timeBlocks: config.time_blocks || null,
+      locSchedules: config.loc_schedules || null,
+      locScheduleDefaults: config.loc_schedule_defaults || null,
+      locScheduleOverrides: config.loc_schedule_overrides || null,
+      hourLocationOverrides: config.hour_location_overrides || null,
+      preferences: config.preferences || null,
+      tempUnitPref: config.temp_unit_pref || 'F',
+      scheduleTemplates: config.schedule_templates || null,
+      templateDefaults: config.template_defaults || null,
+      templateOverrides: config.template_overrides || null,
+      calSyncSettings: config.cal_sync_settings || null
+    };
+  }
+
+  function buildProjectList(userId) {
+    return (stores.project[userId] || []).map(function (p) {
+      return { id: p.id, name: p.name, color: p.color, icon: p.icon, taskCount: 0, doneCount: 0 };
+    });
+  }
+
+  var mockFacade = {
     SCHED_KEYS: ['time_blocks', 'preferences', 'loc_schedules', 'loc_schedule_defaults', 'loc_schedule_overrides', 'hour_location_overrides', 'tool_matrix'],
     updateConfig: function () { return Promise.resolve({ status: 200, body: {} }); },
-    replaceLocations: function () { return Promise.resolve({ status: 200, body: { locations: [] } }); }
+    replaceLocations: function () { return Promise.resolve({ status: 200, body: { locations: [] } }); },
+    getAllConfig: function (input) { return Promise.resolve({ status: 200, body: buildConfig(input.userId) }); },
+    listProjects: function (input) { return Promise.resolve({ status: 200, body: buildProjectList(input.userId) }); },
+    createProject: function (input) { return Promise.resolve({ status: 201, body: { project: input.body } }); },
+    updateProject: function (input) { return Promise.resolve({ status: 200, body: { project: input.body, renamed: null } }); },
+    deleteProject: function (input) { return Promise.resolve({ status: 200, body: { message: 'Project deleted', id: input.id } }); },
+    __stores: stores,
+    __reset: reset
   };
+
+  reset();
+  return mockFacade;
 });
 
 // ── Cluster-2 transport mocks (hoisted) ──────────────────────────────────────
@@ -494,6 +585,8 @@ describe('999.559c — MCP per-client authorization: config isolation', function
 
   beforeEach(function () {
     db.__reset();
+    // 999.1404: config tools route through the facade now — reset its stores too.
+    require('../../src/slices/user-config/facade').__reset();
   });
 
   test('User A get_config returns User A locations, tools, projects, preferences', async function () {

@@ -391,6 +391,7 @@ var checkAndIncrement = require('./adapters/KnexPlanUsageRepository').checkAndIn
 // config.controller handlers
 var _getConfig = new app.GetConfig({ repo: _repo, cache: cache });
 var _getProjects = new app.GetProjects({ repo: _repo });
+var _listProjects = new app.ListProjects({ repo: _repo });
 var _getLocations = new app.GetLocations({ repo: _repo });
 var _getTools = new app.GetTools({ repo: _repo });
 var _updateConfig = new app.UpdateConfig({ repo: _repo, cache: cache });
@@ -495,6 +496,7 @@ var _getFeatureEventsReport = new app.GetFeatureEventsReport({ db: KnexFeatureEv
 // ── config.controller ──
 function getAllConfig(input) { return _getConfig.execute(input); }
 function getProjects(input) { return _getProjects.execute(input); }
+function listProjects(input) { return _listProjects.execute(input); }
 function getLocations(input) { return _getLocations.execute(input); }
 function getTools(input) { return _getTools.execute(input); }
 function updateConfig(input) { return _updateConfig.execute(input); }
@@ -679,6 +681,7 @@ module.exports = {
   // facade operations (one per handler/gate) the thin controllers/middleware delegate to
   getAllConfig: getAllConfig,
   getProjects: getProjects,
+  listProjects: listProjects,
   getLocations: getLocations,
   getTools: getTools,
   updateConfig: updateConfig,

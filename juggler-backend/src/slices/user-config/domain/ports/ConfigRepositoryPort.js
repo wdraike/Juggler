@@ -155,6 +155,11 @@
  * @property {(userId: string) => Promise<number>} countLocations
  *   Location row count. (Legacy: countLocations, entity-limits.js:96-102.)
  *
+ * @property {(userId: string, projectNames: string[]) => Promise<Object[]>} getProjectTaskCounts
+ *   Per-project task counts from tasks_v: rows {project, total, done}. Filters
+ *   by userId + whereIn('project', projectNames), grouped by project. (Legacy:
+ *   MCP list_projects, mcp/tools/config.js:76-81.)
+ *
  * ── ORPHAN WHEN-TAGS (config.controller schedule_templates save) ─────────────
  *
  * @property {(userId: string) => Promise<Object[]>} getActiveWhenTaggedTasks
@@ -308,6 +313,12 @@ ConfigRepositoryPort.prototype.countLocations = function countLocations(_userId)
   throw new Error('ConfigRepositoryPort.countLocations not implemented');
 };
 
+// ── project task counts (MCP list_projects) ──────────────────────────────────
+
+ConfigRepositoryPort.prototype.getProjectTaskCounts = function getProjectTaskCounts(_userId, _projectNames) {
+  throw new Error('ConfigRepositoryPort.getProjectTaskCounts not implemented');
+};
+
 // ── orphan when-tags ─────────────────────────────────────────────────────────
 
 ConfigRepositoryPort.prototype.getActiveWhenTaggedTasks = function getActiveWhenTaggedTasks(_userId) {
@@ -386,6 +397,8 @@ var CONFIG_REPOSITORY_PORT_METHODS = Object.freeze([
   'countRecurringTemplates',
   'countProjects',
   'countLocations',
+  // project task counts (MCP list_projects)
+  'getProjectTaskCounts',
   // orphan when-tags
   'getActiveWhenTaggedTasks',
   // data export/import (config tables)

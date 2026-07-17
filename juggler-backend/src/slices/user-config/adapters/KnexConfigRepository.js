@@ -433,6 +433,34 @@ KnexConfigRepository.prototype.countLocations = function countLocations(userId) 
     .then(function (result) { return parseInt(result.count, 10); });
 };
 
+// ── PROJECT TASK COUNTS (MCP list_projects) ────────────────────────────────────
+
+/**
+ * Per-project task counts from tasks_v. Verbatim relocation of the MCP
+ * list_projects aggregation (mcp/tools/config.js:76-81): where('user_id') +
+ * whereIn('project', names) + groupBy('project') + COUNT(*) as total +
+ * SUM(CASE WHEN status='done' THEN 1 ELSE 0 END) as done.
+ *
+ * Returns [] when projectNames is empty (whereIn with an empty array produces
+ * no rows in MySQL; the in-memory double matches by short-circuiting).
+ * @param {string} userId
+ * @param {string[]} projectNames  project names to count (may be empty)
+ * @returns {Promise<Array<{project: string, total: number, done: number}>>}
+ */
+KnexConfigRepository.prototype.getProjectTaskCounts = function getProjectTaskCounts(userId, projectNames) {
+  if (!Array.isArray(projectNames) || projectNames.length === 0) return Promise.resolve([]);
+  var db = this.db;
+  return db('tasks_v')
+    .where('user_id', userId)
+    .whereIn('project', projectNames)
+    .groupBy('project')
+    .select(
+      'project',
+      db.raw('COUNT(*) as total'),
+      db.raw("SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) as done")
+    );
+};
+
 // ── ORPHAN WHEN-TAGS (config.controller schedule_templates save) ─────────────
 
 /**

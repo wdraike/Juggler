@@ -158,7 +158,6 @@ const DB_GRANDFATHERED_FILES = [
   '**/src/lib/sync-lock.js',
   '**/src/lib/task-write-queue.js',
   '**/src/mcp/getUserTimezone.js',
-  '**/src/mcp/tools/config.js',
   '**/src/mcp/tools/data.js',
   '**/src/mcp/tools/tasks.js',
   '**/src/mcp/transport.js',
