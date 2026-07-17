@@ -22,6 +22,7 @@ import WeatherBadge from '../features/WeatherBadge';
 import { weatherIconUrl } from '../../utils/weatherIcons';
 import AllDayBanner from './AllDayBanner';
 import { isAllDayTask } from '../../utils/isAllDayTask';
+import { coalesceAdjacentSplitChunks } from '../../utils/coalesceSplits';
 import { computeColumns, weatherCodeLabel, minsToTime, MIN_BLOCK_H } from './dailyViewHelpers';
 import TaskBlock from './DailyViewTaskBlock';
 import UnschedEntry from './DailyViewUnschedEntry';
@@ -212,9 +213,15 @@ export default function DailyView({
   // task's block from the grid. Terminal blocks render styled/dimmed + status
   // icon (see TaskBlock). A placement only needs a parseable start to appear.
   var allScheduled = useMemo(function () {
-    return (placements || []).filter(function (p) {
+    // R56: render-only — merge same-occurrence split chunks into one display
+    // block (carries _coalescedIds for edit fan-out). DB rows untouched.
+    // Same coalescing CalendarGrid applies (999.2034: DailyView was the only
+    // grid rendering placements WITHOUT coalescing, so split tasks showed N
+    // separate cards instead of one merged block).
+    var placed = (placements || []).filter(function (p) {
       return p.start != null;
-    }).sort(function (a, b) { return a.start - b.start; });
+    });
+    return coalesceAdjacentSplitChunks(placed).sort(function (a, b) { return a.start - b.start; });
   }, [placements]);
 
   var unscheduled = useMemo(function () {

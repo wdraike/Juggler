@@ -427,3 +427,59 @@ describe('DailyView — 999.882 calendar shows all lifecycle states (grid decoup
     expect(screen.getByText('Paused task')).toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// 999.2034 — split chunks must coalesce into ONE display block on DailyView.
+// The scheduler splits a task into N chunks (split_ordinal/split_total); the
+// UI must merge same-occurrence chunks into a single card (R56). DailyView
+// was the only grid NOT applying coalesceAdjacentSplitChunks, so split tasks
+// showed N overlapping cards instead of one. This test pins the fix.
+// ---------------------------------------------------------------------------
+describe('DailyView — 999.2034 split chunks coalesce into one display block', () => {
+  var DATE_KEY = '2030-06-15';
+  var DATE = new Date('2030-06-15T12:00:00');
+
+  function splitChunksPlacements() {
+    // 4 chunks of the same occurrence, same splitGroup, 60 min each.
+    return [
+      { start: 1200, end: 1260, dur: 60, splitOrdinal: 1, splitTotal: 4,
+        task: { id: 'split-1', text: 'Apply for Jobs', date: DATE_KEY, dur: 60, sourceId: 'master-1', splitGroup: 'occ-1' } },
+      { start: 1395, end: 1455, dur: 60, splitOrdinal: 2, splitTotal: 4,
+        task: { id: 'split-2', text: 'Apply for Jobs', date: DATE_KEY, dur: 60, sourceId: 'master-1', splitGroup: 'occ-1' } },
+      { start: 1560, end: 1620, dur: 60, splitOrdinal: 3, splitTotal: 4,
+        task: { id: 'split-3', text: 'Apply for Jobs', date: DATE_KEY, dur: 60, sourceId: 'master-1', splitGroup: 'occ-1' } },
+      { start: 1740, end: 1800, dur: 60, splitOrdinal: 4, splitTotal: 4,
+        task: { id: 'split-4', text: 'Apply for Jobs', date: DATE_KEY, dur: 60, sourceId: 'master-1', splitGroup: 'occ-1' } },
+    ];
+  }
+
+  test('4 split chunks of one occurrence render as ONE card (not 4)', () => {
+    var placements = splitChunksPlacements();
+    render(
+      <DailyView
+        selectedDate={DATE}
+        selectedDateKey={DATE_KEY}
+        placements={placements}
+        allTasks={placements.map(function (p) { return p.task; })}
+        statuses={{}}
+        onStatusChange={() => {}}
+        onDelete={() => {}}
+        onExpand={() => {}}
+        darkMode={false}
+        schedCfg={mockSchedCfg}
+        nowMins={0}
+        isToday={false}
+        blockedTaskIds={new Set()}
+        unplacedIds={new Set()}
+        pastDueIds={new Set()}
+        fixedIds={new Set()}
+        isMobile={false}
+        weatherByDate={{}}
+      />
+    );
+    // 'Apply for Jobs' should appear exactly ONCE — coalesced into one card.
+    // Before the fix it appeared 4 times (one per chunk).
+    var cards = screen.getAllByText('Apply for Jobs');
+    expect(cards).toHaveLength(1);
+  });
+});
