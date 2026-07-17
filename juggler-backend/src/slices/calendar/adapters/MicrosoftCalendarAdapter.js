@@ -413,10 +413,11 @@ function applyEventToTaskFields(event, tz, currentTask) {
     fields.placement_mode = PLACEMENT_MODES.REMINDER;
   }
 
-  // Reset to ANYTIME if no longer transparent (was REMINDER) — must run before
-  // FIXED promotion so a same-sync date/time change still wins.
+  // 999.2030: Reset to FIXED (not ANYTIME) if no longer transparent (was REMINDER).
+  // A busy synced event must own its time slot — ANYTIME lets other tasks double-book.
+  // Must run before the date/time-change FIXED promotion so a same-sync change still wins.
   if (!event.isTransparent && currentTask?.placement_mode === PLACEMENT_MODES.REMINDER) {
-    fields.placement_mode = PLACEMENT_MODES.ANYTIME;
+    fields.placement_mode = PLACEMENT_MODES.FIXED;
   }
 
   // Set FIXED only when an already-anchored task's date or time actually changed.
