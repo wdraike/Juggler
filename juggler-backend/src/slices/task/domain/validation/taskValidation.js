@@ -63,7 +63,10 @@ var VALID_RECUR_DAY_CODES = ['U', 'M', 'T', 'W', 'R', 'F', 'S'];
 function checkCalSyncEditGuard(existing, body) {
   var origin = existing && existing.cal_sync_origin;
   if (!origin || origin === 'juggler') return null;
-  var allowed = ['status', 'notes', '_allowUnfix'];
+  // 999.2028 (David ruling): priority edits must work on every task regardless
+  // of origin. `pri` is allowed alongside status/notes so cal-synced tasks can
+  // be reprioritized without fighting the sync reconciler.
+  var allowed = ['status', 'notes', 'pri', '_allowUnfix'];
   if (body && body._allowUnfix) allowed.push('placementMode');
   var blocked = Object.keys(body)
     .filter(function(k) { return k !== 'id'; })

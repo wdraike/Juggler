@@ -456,6 +456,33 @@ describe('UpdateTask — checkCalSyncEditGuard 403 (W5-1)', function () {
   });
 });
 
+// ── 999.2028: priority edits allowed on cal-synced tasks ────────────────────
+// David ruling 2026-07-17: any task can be reprioritized regardless of origin.
+// `pri` must be in the allowed-fields list for checkCalSyncEditGuard so
+// cal-synced tasks (origin !== 'juggler') accept priority changes.
+describe('UpdateTask — pri is allowed on cal-synced tasks (999.2028)', function () {
+  function updateDepsBase(repo, extra) {
+    return H.baseDeps(Object.assign({
+      repo: repo,
+      cache: H.makeCacheFake(),
+      events: H.makeEventsSpy(),
+      enqueueScheduleRun: H.makeTriggerSpy(),
+      recurCleanup: function () { return Promise.resolve(); }
+    }, extra || {}));
+  }
+
+  test('FAST PATH: editing pri on a cal-synced task → 200 (not 403)', function () {
+    var repo = new InMemoryTaskRepository({
+      rows: [{ id: 'cspri', user_id: USER, task_type: 'task', text: 'from-gcal', status: '', pri: 'P3', updated_at: new Date('2026-06-01T00:00:00Z') }],
+      ledger: { cspri: { gcal_event_id: 'evt-pri', cal_sync_origin: 'gcal', msft_event_id: null, apple_event_id: null } }
+    });
+    var uc = new UpdateTask(updateDepsBase(repo));
+    return uc.execute({ id: 'cspri', userId: USER, body: { pri: 'P1' } }).then(function (out) {
+      expect(out.status).not.toBe(403);
+    });
+  });
+});
+
 // ── W5-2: ensureProject spy (BLOCK gap closed) ───────────────────────────────
 // CreateTask with body.project set MUST call ensureProject. Dropping the call
 // from CreateTask.js leaves this test RED (fail-on-drop proof).
