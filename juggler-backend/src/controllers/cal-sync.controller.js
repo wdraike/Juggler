@@ -33,6 +33,8 @@ var { isTerminalStatus } = require('../lib/task-status');
 // needed at this scope. See that function's JSDoc for the boundary.
 var { isAllDayTaskBackend } = require('../lib/isAllDayTaskBackend');
 var { handleTerminalTaskSync } = require('../lib/cal-sync-helpers');
+// 999.1025 inc. 3 — pure miss-ladder use-case (decisions in, effects out).
+var { decideMissingEventSync } = require('../slices/calendar/domain/missing-event-decision');
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('cal-sync.controller');
 
@@ -689,156 +691,40 @@ async function sync(req, res) {
             }});
 
           } else if (task && !event) {
-            // Event not found in provider's calendarView response.
-            // This could mean the event was genuinely deleted, OR the API
-            // transiently failed to return it. Use miss_count to avoid
-            // data loss from transient failures.
-            // If the provider had a partial failure (e.g. one Apple calendar
-            // couldn't be fetched), skip miss-count entirely to avoid
-            // deleting tasks due to incomplete event data.
-            if (pd.partialFailure) {
-              // Do nothing — keep task alive until next clean sync
-            } else if (ledger.provider_event_id) {
-              // Past-time recurring instance guard: providers don't return past events in their
-              // calendar view, so a past recurring_instance will always appear as task&&!event
-              // after its scheduled time. Without this guard it would accumulate miss_count and
-              // be catastrophically deleted after MISS_THRESHOLD syncs.
-              // Fix: detect past-time recurring instances here and only clean up the ledger row —
-              // never delete the task itself.
-              var _taskScheduledAt = task._scheduled_at instanceof Date
-                ? task._scheduled_at
-                : new Date(String(task._scheduled_at).replace(' ', 'T') + 'Z');
-              if (task.taskType === 'recurring_instance' && !isNaN(_taskScheduledAt) && _taskScheduledAt < now) {
-                // Ledger-only cleanup: stop tracking this past instance in the ledger.
-                // The task row itself is preserved — it's historical data.
-                ledgerUpdates.push({ id: ledger.id, fields: {
-                  status: 'deleted_local', task_id: null, miss_count: 0
-                }});
-                logSyncAction(pid, 'past_recurring_cleanup', {
-                  taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
-                  detail: 'Past recurring instance — provider does not return past events; ledger cleaned only',
-                  calendarName: calendarLabels[pid] || null
-                });
-              } else if (withinCdnGrace(ledger, pid)) {
-                // CDN propagation window — treat as not-yet-visible, not missing
-              } else if (ledger.origin === JUGGLER_ORIGIN
-                  && task.taskType === 'recurring_instance'
-                  && (ledger.miss_count || 0) >= 1) {
-                // ponytail: recurring instances are scheduler-owned — the scheduler
-                // moves them to new dates and the sync should follow, not re-create.
-                // A recurring instance whose event goes missing on the provider is
-                // almost always a stale ledger from a date the scheduler has already
-                // moved past. Re-creating spawns duplicate events (observed: 44 ledger
-                // rows, 42 deleted_local for one Cut Grass instance). Clean the ledger
-                // only — the next push phase will create a fresh event at the current
-                // date if the task is still active and in the sync window.
-                ledgerUpdates.push({ id: ledger.id, fields: {
-                  status: 'deleted_local', task_id: null, miss_count: 0
-                }});
-                logSyncAction(pid, 'recurring_ledger_cleanup', {
-                  taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
-                  detail: 'Recurring instance event missing — ledger cleaned (no re-create to avoid dup loop)',
-                  calendarName: calendarLabels[pid] || null
-                });
-              } else if (ledger.origin === JUGGLER_ORIGIN
-                  && ledger.last_user_hash !== null
-                  && userHash(task) !== ledger.last_user_hash
-                  && (ledger.miss_count || 0) >= 1) {
-                // User-editable content changed AND event is gone after at least one miss —
-                // the event link is broken. Re-create.
-                // Guarded on last_user_hash !== null: legacy rows (no stored user hash) fall
-                // through to the normal deletion ladder rather than triggering a spurious repush.
-                // NOT reached for recurring_instance — the guard above catches those first.
-                tasksNeedingReCreate.add(task.id);
-                processedTaskIds.delete(task.id);
-                ledgerUpdates.push({ id: ledger.id, fields: {
-                  status: 'replaced', task_id: null, provider_event_id: null, miss_count: 0
-                }});
-                logSyncAction(pid, 'repush', {
-                  taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
-                  detail: pid + ' event gone but juggler task content changed — will re-create',
-                  calendarName: calendarLabels[pid] || null
-                });
-              } else if (ledger.origin === JUGGLER_ORIGIN
-                  && taskHash(task) !== ledger.last_pushed_hash
-                  && (ledger.miss_count || 0) === 0) {
-                // First miss only: task changed (possibly scheduler timing update) on the same
-                // sync the event went missing. Wait one more cycle before acting — could be CDN lag.
-                ledgerUpdates.push({ id: ledger.id, fields: { miss_count: 1 } });
-              } else {
-                var cachedStart = ledger.event_start;
-                var eventInWindow = false;
-                if (cachedStart) {
-                  var cachedDate = new Date(cachedStart);
-                  eventInWindow = cachedDate >= windowStart && cachedDate <= windowEnd;
-                }
-                if (eventInWindow) {
-                  var newMissCount = (ledger.miss_count || 0) + 1;
-                  if (newMissCount >= MISS_THRESHOLD) {
-                    // === Fix Bug #4: Check multi-provider before deleting task ===
-                    // If the task is still on OTHER providers, don't delete the task — just delete the ledger row.
-                    // Only delete the task when ALL providers have marked it missing.
-                    var otherProviders = providerIds.filter(function(op) {
-                      return op !== pid;
-                    });
-                    var hasOtherActive = false;
-                    for (var opi = 0; opi < otherProviders.length; opi++) {
-                      var otherLedger = (ledgerByProvider[otherProviders[opi]] || []).find(function(l) {
-                        return l.task_id === task.id && l.status === 'active';
-                      });
-                      if (otherLedger) {
-                        hasOtherActive = true;
-                        break;
-                      }
-                    }
-
-                    if (hasOtherActive) {
-                      // Task exists on another provider — delete this ledger row only
-                      ledgerUpdates.push({ id: ledger.id, fields: {
-                        status: 'deleted_remote', task_id: null, miss_count: newMissCount
-                      }});
-                      pStats.deleted_remote++;
-                      stats.deleted_remote++;
-                      logSyncAction(pid, 'deleted_remote_partial', {
-                        taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
-                        detail: 'Event deleted in ' + pid + ' but still active on another provider — ledger removed, task kept',
-                        calendarName: calendarLabels[pid] || null
-                      });
-                      continue;
-                    }
-
-                    // Confirmed missing after multiple syncs AND no other provider has it — delete the task.
-                    // Pre-compute dependency transfers from in-memory data so the
-                    // write phase can apply them without querying.
-                    var deletedDeps = Array.isArray(task.dependsOn) ? task.dependsOn : [];
-                    var depTransfers = [];
-                    for (var ai2 = 0; ai2 < allTasks.length; ai2++) {
-                      var a = allTasks[ai2];
-                      var aDeps = Array.isArray(a.dependsOn) ? a.dependsOn : [];
-                      if (aDeps.indexOf(task.id) >= 0) {
-                        var newDeps = aDeps.filter(function(d) { return d !== task.id; });
-                        deletedDeps.forEach(function(d) { if (newDeps.indexOf(d) === -1) newDeps.push(d); });
-                        depTransfers.push({ id: a.id, newDepsJson: JSON.stringify(newDeps) });
-                      }
-                    }
-                    taskDeletes.push({ id: task.id, dependencyTransfers: depTransfers });
-                    ledgerUpdates.push({ id: ledger.id, fields: {
-                      status: 'deleted_remote', task_id: null, miss_count: newMissCount
-                    }});
-                    pStats.deleted_remote++;
-                    stats.deleted_remote++;
-                    logSyncAction(pid, 'deleted_remote', {
-                      taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
-                      detail: 'Event deleted in ' + pid + ' — task removed after ' + MISS_THRESHOLD + ' consecutive syncs',
-                      calendarName: calendarLabels[pid] || null
-                    });
-                  } else {
-                    // Not yet confirmed — increment miss counter, keep task alive
-                    ledgerUpdates.push({ id: ledger.id, fields: { miss_count: newMissCount } });
-                  }
-                }
-              }
+            // Event missing from the provider's calendarView. The miss-ladder /
+            // terminal-decision is a PURE use-case (999.1025 inc. 3) — decisions
+            // in, effects out. Build the resolved context, decide, then apply the
+            // returned mutations here. withinCdnGrace/userHash/taskHash are
+            // injected so the use-case stays DB/HTTP-free; withinCdnGrace's known
+            // raw-Date parse bug (W5 A1-5 / DIGEST-2026-07-16) is preserved via
+            // the injected dependency, NOT fixed or re-implemented.
+            var missDecision = decideMissingEventSync({
+              task: task, ledger: ledger, pid: pid, pd: pd,
+              now: now, windowStart: windowStart, windowEnd: windowEnd,
+              providerIds: providerIds, ledgerByProvider: ledgerByProvider,
+              allTasks: allTasks, calendarLabels: calendarLabels,
+              MISS_THRESHOLD: MISS_THRESHOLD, JUGGLER_ORIGIN: JUGGLER_ORIGIN
+            }, {
+              withinCdnGrace: withinCdnGrace, userHash: userHash, taskHash: taskHash
+            });
+            for (var _mlu = 0; _mlu < missDecision.ledgerUpdates.length; _mlu++) {
+              ledgerUpdates.push(missDecision.ledgerUpdates[_mlu]);
             }
+            for (var _mtd = 0; _mtd < missDecision.taskDeletes.length; _mtd++) {
+              taskDeletes.push(missDecision.taskDeletes[_mtd]);
+            }
+            for (var _mrc = 0; _mrc < missDecision.recreateTaskIds.length; _mrc++) {
+              tasksNeedingReCreate.add(missDecision.recreateTaskIds[_mrc]);
+              processedTaskIds.delete(missDecision.recreateTaskIds[_mrc]);
+            }
+            for (var _mlg = 0; _mlg < missDecision.logs.length; _mlg++) {
+              logSyncAction(missDecision.logs[_mlg].provider, missDecision.logs[_mlg].action, missDecision.logs[_mlg].opts);
+            }
+            if (missDecision.statsDelta.deleted_remote) {
+              pStats.deleted_remote += missDecision.statsDelta.deleted_remote;
+              stats.deleted_remote += missDecision.statsDelta.deleted_remote;
+            }
+            if (missDecision.stop) continue;
 
           } else if (!task && event) {
             // Task deleted from Juggler — delete from provider (skip in ingest-only)

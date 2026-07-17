@@ -72,8 +72,27 @@ var lines = src.split('\n');
 // (getDefaultDb() on use, not on require) — same as tests/apple-cal-cdn-grace.test.js.
 var calSyncController = require('../../../src/controllers/cal-sync.controller');
 
+// 999.1025 inc. 3: the miss-ladder (`task && !event` branch) was extracted from
+// the controller into the PURE use-case
+// src/slices/calendar/domain/missing-event-decision.js (decisions in, effects
+// out). Per THIS file's own contract (header: "When the extraction LEGITIMATELY
+// moves a branch out of cal-sync.controller.js into a use-case/adapter, the
+// corresponding anchor is re-pointed at the new file as part of that reviewed
+// structural change"), Anchor 2 (CDN-grace WIRING / increment order) now reads
+// the use-case source. The withinCdnGrace DEFINITION + CDN_GRACE_MS (Anchor 1)
+// and every other anchor (3-6) stay in the controller and remain pinned there.
+var USECASE_PATH = path.resolve(
+  __dirname, '../../../src/slices/calendar/domain/missing-event-decision.js'
+);
+var usecaseSrc = fs.readFileSync(USECASE_PATH, 'utf8');
+var usecaseLines = usecaseSrc.split('\n');
+
 function firstLineIndex(needle) {
   return lines.findIndex(function (l) { return l.indexOf(needle) !== -1; });
+}
+
+function firstUsecaseLineIndex(needle) {
+  return usecaseLines.findIndex(function (l) { return l.indexOf(needle) !== -1; });
 }
 
 // ─── Anchor 1: CDN grace magnitude (apple 120s, none for gcal/msft) ──────────
@@ -143,20 +162,23 @@ describe('W5-A2: the miss-ladder consults withinCdnGrace BEFORE incrementing mis
   // Anchored on the CALL-SITE form (`} else if (withinCdnGrace(ledger, pid)) {`),
   // not the bare `withinCdnGrace(ledger, pid)` substring — that bare form also
   // matches the FUNCTION DEFINITION (`function withinCdnGrace(ledger, pid) {`,
-  // :52), so it stays green even if the real miss-ladder call (:722) is
-  // deleted — a false-green found by harrison review (999.1025 inc. 2). W4
-  // axis P is the behavioral backstop that would catch a deleted call site
-  // end-to-end; this anchor exists so the WIRING is pinned DB-free too.
+  // still in the controller), so it stays green even if the real miss-ladder
+  // call is deleted — a false-green found by harrison review (999.1025 inc. 2).
+  // 999.1025 inc. 3: the miss-ladder branch was extracted to the PURE use-case
+  // (withinCdnGrace injected as a dependency, call-site form preserved), so this
+  // anchor now reads `usecaseSrc`. W4 axis P is the behavioral backstop that
+  // would catch a deleted call site end-to-end; this anchor pins the WIRING
+  // (grace consulted before the increment) DB-free in its new home.
   it('A2-1: the call-site form `} else if (withinCdnGrace(ledger, pid)) {` is consulted inside the miss ladder', function () {
-    expect(src).toContain('} else if (withinCdnGrace(ledger, pid)) {');
+    expect(usecaseSrc).toContain('} else if (withinCdnGrace(ledger, pid)) {');
   });
 
   it('A2-2: the grace check appears BEFORE the miss_count increment (order-sensitive)', function () {
     // The grace branch must short-circuit the "event missing" ladder before
     // the increment — if it ran AFTER, a CDN-lagged Apple event would still
     // accrue a miss on every sync and be deleted at the threshold.
-    var graceIdx = firstLineIndex('} else if (withinCdnGrace(ledger, pid)) {');
-    var incIdx = firstLineIndex('var newMissCount = (ledger.miss_count || 0) + 1;');
+    var graceIdx = firstUsecaseLineIndex('} else if (withinCdnGrace(ledger, pid)) {');
+    var incIdx = firstUsecaseLineIndex('var newMissCount = (ledger.miss_count || 0) + 1;');
     expect(graceIdx).toBeGreaterThanOrEqual(0);
     expect(incIdx).toBeGreaterThanOrEqual(0);
     expect(graceIdx).toBeLessThan(incIdx);
