@@ -40,6 +40,9 @@ var { decideTerminalTaskSync } = require('../slices/calendar/domain/terminal-tas
 // out). Its delete effect is byte-identical to the terminal path, so it is
 // applied through the SHARED applyTerminalDelete applier below.
 var { decidePastCleanupSync } = require('../slices/calendar/domain/past-cleanup-decision');
+// 999.1025 inc. 6 — pure external-edit predicate (axis-S seam). Was FORKED at two
+// byte-identical sites below (eventModifiedExternally + provEventModified); now unified.
+var { isEventModifiedExternally } = require('../slices/calendar/domain/event-modified-predicate');
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('cal-sync.controller');
 
@@ -527,27 +530,10 @@ async function sync(req, res) {
                 // Compares event.lastModified against ledger.last_modified_at (the
                 // value we recorded on the previous sync). If the event is newer by
                 // more than 1s AND the task itself hasn't changed, the edit must have
-                // come from the calendar.
-                var eventModifiedExternally = false;
-                if (event.lastModified && ledger.last_modified_at) {
-                  var evModMs = new Date(event.lastModified).getTime();
-                  var recordedModMs = new Date(String(ledger.last_modified_at).replace(' ', 'T') + 'Z').getTime();
-                  if (!isNaN(evModMs) && !isNaN(recordedModMs)) {
-                    // 1-second tolerance: provider servers (especially MSFT)
-                    // sometimes bump lastModified by tens of ms internally
-                    // even when no real edit occurred. Without a tolerance
-                    // window every push generates a phantom "externally
-                    // modified" detection on the next sync, triggering a
-                    // pull that re-applies the same scheduled_at and then
-                    // fires enqueueScheduleRun, which loops the system.
-                    eventModifiedExternally = (evModMs - recordedModMs) > 1000;
-                  }
-                } else if (event._etag && ledger.provider_etag) {
-                  // ETag fallback for Apple CalDAV: LAST-MODIFIED is absent on iCloud
-                  // VEVENTs, so last_modified_at is always NULL for Apple rows. ETags
-                  // change on every server-side write and are exact — no tolerance needed.
-                  eventModifiedExternally = event._etag !== ledger.provider_etag;
-                }
+                // come from the calendar. PURE predicate (999.1025 inc. 6 axis-S seam)
+                // — the >1000ms tolerance + the ETag fallback (Apple CalDAV) live in
+                // slices/calendar/domain/event-modified-predicate.js.
+                var eventModifiedExternally = isEventModifiedExternally(event, ledger);
 
                 var isTaskTerminal = isTerminalStatus(task.status);
 
@@ -692,16 +678,9 @@ async function sync(req, res) {
               // event was modified since our last sync. We never push to these events
               // (we don't own them), but we keep task fields (dur, text, time) current
               // when the user edits them on the provider side.
-              var provEventModified = false;
-              if (event.lastModified && ledger.last_modified_at) {
-                var pvModMs = new Date(event.lastModified).getTime();
-                var pvRecMs = new Date(String(ledger.last_modified_at).replace(' ', 'T') + 'Z').getTime();
-                if (!isNaN(pvModMs) && !isNaN(pvRecMs)) {
-                  provEventModified = (pvModMs - pvRecMs) > 1000;
-                }
-              } else if (event._etag && ledger.provider_etag) {
-                provEventModified = event._etag !== ledger.provider_etag;
-              }
+              // Same external-edit test as the full-sync gate above — unified into
+              // the PURE predicate (999.1025 inc. 6): the two sites were byte-identical.
+              var provEventModified = isEventModifiedExternally(event, ledger);
               if (provEventModified) {
                 var provPullFields = pAdapter.applyEventToTaskFields(event, tz, task);
                 // Do NOT unconditionally override placement_mode here — the adapter's

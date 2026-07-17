@@ -85,7 +85,7 @@
  *        (:1561), the mirror image of Q's push-stores-URL.
  *   S  — Apple ETag external-edit fallback: iCloud events have no LAST-MODIFIED,
  *        so external-edit detection falls back to `event._etag !==
- *        ledger.provider_etag` (:500-504). A moved event with a new ETag and a
+ *        ledger.provider_etag` (event-modified-predicate.js). A moved event with a new ETag and a
  *        null lastModified drives a pull the lastModified branch cannot see.
  *   T  — Apple delete-by-URL: a done task with calCompletedBehavior=delete
  *        deletes the CalDAV event by `event._url || ledger.provider_event_id`
@@ -1157,8 +1157,8 @@ test('R — Apple pull dedup: a remote event indexed under BOTH its UID and CalD
 //
 // iCloud VEVENTs carry NO LAST-MODIFIED, so ledger.last_modified_at is always
 // NULL for Apple rows and the lastModified comparison
-// (cal-sync.controller.js:487) can never fire. External edits are detected via
-// the ETag fallback (:500-504): `event._etag !== ledger.provider_etag`. A moved
+// (event-modified-predicate.js) can never fire. External edits are detected via
+// the ETag fallback (event-modified-predicate.js): `event._etag !== ledger.provider_etag`. A moved
 // event with a null lastModified + a bumped ETag must drive the pull the
 // lastModified branch is blind to — without the fallback, calendar-side Apple
 // edits are silently lost.

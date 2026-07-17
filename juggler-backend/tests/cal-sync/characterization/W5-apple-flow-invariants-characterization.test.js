@@ -95,6 +95,22 @@ function firstUsecaseLineIndex(needle) {
   return usecaseLines.findIndex(function (l) { return l.indexOf(needle) !== -1; });
 }
 
+// 999.1025 inc. 6: the external-edit predicate (`isEventModifiedExternally`,
+// axis S) was FORKED at two byte-identical controller sites; the extraction
+// unified both into the PURE module event-modified-predicate.js. Per THIS
+// file's contract (header: re-point an anchor at its new home when a branch
+// LEGITIMATELY moves out of the controller), Anchor 6 (ETag fallback) now reads
+// the predicate source. W4 axis S is the DB-backed behavioral backstop.
+var PREDICATE_PATH = path.resolve(
+  __dirname, '../../../src/slices/calendar/domain/event-modified-predicate.js'
+);
+var predicateSrc = fs.readFileSync(PREDICATE_PATH, 'utf8');
+var predicateLines = predicateSrc.split('\n');
+
+function firstPredicateLineIndex(needle) {
+  return predicateLines.findIndex(function (l) { return l.indexOf(needle) !== -1; });
+}
+
 // ─── Anchor 1: CDN grace magnitude (apple 120s, none for gcal/msft) ──────────
 
 describe('W5-A1: CDN_GRACE_MS pins the Apple CalDAV propagation grace at 120s and NONE for gcal/msft', function () {
@@ -245,12 +261,14 @@ describe('W5-A6: external-edit detection falls back to ETag comparison for Apple
     // iCloud VEVENTs have no LAST-MODIFIED, so ledger.last_modified_at is
     // always NULL for Apple rows; without the ETag fallback, external Apple
     // edits are never detected (calendar-side moves silently lost).
-    expect(src).toContain('eventModifiedExternally = event._etag !== ledger.provider_etag;');
+    // 999.1025 inc. 6: the predicate moved to event-modified-predicate.js, so
+    // the assignment is now a `return`; anchor re-pointed at the predicate source.
+    expect(predicateSrc).toContain('return event._etag !== ledger.provider_etag;');
   });
 
   it('A6-2: the ETag path is the else-branch of the lastModified comparison (fallback, not primary)', function () {
-    var lastModIdx = firstLineIndex('if (event.lastModified && ledger.last_modified_at) {');
-    var etagIdx = firstLineIndex('} else if (event._etag && ledger.provider_etag) {');
+    var lastModIdx = firstPredicateLineIndex('if (event.lastModified && ledger.last_modified_at) {');
+    var etagIdx = firstPredicateLineIndex('} else if (event._etag && ledger.provider_etag) {');
     expect(lastModIdx).toBeGreaterThanOrEqual(0);
     expect(etagIdx).toBeGreaterThanOrEqual(0);
     expect(lastModIdx).toBeLessThan(etagIdx);

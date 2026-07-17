@@ -93,7 +93,7 @@ var INGEST_ID_RE = /^(gcal|msft|apple)_[0-9a-f]{16}$/;
 //     facade indexes each Apple event under BOTH keys (facade.js:1120), which is
 //     what the dual-key pull dedup and delete-by-URL branches rely on.
 //   • an ETag that changes on every server-side write — Apple's external-edit
-//     detection falls back to `event._etag !== ledger.provider_etag` (:504/:658)
+//     detection falls back to `event._etag !== ledger.provider_etag` (slices/calendar/domain/event-modified-predicate.js)
 //     because iCloud VEVENTs carry NO LAST-MODIFIED …
 //   • … so Apple events set `lastModified: null` (routing detection through the
 //     ETag branch, not the lastModified comparison). Deterministic + host-TZ
