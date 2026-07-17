@@ -66,14 +66,45 @@
  *        (miss_count 0->1). Guards the Apple-soak Bug-#2 catastrophic-delete
  *        class. Companion DB-free source pin: W5-apple-flow-invariants.
  *
+ *   Q-T — the remaining Apple/CalDAV flow goldens (999.1025 inc. 2). These
+ *        exercise the CalDAV URL-keyed store end-to-end: the harness ProviderSim
+ *        now makes Apple events carry a VEVENT UID AND a distinct CalDAV `_url`,
+ *        an `_etag` that changes on every server-side write, and NO lastModified
+ *        (iCloud VEVENTs have none) — and Apple createEvent returns the `_url` as
+ *        providerEventId (see harness/syncGoldenHarness.js § Apple modeling).
+ *        Each was previously pinned only DB-free by W5-apple-flow-invariants
+ *        (source inspection); these are the end-to-end DB backstops:
+ *   Q  — Apple push/create eventUrl-storage: a pushed Apple task's ledger
+ *        provider_event_id AND apple_event_id column store the CalDAV URL (not
+ *        the UID — cal-sync.controller.js:1181/:1177 via the facade's
+ *        provider_event_id=URL comment, facade.js:1118); re-run is a no-op.
+ *   R  — Apple _url dual-key pull dedup: a remote event indexed under BOTH its
+ *        UID and CalDAV URL (facade.js:1120) is ingested EXACTLY ONCE — the
+ *        dual-key claim (:1363-1374) prevents the duplicate-task / spurious
+ *        orphan-delete class. Ingested rows store the UID as provider_event_id
+ *        (:1561), the mirror image of Q's push-stores-URL.
+ *   S  — Apple ETag external-edit fallback: iCloud events have no LAST-MODIFIED,
+ *        so external-edit detection falls back to `event._etag !==
+ *        ledger.provider_etag` (:500-504). A moved event with a new ETag and a
+ *        null lastModified drives a pull the lastModified branch cannot see.
+ *   T  — Apple delete-by-URL: a done task with calCompletedBehavior=delete
+ *        deletes the CalDAV event by `event._url || ledger.provider_event_id`
+ *        (lib/cal-sync-helpers.js:44) — the delete targets the URL, not the UID;
+ *        a rewrite targeting the VEVENT UID (`event.id`) instead breaks this.
+ *        (Both sides of the `||` hold the URL in this fixture — juggler-origin
+ *        rows store the URL in provider_event_id per axis Q — so the `_url`
+ *        fallback half itself is NOT pinned here.)
+ *
  * AXES DELIBERATELY NOT COVERED (documented, with reasons):
- *   - Remaining Apple/CalDAV flows — push/create (eventUrl storage),
- *     _url dual-key pull dedup, ETag external-edit fallback, delete-by-URL:
- *     the inline branches are pinned DB-free by W5-apple-flow-invariants
- *     (source inspection); simulating the CalDAV URL-keyed store end-to-end in
- *     this golden harness (Apple events carrying distinct _url/_etag, createEvent
- *     returning a CalDAV URL) is the next Apple golden increment. Axis P above
- *     needs neither (its event is absent), so it lands first.
+ *   - Apple push createEvent raw-shape fidelity: the real Apple adapter's
+ *     createEvent returns a SPARSE raw ({providerEventId,etag,url}) that the REAL
+ *     normalizeEvent maps to a mostly-empty event; this harness (by its standing
+ *     design, syncGoldenHarness.js install() comment) identity-mocks
+ *     normalizeEvent and fabricates full normalized events, so axes Q-T pin the
+ *     sync()-CONTROLLER Apple URL/etag WIRING (which key is stored, which key
+ *     delete/update targets, dual-key dedup, etag comparison) — the actual unit
+ *     under characterization — not the adapter-internal sparse-raw normalization
+ *     (an adapter concern, owned by the AppleCalendarAdapter's own tests).
  *
  * RUN (test-bed pool; NEVER bare npx jest against a dev .env):
  *   cd test-bed && scripts/run-suite.sh juggler -- --testPathPattern='W4-sync-goldenMaster'
@@ -1034,4 +1065,194 @@ test('P — Apple CDN grace: a missing just-pushed event is NOT counted as a mis
   expect((run2.dbDelta.tasks_v || {}).removed).toBeUndefined();
 
   H.checkGolden('P-apple-cdn-grace-flow', [run1, run2]);
+});
+
+// ─── Q: Apple push/create — CalDAV URL is stored (not the UID) ───────────────
+//
+// Apple/CalDAV's createEvent returns the event's CalDAV URL as providerEventId
+// (apple-cal-api.js:360/371). sync() therefore stores the URL as the ledger's
+// provider_event_id (cal-sync.controller.js:1181) — NOT the VEVENT UID. This is
+// the storage invariant the facade's dual-key lookup (facade.js:1118-1122) and
+// the delete/update-by-URL branches all assume. The idempotent re-run proves the
+// stored URL round-trips: on the second sync the facade re-indexes the event
+// under both its UID and URL, the ledger's URL matches via the _url key, hashes
+// match, and NO re-create fires (mirror of axis A for gcal).
+//
+// NOTE (honesty, not a defect — same dead-code class axis O already documents):
+// cal-sync.controller.js:1177 ALSO queues a taskUpdates entry to set the task's
+// apple_event_id column to the same URL, but `apple_event_id` (like
+// gcal_event_id/msft_event_id) is absent from tasks-write.js's
+// MASTER_UPDATE_FIELDS/INSTANCE_UPDATE_FIELDS allowlists (confirmed by reading
+// tasks-write.js:57-85), so splitUpdateFields() silently drops it — the column
+// is NEVER actually written to tasks_v. Confirmed empirically: A-push-only's own
+// golden shows zero tasks_v changes for gcal's identical push. This test
+// characterizes that CURRENT behavior rather than asserting the (incorrect)
+// expectation that the column persists.
+
+test('Q — Apple push/create: ledger provider_event_id stores the CalDAV URL; immediate re-run is a no-op', async () => {
+  await seedTestUser(APPLE_ONLY);
+  await seedAppleFullSyncCalendar();
+  await seedTask('w4q-1', '2026-06-17 14:00:00');
+  await stabilizeTaskTimestamps();
+
+  var run1 = await run('apple initial push');
+  await stabilizeTaskTimestamps();
+  var run2 = await run('apple idempotent re-run');
+
+  var appleUrl = 'https://caldav.icloud.com/w4/calendars/home/w4q-1.ics';
+
+  expect(run1.statusCode).toBe(200);
+  // Exactly one ledger row, keyed by the CalDAV URL (not the UID).
+  var addedLedger = (run1.dbDelta.cal_sync_ledger || {}).added || [];
+  expect(addedLedger.length).toBe(1);
+  expect(addedLedger[0].provider_event_id).toBe(appleUrl);
+  // The linkage-only taskUpdates entry (eventIdCol=apple_event_id) is dead code
+  // (see NOTE above) — tasks_v shows NO apple_event_id change, same as gcal's A.
+  expect((run1.dbDelta.tasks_v || {}).changed).toBeUndefined();
+  // Idempotent re-run: no second create, no new ledger row.
+  var run2Methods = (run2.providerCalls.apple || []).map(function (c) { return c.method; });
+  expect(run2Methods).not.toContain('createEvent');
+  expect(run2Methods).not.toContain('batchCreateEvents');
+  expect((run2.dbDelta.cal_sync_ledger || {}).added).toBeUndefined();
+
+  H.checkGolden('Q-apple-push-eventurl-storage', [run1, run2]);
+});
+
+// ─── R: Apple pull dedup — one event under TWO keys ingested once ────────────
+//
+// CalDAV returns the same event under both its VEVENT UID and its CalDAV URL, so
+// facade.js:1120 indexes it under BOTH in pEventsById. The Phase-3b pull loop
+// claims the sibling key (cal-sync.controller.js:1363-1374) so the event is
+// processed EXACTLY ONCE — without it, the second key would create a duplicate
+// task (Apple soak duplicate-task class). Ingested (pulled) rows store the UID
+// as provider_event_id (:1561) — the mirror image of axis Q's push-stores-URL.
+
+test('R — Apple pull dedup: a remote event indexed under BOTH its UID and CalDAV URL is ingested exactly ONCE', async () => {
+  await seedTestUser(APPLE_ONLY);
+  await seedAppleFullSyncCalendar();
+  // Remote-only Apple event (no local task, no ledger). seedRemoteEvent gives it
+  // a distinct CalDAV _url derived from its id, so it lands under two keys.
+  sim.seedRemoteEvent('apple', {
+    id: 'uid-apple-remote-r1',
+    title: 'Apple remote R1',
+    startDateTime: '2026-06-18T14:00:00.000Z',
+    endDateTime: '2026-06-18T15:00:00.000Z'
+  });
+
+  var run1 = await run('apple dual-key pull');
+
+  // Exactly one task + one ledger row — dedup held (a broken dedup would create
+  // a second task/ledger row for the URL key).
+  expect(((run1.dbDelta.tasks_v || {}).added || []).length).toBe(1);
+  var addedLedger = (run1.dbDelta.cal_sync_ledger || {}).added || [];
+  expect(addedLedger.length).toBe(1);
+  // Pulled rows store the UID (not the URL) as provider_event_id.
+  expect(addedLedger[0].provider_event_id).toBe('uid-apple-remote-r1');
+
+  H.checkGolden('R-apple-url-dual-key-dedup', [run1]);
+});
+
+// ─── S: Apple ETag external-edit fallback (no LAST-MODIFIED) ─────────────────
+//
+// iCloud VEVENTs carry NO LAST-MODIFIED, so ledger.last_modified_at is always
+// NULL for Apple rows and the lastModified comparison
+// (cal-sync.controller.js:487) can never fire. External edits are detected via
+// the ETag fallback (:500-504): `event._etag !== ledger.provider_etag`. A moved
+// event with a null lastModified + a bumped ETag must drive the pull the
+// lastModified branch is blind to — without the fallback, calendar-side Apple
+// edits are silently lost.
+//
+// SETUP (real push, not a hand-seeded ledger — see NOTE): run1 pushes (creates
+// the ledger with provider_etag=null, since ledgerInserts on create always
+// hardcodes provider_etag:null — cal-sync.controller.js:1191 — the created
+// event's real etag isn't captured until the NEXT ledger-refresh pass). run2 is
+// an unchanged settle sync: the unconditional end-of-loop ledger-cached-fields
+// update (:680-689) refreshes provider_etag to the pushed event's actual etag
+// (v1) — this is also the FIRST sync where the etag-comparison branch's
+// precondition (`ledger.provider_etag` truthy) is satisfiable, so it correctly
+// no-ops (skip) here. Only THEN do we mutate the event's `_etag` externally
+// (v1->v2, simulating an iCloud-side edit) and run a third time, where
+// ledger.provider_etag (v1, persisted by run2) vs event._etag (v2) finally
+// diverge and the fallback fires.
+//
+// NOTE (characterization finding, not a production bug — test-construction
+// only): an EARLIER version of this test hand-seeded the ledger row with
+// `last_pushed_hash: taskHash(task)` computed on the RAW seeded tasks_v row.
+// That is NOT equivalent to sync()'s own internal taskHash(): tasks_v.time is a
+// raw SQL TIME string ("14:00:00" — mysql2 dateStrings), but rowToTask's
+// internal `task.time` is utcToLocal()'s 12-hour format ("2:00 PM" —
+// juggler/shared/scheduler/dateHelpers.js:262), and taskHash() hashes
+// task.date/task.time verbatim. The externally-computed hash could therefore
+// never match sync()'s internal comparison, forcing taskChanged=true down the
+// CONFLICT branch instead of the intended pure-pull branch — worse, that branch
+// computed `new Date(event.lastModified).getTime()` on a NULL lastModified,
+// which JS resolves to epoch 0 (NOT NaN), so the conflict resolved "task
+// newer -> push" instead of "event newer -> pull", silently flipping pulled
+// 1->0. Real push (this version) sidesteps the whole class by never comparing
+// an externally-computed taskHash to sync()'s internal one.
+
+test('S — Apple ETag external-edit: a moved event with NO lastModified but a changed ETag triggers the pull', async () => {
+  await seedTestUser(APPLE_ONLY);
+  await seedAppleFullSyncCalendar();
+  await seedTask('w4s-1', '2026-06-17 14:00:00');
+  await stabilizeTaskTimestamps();
+  var run1 = await run('apple initial push');
+  await stabilizeTaskTimestamps();
+  var run2 = await run('apple settle sync — captures the real etag into the ledger');
+  expect((run2.dbDelta.tasks_v || {}).removed).toBeUndefined();
+
+  // The event as it now lives on iCloud: moved +2h, NO lastModified, NEW etag —
+  // same CalDAV URL/UID the push created (sim's Apple createEvent derives both
+  // deterministically from the task id).
+  var ev = sim.store('apple').find(function (e) { return e.id === 'uid-apple-w4s-1'; });
+  expect(ev).toBeTruthy();
+  ev.startDateTime = '2026-06-17T16:00:00.000Z';
+  ev.endDateTime = '2026-06-17T16:30:00.000Z';
+  ev._etag = '"etag-w4s-1-v2"';
+  await stabilizeTaskTimestamps();
+
+  var run3 = await run('apple etag external edit');
+
+  // The ETag fallback drove exactly one pull + one reschedule enqueue.
+  expect(run3.body.pulled).toBe(1);
+  expect(run3.enqueues.length).toBe(1);
+  expect((run3.dbDelta.tasks_v || {}).removed).toBeUndefined();
+
+  H.checkGolden('S-apple-etag-external-edit', [run1, run2, run3]);
+});
+
+// ─── T: Apple delete-by-URL (done + calCompletedBehavior=delete) ─────────────
+//
+// Apple deleteEvent/updateEvent must target the CalDAV URL, not the VEVENT UID:
+// handleTerminalTaskSync (lib/cal-sync-helpers.js:44) calls
+// `deleteEvent(pToken, event._url || ledger.provider_event_id)`. A done task
+// with calCompletedBehavior=delete therefore deletes the event by its `_url`.
+// This is axis D2's Apple twin — the golden proves the delete call carries the
+// URL, so a rewrite that targets the VEVENT UID (`event.id`) instead breaks it.
+// Note: both sides of the `||` hold the URL here (juggler-origin apple rows
+// store the URL in provider_event_id, axis Q), so this pins URL-vs-UID, not
+// the `_url` fallback half.
+
+test('T — Apple delete-by-URL: a done task with calCompletedBehavior=delete deletes the CalDAV event by its _url', async () => {
+  await seedTestUser(APPLE_ONLY);
+  await seedAppleFullSyncCalendar();
+  await seedUserConfig('preferences', { calCompletedBehavior: 'delete' });
+  await seedTask('w4t-1', '2026-06-17 14:00:00');
+  await stabilizeTaskTimestamps();
+  var run1 = await run('apple initial push');
+
+  await stabilizeTaskTimestamps();
+  await editTask('w4t-1', { status: 'done', updated_at: '2026-06-02 00:00:00' });
+
+  var run2 = await run('apple done -> delete by url');
+
+  var appleUrl = 'https://caldav.icloud.com/w4/calendars/home/w4t-1.ics';
+  var deleteCalls = (run2.providerCalls.apple || []).filter(function (c) { return c.method === 'deleteEvent'; });
+  expect(deleteCalls.length).toBe(1);
+  // The delete targets the CalDAV URL, NOT the VEVENT UID.
+  expect(deleteCalls[0].args.eventId).toBe(appleUrl);
+  var appleMethods = (run2.providerCalls.apple || []).map(function (c) { return c.method; });
+  expect(appleMethods).not.toContain('updateEvent'); // no repush — event is gone
+
+  H.checkGolden('T-apple-delete-by-url', [run1, run2]);
 });

@@ -1,0 +1,393 @@
+[
+  {
+    "label": "apple initial push",
+    "statusCode": 200,
+    "body": {
+      "pushed": 1,
+      "pulled": 0,
+      "skipped": 0,
+      "deleted_local": 0,
+      "deleted_remote": 0,
+      "errors": [],
+      "providers": {
+        "apple": {
+          "pushed": 1,
+          "pulled": 0,
+          "skipped": 0,
+          "deleted_local": 0,
+          "deleted_remote": 0,
+          "errors": []
+        }
+      },
+      "syncRunId": "<UUID>",
+      "summary": [
+        {
+          "type": "push",
+          "text": "",
+          "message": "Pushed to Apple Calendar"
+        }
+      ]
+    },
+    "providerCalls": {
+      "apple": [
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        },
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        },
+        {
+          "method": "listEvents",
+          "args": {
+            "token": "tok-apple",
+            "timeMin": "2026-06-16T04:00:00.000Z",
+            "timeMax": "2026-08-15T12:00:00.000Z"
+          }
+        },
+        {
+          "method": "batchCreateEvents",
+          "args": {
+            "token": "tok-apple",
+            "tasks": [
+              {
+                "id": "w4q-1",
+                "text": "W4 w4q-1",
+                "date": "2026-06-17",
+                "time": "10:00 AM",
+                "dur": 30,
+                "status": ""
+              }
+            ],
+            "year": 2026,
+            "tz": "America/New_York"
+          }
+        }
+      ]
+    },
+    "sse": [
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "fetch",
+          "detail": "Fetching events...",
+          "pct": 5,
+          "provider": "apple",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "fetch",
+          "detail": "Fetched 0 events",
+          "pct": 15,
+          "provider": "apple",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "ledger",
+          "detail": "Checking for changes...",
+          "pct": 20,
+          "provider": "apple",
+          "calendar": "Home"
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "push",
+          "detail": "Syncing tasks...",
+          "pct": 50,
+          "provider": "apple",
+          "calendar": "Home"
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "push",
+          "detail": "Pushing 1 tasks...",
+          "pct": 50,
+          "provider": "apple",
+          "calendar": "Home"
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "finalize",
+          "detail": "Saving changes...",
+          "pct": 85,
+          "provider": null,
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "finalize",
+          "detail": "Finalizing...",
+          "pct": 95,
+          "provider": null,
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "done",
+          "detail": "Apple Calendar: 1 pushed",
+          "pct": 100,
+          "provider": null,
+          "calendar": null
+        }
+      }
+    ],
+    "enqueues": [],
+    "dbDelta": {
+      "cal_sync_ledger": {
+        "added": [
+          {
+            "active_task_key": "cal-sync-test-user-001|apple|w4q-1",
+            "completed_at": null,
+            "created_at": "<TS>",
+            "done_frozen": 0,
+            "error_detail": null,
+            "event_all_day": 0,
+            "event_end": "2026-06-17T14:30:00.000Z",
+            "event_start": "2026-06-17T14:00:00.000Z",
+            "event_status": "pending",
+            "event_summary": "W4 w4q-1",
+            "event_url": null,
+            "id": "<N1>",
+            "last_modified_at": "2026-06-16 12:00:00.000000",
+            "last_pulled_hash": "02db3b2cb04de3bed318307f995b3a1fe8b8d5c8f46a72d1fc606dc318476d05",
+            "last_pushed_at": "<TS>",
+            "last_pushed_hash": "e8892173f057a624e6133d6ef278829e",
+            "last_user_hash": "d5f0fbbaa5e2682a5553adfe4051294e",
+            "miss_count": 0,
+            "origin": "juggler",
+            "provider": "apple",
+            "provider_etag": null,
+            "provider_event_id": "https://caldav.icloud.com/w4/calendars/home/w4q-1.ics",
+            "scheduled_at": null,
+            "status": "active",
+            "synced_at": "<TS>",
+            "task_id": "w4q-1",
+            "task_updated_at": "2026-06-01 00:00:00",
+            "updated_at": "<TS>",
+            "user_id": "cal-sync-test-user-001"
+          }
+        ]
+      },
+      "sync_history": {
+        "added": [
+          {
+            "action": "pushed",
+            "calendar_name": "Home",
+            "created_at": "<TS>",
+            "detail": "Batch pushed 1 tasks to apple",
+            "error_detail": null,
+            "event_id": null,
+            "new_values": null,
+            "old_values": null,
+            "provider": "apple",
+            "sync_run_id": "<UUID>",
+            "task_id": null,
+            "task_text": "",
+            "trigger_type": "manual",
+            "user_id": "cal-sync-test-user-001"
+          }
+        ]
+      },
+      "users": {
+        "changed": [
+          {
+            "key": "user",
+            "changes": {
+              "apple_cal_last_synced_at": [
+                null,
+                "<TS>"
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "label": "apple idempotent re-run",
+    "statusCode": 200,
+    "body": {
+      "pushed": 0,
+      "pulled": 0,
+      "skipped": 1,
+      "deleted_local": 0,
+      "deleted_remote": 0,
+      "errors": [],
+      "providers": {
+        "apple": {
+          "pushed": 0,
+          "pulled": 0,
+          "skipped": 1,
+          "deleted_local": 0,
+          "deleted_remote": 0,
+          "errors": []
+        }
+      },
+      "syncRunId": "<UUID>",
+      "summary": [
+        {
+          "type": "info",
+          "text": "W4 w4q-1",
+          "message": "skipped"
+        }
+      ]
+    },
+    "providerCalls": {
+      "apple": [
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        },
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        },
+        {
+          "method": "listEvents",
+          "args": {
+            "token": "tok-apple",
+            "timeMin": "2026-06-16T04:00:00.000Z",
+            "timeMax": "2026-08-15T12:00:00.000Z"
+          }
+        }
+      ]
+    },
+    "sse": [
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "fetch",
+          "detail": "Fetching events...",
+          "pct": 5,
+          "provider": "apple",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "fetch",
+          "detail": "Fetched 1 events",
+          "pct": 15,
+          "provider": "apple",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "ledger",
+          "detail": "Checking for changes...",
+          "pct": 20,
+          "provider": "apple",
+          "calendar": "Home"
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "push",
+          "detail": "Syncing tasks...",
+          "pct": 50,
+          "provider": "apple",
+          "calendar": "Home"
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "finalize",
+          "detail": "Saving changes...",
+          "pct": 85,
+          "provider": null,
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "finalize",
+          "detail": "Finalizing...",
+          "pct": 95,
+          "provider": null,
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "done",
+          "detail": "Sync complete — no changes",
+          "pct": 100,
+          "provider": null,
+          "calendar": null
+        }
+      }
+    ],
+    "enqueues": [],
+    "dbDelta": {
+      "cal_sync_ledger": {
+        "changed": [
+          {
+            "key": "<L1>",
+            "changes": {
+              "last_modified_at": [
+                "2026-06-16 12:00:00.000000",
+                null
+              ],
+              "provider_etag": [
+                null,
+                "\"etag-w4q-1-v1\""
+              ]
+            }
+          }
+        ]
+      },
+      "sync_history": {
+        "added": [
+          {
+            "action": "skipped",
+            "calendar_name": "Home",
+            "created_at": "<TS>",
+            "detail": null,
+            "error_detail": null,
+            "event_id": "https://caldav.icloud.com/w4/calendars/home/w4q-1.ics",
+            "new_values": null,
+            "old_values": null,
+            "provider": "apple",
+            "sync_run_id": "<UUID>",
+            "task_id": "w4q-1",
+            "task_text": "W4 w4q-1",
+            "trigger_type": "manual",
+            "user_id": "cal-sync-test-user-001"
+          }
+        ]
+      }
+    }
+  }
+]

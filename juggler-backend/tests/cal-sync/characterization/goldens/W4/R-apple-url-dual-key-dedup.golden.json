@@ -1,0 +1,281 @@
+[
+  {
+    "label": "apple dual-key pull",
+    "statusCode": 200,
+    "body": {
+      "pushed": 0,
+      "pulled": 1,
+      "skipped": 0,
+      "deleted_local": 0,
+      "deleted_remote": 0,
+      "errors": [],
+      "providers": {
+        "apple": {
+          "pushed": 0,
+          "pulled": 1,
+          "skipped": 0,
+          "deleted_local": 0,
+          "deleted_remote": 0,
+          "errors": []
+        }
+      },
+      "syncRunId": "<UUID>",
+      "summary": [
+        {
+          "type": "create",
+          "text": "Apple remote R1",
+          "message": "New task from Apple Calendar"
+        }
+      ]
+    },
+    "providerCalls": {
+      "apple": [
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        },
+        {
+          "method": "getValidAccessToken",
+          "args": {
+            "userId": "cal-sync-test-user-001"
+          }
+        },
+        {
+          "method": "listEvents",
+          "args": {
+            "token": "tok-apple",
+            "timeMin": "2026-06-16T04:00:00.000Z",
+            "timeMax": "2026-08-15T12:00:00.000Z"
+          }
+        }
+      ]
+    },
+    "sse": [
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "fetch",
+          "detail": "Fetching events...",
+          "pct": 5,
+          "provider": "apple",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "fetch",
+          "detail": "Fetched 1 events",
+          "pct": 15,
+          "provider": "apple",
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "ledger",
+          "detail": "Checking for changes...",
+          "pct": 20,
+          "provider": "apple",
+          "calendar": "Home"
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "push",
+          "detail": "Syncing tasks...",
+          "pct": 50,
+          "provider": "apple",
+          "calendar": "Home"
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "finalize",
+          "detail": "Saving changes...",
+          "pct": 85,
+          "provider": null,
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "finalize",
+          "detail": "Finalizing...",
+          "pct": 95,
+          "provider": null,
+          "calendar": null
+        }
+      },
+      {
+        "event": "sync:progress",
+        "payload": {
+          "phase": "done",
+          "detail": "Apple Calendar: 1 pulled",
+          "pct": 100,
+          "provider": null,
+          "calendar": null
+        }
+      }
+    ],
+    "enqueues": [
+      {
+        "source": "cal-sync",
+        "affectedIds": [
+          "<NEW-TASK-1>"
+        ]
+      }
+    ],
+    "dbDelta": {
+      "tasks_v": {
+        "added": [
+          {
+            "apple_event_id": null,
+            "completed_at": null,
+            "created_at": "<TS>",
+            "date": null,
+            "day": null,
+            "day_req": null,
+            "deadline": null,
+            "depends_on": null,
+            "depends_on_json": null,
+            "desired_at": null,
+            "disabled_at": null,
+            "disabled_reason": null,
+            "dur": 60,
+            "earliest_start": null,
+            "end_date": null,
+            "flex_when": 0,
+            "gcal_event_id": null,
+            "generated": 0,
+            "id": "<NEW-TASK-1>",
+            "implied_deadline": null,
+            "location": null,
+            "marker": 0,
+            "master_id": "<NEW-TASK-1>",
+            "msft_event_id": null,
+            "next_start": null,
+            "notes": null,
+            "occurrence_ordinal": 1,
+            "placement_mode": "fixed",
+            "preferred_time_mins": null,
+            "pri": "P3",
+            "project": null,
+            "recur": null,
+            "recur_end": null,
+            "recur_start": null,
+            "recurring": 0,
+            "scheduled_at": "2026-06-18 14:00:00",
+            "section": null,
+            "slack_mins": null,
+            "source_id": null,
+            "split": null,
+            "split_group": null,
+            "split_min": null,
+            "split_ordinal": 1,
+            "split_total": 1,
+            "start_after_at": null,
+            "status": "",
+            "task_type": "task",
+            "text": "Apple remote R1",
+            "time": null,
+            "time_flex": null,
+            "time_remaining": null,
+            "tools": null,
+            "travel_after": null,
+            "travel_before": null,
+            "tz": null,
+            "unplaced_detail": null,
+            "unplaced_reason": null,
+            "unscheduled": null,
+            "updated_at": "<TS>",
+            "url": null,
+            "user_id": "cal-sync-test-user-001",
+            "weather_cloud": "any",
+            "weather_humidity_max": null,
+            "weather_humidity_min": null,
+            "weather_precip": "any",
+            "weather_temp_max": null,
+            "weather_temp_min": null,
+            "weather_temp_unit": null,
+            "when": ""
+          }
+        ]
+      },
+      "cal_sync_ledger": {
+        "added": [
+          {
+            "active_task_key": "cal-sync-test-user-001|apple|<NEW-TASK-1>",
+            "completed_at": null,
+            "created_at": "<TS>",
+            "done_frozen": 0,
+            "error_detail": null,
+            "event_all_day": 0,
+            "event_end": "2026-06-18T15:00:00.000Z",
+            "event_start": "2026-06-18T14:00:00.000Z",
+            "event_status": "pending",
+            "event_summary": "Apple remote R1",
+            "event_url": null,
+            "id": "<N1>",
+            "last_modified_at": null,
+            "last_pulled_hash": "fd67665eb42cf3d7edcc1a058f7839dd7cbea619e9ae9a1c0f2f4302d49734d9",
+            "last_pushed_at": null,
+            "last_pushed_hash": "0b3aa34964e7d25333ed3d2cb859a3ac",
+            "last_user_hash": "7791a352d92558e8aff6491aeef41da4",
+            "miss_count": 0,
+            "origin": "apple",
+            "provider": "apple",
+            "provider_etag": "\"etag-uid-apple-remote-r1-v1\"",
+            "provider_event_id": "uid-apple-remote-r1",
+            "scheduled_at": null,
+            "status": "active",
+            "synced_at": "<TS>",
+            "task_id": "<NEW-TASK-1>",
+            "task_updated_at": null,
+            "updated_at": "<TS>",
+            "user_id": "cal-sync-test-user-001"
+          }
+        ]
+      },
+      "sync_history": {
+        "added": [
+          {
+            "action": "created",
+            "calendar_name": "Home",
+            "created_at": "<TS>",
+            "detail": "New task from apple",
+            "error_detail": null,
+            "event_id": "uid-apple-remote-r1",
+            "new_values": null,
+            "old_values": null,
+            "provider": "apple",
+            "sync_run_id": "<UUID>",
+            "task_id": "<NEW-TASK-1>",
+            "task_text": "Apple remote R1",
+            "trigger_type": "manual",
+            "user_id": "cal-sync-test-user-001"
+          }
+        ]
+      },
+      "users": {
+        "changed": [
+          {
+            "key": "user",
+            "changes": {
+              "apple_cal_last_synced_at": [
+                null,
+                "<TS>"
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+]

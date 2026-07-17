@@ -22,10 +22,13 @@
  * CONTRACT (same as W0): this is a PRE-extraction / early-extraction tripwire.
  * When the extraction LEGITIMATELY moves a branch out of
  * cal-sync.controller.js into a use-case/adapter, the corresponding anchor is
- * re-pointed at the new file as part of that reviewed structural change — a
- * golden master (W4-Apple, a DB-backed increment-2 follow-up) is what will
- * survive the move bit-for-bit. Until that Apple golden exists, W5 is the only
- * regression guard on these five branches.
+ * re-pointed at the new file as part of that reviewed structural change — the
+ * DB-backed W4 Apple goldens (axes P + Q-T, 999.1025 inc. 2) are what survive
+ * the move bit-for-bit. W5 is the fast DB-FREE tripwire that fails the instant
+ * an anchor's source text changes, BEFORE the (test-bed-only) W4 golden run;
+ * the two are complementary (W5 pins the source shape, W4 pins the DB effect).
+ * Anchor→W4-axis map: A2 CDN-grace wiring→P, A3 dual-key dedup→R, A4
+ * delete-by-URL→T, A6 ETag fallback→S.
  *
  * Anchors (each = one Apple-specific sync() branch + the bug it guards):
  *   1  CDN_GRACE_MS magnitude — apple:120s, none for gcal/msft

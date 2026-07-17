@@ -83,6 +83,26 @@ var USER_COLS = [
 var UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 var INGEST_ID_RE = /^(gcal|msft|apple)_[0-9a-f]{16}$/;
 
+// ─── Apple/CalDAV event modeling (999.1025 inc. 2) ───────────────────────────
+// gcal/msft events use ONE id and no url/etag; Apple/CalDAV is different in three
+// ways the controller's Apple-only branches depend on, so the sim models them:
+//   • a VEVENT UID (the event `id`) AND a DISTINCT CalDAV URL (`_url`, the
+//     collection href) — createEvent returns the URL as providerEventId, so a
+//     pushed event's ledger provider_event_id stores the URL, while a *pulled*
+//     event's ledger stores the UID (cal-sync.controller.js:1181 vs :1561). The
+//     facade indexes each Apple event under BOTH keys (facade.js:1120), which is
+//     what the dual-key pull dedup and delete-by-URL branches rely on.
+//   • an ETag that changes on every server-side write — Apple's external-edit
+//     detection falls back to `event._etag !== ledger.provider_etag` (:504/:658)
+//     because iCloud VEVENTs carry NO LAST-MODIFIED …
+//   • … so Apple events set `lastModified: null` (routing detection through the
+//     ETag branch, not the lastModified comparison). Deterministic + host-TZ
+//     independent: UID/URL/ETag are all derived from the seed id, never a clock.
+var APPLE_CALDAV_BASE = 'https://caldav.icloud.com/w4/calendars/home/';
+function appleUrlFor(key) { return APPLE_CALDAV_BASE + String(key).replace(/[^a-zA-Z0-9_-]/g, '') + '.ics'; }
+function appleUidFor(key) { return 'uid-apple-' + String(key).replace(/[^a-zA-Z0-9_-]/g, ''); }
+function appleEtagFor(key, ver) { return '"etag-' + String(key).replace(/[^a-zA-Z0-9_-]/g, '') + '-v' + (ver || 1) + '"'; }
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Provider simulator — scripted network boundary with an in-memory remote store
 // ─────────────────────────────────────────────────────────────────────────────
@@ -122,10 +142,31 @@ ProviderSim.prototype.makeEventFromTask = function (pid, task) {
     : new Date(String(task._scheduled_at).replace(' ', 'T') + (String(task._scheduled_at).indexOf('Z') === -1 ? 'Z' : '')).toISOString();
   var durMin = Number(task.dur) || 30;
   var end = new Date(new Date(sa).getTime() + durMin * 60000).toISOString();
+  var store = this.stores[pid];
+  if (pid === 'apple') {
+    // Apple/CalDAV: distinct UID + URL + ETag, no lastModified (see the
+    // Apple-modeling block above). createEvent returns _url as providerEventId.
+    var aKey = task.id;
+    var an = 1;
+    while (store.some(function (e) { return e.id === appleUidFor(aKey); })) { an++; aKey = task.id + '-' + an; }
+    return {
+      id: appleUidFor(aKey),
+      title: task.text,
+      description: '',
+      startDateTime: sa,
+      endDateTime: end,
+      isAllDay: false,
+      durationMinutes: durMin,
+      isTransparent: false,
+      lastModified: null,
+      _url: appleUrlFor(aKey),
+      _etag: appleEtagFor(aKey, 1),
+      _raw: null
+    };
+  }
   var baseId = 'ev-' + pid + '-' + task.id;
   var id = baseId;
   var n = 1;
-  var store = this.stores[pid];
   while (store.some(function (e) { return e.id === id; })) { n++; id = baseId + '-' + n; }
   return {
     id: id,
@@ -143,8 +184,16 @@ ProviderSim.prototype.makeEventFromTask = function (pid, task) {
   };
 };
 
-/** Seed a remote-only event (not created via push) into the simulated store. */
+/** Seed a remote-only event (not created via push) into the simulated store.
+ *  For pid==='apple' the event auto-carries a distinct CalDAV _url + _etag
+ *  (derived from its id) and no lastModified — the caller can still override any
+ *  of these by passing them in `ev` (explicit values always win). */
 ProviderSim.prototype.seedRemoteEvent = function (pid, ev) {
+  var appleDefaults = {};
+  if (pid === 'apple') {
+    var aKey = ev && ev.id ? ev.id : ('seed-' + (this.stores[pid].length + 1));
+    appleDefaults = { lastModified: null, _url: appleUrlFor(aKey), _etag: appleEtagFor(aKey, 1) };
+  }
   var full = Object.assign({
     id: 'ev-' + pid + '-seed-' + (this.stores[pid].length + 1),
     title: 'Remote event',
@@ -153,7 +202,7 @@ ProviderSim.prototype.seedRemoteEvent = function (pid, ev) {
     isTransparent: false,
     lastModified: '2026-06-16T11:00:00.000Z',
     _url: null, _etag: null, _raw: null
-  }, ev);
+  }, appleDefaults, ev);
   if (!full.durationMinutes && full.startDateTime && full.endDateTime) {
     full.durationMinutes = Math.round((new Date(full.endDateTime) - new Date(full.startDateTime)) / 60000);
   }
@@ -239,7 +288,10 @@ ProviderSim.prototype._dispatch = function (pid, method, args) {
       if (script.createError) return Promise.reject(new Error(script.createError));
       var ev = this.makeEventFromTask(pid, cTask);
       this.stores[pid].push(ev);
-      return Promise.resolve({ raw: ev, providerEventId: ev.id, taskId: cTask.id });
+      // Apple/CalDAV createEvent returns the event's CalDAV URL as
+      // providerEventId (apple-cal-api.js:360/371 -> AppleCalendarAdapter), so
+      // the ledger's provider_event_id stores the URL; gcal/msft return the id.
+      return Promise.resolve({ raw: ev, providerEventId: (pid === 'apple' ? ev._url : ev.id), taskId: cTask.id });
     }
 
     case 'batchCreateEvents': {
@@ -251,7 +303,8 @@ ProviderSim.prototype._dispatch = function (pid, method, args) {
         if (script.createError) return { error: script.createError };
         var bev = sim.makeEventFromTask(pid, q.task);
         sim.stores[pid].push(bev);
-        return { raw: bev, providerEventId: bev.id, taskId: q.task.id };
+        // Apple providerEventId = CalDAV URL (see createEvent above).
+        return { raw: bev, providerEventId: (pid === 'apple' ? bev._url : bev.id), taskId: q.task.id };
       }));
     }
 
