@@ -301,6 +301,13 @@ async function tryClaim(userId, instanceId) {
 //         { claimed: true, success: false, error } on run failure,
 //         { claimed: false, reason } if the claim was lost.
 async function claimAndRun(userId) {
+  // 999.1576: every write under a queue-claimed scheduler run attributes as
+  // the 'scheduler' service identity (David spec — system writer).
+  var runWithActor = require('../lib/audit-context').runWithActor;
+  return runWithActor('scheduler', function() { return claimAndRunInner(userId); });
+}
+
+async function claimAndRunInner(userId) {
   var c = await tryClaim(userId, INSTANCE_ID);
   if (!c.claimed) {
     return c;

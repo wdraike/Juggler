@@ -142,6 +142,12 @@ app.use('/api/data/import', express.text({ type: 'text/csv', limit: '10mb' }), b
 
 app.use(bodyParser.json({ limit: '1mb' }));
 app.use(bodyParser.urlencoded({ extended: true }));
+
+// 999.1576: app-wide audit-context. Establishes a LAZY actor thunk reading
+// req.user (populated later by route-level JWT auth) so audit-column stamping
+// anywhere down the async chain can attribute writes to the JWT sub.
+const { expressAuditContext } = require('./lib/audit-context');
+app.use(expressAuditContext);
 // NOTE: GET /api/events accepts JWT via ?token= query param (EventSource limitation).
 // Other endpoints may also carry a ?token= query string; logging the raw URL would
 // leak the JWT into request logs. Redact the `token` query value for ALL paths while
