@@ -9,7 +9,7 @@ import { getTheme, BRAND } from '../../theme/colors';
 import { DAY_NAMES } from '../../state/constants';
 import { formatDateKey } from '../../scheduler/dateHelpers';
 import { getTimezoneAbbr, formatDayHeader } from '../../utils/timezone';
-import FeedbackDialog from '../feedback/FeedbackDialog';
+import FeedbackWidget from '../feedback/FeedbackWidget';
 import HealthDot from './HealthDot';
 import FontSizeControl from './FontSizeControl';
 import UserDropdown from './UserDropdown';
@@ -279,10 +279,9 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
       </div>
     </div>
     {showFeedback && (
-      <FeedbackDialog
+      <FeedbackWidget
         open={showFeedback}
         onClose={function() { setShowFeedback(false); }}
-        darkMode={darkMode}
         theme={theme}
       />
     )}

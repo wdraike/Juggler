@@ -1,0 +1,201 @@
+/**
+ * Shared feedback widget styles (999.1363).
+ *
+ * Host-adaptive: every color/space/z reads a --brfw-* token with a NEUTRAL
+ * fallback. Hosts map these to their design system (RO/juggler in their app
+ * css; landing-page via brand.css --brand-* variables). No host brand hex
+ * lives here and the widget never ships a third self-branded look.
+ *
+ * Example host mapping:
+ *   :root { --brfw-accent: var(--brand-navy); --brfw-accent-contrast: #fff; }
+ */
+
+.brfw-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--brfw-backdrop, rgba(0, 0, 0, 0.5));
+  z-index: var(--brfw-z, 10000);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.brfw-dialog {
+  background: var(--brfw-surface, #ffffff);
+  color: var(--brfw-text, #1f2430);
+  border-radius: var(--brfw-radius, 8px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  width: 100%;
+  max-width: 520px;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+.brfw-dialog--wide { max-width: 900px; }
+
+.brfw-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.brfw-title {
+  font-size: 1.15rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.brfw-icon-button {
+  background: none;
+  border: none;
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--brfw-text-muted, #6b7280);
+  padding: 4px 8px;
+  border-radius: var(--brfw-radius, 8px);
+}
+.brfw-icon-button:hover { background: var(--brfw-hover, rgba(0, 0, 0, 0.06)); }
+.brfw-icon-button:focus-visible,
+.brfw-button:focus-visible,
+.brfw-fab:focus-visible,
+.brfw-input:focus-visible {
+  outline: 2px solid var(--brfw-accent, #3b5bdb);
+  outline-offset: 2px;
+}
+
+.brfw-steps {
+  display: flex;
+  gap: 12px;
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  font-size: 0.85rem;
+}
+.brfw-step { color: var(--brfw-text-muted, #6b7280); }
+.brfw-step--active { color: var(--brfw-accent, #3b5bdb); font-weight: 600; }
+.brfw-step--done { color: var(--brfw-success, #2f7d4f); }
+
+.brfw-body { display: flex; flex-direction: column; gap: 6px; }
+
+.brfw-label { font-size: 0.85rem; font-weight: 600; margin-top: 8px; }
+
+.brfw-input {
+  font: inherit;
+  color: inherit;
+  background: var(--brfw-field, #ffffff);
+  border: 1px solid var(--brfw-border, #d1d5db);
+  border-radius: var(--brfw-radius, 8px);
+  padding: 8px 10px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.brfw-textarea { resize: vertical; }
+
+.brfw-alert {
+  border-radius: var(--brfw-radius, 8px);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+}
+.brfw-alert--error {
+  background: var(--brfw-error-bg, #fdecec);
+  color: var(--brfw-error, #b3261e);
+}
+
+.brfw-hint { color: var(--brfw-text-muted, #6b7280); font-size: 0.9rem; }
+
+.brfw-preview {
+  max-width: 100%;
+  border: 1px solid var(--brfw-border, #d1d5db);
+  border-radius: var(--brfw-radius, 8px);
+}
+
+.brfw-row { display: flex; gap: 8px; margin-top: 8px; }
+
+.brfw-review { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; margin: 0; }
+.brfw-review dt { font-weight: 600; color: var(--brfw-text-muted, #6b7280); }
+.brfw-review dd { margin: 0; overflow-wrap: anywhere; }
+.brfw-review-description { white-space: pre-wrap; }
+
+.brfw-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.brfw-confirm-discard {
+  justify-content: space-between;
+  align-items: center;
+  background: var(--brfw-hover, rgba(0, 0, 0, 0.06));
+  border-radius: var(--brfw-radius, 8px);
+  padding: 10px 12px;
+}
+
+.brfw-button {
+  font: inherit;
+  padding: 8px 14px;
+  border-radius: var(--brfw-radius, 8px);
+  border: 1px solid var(--brfw-border, #d1d5db);
+  background: var(--brfw-surface, #ffffff);
+  color: inherit;
+  cursor: pointer;
+}
+.brfw-button:hover { background: var(--brfw-hover, rgba(0, 0, 0, 0.06)); }
+.brfw-button:disabled { opacity: 0.55; cursor: default; }
+.brfw-button--primary {
+  background: var(--brfw-accent, #3b5bdb);
+  border-color: var(--brfw-accent, #3b5bdb);
+  color: var(--brfw-accent-contrast, #ffffff);
+}
+.brfw-button--primary:hover { filter: brightness(1.08); background: var(--brfw-accent, #3b5bdb); }
+.brfw-button--danger {
+  background: var(--brfw-error, #b3261e);
+  border-color: var(--brfw-error, #b3261e);
+  /* Distinct token: hosts with a dark accent-contrast (e.g. navy on gold)
+     must not inherit it onto the red danger background (WCAG fail). */
+  color: var(--brfw-danger-contrast, #ffffff);
+}
+
+.brfw-success { text-align: center; padding: 24px 8px; }
+.brfw-success-title { font-weight: 600; color: var(--brfw-success, #2f7d4f); margin: 0 0 4px; }
+.brfw-success-body { color: var(--brfw-text-muted, #6b7280); margin: 0; }
+
+.brfw-fab {
+  position: fixed;
+  bottom: var(--brfw-fab-bottom, 20px);
+  right: var(--brfw-fab-right, 20px);
+  z-index: var(--brfw-z, 10000);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: inherit;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--brfw-border, #d1d5db);
+  background: var(--brfw-surface, #ffffff);
+  color: var(--brfw-text, #1f2430);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  cursor: pointer;
+}
+.brfw-fab:hover { background: var(--brfw-hover, rgba(0, 0, 0, 0.06)); }
+
+.brfw-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}

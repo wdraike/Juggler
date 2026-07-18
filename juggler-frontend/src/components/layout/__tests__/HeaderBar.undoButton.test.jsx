@@ -34,9 +34,9 @@ jest.mock('../../auth/AuthProvider', () => ({
 
 // FeedbackDialog -> AnnotationCanvas -> react-konva needs a native canvas
 // binding unavailable in jsdom — not the seam under test.
-jest.mock('../../feedback/FeedbackDialog', () => ({
+jest.mock('../../feedback/FeedbackWidget', () => ({
   __esModule: true,
-  default: function MockFeedbackDialog() { return null; }
+  default: function MockFeedbackWidget() { return null; }
 }));
 
 import HeaderBar from '../HeaderBar';
