@@ -14,6 +14,7 @@
 
 var SCHEDULE_QUEUE_PORT_METHODS =
   require('../domain/ports/ScheduleQueuePort').SCHEDULE_QUEUE_PORT_METHODS;
+var { stampInsert, stampUpdate } = require('../../../lib/audit-context'); // 999.1576 inc.3b.2
 
 function SchedulerQueueRepository() {}
 
@@ -23,7 +24,7 @@ function SchedulerQueueRepository() {}
  */
 SchedulerQueueRepository.prototype.upsertQueueRow = function upsertQueueRow(db, row) {
   return db('schedule_queue')
-    .insert(row)
+    .insert(stampInsert(row))
     .onConflict('user_id')
     .merge(['source', 'created_at']);
 };
@@ -48,10 +49,10 @@ SchedulerQueueRepository.prototype.claimQueueRow = function claimQueueRow(db, us
       this.whereNull('claimed_by')
           .orWhere('claimed_at', '<', ttlExpiry);
     })
-    .update({
+    .update(stampUpdate({
       claimed_by: instanceId,
       claimed_at: claimedAt
-    });
+    }));
 };
 
 /**
@@ -71,7 +72,7 @@ SchedulerQueueRepository.prototype.heartbeatClaim = function heartbeatClaim(db, 
   return db('schedule_queue')
     .where('user_id', userId)
     .where('claimed_by', instanceId)
-    .update({ claimed_at: claimedAt });
+    .update(stampUpdate({ claimed_at: claimedAt }));
 };
 
 /**
@@ -82,7 +83,7 @@ SchedulerQueueRepository.prototype.releaseQueueClaim = function releaseQueueClai
   return db('schedule_queue')
     .where('user_id', userId)
     .where('claimed_by', instanceId)
-    .update({ claimed_by: null, claimed_at: null });
+    .update(stampUpdate({ claimed_by: null, claimed_at: null }));
 };
 
 /**
@@ -134,7 +135,7 @@ SchedulerQueueRepository.prototype.sweepStuckClaims = function sweepStuckClaims(
   return db('schedule_queue')
     .whereNotNull('claimed_by')
     .whereRaw('claimed_at < DATE_SUB(NOW(), INTERVAL 120 SECOND)')
-    .update({ claimed_by: null, claimed_at: null });
+    .update(stampUpdate({ claimed_by: null, claimed_at: null }));
 };
 
 module.exports = SchedulerQueueRepository;

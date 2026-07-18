@@ -47,6 +47,7 @@
 // insertTasksBatch/deleteTasksWhere (P1-clean, no raw() values) route through
 // the task slice's exported KnexTaskRepository instead — see below.
 var tasksWrite = require('../../../lib/tasks-write');
+var { stampInsert, stampUpdate } = require('../../../lib/audit-context'); // 999.1576 inc.3b.2
 
 var SCHEDULE_REPOSITORY_PORT_METHODS =
   require('../domain/ports/ScheduleRepositoryPort').SCHEDULE_REPOSITORY_PORT_METHODS;
@@ -245,7 +246,7 @@ KnexScheduleRepository.prototype.backfillRollingAnchorIfNull = function backfill
   return this.db('task_masters')
     .where({ id: masterId, user_id: userId })
     .whereNull('next_start')
-    .update({ next_start: anchor, updated_at: this.clock.now() });
+    .update(stampUpdate({ next_start: anchor, updated_at: this.clock.now() }));
 };
 
 /**
@@ -259,7 +260,7 @@ KnexScheduleRepository.prototype.backfillRollingAnchorIfNull = function backfill
 KnexScheduleRepository.prototype.setNextStart = function setNextStart(masterId, userId, nextStart) {
   return this.db('task_masters')
     .where({ id: masterId, user_id: userId })
-    .update({ next_start: nextStart, updated_at: this.clock.now() });
+    .update(stampUpdate({ next_start: nextStart, updated_at: this.clock.now() }));
 };
 
 // 999.1217 (W4, SCHEDULER-SPEC.md D6): `now()` (DB-clock read, was used only
@@ -328,7 +329,7 @@ KnexScheduleRepository.prototype.applySplitDriftFix = async function applySplitD
       expr += ' ELSE `' + col + '` END';
       driftFields[col] = trx.raw(expr, bindings);
     });
-    await trx('task_instances').whereIn('id', driftIds).update(driftFields);
+    await trx('task_instances').whereIn('id', driftIds).update(stampUpdate(driftFields));
   }
 };
 

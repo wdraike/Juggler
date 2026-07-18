@@ -55,6 +55,7 @@
 
 // ── pure domain (W2): mappers + validation + closed-enum VOs ─────────────────
 var domain = require('./domain');
+var { stampInsert, stampUpdate } = require('../../lib/audit-context'); // 999.1576 inc.3b.2
 var mappers = domain.mappers;        // rowToTask, taskToRow, buildSourceMap, TEMPLATE_FIELDS, safeParseJSON…
 var validation = domain.validation;  // validateTaskInput, checkCalSyncEditGuard, guardFixedCalendarWhen
 var PlacementMode = domain.PlacementMode;
@@ -282,7 +283,7 @@ async function recurCleanup(ctx) {
             .where('user_id', userId)
             .whereIn('task_id', _allToggleIds)
             .where('status', 'active')
-            .update({ status: 'deleted_local', task_id: null, synced_at: trx.fn.now() })
+            .update(stampUpdate({ status: 'deleted_local', task_id: null, synced_at: trx.fn.now() }))
             .catch(function (err) { logger.error('[silent-catch]', err.message); });
         }
 
@@ -291,7 +292,7 @@ async function recurCleanup(ctx) {
 
         await twrite.resetRecurringInstances(trx, userId, id, '[RECUR] toggle-off: recurring=false');
         await trx('task_instances')
-          .insert({
+          .insert(stampInsert({
             id: id,
             master_id: id,
             user_id: userId,
@@ -306,7 +307,7 @@ async function recurCleanup(ctx) {
             generated: 0,
             created_at: new Date(),
             updated_at: new Date()
-          })
+          }))
           .onConflict(['master_id', 'occurrence_ordinal', 'split_ordinal']).ignore();
       } else {
         var updatedTmpl = Object.assign({}, existing, row);
@@ -481,7 +482,7 @@ async function softClearLedgerFor(trx, userId, ids) {
     .where('user_id', userId)
     .whereIn('task_id', ids)
     .where('status', 'active')
-    .update({ status: 'deleted_local', task_id: null, synced_at: trx.fn.now() })
+    .update(stampUpdate({ status: 'deleted_local', task_id: null, synced_at: trx.fn.now() }))
     .catch(function (err) { logger.error('[silent-catch]', err.message); });
 }
 
@@ -643,7 +644,7 @@ async function reconcileMaterialEdit(ctx) {
       cursor.setDate(cursor.getDate() + 1);
     }
     if (toInsert.length > 0) {
-      await trx('task_instances').insert(toInsert);
+      await trx('task_instances').insert(toInsert.map(stampInsert));
     }
   }
 }
@@ -975,7 +976,7 @@ async function cascadeRecurringDelete(ctx) {
       .where('user_id', userId)
       .whereIn('task_id', pendingIds)
       .where('status', 'active')
-      .update({ status: 'deleted_local', task_id: null, synced_at: trx.fn.now() })
+      .update(stampUpdate({ status: 'deleted_local', task_id: null, synced_at: trx.fn.now() }))
       .catch(function (err) { logger.error('[silent-catch]', err.message); });
 
     // R55 no-hard-delete: soft-cancel (status='cancelled', keep rows as record)
@@ -1003,7 +1004,7 @@ async function cascadeRecurringDelete(ctx) {
       await trx('cal_sync_ledger')
         .where({ user_id: userId, task_id: templateId })
         .where('status', 'active')
-        .update({ status: 'deleted_local', task_id: null, synced_at: trx.fn.now() })
+        .update(stampUpdate({ status: 'deleted_local', task_id: null, synced_at: trx.fn.now() }))
         .catch(function (err) { logger.error('[silent-catch]', err.message); });
     }
     await twrite.softCancelById(trx, templateId, userId); // R55 soft-cancel master, keep as record
@@ -1052,7 +1053,7 @@ async function standardDelete(ctx) {
     await trx('cal_sync_ledger')
       .where({ user_id: userId, task_id: id })
       .where('status', 'active')
-      .update({ status: 'deleted_local', task_id: null, synced_at: trx.fn.now() })
+      .update(stampUpdate({ status: 'deleted_local', task_id: null, synced_at: trx.fn.now() }))
       .catch(function (err) { logger.error('[silent-catch]', err.message); });
   }
 
@@ -1095,7 +1096,7 @@ async function thisAndFutureDelete(ctx) {
       .where('user_id', userId)
       .whereIn('task_id', pendingIds)
       .where('status', 'active')
-      .update({ status: 'deleted_local', task_id: null, synced_at: trx.fn.now() })
+      .update(stampUpdate({ status: 'deleted_local', task_id: null, synced_at: trx.fn.now() }))
       .catch(function (err) { logger.error('[silent-catch]', err.message); });
 
     // R55 no-hard-delete: soft-cancel (status='cancelled', keep rows as record)
@@ -1121,7 +1122,7 @@ async function thisAndFutureDelete(ctx) {
       await trx('cal_sync_ledger')
         .where({ user_id: userId, task_id: templateId })
         .where('status', 'active')
-        .update({ status: 'deleted_local', task_id: null, synced_at: trx.fn.now() })
+        .update(stampUpdate({ status: 'deleted_local', task_id: null, synced_at: trx.fn.now() }))
         .catch(function (err) { logger.error('[silent-catch]', err.message); });
     }
     await twrite.softCancelById(trx, templateId, userId); // R55 soft-cancel master, keep as record
@@ -1404,7 +1405,7 @@ async function batchUpdateTxn(ctx) {
               .where('user_id', userId)
               .whereIn('task_id', _batchToggleIds)
               .where('status', 'active')
-              .update({ status: 'deleted_local', task_id: null, synced_at: trx.fn.now() })
+              .update(stampUpdate({ status: 'deleted_local', task_id: null, synced_at: trx.fn.now() }))
               .catch(function (err) { logger.error('[silent-catch]', err.message); });
           }
         }

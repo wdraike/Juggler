@@ -15,6 +15,7 @@
  */
 
 const getDb = () => require('../../../db');
+var { stampInsert, stampUpdate } = require('../../../lib/audit-context'); // 999.1576 inc.3b.2
 const tasksWrite = require('../../../lib/tasks-write');
 const cache = require('../../../lib/redis');
 const { createLogger } = require('@raike/lib-logger');
@@ -76,7 +77,7 @@ async function enforceDowngradeLimits(userId, planFeatures) {
               .where('user_id', userId)
               .whereIn('task_id', allDisabledIds)
               .where('status', 'active')
-              .update({ status: 'deleted_local', task_id: null, synced_at: now })
+              .update(stampUpdate({ status: 'deleted_local', task_id: null, synced_at: now }))
               .catch(function(err) { logger.error("[silent-catch]", err.message); });
           }
 
@@ -141,7 +142,7 @@ async function enforceDowngradeLimits(userId, planFeatures) {
             .where('user_id', userId)
             .whereIn('task_id', taskIds)
             .where('status', 'active')
-            .update({ status: 'deleted_local', task_id: null, synced_at: now })
+            .update(stampUpdate({ status: 'deleted_local', task_id: null, synced_at: now }))
             .catch(function(err) { logger.error("[silent-catch]", err.message); });
 
           disabledTasks = taskIds.length;
