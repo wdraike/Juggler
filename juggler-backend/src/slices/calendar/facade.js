@@ -1483,60 +1483,101 @@ async function runSyncWritePhase(userId, buffers, syncStart, emitProgress) {
 
   emitProgress('finalize', 'Saving changes...', 85);
 
+  // 999.1457: the lock may have been acquired earlier in the controller
+  // (before the push phase) to prevent orphan remote events on lock contention.
+  // If so, the token arrives via buffers.existingLockToken and we skip the
+  // acquisition loop below. The controller owns the lock until this function
+  // returns; the finally block below releases it in all cases.
+  var lockToken = buffers.existingLockToken || null;
+  var lockStart = buffers.existingLockStart || Date.now();
+
   if (Date.now() - syncStart > 300000) {
     logger.warn('[CAL-SYNC] Sync exceeded 5-minute timeout — aborting before write phase');
     emitProgress('done', 'Sync timed out — please try again', 100);
+    if (buffers.prePushHeartbeat) clearInterval(buffers.prePushHeartbeat);
+    if (lockToken) {
+      try { await syncLock.releaseLock(userId, lockToken); } catch (_e) { /* best-effort */ }
+    }
     return { earlyReturn: 'timeout' };
   }
 
-  // Acquire per-user lock for the write phase only. During the API fetch
-  // phase above, user/MCP edits flowed normally. Now we lock so the
-  // scheduler doesn't start while we write.
-  var MAX_LOCK_ATTEMPTS = 8;
-  var lockResult = null;
-  for (var lockAttempt = 0; lockAttempt < MAX_LOCK_ATTEMPTS; lockAttempt++) {
-    lockResult = await syncLock.acquireLock(userId);
-    if (lockResult.acquired) {
-      // === Fix Bug #5: Re-read ledger after lock to detect concurrent sync changes ===
-      // Another sync may have inserted ledger rows between our Phase 1 read and lock.
-      var postLockLedger = await srcDb('cal_sync_ledger')
-        .where('user_id', userId)
-        .where(function() {
-          this.where('status', 'active')
-            .orWhere(function() {
-              this.where('status', 'deleted_local').whereNotNull('provider_event_id');
-            });
-        })
-        .select();
+  if (lockToken) {
+    // Lock already acquired by the controller — do the post-lock ledger re-read
+    // (same Bug #5 fix as below, just without the acquisition loop).
+    var postLockLedger = await srcDb('cal_sync_ledger')
+      .where('user_id', userId)
+      .where(function() {
+        this.where('status', 'active')
+          .orWhere(function() {
+            this.where('status', 'deleted_local').whereNotNull('provider_event_id');
+          });
+      })
+      .select();
 
-      // Dedupe: merge post-read rows, keeping newer (by updated_at or computed_at)
-      var seenById = {};
-      for (var pli = 0; pli < ledgerRecords.length; pli++) {
-        seenById[ledgerRecords[pli].id] = ledgerRecords[pli];
-      }
-      for (var pli2 = 0; pli2 < postLockLedger.length; pli2++) {
-        var newRow = postLockLedger[pli2];
-        var existing = seenById[newRow.id];
-        if (!existing) {
-          ledgerRecords.push(newRow);
-          seenById[newRow.id] = newRow;
-        }
-      }
-
-      break;
+    var seenById = {};
+    for (var pli = 0; pli < ledgerRecords.length; pli++) {
+      seenById[ledgerRecords[pli].id] = ledgerRecords[pli];
     }
-    var backoffMs = Math.min(1000 * Math.pow(1.5, lockAttempt), 10000) + Math.floor(Math.random() * 500);
-    await new Promise(function(r) { setTimeout(r, backoffMs); });
+    for (var pli2 = 0; pli2 < postLockLedger.length; pli2++) {
+      var newRow = postLockLedger[pli2];
+      var existing = seenById[newRow.id];
+      if (!existing) {
+        ledgerRecords.push(newRow);
+        seenById[newRow.id] = newRow;
+      }
+    }
+  } else {
+    // No pre-acquired lock — acquire here (legacy path for callers that don't
+    // pre-acquire, e.g. if the controller's pre-push lock was removed).
+    var MAX_LOCK_ATTEMPTS = 8;
+    var lockResult = null;
+    for (var lockAttempt = 0; lockAttempt < MAX_LOCK_ATTEMPTS; lockAttempt++) {
+      lockResult = await syncLock.acquireLock(userId);
+      if (lockResult.acquired) {
+        // === Fix Bug #5: Re-read ledger after lock to detect concurrent sync changes ===
+        // Another sync may have inserted ledger rows between our Phase 1 read and lock.
+        var postLockLedger2 = await srcDb('cal_sync_ledger')
+          .where('user_id', userId)
+          .where(function() {
+            this.where('status', 'active')
+              .orWhere(function() {
+                this.where('status', 'deleted_local').whereNotNull('provider_event_id');
+              });
+          })
+          .select();
+
+        // Dedupe: merge post-read rows, keeping newer (by updated_at or computed_at)
+        var seenById2 = {};
+        for (var pli3 = 0; pli3 < ledgerRecords.length; pli3++) {
+          seenById2[ledgerRecords[pli3].id] = ledgerRecords[pli3];
+        }
+        for (var pli4 = 0; pli4 < postLockLedger2.length; pli4++) {
+          var newRow2 = postLockLedger2[pli4];
+          var existing2 = seenById2[newRow2.id];
+          if (!existing2) {
+            ledgerRecords.push(newRow2);
+            seenById2[newRow2.id] = newRow2;
+          }
+        }
+
+        lockToken = lockResult.token;
+        lockStart = Date.now();
+        break;
+      }
+      var backoffMs = Math.min(1000 * Math.pow(1.5, lockAttempt), 10000) + Math.floor(Math.random() * 500);
+      await new Promise(function(r) { setTimeout(r, backoffMs); });
+    }
+    if (!lockToken) {
+      logger.error('[CAL-SYNC] could not acquire lock for write phase after ' + MAX_LOCK_ATTEMPTS + ' attempts');
+      var sseEmitter = require('../../lib/sse-emitter');
+      sseEmitter.emit(userId, 'sync:lock_conflict', { error: 'Scheduler is busy', retryAfter: 30 });
+      return { earlyReturn: 'lock_busy' };
+    }
   }
-  if (!lockResult || !lockResult.acquired) {
-    logger.error('[CAL-SYNC] could not acquire lock for write phase after ' + MAX_LOCK_ATTEMPTS + ' attempts');
-    var sseEmitter = require('../../lib/sse-emitter');
-    sseEmitter.emit(userId, 'sync:lock_conflict', { error: 'Scheduler is busy', retryAfter: 30 });
-    return { earlyReturn: 'lock_busy' };
-  }
-  var lockToken = lockResult.token;
-  var lockStart = Date.now();
   var writePhaseLockLost = false;
+  // Clear the controller's pre-push heartbeat (if any) — the write-phase
+  // heartbeat below takes over with the same lockStart.
+  if (buffers.prePushHeartbeat) clearInterval(buffers.prePushHeartbeat);
   var lockHeartbeat = setInterval(function() {
     if (Date.now() - lockStart > 120000) {
       clearInterval(lockHeartbeat);

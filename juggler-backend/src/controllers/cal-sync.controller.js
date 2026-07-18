@@ -922,6 +922,43 @@ async function sync(req, res) {
       }
     }
 
+    // === Pre-Push Lock Acquisition (999.1457) ===
+    // The sync lock MUST be acquired BEFORE the push phase (Phase 3) so that
+    // a 409 lock-contention return happens BEFORE any remote calendar events
+    // are created. Previously the lock was acquired only in the write phase
+    // (runSyncWritePhase), after createEvent calls had already fired — orphan
+    // remote events whose ledger inserts were then discarded.
+    var MAX_LOCK_ATTEMPTS = 8;
+    var _lockResult = null;
+    for (var _lockAttempt = 0; _lockAttempt < MAX_LOCK_ATTEMPTS; _lockAttempt++) {
+      _lockResult = await calendarFacade.acquireLock(userId);
+      if (_lockResult.acquired) break;
+      var _backoffMs = Math.min(1000 * Math.pow(1.5, _lockAttempt), 10000) + Math.floor(Math.random() * 500);
+      await delay(_backoffMs);
+    }
+    if (!_lockResult || !_lockResult.acquired) {
+      logger.error('[CAL-SYNC] could not acquire lock before push phase after ' + MAX_LOCK_ATTEMPTS + ' attempts');
+      sseEmitter.emit(userId, 'sync:lock_conflict', { error: 'Scheduler is busy', retryAfter: 30 });
+      return res.status(409).json({ error: 'Scheduler is busy. Try again in a few seconds.', retryAfter: 30 });
+    }
+    var _syncLockToken = _lockResult.token;
+    var _syncLockStart = Date.now();
+
+    // Start a heartbeat immediately so the lock doesn't expire during the
+    // push phase (TTL is 30s; a large push batch with rate-limiting can
+    // exceed that). runSyncWritePhase will start its own heartbeat using
+    // the same lockStart and clear this one via _prePushHeartbeat.
+    var _prePushHeartbeat = setInterval(function() {
+      if (Date.now() - _syncLockStart > 120000) {
+        clearInterval(_prePushHeartbeat);
+        logger.warn('[CAL-SYNC] Pre-push heartbeat stopped — lock held over 120s');
+        return;
+      }
+      calendarFacade.refreshLock(userId, _syncLockToken).catch(function(err) {
+        logger.error('[CAL-SYNC] Pre-push lock refresh failed:', err.message);
+      });
+    }, 10000);
+
     // === Phase 3: Push new tasks to providers (skip for ingest-only) ===
     // Load task IDs with error ledger records so we skip them in push.
     // A manual sync clears error records to allow fresh retries.
@@ -1533,7 +1570,10 @@ async function sync(req, res) {
       ledgerRecords: ledgerRecords,
       tasksById: tasksById,
       providerIds: providerIds,
-      providerData: providerData
+      providerData: providerData,
+      existingLockToken: _syncLockToken,
+      existingLockStart: _syncLockStart,
+      prePushHeartbeat: _prePushHeartbeat
     }, syncStart, emitProgress);
     if (writeResult.earlyReturn === 'timeout') {
       return res.status(200).json(Object.assign({}, stats, { error: 'sync_timeout' }));
@@ -1621,6 +1661,13 @@ async function sync(req, res) {
     res.json(stats);
   } catch (error) {
     logger.error('Cal sync error:', error);
+    // Release the pre-push lock if it was acquired but never handed off to
+    // runSyncWritePhase (which manages its own release). This prevents lock
+    // leaks when an error occurs between lock acquisition and the write phase.
+    if (_prePushHeartbeat) clearInterval(_prePushHeartbeat);
+    if (_syncLockToken) {
+      try { await calendarFacade.releaseLock(userId, _syncLockToken); } catch (_le) { /* best-effort */ }
+    }
     sseEmitter.emit(userId, 'sync:error', { error: error.message || 'Unknown sync error' });
     res.status(500).json({ error: 'Failed to sync calendars' });
   }
