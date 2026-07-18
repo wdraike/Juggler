@@ -65,6 +65,11 @@ var { isTaskPushEligible } = require('../slices/calendar/domain/push-eligibility
 // 999.1025 inc. 10 — pure merged-follower cleanup planner. The mutation buffers
 // (splitDeleteQueue / ledgerUpdates / ledgeredTaskIds) stay effects at the call site.
 var { planMergedFollowerCleanup } = require('../slices/calendar/domain/merged-follower-cleanup');
+// 999.1025 inc. 11 — pure both-exist pre-dispatch disposition (recurring-template
+// skip + unscheduled-task calendar-delete). The delete EFFECT is applied through
+// the SHARED applyTerminalDelete applier at the call site (byte-identical to the
+// terminal / past-cleanup delete blocks).
+var { decideBothExistDisposition } = require('../slices/calendar/domain/both-exist-disposition');
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('cal-sync.controller');
 
@@ -495,25 +500,32 @@ async function sync(req, res) {
 
           // --- Both exist ---
           if (task && event) {
-            var isRecurringTemplate = task.taskType === 'recurring_template';
-            if (isRecurringTemplate) {
-              // Templates should never be on calendars; nothing to do here
-              continue;
+            // Recurring-template skip + unscheduled-task calendar-delete are a
+            // PURE pre-dispatch disposition (999.1025 inc. 11 —
+            // decideBothExistDisposition): templates never live on a calendar
+            // (action 'skip', no effect); an unscheduled juggler task must not
+            // occupy a calendar slot (action 'delete'). Both formerly-inline
+            // guards moved into the decision; the delete EFFECT is applied
+            // through the SHARED applyTerminalDelete applier — byte-identical to
+            // the terminal / past-cleanup delete blocks above (deleteTarget =
+            // event._url || ledger.provider_event_id, same buffers, same
+            // statsDelta.deleted_local). action 'proceed' falls through to the
+            // origin-based push/pull routing unchanged.
+            var bothExistDisposition = decideBothExistDisposition({
+              task: task, event: event, ledger: ledger,
+              isIngestOnly: isIngestOnly(pid),
+              JUGGLER_ORIGIN: JUGGLER_ORIGIN,
+              eventIdColumn: pAdapter.getEventIdColumn()
+            });
+            if (bothExistDisposition.action === 'skip') {
+              continue; // recurring template — nothing to sync
             }
-
-            // If the task is unscheduled (scheduler couldn't place it), delete its calendar
-            // event — unscheduled tasks should never occupy a slot on external calendars.
-            if (task.unscheduled && ledger.origin === JUGGLER_ORIGIN && !isIngestOnly(pid)) {
-              try {
-                await pAdapter.deleteEvent(pToken, event._url || ledger.provider_event_id);
-                await throttle();
-              } catch (eDel) {
-                if (!eDel.message.includes('404') && !eDel.message.includes('410')) throw eDel;
-              }
-              taskUpdates.push({ id: task.id, fields: { [pAdapter.getEventIdColumn()]: null } });
-              ledgerUpdates.push({ id: ledger.id, fields: { status: 'deleted_local', provider_event_id: null } });
-              pStats.deleted_local++;
-              stats.deleted_local++;
+            if (bothExistDisposition.action === 'delete') {
+              var appliedUnscheduled = await applyTerminalDelete(pAdapter, pToken, throttle, bothExistDisposition);
+              taskUpdates = taskUpdates.concat(appliedUnscheduled.taskUpdates);
+              ledgerUpdates = ledgerUpdates.concat(appliedUnscheduled.ledgerUpdates);
+              pStats.deleted_local = (pStats.deleted_local || 0) + (appliedUnscheduled.statsDelta.deleted_local || 0);
+              stats.deleted_local = (stats.deleted_local || 0) + (appliedUnscheduled.statsDelta.deleted_local || 0);
               continue;
             }
 
