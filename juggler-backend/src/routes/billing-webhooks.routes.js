@@ -75,6 +75,13 @@ function verifySignature(req, res, next) {
   next();
 }
 
-router.post('/', verifySignature, handleWebhook);
+// 999.1576: webhook writes attribute as the 'billing-webhook' service
+// identity (no JWT user on this signed service-to-service path).
+const { runWithActor } = require('../lib/audit-context');
+router.post('/', verifySignature, function (req, res, next) {
+  return runWithActor('billing-webhook', function () {
+    return handleWebhook(req, res, next);
+  });
+});
 
 module.exports = router;

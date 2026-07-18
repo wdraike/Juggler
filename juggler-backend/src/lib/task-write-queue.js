@@ -111,12 +111,19 @@ async function isLocked(userId) {
  * routing must happen BEFORE calling this.
  */
 async function enqueueWrite(userId, taskId, operation, fields, source) {
+  // 999.1576 inc.2b: the queue row's own created_by audit column doubles as
+  // the ACTOR CARRIER — writes are applied later by the flusher (under the
+  // 'scheduler' context), so the originator must ride the row. Soft capture
+  // (peek, may be null) until the inc.4 tightening flips this strict.
+  var actor = require('./audit-context').peekActor();
   await db('task_write_queue').insert({
     user_id: userId,
     task_id: taskId,
     operation: operation,
     fields: JSON.stringify(fields),
-    source: source || 'unknown'
+    source: source || 'unknown',
+    created_by: actor,
+    updated_by: actor
   });
   logger.info('[WRITE-QUEUE] enqueued ' + operation + ' for task ' + taskId + ' user ' + userId + ' source=' + (source || 'unknown'));
 }
@@ -230,13 +237,23 @@ async function _doFlush(userId) {
   var entries = await db('task_write_queue')
     .where('user_id', userId)
     .orderBy('created_at', 'asc')
-    .select('id', 'task_id', 'operation', 'fields', 'source');
+    .select('id', 'task_id', 'operation', 'fields', 'source', 'created_by');
 
   if (entries.length === 0) return;
 
   var entryIds = entries.map(function(e) { return e.id; });
   var coalesced = coalesceEntries(entries);
   var affectedIds = [];
+
+  // 999.1576 inc.2b: the flush runs under the 'scheduler' context (claimAndRun),
+  // but each queued write must attribute its ORIGINATOR. Entries are asc-ordered,
+  // so per task the last contributing entry's actor wins (last-writer). Rows
+  // enqueued before this deploy carry NULL — attributed as the honest sentinel.
+  var runWithActor = require('./audit-context').runWithActor;
+  var actorByTask = {};
+  entries.forEach(function(e) {
+    actorByTask[e.task_id] = e.created_by || 'unknown-backfill';
+  });
 
   logger.info('[WRITE-QUEUE] flushing ' + entries.length + ' entries → ' + coalesced.length + ' ops for user ' + userId);
 
@@ -249,6 +266,7 @@ async function _doFlush(userId) {
     var tasksWrite = new (getKnexTaskRepository())({ db: trx }).tasksWrite;
     for (var i = 0; i < coalesced.length; i++) {
       var op = coalesced[i];
+      await runWithActor(actorByTask[op.taskId] || 'unknown-backfill', async function() {
       var fields = op.fields;
       // Fields came out of JSON, so datetime columns are ISO strings. MySQL
       // rejects those literally; rehydrate to Date so the driver formats them.
@@ -291,6 +309,7 @@ async function _doFlush(userId) {
           affectedIds.push(op.taskId);
         }
       }
+      }); // end runWithActor(actorByTask[...])
     }
 
     // Delete processed queue entries (by id, not user_id — new entries may have arrived)

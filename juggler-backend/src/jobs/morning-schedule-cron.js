@@ -57,7 +57,9 @@ class MorningScheduleCron {
       return; // another instance is already sweeping this tick
     }
     try {
-      await this.sweep();
+      // 999.1576: cron writes attribute as their service identity.
+      const { runWithActor } = require('../lib/audit-context');
+      await runWithActor('morning-schedule-cron', () => this.sweep());
     } catch (error) {
       logger.error('morning-schedule-cron sweep error', { error: error.message });
     } finally {

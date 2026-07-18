@@ -20,7 +20,9 @@ class CalHistoryCron {
 
   async run() {
     try {
-      await runCalHistoryCron();
+      // 999.1576: cron writes attribute as their service identity.
+      const { runWithActor } = require('../lib/audit-context');
+      await runWithActor('cal-history-cron', () => runCalHistoryCron());
     } catch (error) {
       logger.error('CalHistoryCron run error', { error });
     }

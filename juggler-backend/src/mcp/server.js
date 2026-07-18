@@ -24,7 +24,13 @@ function sanitizeToolErrors(server) {
     if (typeof handler === 'function') {
       args[args.length - 1] = async function (...handlerArgs) {
         try {
-          return await handler.apply(this, handlerArgs);
+          // 999.1576: every MCP tool write attributes as the 'mcp' service
+          // identity (David spec) — piggybacks on the existing all-tools wrap.
+          const { runWithActor } = require('../lib/audit-context');
+          const self = this;
+          return await runWithActor('mcp', function () {
+            return handler.apply(self, handlerArgs);
+          });
         } catch (err) {
           logger.error('[mcp] unexpected tool error', err);
           return { content: [{ type: 'text', text: 'Error: Internal server error' }], isError: true };
