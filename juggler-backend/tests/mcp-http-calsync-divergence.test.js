@@ -519,17 +519,32 @@ describe('ZOE-JUG-025 — Both paths agree: non-allowed fields are always reject
     expect(result.content[0].text).toMatch(/synced from an external calendar/i);
   });
 
-  test('pri change: HTTP guard blocks it on ingested task', function() {
+  // 999.2028 (David ruling 2026-07-17): priority edits are allowed on every
+  // task regardless of origin. Both paths must AGREE on the allowance — the
+  // divergence contract this suite pins now covers pri as an allowed field.
+  test('pri change: HTTP guard allows it on ingested task (999.2028)', function() {
     var existing = makeTask({ cal_sync_origin: 'gcal' });
     var guard = checkCalSyncEditGuard(existing, { pri: 'P1' });
-    expect(guard).not.toBeNull();
-    expect(guard.blockedFields).toContain('pri');
+    expect(guard).toBeNull();
   });
 
-  test('pri change: MCP guard blocks it on synced task', async function() {
+  test('pri change: MCP guard allows it on synced task (999.2028)', async function() {
     resetStore({ gcal_event_id: 'gcal-evt-001', cal_sync_origin: 'gcal' });
     var result = await captureMcpHandlers()['update_task']({
       id: 'task-001', pri: 'P1'
+    });
+    expect(result.isError).not.toBe(true);
+  });
+
+  test('text change: both guards still block it on synced tasks', async function() {
+    var existing = makeTask({ cal_sync_origin: 'gcal' });
+    var guard = checkCalSyncEditGuard(existing, { text: 'New title' });
+    expect(guard).not.toBeNull();
+    expect(guard.blockedFields).toContain('text');
+
+    resetStore({ gcal_event_id: 'gcal-evt-001', cal_sync_origin: 'gcal' });
+    var result = await captureMcpHandlers()['update_task']({
+      id: 'task-001', text: 'New title'
     });
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toMatch(/synced from an external calendar/i);

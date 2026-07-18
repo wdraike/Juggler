@@ -331,8 +331,10 @@ describe('update_task — cal-sync guard', function() {
   });
 
   test('msft-synced task with blocked field → isError', async function() {
+    // 999.2028: `pri` is now ALLOWED on cal-synced tasks (David ruling), so
+    // `text` is the blocked-field example here.
     resetStore({ msft_event_id: 'msft-evt-xyz' });
-    var result = await captureHandlers()['update_task']({ id: 'task-001', pri: 'P1' });
+    var result = await captureHandlers()['update_task']({ id: 'task-001', text: 'New title' });
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toMatch(/synced from an external calendar/i);
   });
