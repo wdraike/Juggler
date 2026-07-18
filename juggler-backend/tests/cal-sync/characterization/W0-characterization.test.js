@@ -154,6 +154,14 @@ var CONTROLLER_PATH = path.resolve(
 var controllerSource = fs.readFileSync(CONTROLLER_PATH, 'utf8');
 var controllerLines = controllerSource.split('\n');
 
+// 999.1025 inc.3 moved the miss-ladder (incl. the C1 repush guard) into the
+// pure decision module — C1-1/C1-2 read it there now (mirrors W5's A2 re-point).
+var MISSING_EVENT_DECISION_PATH = path.resolve(
+  __dirname, '../../../src/slices/calendar/domain/missing-event-decision.js'
+);
+var decisionSource = fs.readFileSync(MISSING_EVENT_DECISION_PATH, 'utf8');
+var decisionLines = decisionSource.split('\n');
+
 // The real helpers — userHash is exported from cal-sync-helpers.
 var { userHash } = require('../../../src/controllers/cal-sync-helpers');
 
@@ -165,7 +173,7 @@ describe('C1: Apple repush guard — miss_count >= 1 is required before re-creat
   it('C1-1: real controller source contains the miss_count >= 1 guard clause', function () {
     // The guard must appear verbatim: (ledger.miss_count || 0) >= 1
     // Any relaxation to >= 0 or removal will fail this assertion.
-    var guardPresent = controllerSource.includes('(ledger.miss_count || 0) >= 1');
+    var guardPresent = decisionSource.includes('(ledger.miss_count || 0) >= 1');
     expect(guardPresent).toBe(true);
   });
 
@@ -174,13 +182,13 @@ describe('C1: Apple repush guard — miss_count >= 1 is required before re-creat
     // 2026-04-26) is re-enabled. Assert the loosened form is absent.
     // We exclude the taskHash path at line ~1084 which legitimately uses === 0.
     // Strategy: find the repush branch block and confirm no >= 0 appears there.
-    var repushBlockStart = controllerLines.findIndex(function(l) {
+    var repushBlockStart = decisionLines.findIndex(function(l) {
       return l.includes('(ledger.miss_count || 0) >= 1');
     });
     // Guard line itself must exist (C1-1 already catches if absent).
     // Now check that the guard line itself says '>= 1', not '>= 0'.
     if (repushBlockStart >= 0) {
-      var guardLine = controllerLines[repushBlockStart];
+      var guardLine = decisionLines[repushBlockStart];
       expect(guardLine).toContain('>= 1');
       expect(guardLine).not.toMatch(/>=\s*0/);
     } else {
