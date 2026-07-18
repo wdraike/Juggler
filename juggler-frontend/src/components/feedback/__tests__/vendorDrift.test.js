@@ -16,7 +16,7 @@ const SOURCE = path.join(
   '../../../../../../bug-reporter-service/shared/widget/dist'
 );
 
-const FILES = ['FeedbackDialog.js', 'FeedbackButton.js', 'feedbackMachine.js', 'widget.css'];
+const FILES = ['FeedbackDialog.js', 'FeedbackButton.js', 'AnnotationCanvas.js', 'feedbackMachine.js', 'widget.css'];
 
 const sourcePresent = fs.existsSync(SOURCE);
 

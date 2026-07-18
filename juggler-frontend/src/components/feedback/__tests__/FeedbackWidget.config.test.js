@@ -12,11 +12,10 @@ jest.mock('bug-reporter-client', () => ({
   createBugReporterClient: jest.fn(() => ({ submitFeedback: jest.fn(), getMyFeedback: jest.fn() })),
 }));
 
-// AnnotationCanvas pulls react-konva -> native canvas, unavailable in jsdom.
-jest.mock('../AnnotationCanvas', () => function MockAnnotationCanvas() { return null; });
-
 // The vendored shared dialog is not under test here (pinned in bug-reporter-
-// service + RO's integration suite) — module-level client config is.
+// service + RO's integration suite) — module-level client config is. Mocking
+// it also cuts the chain to the shared AnnotationCanvas -> react-konva
+// (native canvas, unavailable in jsdom).
 jest.mock('../../../vendor/bug-reporter-widget/FeedbackDialog', () =>
   function MockSharedFeedbackDialog() { return null; }
 );

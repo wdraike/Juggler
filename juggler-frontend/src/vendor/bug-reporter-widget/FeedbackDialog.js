@@ -36,6 +36,7 @@ var import_jsx_runtime = require("react/jsx-runtime");
 var import_react = __toESM(require("react"));
 var import_html2canvas = __toESM(require("html2canvas"));
 var import_feedbackMachine = require("./feedbackMachine");
+var import_AnnotationCanvas = __toESM(require("./AnnotationCanvas"));
 var import_widget = require("./widget.css");
 const TYPE_OPTIONS = [
   { value: "bug", emoji: "\u{1F41B}", label: "Bug report" },
@@ -58,7 +59,6 @@ function FeedbackDialog({
   onClose,
   client,
   user,
-  AnnotationCanvas,
   capture = defaultCapture
 }) {
   const [state, dispatch] = (0, import_react.useReducer)(
@@ -157,9 +157,9 @@ function FeedbackDialog({
     }
   };
   if (!open || state.status === "closed") return null;
-  if (state.status === "annotating" && AnnotationCanvas) {
+  if (state.status === "annotating") {
     return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "brfw-backdrop", ref: rootRef, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "brfw-dialog brfw-dialog--wide", role: "dialog", "aria-modal": "true", "aria-label": "Annotate screenshot", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-      AnnotationCanvas,
+      import_AnnotationCanvas.default,
       {
         screenshot: state.screenshot,
         onComplete: (shot) => dispatch({ type: "ANNOTATE_DONE", screenshot: shot }),
@@ -273,7 +273,7 @@ function FeedbackDialog({
               step === import_feedbackMachine.STEPS.SCREENSHOT && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "brfw-body", children: state.screenshot ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
                 /* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", { src: state.screenshot, alt: "Captured screenshot preview", className: "brfw-preview" }),
                 /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "brfw-row", children: [
-                  AnnotationCanvas && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "brfw-button", onClick: () => dispatch({ type: "ANNOTATE_START" }), children: "Annotate" }),
+                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "brfw-button", onClick: () => dispatch({ type: "ANNOTATE_START" }), children: "Annotate" }),
                   /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "brfw-button", onClick: () => dispatch({ type: "SET_SCREENSHOT", screenshot: null }), children: "Remove" })
                 ] })
               ] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [

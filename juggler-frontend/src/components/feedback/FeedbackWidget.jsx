@@ -11,7 +11,6 @@ import { createBugReporterClient } from 'bug-reporter-client';
 import { useAuth } from '../auth/AuthProvider';
 import { getAccessToken } from '../../services/apiClient';
 import { services } from '../../proxy-config';
-import AnnotationCanvas from './AnnotationCanvas';
 
 // 999.1351: Direct cross-origin call to bug-reporter-service via env-aware
 // URL (ruling option (b)). In proxied envs, services.bugs.backend resolves to
@@ -49,13 +48,7 @@ export default function FeedbackWidget({ open, onClose, theme }) {
   var { user } = useAuth();
   return (
     <div style={theme ? tokenVars(theme) : undefined}>
-      <FeedbackDialog
-        open={open}
-        onClose={onClose}
-        client={bugReporter}
-        user={user}
-        AnnotationCanvas={AnnotationCanvas}
-      />
+      <FeedbackDialog open={open} onClose={onClose} client={bugReporter} user={user} />
     </div>
   );
 }
