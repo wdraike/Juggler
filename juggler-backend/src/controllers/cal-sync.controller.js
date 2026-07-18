@@ -50,6 +50,11 @@ var { decideExternalEditSync } = require('../slices/calendar/domain/external-edi
 // (unifies the ingest-only + provider-origin full-sync pull branches). The adapter
 // call (applyEventToTaskFields), task/stat buffers, and logSyncAction stay effects here.
 var { decideProviderOriginPull } = require('../slices/calendar/domain/provider-origin-pull-decision');
+// 999.1025 inc. 9 — pure "what becomes of a no-ledger remote event" decision for
+// Phase 3b re-ingest (link / skip-past / orphan-reclaim / orphan-delete /
+// promote). INSERT buffers, stats, logs, the orphan deleteEvent call, and the
+// processed-id bookkeeping stay effects here.
+var { decideIngestEvent } = require('../slices/calendar/domain/ingest-event-decision');
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('cal-sync.controller');
 
@@ -1308,18 +1313,56 @@ async function sync(req, res) {
           processedEventIds2.add(newEvent.id); // claim the UID key so it won't re-process
         }
 
-        // Check if already linked to a task via the event ID column
+        // === Ingest fate decision (999.1025 inc. 9 — decideIngestEvent) ======
+        // Resolve the predicates for this no-ledger event, then let the PURE
+        // decision pick the outcome. Every effect below (ledger/task INSERT
+        // buffers, taskUpdates, stats, logs, the orphan deleteEvent call, and
+        // the processed-id bookkeeping) stays here. Predicates are resolved in
+        // the decision's own precedence so isEventPast/isoToJugglerDate are only
+        // evaluated when the original code reached them.
         var existingTask = allTasks.find(function(t) {
           return t[(eventIdCol === 'gcal_event_id' ? 'gcalEventId' : eventIdCol === 'msft_event_id' ? 'msftEventId' : 'appleEventId')] === evId;
         });
-        if (existingTask) {
-          var origin = existingTask.id.startsWith(pid2 + '_') ? pid2 : 'juggler';
+        // 999.1605: all-day events compare by calendar date — new Date('YYYY-MM-DD')
+        // is UTC midnight, which lands before local todayStart in negative-offset
+        // timezones and skipped TODAY's all-day events.
+        var isPast = existingTask ? false : isEventPast(newEvent.startDateTime, !!newEvent.isAllDay, todayKey, todayStart);
+        // Round-trip detection — plain text + raw body (Microsoft returns
+        // HTML-wrapped content) + the HTML-encoded '&amp;' variant.
+        var evDesc = newEvent.description || '';
+        var evRawBody = (newEvent._raw && newEvent._raw.body && newEvent._raw.body.content) || '';
+        var combinedBody = evDesc + ' ' + evRawBody;
+        var isJugglerOriginBody = combinedBody.indexOf('Synced from Raike & Sons') !== -1
+          || combinedBody.indexOf('Synced from Raike &amp; Sons') !== -1
+          || combinedBody.indexOf('Synced from Juggler') !== -1;
+        // Orphan match (dual-write recovery) — only computed when the marker
+        // branch is actually reached, matching the original short-circuit.
+        var reachesMarkerBranch = !existingTask && !isPast && isJugglerOriginBody;
+        var jdOrphan = reachesMarkerBranch ? isoToJugglerDate(newEvent.startDateTime, newEvent.startTimezone || tz) : null;
+        var orphanMatch = reachesMarkerBranch ? allTasks.find(function(t) {
+          return t.text === newEvent.title && t.date === jdOrphan.date && !processedTaskIds2.has(t.id);
+        }) : null;
+        var calIngestMode = calIngestModeMap[newEvent._calendarId] || 'task';
+
+        var ingestDecision = decideIngestEvent({
+          event: newEvent,
+          existingTask: existingTask,
+          isPast: isPast,
+          isJugglerOriginBody: isJugglerOriginBody,
+          orphanMatch: orphanMatch,
+          calIngestMode: calIngestMode,
+          pid: pid2,
+          jugglerOrigin: JUGGLER_ORIGIN
+        });
+
+        // --- link: event already bound to a task via its event-id column ------
+        if (ingestDecision.action === 'link') {
           ledgerInserts.push({
             user_id: userId,
             provider: pid2,
             task_id: existingTask.id,
             provider_event_id: evId,
-            origin: origin,
+            origin: ingestDecision.origin,
             last_pushed_hash: taskHash(existingTask),
             last_user_hash: userHash(existingTask),
             last_pulled_hash: pAdapter2.eventHash(newEvent),
@@ -1336,13 +1379,8 @@ async function sync(req, res) {
           continue;
         }
 
-        // Check if event is in the past (999.1605: all-day events compare by
-        // calendar date — new Date('YYYY-MM-DD') is UTC midnight, which lands
-        // before local todayStart in negative-offset timezones and skipped
-        // TODAY's all-day events)
-        var isPast = isEventPast(newEvent.startDateTime, !!newEvent.isAllDay, todayKey, todayStart);
-
-        if (isPast) {
+        // --- skip-past: past event → task_id-NULL skip ledger row -------------
+        if (ingestDecision.action === 'skip-past') {
           ledgerInserts.push({
             user_id: userId,
             provider: pid2,
@@ -1364,48 +1402,38 @@ async function sync(req, res) {
           continue;
         }
 
-        // Skip events that originated from Juggler (round-trip prevention)
-        // Check both plain text and raw body (Microsoft may return HTML-wrapped content)
-        // Also check HTML-encoded '&amp;' variant because Graph API returns HTML by default
-        var evDesc = newEvent.description || '';
-        var evRawBody = (newEvent._raw && newEvent._raw.body && newEvent._raw.body.content) || '';
-        var combinedBody = evDesc + ' ' + evRawBody;
-        if (combinedBody.indexOf('Synced from Raike & Sons') !== -1
-            || combinedBody.indexOf('Synced from Raike &amp; Sons') !== -1
-            || combinedBody.indexOf('Synced from Juggler') !== -1) {
-          // Try to match orphaned event back to its source task (dual-write recovery)
-          var jdOrphan = isoToJugglerDate(newEvent.startDateTime, newEvent.startTimezone || tz);
-          var orphanMatch = allTasks.find(function(t) {
-            return t.text === newEvent.title && t.date === jdOrphan.date && !processedTaskIds2.has(t.id);
+        // --- orphan-reclaim: round-trip event, source task still here ---------
+        if (ingestDecision.action === 'orphan-reclaim') {
+          taskUpdates.push({ id: orphanMatch.id, fields: { [eventIdCol]: evId } });
+          ledgerInserts.push({
+            user_id: userId,
+            provider: pid2,
+            task_id: orphanMatch.id,
+            provider_event_id: evId,
+            origin: JUGGLER_ORIGIN,
+            last_pushed_hash: taskHash(orphanMatch),
+            last_user_hash: userHash(orphanMatch),
+            last_pulled_hash: pAdapter2.eventHash(newEvent),
+            event_summary: newEvent.title,
+            event_start: newEvent.startDateTime || null,
+            event_end: newEvent.endDateTime || null,
+            event_all_day: newEvent.isAllDay ? 1 : 0,
+            last_modified_at: toMySQLDate(newEvent.lastModified),
+            task_updated_at: orphanMatch._updated_at || null,
+            status: 'active'
           });
-          if (orphanMatch) {
-            taskUpdates.push({ id: orphanMatch.id, fields: { [eventIdCol]: evId } });
-            ledgerInserts.push({
-              user_id: userId,
-              provider: pid2,
-              task_id: orphanMatch.id,
-              provider_event_id: evId,
-              origin: JUGGLER_ORIGIN,
-              last_pushed_hash: taskHash(orphanMatch),
-              last_user_hash: userHash(orphanMatch),
-              last_pulled_hash: pAdapter2.eventHash(newEvent),
-              event_summary: newEvent.title,
-              event_start: newEvent.startDateTime || null,
-              event_end: newEvent.endDateTime || null,
-              event_all_day: newEvent.isAllDay ? 1 : 0,
-              last_modified_at: toMySQLDate(newEvent.lastModified),
-              task_updated_at: orphanMatch._updated_at || null,
-              status: 'active'
-            });
-            processedTaskIds2.add(orphanMatch.id);
-            processedEventIds2.add(evId);
-            pStats2.pushed++;
-            stats.pushed++;
-            continue;
-          }
-          // No matching task — this is a stale Juggler event (e.g. from a
-          // recurring instance that was regenerated with a new ID). Delete it
-          // from the provider to prevent duplicates accumulating.
+          processedTaskIds2.add(orphanMatch.id);
+          processedEventIds2.add(evId);
+          pStats2.pushed++;
+          stats.pushed++;
+          continue;
+        }
+
+        // --- orphan-delete: round-trip event, source task gone → clean up -----
+        if (ingestDecision.action === 'orphan-delete') {
+          // No matching task — a stale Juggler event (e.g. a recurring instance
+          // regenerated with a new ID). Delete it from the provider so
+          // duplicates don't accumulate.
           try {
             // For Apple, evId is the VEVENT UID but deleteEvent needs the CalDAV URL.
             // Use _url when available; fall back to evId for GCal/MSFT.
@@ -1428,10 +1456,12 @@ async function sync(req, res) {
           continue;
         }
 
-        // Future event — create task
+        // --- promote: genuine new future event → new task ---------------------
+        // decideIngestEvent returned the pure promotion fields (dur / when /
+        // placementMode); the random id, tz scheduled_at, hashing, and buffers
+        // stay here.
         try {
           var jd = isoToJugglerDate(newEvent.startDateTime, newEvent.startTimezone || tz);
-          var evDur = newEvent.isAllDay ? 0 : newEvent.durationMinutes;
 
           // 999.1627 (David ruling 2026-07-15): provider_event_id is the SOLE
           // dedup identity for incoming provider events — already enforced
@@ -1464,22 +1494,20 @@ async function sync(req, res) {
             }
           }
 
-          var calIngestMode = calIngestModeMap[newEvent._calendarId] || 'task';
-          var isReminder = !newEvent.isAllDay && calIngestMode === 'reminder';
           var taskRow = {
             id: newTaskId,
             user_id: userId,
             text: newEvent.title,
             scheduled_at: newScheduledAt,
-            dur: evDur,
+            dur: ingestDecision.dur,
             pri: 'P3',
             status: '',
             // Legacy when='allday' kept for downstream sites that still read it
             // (scheduler skip-gate, outbound push, AllDayBanner, CalendarView).
             // For non-all-day events `when` stays empty — placement_mode='fixed'
             // is now the canonical fixed signal.
-            when: newEvent.isAllDay ? 'allday' : '',
-            placement_mode: newEvent.isTransparent ? PLACEMENT_MODES.REMINDER : (newEvent.isAllDay ? PLACEMENT_MODES.ALL_DAY : (isReminder ? PLACEMENT_MODES.REMINDER : PLACEMENT_MODES.FIXED)),
+            when: ingestDecision.when,
+            placement_mode: ingestDecision.placementMode,
             [eventIdCol]: newEvent.id
           };
           if (newEvent.description) {
