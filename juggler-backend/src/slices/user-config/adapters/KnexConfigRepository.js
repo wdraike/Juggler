@@ -64,6 +64,7 @@
 'use strict';
 
 var UserConfig = require('../domain/entities/UserConfig');
+var { stampInsert, stampUpdate } = require('../../../lib/audit-context'); // 999.1576 inc.3b
 
 var CONFIG_REPOSITORY_PORT_METHODS =
   require('../domain/ports/ConfigRepositoryPort').CONFIG_REPOSITORY_PORT_METHODS;
@@ -124,7 +125,9 @@ function withTimestamp(changes) {
   } else {
     out.updated_at = new Date(); // P1: new Date(), NEVER db.fn.now()
   }
-  return out;
+  // 999.1576 inc.3b: withTimestamp is the update choke for this repo — every
+  // update also records WHO (soft until the inc.4 tightening).
+  return stampUpdate(out);
 }
 
 // ── USER_CONFIG ──────────────────────────────────────────────────────────────
@@ -200,11 +203,11 @@ KnexConfigRepository.prototype.upsertConfig = function upsertConfig(userId, conf
           config_value: serializedValue
         }));
       }
-      return db('user_config').insert({
+      return db('user_config').insert(stampInsert({
         user_id: userId,
         config_key: configKey,
         config_value: serializedValue
-      });
+      }));
     })
     .then(function () { /* void — match legacy (no return value used) */ });
 };
@@ -240,13 +243,13 @@ KnexConfigRepository.prototype.getMaxProjectSortOrder = function getMaxProjectSo
  * @returns {Promise<number>}
  */
 KnexConfigRepository.prototype.insertProject = function insertProject(userId, project) {
-  return this.db('projects').insert({
+  return this.db('projects').insert(stampInsert({
     user_id: userId,
     name: project.name,
     color: project.color,
     icon: project.icon,
     sort_order: project.sort_order
-  }).then(function (res) { return Array.isArray(res) ? res[0] : res; });
+  })).then(function (res) { return Array.isArray(res) ? res[0] : res; });
 };
 
 /**
@@ -328,7 +331,7 @@ KnexConfigRepository.prototype.replaceLocations = function replaceLocations(user
   return db('locations').where('user_id', userId).del()
     .then(function () {
       if (rows && rows.length > 0) {
-        return db('locations').insert(rows);
+        return db('locations').insert(rows.map(stampInsert));
       }
     })
     .then(function () { /* void */ });
@@ -359,7 +362,7 @@ KnexConfigRepository.prototype.replaceTools = function replaceTools(userId, rows
   return db('tools').where('user_id', userId).del()
     .then(function () {
       if (rows && rows.length > 0) {
-        return db('tools').insert(rows);
+        return db('tools').insert(rows.map(stampInsert));
       }
     })
     .then(function () { /* void */ });

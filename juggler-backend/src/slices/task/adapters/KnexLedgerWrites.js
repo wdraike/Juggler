@@ -20,6 +20,7 @@
  *   singleton via getDefaultDb(), ADR-0002 — same connection KnexTaskRepository
  *   uses by default).
  */
+var { stampUpdate } = require('../../../lib/audit-context'); // 999.1576 inc.3b
 function KnexLedgerWrites(deps) {
   var d = deps || {};
   this.db = d.db || require('../../../lib/db').getDefaultDb();
@@ -39,7 +40,7 @@ KnexLedgerWrites.prototype.clearActiveLedgerForTasks = function clearActiveLedge
     .where('user_id', userId)
     .whereIn('task_id', taskIds)
     .where('status', 'active')
-    .update({ status: 'deleted_local', task_id: null, synced_at: this.db.fn.now() });
+    .update(stampUpdate({ status: 'deleted_local', task_id: null, synced_at: this.db.fn.now() }));
 };
 
 /**
@@ -64,10 +65,10 @@ KnexLedgerWrites.prototype.clearActiveLedgerForTasks = function clearActiveLedge
 KnexLedgerWrites.prototype.updateNextStartAnchor = function updateNextStartAnchor(dbOrTrx, masterId, userId, newAnchor) {
   return dbOrTrx('task_masters')
     .where({ id: masterId, user_id: userId })
-    .update({
+    .update(stampUpdate({
       next_start: dbOrTrx.raw('GREATEST(COALESCE(next_start, ?), ?)', [newAnchor, newAnchor]),
       updated_at: dbOrTrx.fn.now()
-    });
+    }));
 };
 
 /**
@@ -81,7 +82,7 @@ KnexLedgerWrites.prototype.updateNextStartAnchor = function updateNextStartAncho
 KnexLedgerWrites.prototype.reactivateDoneFrozenLedger = function reactivateDoneFrozenLedger(userId, taskId) {
   return this.db('cal_sync_ledger')
     .where({ user_id: userId, task_id: taskId, status: 'done_frozen' })
-    .update({ status: 'active', synced_at: this.db.fn.now() });
+    .update(stampUpdate({ status: 'active', synced_at: this.db.fn.now() }));
 };
 
 /**
@@ -104,7 +105,7 @@ KnexLedgerWrites.prototype.reactivateDoneFrozenLedger = function reactivateDoneF
 KnexLedgerWrites.prototype.detachTaskLedger = function detachTaskLedger(dbOrTrx, userId, taskId) {
   return dbOrTrx('cal_sync_ledger')
     .where({ task_id: taskId, user_id: userId, status: 'active' })
-    .update({ status: 'deleted_local', synced_at: dbOrTrx.fn.now() });
+    .update(stampUpdate({ status: 'deleted_local', synced_at: dbOrTrx.fn.now() }));
 };
 
 module.exports = KnexLedgerWrites;
