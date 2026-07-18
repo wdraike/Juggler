@@ -15,6 +15,10 @@ var db = require('../db');
 var { computeChunks } = require('../lib/reconcile-splits');
 var unifiedScheduleV2 = require('./unifiedScheduleV2');
 var constants = require('./constants');
+// 999.1435: explicit read/write interface for the Phase 1/1I pre-insert ledger
+// (rawRowById, phase1InsertedById, inMemoryChunks, pendingById) — was 28
+// non-contiguous implicit read/patch sites, now routed through named methods.
+var { createPreInsertLedger } = require('./preInsertLedger');
 var { TERMINAL_STATUSES } = require('../lib/task-status');
 var config = require('../lib/config');
 
@@ -629,6 +633,11 @@ async function runScheduleAndPersist(userId, _retries, options) {
 
   try {
   return await db.transaction(async function(trx) {
+
+  // 999.1435: PreInsertLedger — explicit read/write interface for the Phase 1/1I
+  // pre-insert ledger state (rawRowById, phase1InsertedById, inMemoryChunks,
+  // pendingById). Was 28 non-contiguous implicit read/patch sites.
+  var ledger = createPreInsertLedger();
 
   // Per-phase timing. Each checkpoint captures cumulative elapsed ms from
   // transaction start; the summary log at the end shows phase-by-phase
@@ -1475,7 +1484,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // null; the persist step UPDATEs it for placed chunks.
   // Hoisted so the changeset builder can project full task objects for these
   // rows even though taskRows was loaded before the INSERT.
-  var phase1InsertedById = {};
+  // 999.1435: phase1InsertedById routed through the PreInsertLedger.
   if (toInsert.length > 0) {
     var chunkInsertRows = toInsert.map(function(row) {
       var occDate = row._candidateDate || row.date || null;
@@ -1542,10 +1551,9 @@ async function runScheduleAndPersist(userId, _retries, options) {
     // Use an ISO string for created_at/updated_at here: the DB rows were stamped
     // with a JS Date (H6/W3 P1: _runScheduleCommand.clockNow()); rowToTask wants a
     // parseable string for the changeset projection, so normalize to ISO.
+    // 999.1435: routed through the PreInsertLedger.
     var nowISO = _runScheduleCommand.clockNow().toISOString();
-    chunkInsertRows.forEach(function(r) {
-      phase1InsertedById[r.id] = Object.assign({}, r, { created_at: nowISO, updated_at: nowISO });
-    });
+    ledger.recordPhase1Inserts(chunkInsertRows, nowISO);
   }
 
   // ── In-memory chunk expansion ──
@@ -1559,9 +1567,8 @@ async function runScheduleAndPersist(userId, _retries, options) {
   var existingTaskIds = {};
   allTasks.forEach(function(t) { existingTaskIds[t.id] = true; });
 
-  var inMemoryChunks = [];
+  // 999.1435: inMemoryChunks routed through the PreInsertLedger.
   toInsert.forEach(function(row) {
-    if (existingTaskIds[row.id]) return; // already in allTasks
     var master = masterById[row.sourceId];
     if (!master) return;
 
@@ -1611,9 +1618,10 @@ async function runScheduleAndPersist(userId, _retries, options) {
       _inMemoryChunk: true, // flag for persist step
       _tpcBudgetUnscheduled: row._tpcBudgetUnscheduled || false
     };
-    inMemoryChunks.push(chunk);
+    ledger.addInMemoryChunk(chunk);
   });
 
+  var inMemoryChunks = ledger.getInMemoryChunks();
   if (inMemoryChunks.length > 0) {
     allTasks = allTasks.concat(inMemoryChunks);
     inMemoryChunks.forEach(function(t) { statuses[t.id] = ''; });
@@ -1709,8 +1717,8 @@ async function runScheduleAndPersist(userId, _retries, options) {
   allTasks.forEach(function(t) { taskById[t.id] = t; });
 
   // Build a map of raw rows by ID for accessing scheduled_at
-  var rawRowById = {};
-  taskRows.forEach(function(r) { rawRowById[r.id] = r; });
+  // 999.1435: routed through the PreInsertLedger.
+  ledger.setRawRows(taskRows);
 
   // Extract the first placement per task from dayPlacements. Phase 1 ensures
   // every split chunk has its own unique row ID, so each task.id maps to
@@ -1883,7 +1891,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
     // W3 (sched-drop-overdue-column, M-5): `overdue` is no longer a stored
     // column — nothing is written to it here. `_rawRow` is still needed below
     // for the implied_deadline recompute comparison.
-    var _rawRow = rawRowById[taskId];
+    var _rawRow = ledger.getRawRow(taskId);
 
     var dbUpdate = {
       scheduled_at: newScheduledAt,
@@ -1910,7 +1918,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
     // (rawRowById[taskId]). If all match, the write is a no-op → skip it. Any
     // field that differs, or any field we can't confidently compare, falls
     // through to a real write (conservative — never skips a genuine change).
-    if (placementMatchesDbRow(dbUpdate, rawRowById[taskId])) {
+    if (placementMatchesDbRow(dbUpdate, ledger.getRawRow(taskId))) {
       // No DB change needed. Still emit the SSE patch below on a date/time move
       // is impossible here (a move would have differed), so nothing to push.
       continue;
@@ -2061,7 +2069,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
     //     this run. Mark unscheduled=1 so the frontend shows it in the
     //     unscheduled lane. No SSE emitted here — Phase 5 handles new-chunk events.
     if (original.taskType === 'recurring_instance') {
-      var rawRec = rawRowById[t.id];
+      var rawRec = ledger.getRawRow(t.id);
       var hasScheduledAt = rawRec ? !!rawRec.scheduled_at : !!original.scheduledAt;
       // sched-chunk-collision-lockbypass fix: a chunk unplaced this run because it
       // structurally overflowed its cycle's capacity (RECURRING_SPLIT_OVERFLOW —
@@ -2136,7 +2144,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       return;
     }
     // One-off / chain-member task. Two sub-cases:
-    var rawRow = rawRowById[t.id];
+    var rawRow = ledger.getRawRow(t.id);
     // eslint-disable-next-line no-redeclare
     var hasScheduledAt = rawRow ? !!rawRow.scheduled_at : !!(original.date || original.scheduledAt);
     if (hasScheduledAt) {
@@ -2322,7 +2330,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // task shows in the unscheduled lane instead of the calendar.
   allTasks.forEach(function(t) {
     if (t.taskType !== 'recurring_instance') return;
-    var raw = rawRowById[t.id];
+    var raw = ledger.getRawRow(t.id);
     if (!raw || !raw.unscheduled) return; // already clear
     if (!raw.scheduled_at) return; // truly nothing to show on calendar
     // 999.1612 (AC4 flake root cause): a past-incomplete recurring instance
@@ -2381,7 +2389,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (t.placementMode !== PLACEMENT_MODES.FIXED) return;
     var stFx = statuses[t.id] || '';
     if (stFx === 'done' || stFx === 'cancel' || stFx === 'skip' || stFx === 'pause' || stFx === 'disabled') return;
-    var rawFx = rawRowById[t.id];
+    var rawFx = ledger.getRawRow(t.id);
     if (!rawFx) return;
     var schedMinsFx = t.time ? parseTimeToMinutes(t.time) : null;
     if (!computeIsPastDue(t, schedMinsFx, timeInfo)) return; // not past its due date/time
@@ -2417,7 +2425,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       // as a fallback when t.date is null. rowToTask only sets t.date from
       // utcToLocal(scheduled_at) — when scheduled_at=NULL (never placed), t.date
       // is null even if the DB row's `date` column holds the intended calendar day.
-      var rawRowPast = rawRowById[t.id];
+      var rawRowPast = ledger.getRawRow(t.id);
       if (!rawRowPast) return;  // not a real DB task
 
       // Use the raw DB row's `date` column as the authoritative calendar day for
@@ -2599,12 +2607,10 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // rawRowById[id] || phase1InsertedById[id] covers both cases so a roamed-and-dropped
   // Phase-1 instance (placed in-memory by the scheduler, skipped by L1's persist guard)
   // is correctly caught here rather than silently left in limbo.
-  var pendingById = {};
-  pendingUpdates.forEach(function(p) {
-    pendingById[p.id] = Object.assign(pendingById[p.id] || {}, p.dbUpdate);
-  });
+  // 999.1435: pendingById built through the PreInsertLedger.
+  ledger.buildPendingById(pendingUpdates);
   var noLimboUpdates = computeNoLimboUpdates(
-    allTasks, rawRowById, phase1InsertedById, pendingById, statuses, today, expandEnd, _runScheduleCommand.clockNow()
+     allTasks, ledger.getRawRowById(), ledger.getPhase1InsertedById(), ledger.getPendingById(), statuses, today, expandEnd, _runScheduleCommand.clockNow()
   );
   noLimboUpdates.forEach(function(u) { pendingUpdates.push(u); });
   var limboFlagged = noLimboUpdates.length;
@@ -2696,8 +2702,8 @@ async function runScheduleAndPersist(userId, _retries, options) {
     // David's 2026-07-12 ruling outlaws. pendingById (built above, before this loop)
     // holds every dbUpdate queued so far this run — check it first, falling back to
     // the raw snapshot only when this run queued no unscheduled write for the task.
-    var _rawT = rawRowById[t.id];
-    var _pendingT = pendingById[t.id];
+    var _rawT = ledger.getRawRow(t.id);
+    var _pendingT = ledger.getPendingUpdate(t.id);
     var _effectiveUnscheduled = (_pendingT && 'unscheduled' in _pendingT)
       ? _pendingT.unscheduled
       : (_rawT && _rawT.unscheduled);
@@ -2764,7 +2770,8 @@ async function runScheduleAndPersist(userId, _retries, options) {
     // rowsById was populated from taskRows (pre-Phase-1 snapshot). Phase 1
     // pre-inserted chunk rows (split_ordinal >= 2) aren't there — fall back
     // to phase1InsertedById so we still ship a full object instead of id-only.
-    var r = rowsById[id] || phase1InsertedById[id];
+    // 999.1435: phase1InsertedById routed through the PreInsertLedger.
+    var r = rowsById[id] || ledger.getPhase1InsertedRow(id);
     if (!r) return { id: id }; // fallback: id-only (frontend will fetch as before)
     // Project a full task shape via rowToTask so the frontend gets exactly the
     // same fields it would have received from GET /api/tasks/:id.
