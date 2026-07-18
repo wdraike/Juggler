@@ -46,6 +46,10 @@ var { isEventModifiedExternally } = require('../slices/calendar/domain/event-mod
 // 999.1025 inc. 7 — pure "both changed → conflict resolution" decision (push /
 // pull / push-conflict). _buildPullFields + logSyncAction stay effects here.
 var { decideExternalEditSync } = require('../slices/calendar/domain/external-edit-decision');
+// 999.1025 inc. 8 — pure "pull a NON-juggler-origin event into its task" decision
+// (unifies the ingest-only + provider-origin full-sync pull branches). The adapter
+// call (applyEventToTaskFields), task/stat buffers, and logSyncAction stay effects here.
+var { decideProviderOriginPull } = require('../slices/calendar/domain/provider-origin-pull-decision');
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('cal-sync.controller');
 
@@ -654,42 +658,35 @@ async function sync(req, res) {
                   });
                 }
               }
-            } else if (isIngestOnly(pid)) {
-              // Ingest-only: pull event changes into task. Skip terminal tasks and
-              // juggler-origin tasks (MCP-created) — Juggler owns their scheduling fields.
-              var ingestTaskTerminal = isTerminalStatus(task.status);
-              var isJugglerOrigin = ledger.origin === JUGGLER_ORIGIN;
-              if (!isJugglerOrigin && !ingestTaskTerminal) {
-                var updateFields = pAdapter.applyEventToTaskFields(event, tz, task);
-                updateFields.placement_mode = PLACEMENT_MODES.FIXED;
-                taskUpdates.push({ id: task.id, fields: updateFields });
+            } else {
+              // NON-juggler-origin pull decision is PURE (999.1025 inc. 8 —
+              // decideProviderOriginPull): the two remaining inline pull branches
+              // (ingest-only providers + provider-origin full-sync) unified. It
+              // decides whether to pull, whether that pull forces placement_mode =
+              // FIXED (ingest does; provider-origin leaves the adapter's own
+              // change-detection to decide — ROADMAP 999.012 BUG-2), and the log
+              // descriptor(s). isEventModifiedExternally (999.1025 inc. 6) is reused
+              // inside the decision. The adapter call (applyEventToTaskFields),
+              // taskUpdates buffer, pStats/stats.pulled, and logSyncAction stay
+              // effects here at the call site.
+              var pullDecision = decideProviderOriginPull({
+                task: task, event: event, ledger: ledger, pid: pid,
+                isIngestOnly: isIngestOnly(pid),
+                jugglerOrigin: JUGGLER_ORIGIN,
+                isTaskTerminal: isTerminalStatus(task.status),
+                calendarLabels: calendarLabels
+              });
+              if (pullDecision.action === 'pull') {
+                var pullTaskFields = pAdapter.applyEventToTaskFields(event, tz, task);
+                if (pullDecision.forcePlacementFixed) {
+                  pullTaskFields.placement_mode = PLACEMENT_MODES.FIXED;
+                }
+                taskUpdates.push({ id: task.id, fields: pullTaskFields });
                 pStats.pulled++;
                 stats.pulled++;
-              }
-            } else if (ledger.origin === pid && !isTerminalStatus(task.status)) {
-              // Provider-origin task in full-sync mode: pull event changes when the
-              // event was modified since our last sync. We never push to these events
-              // (we don't own them), but we keep task fields (dur, text, time) current
-              // when the user edits them on the provider side.
-              // Same external-edit test as the full-sync gate above — unified into
-              // the PURE predicate (999.1025 inc. 6): the two sites were byte-identical.
-              var provEventModified = isEventModifiedExternally(event, ledger);
-              if (provEventModified) {
-                var provPullFields = pAdapter.applyEventToTaskFields(event, tz, task);
-                // Do NOT unconditionally override placement_mode here — the adapter's
-                // change-detection already sets FIXED when date/time genuinely changed.
-                // Forcing FIXED for title/duration-only changes would spuriously promote
-                // flexible tasks (ROADMAP 999.012 BUG-2 fix).
-                taskUpdates.push({ id: task.id, fields: provPullFields });
-                pStats.pulled++;
-                stats.pulled++;
-                logSyncAction(pid, 'pulled', {
-                  taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
-                  oldValues: { dur: task.dur, text: task.text },
-                  newValues: { dur: event.durationMinutes, text: event.title },
-                  detail: 'Provider-origin event edited — task refreshed from ' + pid,
-                  calendarName: calendarLabels[pid] || null
-                });
+                for (var _ppl = 0; _ppl < pullDecision.logs.length; _ppl++) {
+                  logSyncAction(pullDecision.logs[_ppl].provider, pullDecision.logs[_ppl].action, pullDecision.logs[_ppl].opts);
+                }
               }
             }
 
