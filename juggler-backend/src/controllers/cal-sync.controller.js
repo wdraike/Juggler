@@ -43,6 +43,9 @@ var { decidePastCleanupSync } = require('../slices/calendar/domain/past-cleanup-
 // 999.1025 inc. 6 — pure external-edit predicate (axis-S seam). Was FORKED at two
 // byte-identical sites below (eventModifiedExternally + provEventModified); now unified.
 var { isEventModifiedExternally } = require('../slices/calendar/domain/event-modified-predicate');
+// 999.1025 inc. 7 — pure "both changed → conflict resolution" decision (push /
+// pull / push-conflict). _buildPullFields + logSyncAction stay effects here.
+var { decideExternalEditSync } = require('../slices/calendar/domain/external-edit-decision');
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('cal-sync.controller');
 
@@ -548,12 +551,37 @@ async function sync(req, res) {
                   pStats.pushed++;
                   stats.pushed++;
                 } else if (taskChanged && eventModifiedExternally) {
-                  // Both changed — conflict resolution
-                  // Terminal tasks (done/cancel/skip/pause) always win — never pull
-                  // a calendar edit into a completed task.
-                  const isFixed = task.placementMode === PLACEMENT_MODES.FIXED;
-                  if (isFixed || isTaskTerminal) {
-                    // Fixed or terminal tasks always win → push, log conflict
+                  // Both changed — conflict resolution is a PURE use-case
+                  // (999.1025 inc. 7 — decideExternalEditSync): task placement +
+                  // terminal status + the event-vs-task last-modified tiebreaker
+                  // in, action ('push' | 'pull' | 'push-conflict') + log
+                  // descriptors out. The push effect is identical for 'push' and
+                  // 'push-conflict' (only the log detail differs, carried in
+                  // editDecision.logs). _buildPullFields + logSyncAction stay
+                  // effects here; the pull-branch conflict_provider log lives at
+                  // the call site because its newValues.when depends on the
+                  // freshly-built pull fields.
+                  var editDecision = decideExternalEditSync({
+                    task: task, event: event, ledger: ledger, pid: pid,
+                    isTaskTerminal: isTaskTerminal,
+                    calendarLabels: calendarLabels
+                  });
+                  if (editDecision.action === 'pull') {
+                    // Event newer → pull.
+                    var conflictPullFields = _buildPullFields(event, task, tz, pAdapter);
+                    taskUpdates.push({ id: task.id, fields: conflictPullFields });
+                    pStats.pulled++;
+                    stats.pulled++;
+                    logSyncAction(pid, 'conflict_provider', {
+                      taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
+                      oldValues: { text: task.text, when: task.when, dur: task.dur },
+                      newValues: { text: event.title, when: conflictPullFields.when || task.when, dur: event.durationMinutes },
+                      detail: 'Conflict: calendar edit accepted (newer than task)',
+                      calendarName: calendarLabels[pid] || null
+                    });
+                  } else {
+                    // 'push' or 'push-conflict' → re-assert the task over the
+                    // calendar edit (identical push effect; log detail differs).
                     pendingEventUpdates.push({
                       eventId: event._url || ledger.provider_event_id,
                       task: task,
@@ -562,43 +590,8 @@ async function sync(req, res) {
                     });
                     pStats.pushed++;
                     stats.pushed++;
-                    logSyncAction(pid, 'conflict_juggler', {
-                      taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
-                      detail: isTaskTerminal ? 'Conflict: terminal task pushed over calendar edit (completed tasks are immutable)' : 'Conflict: fixed task pushed over calendar edit',
-                      calendarName: calendarLabels[pid] || null
-                    });
-                  } else {
-                    // Last-modified wins (with 1s tolerance — see eventModifiedExternally above)
-                    var evModMsConflict = new Date(event.lastModified).getTime();
-                    var taskModMsConflict = new Date(String(task._updated_at).replace(' ', 'T') + 'Z').getTime();
-                    if (!isNaN(evModMsConflict) && !isNaN(taskModMsConflict) && (evModMsConflict - taskModMsConflict) > 1000) {
-                      // Event newer → pull
-                      var conflictPullFields = _buildPullFields(event, task, tz, pAdapter);
-                      taskUpdates.push({ id: task.id, fields: conflictPullFields });
-                      pStats.pulled++;
-                      stats.pulled++;
-                      logSyncAction(pid, 'conflict_provider', {
-                        taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
-                        oldValues: { text: task.text, when: task.when, dur: task.dur },
-                        newValues: { text: event.title, when: conflictPullFields.when || task.when, dur: event.durationMinutes },
-                        detail: 'Conflict: calendar edit accepted (newer than task)',
-                        calendarName: calendarLabels[pid] || null
-                      });
-                    } else {
-                      // Task newer → push
-                      pendingEventUpdates.push({
-                        eventId: event._url || ledger.provider_event_id,
-                        task: task,
-                        ledgerId: ledger.id,
-                        newHash: newHash
-                      });
-                      pStats.pushed++;
-                      stats.pushed++;
-                      logSyncAction(pid, 'conflict_juggler', {
-                        taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
-                        detail: 'Conflict: task pushed over calendar edit (task is newer)',
-                        calendarName: calendarLabels[pid] || null
-                      });
+                    for (var _cel = 0; _cel < editDecision.logs.length; _cel++) {
+                      logSyncAction(editDecision.logs[_cel].provider, editDecision.logs[_cel].action, editDecision.logs[_cel].opts);
                     }
                   }
                 } else if (!taskChanged && eventModifiedExternally && !isTaskTerminal) {
