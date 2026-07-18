@@ -82,4 +82,40 @@ function expressAuditContext(req, res, next) {
   );
 }
 
-module.exports = { runWithActor, getActor, peekActor, expressAuditContext };
+/**
+ * Stamp an INSERT row with who-attribution (999.1576 inc.3). SOFT for now:
+ * without an established actor the row passes through UNCHANGED — the DB
+ * NULL is the honest "unattributed" marker, never a fake actor. The inc.4
+ * tightening flips this to strict getActor() (empirically: 2027 test paths
+ * exercise writers outside any context; a per-test ALS hook via
+ * enterWith-in-beforeEach does NOT propagate into jest test bodies, so the
+ * strict flip needs its own designed test-context mechanism first).
+ * Caller-provided values always win, so import/backfill paths carrying
+ * explicit historical attribution are never overwritten.
+ */
+function stampInsert(row) {
+  const actor = peekActor();
+  if (!actor) return row;
+  const out = Object.assign({}, row);
+  if (out.created_by === undefined || out.created_by === null) out.created_by = actor;
+  if (out.updated_by === undefined || out.updated_by === null) out.updated_by = actor;
+  return out;
+}
+
+/** Stamp an UPDATE change-set with updated_by. Same rules as stampInsert. */
+function stampUpdate(changes) {
+  const actor = peekActor();
+  if (!actor) return changes;
+  const out = Object.assign({}, changes);
+  if (out.updated_by === undefined || out.updated_by === null) out.updated_by = actor;
+  return out;
+}
+
+module.exports = {
+  runWithActor,
+  getActor,
+  peekActor,
+  expressAuditContext,
+  stampInsert,
+  stampUpdate,
+};

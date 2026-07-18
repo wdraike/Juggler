@@ -21,6 +21,7 @@
 
 var { _PLACEMENT_MODES } = require('./placementModes');
 const { createLogger } = require('@raike/lib-logger');
+const { stampInsert, stampUpdate } = require('./audit-context');
 const logger = createLogger('tasks-write');
 
 var MASTER_FIELDS = [
@@ -40,7 +41,9 @@ var MASTER_FIELDS = [
   // state (done/wip/skip/''). insertTask + updateTaskById write both so the
   // value is visible regardless of which row class the consumer reads.
   'status',
-  'created_at', 'updated_at'
+  'created_at', 'updated_at',
+  // 999.1576: who-attribution (stamped by audit-context at the write boundary)
+  'created_by', 'updated_by'
 ];
 
 // Fields that live on task_instances. `dur` lives on both — copied from
@@ -50,7 +53,8 @@ var _INSTANCE_FIELDS = [
   'occurrence_ordinal', 'split_ordinal', 'split_total',
   'scheduled_at', 'dur',
   'status', 'time_remaining', 'unscheduled', 'generated',
-  'created_at', 'updated_at'
+  'created_at', 'updated_at',
+  'created_by', 'updated_by'
 ];
 
 // Fields in the `tasks`-shape row that update MASTER only (template fields).
@@ -66,7 +70,10 @@ var MASTER_UPDATE_FIELDS = [
   'weather_precip', 'weather_cloud', 'weather_temp_min', 'weather_temp_max',
   'weather_temp_unit', 'weather_humidity_min', 'weather_humidity_max',
   // status: also a master-level field (template lifecycle); see MASTER_FIELDS comment
-  'status'
+  'status',
+  // 999.1576: updated_by routes to BOTH tables (present in both update lists,
+  // like status) — every touched row records its modifier.
+  'updated_by'
 ];
 
 // Fields in the `tasks`-shape row that update INSTANCE only (placement fields).
@@ -82,7 +89,8 @@ var INSTANCE_UPDATE_FIELDS = [
   'unplaced_reason', 'unplaced_detail',
   // instance-owns-window: per-instance start floor + cycle-boundary due must update
   // on re-runs (a later scheduler pass recomputes the window), not just on insert.
-  'earliest_start', 'implied_deadline'
+  'earliest_start', 'implied_deadline',
+  'updated_by'
 ];
 
 function isTemplate(row) {
@@ -135,6 +143,9 @@ function pickInstance(row, id, masterId, occOrdinal) {
   // mirrors that for the instance table.
   if (row.created_at !== undefined) out.created_at = row.created_at;
   if (row.updated_at !== undefined) out.updated_at = row.updated_at;
+  // 999.1576: who-attribution mirrors the created_at/updated_at copy above.
+  if (row.created_by !== undefined) out.created_by = row.created_by;
+  if (row.updated_by !== undefined) out.updated_by = row.updated_by;
   // Derived local-tz caches — written by the scheduler when placing chunks
   if (row.date !== undefined) out.date = row.date;
   if (row.day !== undefined) out.day = row.day;
@@ -182,6 +193,7 @@ async function insertTask(dbOrTrx, row) {
   // insertTask/insertTasksBatch did not) so an owner-less row fails loudly here instead of as
   // a cryptic DB constraint error — and no future caller can silently insert an unowned task.
   requireUserId(row && row.user_id, 'insertTask');
+  row = stampInsert(row); // 999.1576: who-attribution at the write boundary
   if (isTemplate(row)) {
     var masterRow = pickMaster(row, row.id);
     // Guarantee recurring=1 — templates must be visible in tasks_v WHERE recurring=1.
@@ -219,6 +231,7 @@ async function insertTask(dbOrTrx, row) {
  * Returns { masterUpdated, instanceUpdated } — row counts per table.
  */
 async function updateTaskById(dbOrTrx, id, changes, userId) {
+  changes = stampUpdate(changes); // 999.1576
   var split = splitUpdateFields(changes);
   var masterUpdated = 0;
   var instanceUpdated = 0;
@@ -226,10 +239,16 @@ async function updateTaskById(dbOrTrx, id, changes, userId) {
   var iWhere = { id: id };
   if (userId) { mWhere.user_id = userId; iWhere.user_id = userId; }
 
-  if (Object.keys(split.master).length > 0) {
+  // 999.1576 (harrison): updated_by alone must not turn a deliberate no-op
+  // call (empty change-set) or a single-table edit into extra writes — same
+  // suppression updateTasksWhere applies. updated_at-only change-sets keep
+  // firing (pre-existing touch semantics preserved).
+  var masterHasWrite = Object.keys(split.master).some(function(k) { return k !== 'updated_by'; });
+  var instanceHasWrite = Object.keys(split.instance).some(function(k) { return k !== 'updated_by'; });
+  if (masterHasWrite) {
     masterUpdated = await dbOrTrx('task_masters').where(mWhere).update(split.master);
   }
-  if (Object.keys(split.instance).length > 0) {
+  if (instanceHasWrite) {
     instanceUpdated = await dbOrTrx('task_instances').where(iWhere).update(split.instance);
   }
   return { masterUpdated: masterUpdated, instanceUpdated: instanceUpdated };
@@ -272,6 +291,7 @@ async function insertTasksBatch(dbOrTrx, rows) {
   for (var ri = 0; ri < rows.length; ri++) {
     requireUserId(rows[ri] && rows[ri].user_id, 'insertTasksBatch (row ' + ri + ')');
   }
+  rows = rows.map(stampInsert); // 999.1576: who-attribution at the write boundary
 
   var masterRows = [];
   var instanceRowsNonRecurring = [];
@@ -352,6 +372,7 @@ function requireUserId(userId, fn) {
  */
 async function updateTasksWhere(dbOrTrx, userId, applyWhere, changes, opts) {
   requireUserId(userId, 'updateTasksWhere');
+  changes = stampUpdate(changes); // 999.1576
   var split = splitUpdateFields(changes);
   var masterUpdated = 0;
   var instanceUpdated = 0;
@@ -360,7 +381,10 @@ async function updateTasksWhere(dbOrTrx, userId, applyWhere, changes, opts) {
   // filter may reference master-only columns (e.g. `project`) that would
   // error against task_instances.
   var instanceKeys = Object.keys(split.instance);
-  var instanceHasRealChange = instanceKeys.some(function(k) { return k !== 'updated_at'; });
+  // 999.1576: updated_by is bookkeeping like updated_at — it must not flip a
+  // "no real change" batch into a real one (the scheduler's master-skip and
+  // the instance-skip below depend on this).
+  var instanceHasRealChange = instanceKeys.some(function(k) { return k !== 'updated_at' && k !== 'updated_by'; });
   // Same bail-out on the master side. The scheduler's persist path only
   // mutates instance-side columns (scheduled_at / date / time / unscheduled /
   // dur). Its batched UPDATE arrives here with master keys == only
@@ -368,7 +392,7 @@ async function updateTasksWhere(dbOrTrx, userId, applyWhere, changes, opts) {
   // cost — cache-staleness detection already picks up the instance-side
   // updated_at bump via the tasks_v UNION.
   var masterKeys = Object.keys(split.master);
-  var masterHasRealChange = masterKeys.some(function(k) { return k !== 'updated_at'; });
+  var masterHasRealChange = masterKeys.some(function(k) { return k !== 'updated_at' && k !== 'updated_by'; });
   // instanceOnly: skip master writes entirely (used by scheduler to prevent
   // overwriting user-set master.dur with effectiveDuration / time_remaining).
   var instanceOnly = opts && opts.instanceOnly;
@@ -411,8 +435,11 @@ async function deleteInstancesWhere(dbOrTrx, userId, applyWhere) {
  */
 async function updateInstancesWhere(dbOrTrx, userId, applyWhere, changes) {
   requireUserId(userId, 'updateInstancesWhere');
+  changes = stampUpdate(changes); // 999.1576
   var split = splitUpdateFields(changes);
-  if (Object.keys(split.instance).length === 0) return 0;
+  // 999.1576 (harrison): updated_by alone is not a write trigger — see updateTaskById.
+  var hasWrite = Object.keys(split.instance).some(function(k) { return k !== 'updated_by'; });
+  if (!hasWrite) return 0;
   return await applyWhere(dbOrTrx('task_instances').where('user_id', userId)).update(split.instance);
 }
 
@@ -471,7 +498,7 @@ async function resetRecurringInstances(dbOrTrx, userId, masterId, logTag) {
  * filter (status not in ''|NULL) excludes it automatically.
  */
 async function softCancelById(dbOrTrx, id, userId) {
-  var changes = { status: 'cancelled', updated_at: dbOrTrx.fn.now() };
+  var changes = stampUpdate({ status: 'cancelled', updated_at: dbOrTrx.fn.now() }); // 999.1576
   var iWhere = { id: id }; if (userId) iWhere.user_id = userId;
   var instanceCancelled = await dbOrTrx('task_instances').where(iWhere).update(changes);
   var mWhere = { id: id }; if (userId) mWhere.user_id = userId;
@@ -485,7 +512,7 @@ async function softCancelById(dbOrTrx, id, userId) {
  */
 async function softCancelWhere(dbOrTrx, userId, applyWhere) {
   requireUserId(userId, 'softCancelWhere');
-  var changes = { status: 'cancelled', updated_at: dbOrTrx.fn.now() };
+  var changes = stampUpdate({ status: 'cancelled', updated_at: dbOrTrx.fn.now() }); // 999.1576
   var instanceCancelled = await applyWhere(dbOrTrx('task_instances').where('user_id', userId)).update(changes);
   var masterCancelled = await applyWhere(dbOrTrx('task_masters').where('user_id', userId)).update(changes);
   return { instanceCancelled: instanceCancelled, masterCancelled: masterCancelled };

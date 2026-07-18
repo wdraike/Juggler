@@ -8,7 +8,12 @@
  * context win for system-writers-within-requests.
  */
 
-const { runWithActor, getActor, peekActor, expressAuditContext } = require('../../src/lib/audit-context');
+const {
+  runWithActor,
+  getActor,
+  peekActor,
+  expressAuditContext,
+} = require('../../src/lib/audit-context');
 
 describe('audit-context', () => {
   test('getActor throws outside any context (no silent NULL)', () => {
