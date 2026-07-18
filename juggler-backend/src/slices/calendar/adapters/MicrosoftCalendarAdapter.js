@@ -11,6 +11,7 @@
  * module (back-compat for controllers + frozen migration until W5).
  */
 
+var { stampInsert, stampUpdate } = require('../../../lib/audit-context'); // 999.1576 inc.3b.3
 var crypto = require('crypto');
 // W5 (juggler-hex-h2): route through lib/db's shared singleton (single pool).
 // 999.1534: db is lazily resolved and injectable via setDb() for unit tests,
@@ -139,7 +140,7 @@ async function getValidAccessToken(user) {
     update.msft_cal_refresh_token = credentials.refreshToken;
   }
 
-  await getDb()('users').where('id', user.id).update(update);
+  await getDb()('users').where('id', user.id).update(stampUpdate(update));
 
   return credentials.accessToken;
 }
@@ -293,14 +294,14 @@ async function hasChanges(token, user) {
   } catch (err) {
     // 410 = delta token expired; clear it so next sync does full fetch
     if (err.statusCode === 410 || err.status === 410 || (err.message && err.message.includes('syncStateNotFound'))) {
-      await getDb()('users').where('id', user.id).update({ msft_cal_delta_link: null });
+      await getDb()('users').where('id', user.id).update(stampUpdate({ msft_cal_delta_link: null }));
       return { hasChanges: true, tokenInvalid: true };
     }
     throw err;
   }
 
   if (!result.hasChanges && result.deltaLink && result.deltaLink !== deltaLink) {
-    await getDb()('users').where('id', user.id).update({ msft_cal_delta_link: result.deltaLink });
+    await getDb()('users').where('id', user.id).update(stampUpdate({ msft_cal_delta_link: result.deltaLink }));
   }
 
   return result;

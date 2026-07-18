@@ -11,6 +11,7 @@
  * module (back-compat for controllers + frozen migration until W5).
  */
 
+var { stampInsert, stampUpdate } = require('../../../lib/audit-context'); // 999.1576 inc.3b.3
 var crypto = require('crypto');
 // W5 (juggler-hex-h2): route through lib/db's shared singleton (single pool).
 // 999.1534: db is lazily resolved and injectable via setDb() for unit tests,
@@ -77,7 +78,7 @@ async function getValidAccessToken(user) {
     update.gcal_refresh_token = credentials.refresh_token;
   }
 
-  await getDb()('users').where('id', user.id).update(update);
+  await getDb()('users').where('id', user.id).update(stampUpdate(update));
 
   return credentials.access_token;
 }
@@ -202,7 +203,7 @@ async function listEvents(token, timeMin, timeMax, userId) {
   }
 
   if (syncTokenToStore && userId) {
-    await getDb()('users').where('id', userId).update({ gcal_sync_token: syncTokenToStore });
+    await getDb()('users').where('id', userId).update(stampUpdate({ gcal_sync_token: syncTokenToStore }));
   }
 
   if (hasPartialFailure) {
@@ -241,7 +242,7 @@ async function hasChanges(token, user) {
 
   // If Google returned a new sync token with no changes, save it
   if (!result.hasChanges && result.nextSyncToken && result.nextSyncToken !== syncToken) {
-    await getDb()('users').where('id', user.id).update({ gcal_sync_token: result.nextSyncToken });
+    await getDb()('users').where('id', user.id).update(stampUpdate({ gcal_sync_token: result.nextSyncToken }));
   }
 
   return result;

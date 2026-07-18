@@ -15,6 +15,7 @@
  * module (back-compat for controllers + frozen migration until W5).
  */
 
+var { stampInsert, stampUpdate } = require('../../../lib/audit-context'); // 999.1576 inc.3b.3
 var crypto = require('crypto');
 // W5 (juggler-hex-h2): route through lib/db's shared singleton (single pool).
 // 999.1534: db is lazily resolved and injectable via setDb() for unit tests,
@@ -155,9 +156,9 @@ async function listEvents(client, timeMin, timeMax, userId) {
       if (remoteCal && (remoteCal.syncToken || remoteCal.ctag)) {
         // Store sync token per calendar — use the first one for legacy compat
         if (j === 0) {
-          await getDb()('users').where('id', userId).update({
+          await getDb()('users').where('id', userId).update(stampUpdate({
             apple_cal_sync_token: remoteCal.syncToken || remoteCal.ctag
-          });
+          }));
         }
       }
     }
@@ -187,9 +188,9 @@ async function hasChanges(client, user) {
   );
 
   if (!result.hasChanges && result.syncToken && result.syncToken !== syncToken) {
-    await getDb()('users').where('id', user.id).update({
+    await getDb()('users').where('id', user.id).update(stampUpdate({
       apple_cal_sync_token: result.syncToken
-    });
+    }));
   }
 
   return result;

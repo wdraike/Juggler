@@ -2,6 +2,7 @@
  * MCP Data & Calendar Tools — export/import and calendar sync
  */
 
+var { stampInsert, stampUpdate } = require('../../lib/audit-context'); // 999.1576 inc.3b.3
 const { z } = require('zod');
 const safeStringify = require('../safeStringify');
 const db = require('../../db');
@@ -163,7 +164,7 @@ function registerDataTools(server, userId) {
       if (orphanedSync.length > 0) {
         issues.push({ type: 'orphaned_sync', count: orphanedSync.length, details: orphanedSync.slice(0, 20).map(function(r) { return { syncId: r.id, taskId: r.task_id, provider: r.provider }; }) });
         if (fix) {
-          await db('cal_sync_ledger').whereIn('id', orphanedSync.map(function(r) { return r.id; })).update({ status: 'deleted' });
+          await db('cal_sync_ledger').whereIn('id', orphanedSync.map(function(r) { return r.id; })).update(stampUpdate({ status: 'deleted' }));
           fixed.push('Soft-deleted ' + orphanedSync.length + ' orphaned sync records');
         }
       }
@@ -202,7 +203,7 @@ function registerDataTools(server, userId) {
             var deps2;
             try { deps2 = typeof master.depends_on === 'string' ? JSON.parse(master.depends_on) : master.depends_on; } catch(_e) { continue; }
             var cleaned = deps2.filter(function(d) { return masterIds.has(d); });
-            await db('task_masters').where('id', bd.taskId).update({ depends_on: JSON.stringify(cleaned), updated_at: db.fn.now() });
+            await db('task_masters').where('id', bd.taskId).update(stampUpdate({ depends_on: JSON.stringify(cleaned), updated_at: db.fn.now() }));
           }
           fixed.push('Cleaned broken deps from ' + brokenDeps.length + ' tasks');
         }

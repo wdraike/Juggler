@@ -15,6 +15,7 @@
  */
 
 'use strict';
+var { stampInsert, stampUpdate } = require('../../../lib/audit-context'); // 999.1576 inc.3b.3
 
 var libDb = require('../../../lib/db');
 var { createLogger } = require('@raike/lib-logger');
@@ -36,7 +37,7 @@ function getDb() { return libDb.getDefaultDb(); }
 function logFeatureEvent(reqOrUserId, featureKey, eventType, value) {
   var userId = typeof reqOrUserId === 'object' ? (reqOrUserId.user && reqOrUserId.user.id) : reqOrUserId;
   var planId = typeof reqOrUserId === 'object' ? reqOrUserId.planId : 'free';
-  return getDb()('feature_events').insert({
+  return getDb()('feature_events').insert(stampInsert({
     user_id: userId,
     feature_key: featureKey,
     event_type: eventType,
@@ -47,7 +48,7 @@ function logFeatureEvent(reqOrUserId, featureKey, eventType, value) {
     request_id: typeof reqOrUserId === 'object' ? ((reqOrUserId.headers && reqOrUserId.headers['x-request-id']) || null) : null,
     value: value ? JSON.stringify(value) : null,
     created_at: new Date()
-  }).catch(function (err) {
+  })).catch(function (err) {
     logger.error('[feature-gate] Failed to log event:', { error: err });
   });
 }

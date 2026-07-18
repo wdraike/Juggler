@@ -36,6 +36,7 @@
  */
 
 // ── sync-lock (re-exported by reference, no wrapper logic) ──────────
+var { stampInsert, stampUpdate } = require('../../lib/audit-context'); // 999.1576 inc.3b.3
 var syncLock = require('../../lib/sync-lock');
 
 // ── date helpers backing the 60d sync window (same refs as controller) ──
@@ -1071,7 +1072,7 @@ async function gatherProviderSyncData(user, userId, windowStart, windowEnd, tz, 
           : vaEventIdCol === 'apple_event_id'
             ? { apple_cal_password: null }
             : { msft_cal_access_token: null, msft_cal_refresh_token: null, msft_cal_token_expiry: null };
-        await srcDb('users').where('id', userId).update({ ...vaTokenCols, updated_at: srcDb.fn.now() });
+        await srcDb('users').where('id', userId).update(stampUpdate({ ...vaTokenCols, updated_at: srcDb.fn.now() }));
       }
       stats.errors.push({
         phase: 'token_validation',
@@ -1136,7 +1137,7 @@ async function gatherProviderSyncData(user, userId, windowStart, windowEnd, tz, 
           : eventIdCol === 'apple_event_id'
             ? { apple_cal_password: null }
             : { msft_cal_access_token: null, msft_cal_refresh_token: null, msft_cal_token_expiry: null };
-        await srcDb('users').where('id', userId).update({ ...tokenCols, updated_at: srcDb.fn.now() });
+        await srcDb('users').where('id', userId).update(stampUpdate({ ...tokenCols, updated_at: srcDb.fn.now() }));
       }
 
       stats.errors.push({
@@ -1717,7 +1718,7 @@ async function runSyncWritePhase(userId, buffers, syncStart, emitProgress) {
     var groupSigs = Object.keys(ledgerGroups);
     for (var wg = 0; wg < groupSigs.length; wg++) {
       var grp = ledgerGroups[groupSigs[wg]];
-      await trx('cal_sync_ledger').whereIn('id', grp.ids).update(grp.fields);
+      await trx('cal_sync_ledger').whereIn('id', grp.ids).update(stampUpdate(grp.fields));
     }
 
     // 5. Ledger inserts — dedup by (user_id, provider, task_id) then bulk insert.
@@ -1740,7 +1741,7 @@ async function runSyncWritePhase(userId, buffers, syncStart, emitProgress) {
       for (var wli2 = 0; wli2 < winnerIdxs.length; wli2++) {
         dedupedLedgerInserts.push(ledgerInserts[winnerIdxs[wli2]]);
       }
-      await trx('cal_sync_ledger').insert(dedupedLedgerInserts).onConflict().ignore();
+      await trx('cal_sync_ledger').insert(dedupedLedgerInserts.map(stampInsert)).onConflict().ignore();
     }
 
     // 6. Sync history inserts — bulk insert
@@ -1748,7 +1749,7 @@ async function runSyncWritePhase(userId, buffers, syncStart, emitProgress) {
       for (var wh = 0; wh < historyInserts.length; wh++) {
         historyInserts[wh].created_at = now;
       }
-      await trx('sync_history').insert(historyInserts);
+      await trx('sync_history').insert(historyInserts.map(stampInsert));
     }
 
     // [FIX D-09] Prune fully-resolved orphan ledger rows — no task, no event, no purpose
@@ -1770,7 +1771,7 @@ async function runSyncWritePhase(userId, buffers, syncStart, emitProgress) {
       var syncedCol = providerData[providerIds[pi3]].adapter.getLastSyncedColumn();
       userUpdate[syncedCol] = now;
     }
-    await trx('users').where('id', userId).update(userUpdate);
+    await trx('users').where('id', userId).update(stampUpdate(userUpdate));
   });
 
   } finally {

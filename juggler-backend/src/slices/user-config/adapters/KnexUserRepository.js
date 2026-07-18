@@ -11,6 +11,7 @@
  */
 
 'use strict';
+var { stampInsert, stampUpdate } = require('../../../lib/audit-context'); // 999.1576 inc.3b.3
 
 function KnexUserRepository(opts) {
   this._db = (opts && opts.db)
@@ -31,7 +32,7 @@ KnexUserRepository.prototype.insertUser = function (row) {
 };
 
 KnexUserRepository.prototype.updateTimezone = function (id, timezone) {
-  return this._db('users').where('id', id).update({ timezone: timezone });
+  return this._db('users').where('id', id).update(stampUpdate({ timezone: timezone }));
 };
 
 module.exports = KnexUserRepository;

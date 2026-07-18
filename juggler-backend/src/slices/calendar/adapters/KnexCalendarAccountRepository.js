@@ -30,6 +30,7 @@
  * @param {Function} [deps.db] Knex instance. Defaults to lib/db's shared
  *   singleton (getDefaultDb) — the single pool src/db.js also re-exports.
  */
+var { stampInsert, stampUpdate } = require('../../../lib/audit-context'); // 999.1576 inc.3b.3
 function KnexCalendarAccountRepository(deps) {
   var d = deps || {};
   this.db = d.db || require('../../../lib/db').getDefaultDb();
@@ -52,7 +53,7 @@ KnexCalendarAccountRepository.prototype.getUser = function (userId) {
  * @returns {Promise<number>}
  */
 KnexCalendarAccountRepository.prototype.updateUser = function (userId, fields) {
-  return this.db('users').where('id', userId).update(fields);
+  return this.db('users').where('id', userId).update(stampUpdate(fields));
 };
 
 /**
@@ -82,7 +83,7 @@ KnexCalendarAccountRepository.prototype.getUserConfig = function (userId, config
  * @returns {Promise<*>}
  */
 KnexCalendarAccountRepository.prototype.insertUserConfig = function (fields) {
-  return this.db('user_config').insert(fields);
+  return this.db('user_config').insert(stampInsert(fields));
 };
 
 /**
@@ -92,7 +93,7 @@ KnexCalendarAccountRepository.prototype.insertUserConfig = function (fields) {
  * @returns {Promise<number>}
  */
 KnexCalendarAccountRepository.prototype.updateUserConfig = function (userId, configKey, fields) {
-  return this.db('user_config').where({ user_id: userId, config_key: configKey }).update(fields);
+  return this.db('user_config').where({ user_id: userId, config_key: configKey }).update(stampUpdate(fields));
 };
 
 /**
@@ -186,7 +187,7 @@ KnexCalendarAccountRepository.prototype.findUserCalendarByIdForUser = function (
  * @returns {Promise<*>}
  */
 KnexCalendarAccountRepository.prototype.insertUserCalendar = function (fields) {
-  return this.db('user_calendars').insert(fields);
+  return this.db('user_calendars').insert(stampInsert(fields));
 };
 
 /**
@@ -195,7 +196,7 @@ KnexCalendarAccountRepository.prototype.insertUserCalendar = function (fields) {
  * @returns {Promise<number>}
  */
 KnexCalendarAccountRepository.prototype.updateUserCalendarById = function (id, fields) {
-  return this.db('user_calendars').where('id', id).update(fields);
+  return this.db('user_calendars').where('id', id).update(stampUpdate(fields));
 };
 
 /**
