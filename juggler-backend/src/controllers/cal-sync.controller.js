@@ -40,9 +40,9 @@ var { decideTerminalTaskSync } = require('../slices/calendar/domain/terminal-tas
 // out). Its delete effect is byte-identical to the terminal path, so it is
 // applied through the SHARED applyTerminalDelete applier below.
 var { decidePastCleanupSync } = require('../slices/calendar/domain/past-cleanup-decision');
-// 999.1025 inc. 6 — pure external-edit predicate (axis-S seam). Was FORKED at two
-// byte-identical sites below (eventModifiedExternally + provEventModified); now unified.
-var { isEventModifiedExternally } = require('../slices/calendar/domain/event-modified-predicate');
+// 999.1025 inc. 6/10 — the external-edit predicate isEventModifiedExternally now
+// lives entirely inside the decide* use-cases (hash-push-decision.js,
+// provider-origin-pull-decision.js); no longer imported at this scope.
 // 999.1025 inc. 7 — pure "both changed → conflict resolution" decision (push /
 // pull / push-conflict). _buildPullFields + logSyncAction stay effects here.
 var { decideExternalEditSync } = require('../slices/calendar/domain/external-edit-decision');
@@ -55,6 +55,16 @@ var { decideProviderOriginPull } = require('../slices/calendar/domain/provider-o
 // promote). INSERT buffers, stats, logs, the orphan deleteEvent call, and the
 // processed-id bookkeeping stay effects here.
 var { decideIngestEvent } = require('../slices/calendar/domain/ingest-event-decision');
+// 999.1025 inc. 10 — pure juggler-origin push/pull/skip routing (the hash-based
+// push-skip matrix incl. the merged-follower skip). taskHash is injected; the
+// push/pull effects + logSyncAction stay effects at the call site.
+var { decideHashPushSync } = require('../slices/calendar/domain/hash-push-decision');
+// 999.1025 inc. 10 — pure per-task push-eligibility predicate for the Phase 3a
+// new-event push queue. The pushQueue.push effect stays at the call site.
+var { isTaskPushEligible } = require('../slices/calendar/domain/push-eligibility');
+// 999.1025 inc. 10 — pure merged-follower cleanup planner. The mutation buffers
+// (splitDeleteQueue / ledgerUpdates / ledgeredTaskIds) stay effects at the call site.
+var { planMergedFollowerCleanup } = require('../slices/calendar/domain/merged-follower-cleanup');
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('cal-sync.controller');
 
@@ -511,46 +521,31 @@ async function sync(req, res) {
             // a provider (origin=pid) are read-only from Juggler's perspective —
             // we don't own them, can't PATCH them, and shouldn't try.
             if (ledger.origin === JUGGLER_ORIGIN && !isIngestOnly(pid)) {
-              // Followers in a merged-chunks run: skip the PATCH — their
-              // event is queued for delete in Phase 3's splitDeleteQueue,
-              // so patching it first wastes an API call. We also clear
-              // last_pushed_hash later via the deleted_local transition.
-              if (mergedFollowers[task.id]) {
-                pStats.skipped = (pStats.skipped || 0) + 1;
-                stats.skipped = (stats.skipped || 0) + 1;
-                // [FIX D-10] Log skipped item to sync_history so UI can show skipped count
-                logSyncAction(pid, 'skipped', {
-                  taskId: task ? task.id : null,
-                  taskText: task ? task.text : null,
-                  eventId: ledger ? ledger.provider_event_id : null,
-                  calendarName: calendarLabels[pid] || null
+                // Hash-based push/pull/skip routing is a PURE use-case (999.1025
+                // inc. 10 — decideHashPushSync): the merged-follower skip + the
+                // taskHash-vs-last_pushed_hash change matrix (push / external-edit
+                // / pull / push-terminal-conflict / skip) in; an action tag + the
+                // freshly-computed push hash + the pure-branch log descriptors out.
+                // taskHash is INJECTED so the domain module stays controller-free;
+                // isEventModifiedExternally (inc. 6) is imported inside the decision.
+                // The push/pull EFFECTS — pendingEventUpdates, _buildPullFields,
+                // taskUpdates, pStats/stats, logSyncAction — stay here; the
+                // pure-branch logs (skip-merged / push-terminal-conflict / skip)
+                // are replayed from pushDecision.logs after the branch effects run.
+                var pushDecision = decideHashPushSync({
+                  task: task, event: event, ledger: ledger, pid: pid,
+                  isMergedFollower: !!mergedFollowers[task.id],
+                  isTaskTerminal: isTerminalStatus(task.status),
+                  taskHash: taskHash,
+                  calendarLabels: calendarLabels
                 });
-              } else {
-                // Hash-based skip: push only when the task's push-relevant fields
-                // actually differ from what the ledger says we last sent. With
-                // 200+ active tasks per user, the old "every sync, every task"
-                // PATCH loop burned through GCal's 600/min quota on every sync —
-                // and masked real errors behind rate-limit 403s. taskHash covers
-                // text/date/time/dur/status/when/project/marker (see
-                // cal-sync-helpers.js). On push success the new hash is written
-                // to last_pushed_hash (below); on failure we leave the old hash
-                // in place so the next sync retries.
-                var newHash = taskHash(task);
-                var taskChanged = (newHash !== ledger.last_pushed_hash);
+                var newHash = pushDecision.newHash;
 
-                // Detect whether the user edited the event on the calendar side.
-                // Compares event.lastModified against ledger.last_modified_at (the
-                // value we recorded on the previous sync). If the event is newer by
-                // more than 1s AND the task itself hasn't changed, the edit must have
-                // come from the calendar. PURE predicate (999.1025 inc. 6 axis-S seam)
-                // — the >1000ms tolerance + the ETag fallback (Apple CalDAV) live in
-                // slices/calendar/domain/event-modified-predicate.js.
-                var eventModifiedExternally = isEventModifiedExternally(event, ledger);
-
-                var isTaskTerminal = isTerminalStatus(task.status);
-
-                if (taskChanged && !eventModifiedExternally) {
-                  // Task changed, event stable → push (existing behaviour)
+                if (pushDecision.action === 'push' || pushDecision.action === 'push-terminal-conflict') {
+                  // Task changed + event stable → push; OR the calendar moved a
+                  // terminal task's event → re-assert the correct date (terminal
+                  // tasks are immutable). Identical push EFFECT; push-terminal-
+                  // conflict also carries a conflict_juggler log (replayed below).
                   pendingEventUpdates.push({
                     eventId: event._url || ledger.provider_event_id,
                     task: task,
@@ -559,7 +554,7 @@ async function sync(req, res) {
                   });
                   pStats.pushed++;
                   stats.pushed++;
-                } else if (taskChanged && eventModifiedExternally) {
+                } else if (pushDecision.action === 'external-edit') {
                   // Both changed — conflict resolution is a PURE use-case
                   // (999.1025 inc. 7 — decideExternalEditSync): task placement +
                   // terminal status + the event-vs-task last-modified tiebreaker
@@ -572,7 +567,7 @@ async function sync(req, res) {
                   // freshly-built pull fields.
                   var editDecision = decideExternalEditSync({
                     task: task, event: event, ledger: ledger, pid: pid,
-                    isTaskTerminal: isTaskTerminal,
+                    isTaskTerminal: isTerminalStatus(task.status),
                     calendarLabels: calendarLabels
                   });
                   if (editDecision.action === 'pull') {
@@ -603,7 +598,7 @@ async function sync(req, res) {
                       logSyncAction(editDecision.logs[_cel].provider, editDecision.logs[_cel].action, editDecision.logs[_cel].opts);
                     }
                   }
-                } else if (!taskChanged && eventModifiedExternally && !isTaskTerminal) {
+                } else if (pushDecision.action === 'pull') {
                   // Event changed, task stable, task not terminal → pull from event to task
                   var pullFields = _buildPullFields(event, task, tz, pAdapter);
                   // Backward dependency check: warn if task is moved to before a task it depends on
@@ -633,36 +628,19 @@ async function sync(req, res) {
                     detail: (isPromotion ? 'Event moved on calendar — task promoted to fixed' : 'Event edited on calendar — task updated') + (backwardDepWarning ? '. WARNING: ' + backwardDepWarning : ''),
                     calendarName: calendarLabels[pid] || null
                   });
-                } else if (!taskChanged && eventModifiedExternally && isTaskTerminal) {
-                  // Calendar moved a completed task's event — push back to correct it.
-                  // Terminal tasks are immutable; the calendar edit is rejected and the
-                  // correct date/status is re-asserted so the calendar can't drift forward.
-                  pendingEventUpdates.push({
-                    eventId: event._url || ledger.provider_event_id,
-                    task: task,
-                    ledgerId: ledger.id,
-                    newHash: newHash
-                  });
-                  pStats.pushed++;
-                  stats.pushed++;
-                  logSyncAction(pid, 'conflict_juggler', {
-                    taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
-                    detail: 'Calendar moved completed task — pushed correct date back (terminal tasks are immutable)',
-                    calendarName: calendarLabels[pid] || null
-                  });
                 } else {
-                  // Neither changed → skip (existing behaviour)
+                  // skip / skip-merged → no push, no pull. Both just bump skipped;
+                  // their 'skipped' log rides in pushDecision.logs (replayed below).
                   pStats.skipped = (pStats.skipped || 0) + 1;
                   stats.skipped = (stats.skipped || 0) + 1;
-                  // [FIX D-10] Log skipped item to sync_history so UI can show skipped count
-                  logSyncAction(pid, 'skipped', {
-                    taskId: task ? task.id : null,
-                    taskText: task ? task.text : null,
-                    eventId: ledger ? ledger.provider_event_id : null,
-                    calendarName: calendarLabels[pid] || null
-                  });
                 }
-              }
+
+                // Replay the pure-branch log descriptors (skip-merged /
+                // push-terminal-conflict / skip). push / external-edit / pull own
+                // their logs at the call site, so pushDecision.logs is empty there.
+                for (var _hpl = 0; _hpl < pushDecision.logs.length; _hpl++) {
+                  logSyncAction(pushDecision.logs[_hpl].provider, pushDecision.logs[_hpl].action, pushDecision.logs[_hpl].opts);
+                }
             } else {
               // NON-juggler-origin pull decision is PURE (999.1025 inc. 8 —
               // decideProviderOriginPull): the two remaining inline pull branches
@@ -1012,15 +990,25 @@ async function sync(req, res) {
       // deleted_local — the leader's expanded event now covers its time
       // slot. If the follower had no active ledger yet (new merge before
       // that chunk ever synced on its own), there's nothing to delete.
-      Object.keys(mergedFollowers).forEach(function(followerId) {
-        var row = (ledgerByProvider[pid2] || []).find(function(l) {
-          return l.task_id === followerId && l.status === 'active';
-        });
-        if (!row) return;
-        if (row.provider_event_id) splitDeleteQueue.push(row.provider_event_id);
-        ledgerUpdates.push({ id: row.id, fields: { status: 'deleted_local' } });
-        ledgeredTaskIds2.delete(followerId);
+      // Which merged followers to tear down is a PURE decision (999.1025 inc. 10
+      // — planMergedFollowerCleanup): for each absorbed follower, find its active
+      // ledger row, and if present queue its event for delete + its ledger row for
+      // deleted_local + drop it from the pushed set. Followers with no active
+      // ledger row (a new merge before that chunk ever synced) are skipped. The
+      // buffers (splitDeleteQueue / ledgerUpdates / ledgeredTaskIds2) stay here.
+      var mfCleanup = planMergedFollowerCleanup({
+        mergedFollowers: mergedFollowers,
+        ledgerRows: ledgerByProvider[pid2] || []
       });
+      for (var _mfd = 0; _mfd < mfCleanup.deleteEventIds.length; _mfd++) {
+        splitDeleteQueue.push(mfCleanup.deleteEventIds[_mfd]);
+      }
+      for (var _mfl = 0; _mfl < mfCleanup.ledgerDeletes.length; _mfl++) {
+        ledgerUpdates.push({ id: mfCleanup.ledgerDeletes[_mfl].id, fields: { status: 'deleted_local' } });
+      }
+      for (var _mfu = 0; _mfu < mfCleanup.unledgerTaskIds.length; _mfu++) {
+        ledgeredTaskIds2.delete(mfCleanup.unledgerTaskIds[_mfu]);
+      }
 
       // 999.1217 (W4): the old "cache-flagged split placements replace a
       // stale non-split ledger entry" pass lived here. It only ever fired for
@@ -1045,35 +1033,24 @@ async function sync(req, res) {
       var pushQueue = [];
       for (var ti2 = 0; ti2 < allTasks.length; ti2++) {
         var newTask = allTasks[ti2];
-        if (processedTaskIds2.has(newTask.id)) continue;
-        if (ledgeredTaskIds2.has(newTask.id)) continue;
-        // Followers in a merged-chunks run: their time slot is covered
-        // by the leader's expanded event; don't push a separate event.
-        if (mergedFollowers[newTask.id]) continue;
-
-        var taskStatus = newTask.status || '';
-        if (taskStatus === 'done' || taskStatus === 'cancel' || taskStatus === 'skip' || taskStatus === 'pause' || taskStatus === 'disabled') continue;
-
-        if (newTask.taskType === 'recurring_template') continue;
-        if (newTask.unscheduled) continue;
-        if (!newTask.date) continue;
-        if (!newTask.time && !isAllDayTaskBackend(newTask)) continue;
-
-        // Skip tasks with existing event IDs — unless they were just cleared for split replacement
-        var existingEvId = newTask[(eventIdCol === 'gcal_event_id' ? 'gcalEventId' : eventIdCol === 'msft_event_id' ? 'msftEventId' : 'appleEventId')];
-        if (existingEvId && !splitReplacedIds.has(newTask.id)) continue;
-
-        var taskSA = newTask._scheduled_at instanceof Date ? newTask._scheduled_at : new Date(String(newTask._scheduled_at).replace(' ', 'T') + 'Z');
-        if (taskSA < todayStart) continue;
-        if (taskSA > windowEnd) continue;
-
-        // 999.1217 (W4): split chunks persist as separate task_instances rows
-        // (999.841) — `newTask` here already IS a single chunk (or a merged
-        // leader with mergeContiguousSplitChunks' summed dur/title), so it
-        // pushes as one event with no synthetic per-part expansion needed.
-        // The old schedule_cache-driven expansion (one synthetic sub-task per
-        // cached splitPart) is removed; it only ever applied to the
-        // pre-999.841 model where a chunk had no DB row of its own.
+        // Per-task push eligibility is a PURE predicate (999.1025 inc. 10 —
+        // isTaskPushEligible): the already-processed / already-ledgered /
+        // merged-follower / terminal-or-disabled status / template / unscheduled /
+        // missing-date-or-time / already-has-event-id (unless split-replaced) /
+        // out-of-window filters in; a boolean out. The Set/window state is passed
+        // in; the pushQueue.push effect stays here. Split chunks persist as
+        // separate task_instances rows (999.841), so `newTask` already IS a single
+        // chunk (or a merged leader) — no synthetic per-part expansion needed.
+        if (!isTaskPushEligible({
+          task: newTask,
+          processedTaskIds: processedTaskIds2,
+          ledgeredTaskIds: ledgeredTaskIds2,
+          mergedFollowers: mergedFollowers,
+          splitReplacedIds: splitReplacedIds,
+          eventIdCol: eventIdCol,
+          todayStart: todayStart,
+          windowEnd: windowEnd
+        })) continue;
         pushQueue.push({ task: newTask });
       }
 
