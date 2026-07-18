@@ -1,3 +1,4 @@
+var { runWithActor } = require('../../../lib/audit-context'); // 999.1576 inc.3b
 const BATCH_SIZE     = 500;
 const INTERVAL_MS    = 60_000;
 const MAX_ATTEMPTS   = 10;
@@ -17,7 +18,7 @@ class AiUsageFlusher {
 
   start() {
     if (this._timer) return;
-    this._timer = setInterval(() => { this._tick().catch(() => {}); }, INTERVAL_MS);
+    this._timer = setInterval(() => { runWithActor('ai-usage-flusher', () => this._tick()).catch(() => {}); }, INTERVAL_MS); // 999.1576
     setTimeout(() => { this._tick().catch(() => {}); }, 5_000);
   }
 
