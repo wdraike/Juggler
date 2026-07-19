@@ -83,10 +83,17 @@ function expressAuditContext(req, res, next) {
 }
 
 /**
- * Stamp an INSERT row with who-attribution (999.1576 inc.4: STRICT — throws
- * without an established actor; jest bodies get an ambient 'jest' actor via
- * the global test-fn wrapper in test-helpers/afterEachFile.js, the mechanism
- * that actually propagates where enterWith-in-beforeEach could not).
+ * Stamp an INSERT row with who-attribution (999.1576 — currently SOFT: no
+ * ambient actor leaves the columns untouched; the strict getActor() flip is
+ * the epic's closing increment. NOTE: no ambient-'jest' test mechanism exists
+ * yet — THREE approaches are disproven (enterWith-in-beforeEach, global
+ * test-fn wrapping, and the inc.4b testEnvironment event hook, whose
+ * enterWith store is lost between handleTestEvent and the test body under
+ * jest's own sequencer ordering). The strict flip must first land a
+ * deterministic test-ambience design — candidate: an explicitly-armed,
+ * sandbox-scoped test-default actor set by setupFilesAfterEnv, resolved
+ * synchronously here with no ALS propagation involved — see the item's
+ * inc.4b findings).
  * Caller-provided values always win, so import/backfill paths carrying
  * explicit historical attribution are never overwritten.
  */
@@ -115,8 +122,8 @@ function stampUpdate(changes) {
 }
 
 /**
- * TEST-ONLY escape: run fn with NO ambient actor (the global jest wrapper
- * gives every test body a 'jest' actor; no-context assertions opt out here).
+ * TEST-ONLY escape: run fn with NO ambient actor (for no-context assertions
+ * once a test-ambience mechanism lands — see stampInsert note; none exists yet).
  */
 function _runWithoutActor(fn) {
   return als.run(undefined, fn);
