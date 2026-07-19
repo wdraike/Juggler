@@ -5,7 +5,7 @@
  * All nodes default to collapsed; state persists in localStorage.
  */
 
-import React, { useMemo, useState, useEffect, useCallback } from 'react';
+import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import TaskCard from '../tasks/TaskCard';
 import { getTheme } from '../../theme/colors';
 import { getTaskIcon } from '../../utils/taskIcon';
@@ -60,6 +60,39 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
   );
 
   var warnings = issues.warnings;
+
+  // 999.1077 (R6, David 2026-07-19, BINDING) — overdue pileup visibility.
+  // Overdue unscheduled items pin to PAST dates so today's DailyView (which
+  // renders only selectedDateKey) never shows them, and this section defaults
+  // collapsed — so a pileup was invisible without a manual expand. Ruling:
+  // auto-expand the Overdue section whenever its count transitions 0→N
+  // (including "N already at mount", treated as a transition from an unknown/
+  // empty prior state); auto-collapse it back when the count clears to 0.
+  // A user's explicit re-collapse DURING a nonzero-count session is respected:
+  // only a FRESH 0→N transition re-triggers auto-expand — a later N1→N2 change
+  // (both > 0) does not fight a manual toggle. No new banner UI; badge
+  // behavior (actionCount) is unchanged.
+  var overdueCount = issues.overdue.length;
+  var prevOverdueCountRef = useRef(0);
+  useEffect(function() {
+    var prevCount = prevOverdueCountRef.current;
+    if (prevCount === 0 && overdueCount > 0) {
+      setCollapsed(function(prev) {
+        if (!prev.overdue) return prev;
+        var next = Object.assign({}, prev);
+        next.overdue = false;
+        return next;
+      });
+    } else if (overdueCount === 0 && prevCount > 0) {
+      setCollapsed(function(prev) {
+        if (prev.overdue) return prev;
+        var next = Object.assign({}, prev);
+        next.overdue = true;
+        return next;
+      });
+    }
+    prevOverdueCountRef.current = overdueCount;
+  }, [overdueCount]);
 
   var actionSections = [
     {
