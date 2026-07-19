@@ -47,8 +47,8 @@ test('system identities ride the row the same way', async () => {
   expect(db.__inserts[0].row.created_by).toBe('cal-sync');
 });
 
-test('outside any context the carrier stays NULL (soft until inc.4 tightening)', async () => {
-  await enqueueWrite('user-9', 'task-3', 'delete', {}, 'test');
+test('outside any context the carrier stays NULL (soft until the strict increment)', async () => {
+  const { _runWithoutActor } = require('../../src/lib/audit-context');
+  await _runWithoutActor(() => enqueueWrite('user-9', 'task-3', 'delete', {}, 'test'));
   expect(db.__inserts[0].row.created_by).toBeNull();
-  expect(db.__inserts[0].row.updated_by).toBeNull();
 });

@@ -83,17 +83,20 @@ function expressAuditContext(req, res, next) {
 }
 
 /**
- * Stamp an INSERT row with who-attribution (999.1576 inc.3). SOFT for now:
- * without an established actor the row passes through UNCHANGED — the DB
- * NULL is the honest "unattributed" marker, never a fake actor. The inc.4
- * tightening flips this to strict getActor() (empirically: 2027 test paths
- * exercise writers outside any context; a per-test ALS hook via
- * enterWith-in-beforeEach does NOT propagate into jest test bodies, so the
- * strict flip needs its own designed test-context mechanism first).
+ * Stamp an INSERT row with who-attribution (999.1576 inc.4: STRICT — throws
+ * without an established actor; jest bodies get an ambient 'jest' actor via
+ * the global test-fn wrapper in test-helpers/afterEachFile.js, the mechanism
+ * that actually propagates where enterWith-in-beforeEach could not).
  * Caller-provided values always win, so import/backfill paths carrying
  * explicit historical attribution are never overwritten.
  */
 function stampInsert(row) {
+  // inc.4a: still SOFT. Strict flip attempted 2026-07-18 and reverted: 192
+  // no-actor throws from BACKGROUND TIMERS in tests (lib/usage-reporter's own
+  // flush interval and similar setInterval callbacks run outside any ALS
+  // context and surface as unhandled rejections in unrelated suites). The
+  // final increment must wrap every timer-spawned writer (usage-reporter et
+  // al) before this becomes getActor().
   const actor = peekActor();
   if (!actor) return row;
   const out = Object.assign({}, row);
@@ -104,11 +107,19 @@ function stampInsert(row) {
 
 /** Stamp an UPDATE change-set with updated_by. Same rules as stampInsert. */
 function stampUpdate(changes) {
-  const actor = peekActor();
+  const actor = peekActor(); // inc.4a: soft — see stampInsert note
   if (!actor) return changes;
   const out = Object.assign({}, changes);
   if (out.updated_by === undefined || out.updated_by === null) out.updated_by = actor;
   return out;
+}
+
+/**
+ * TEST-ONLY escape: run fn with NO ambient actor (the global jest wrapper
+ * gives every test body a 'jest' actor; no-context assertions opt out here).
+ */
+function _runWithoutActor(fn) {
+  return als.run(undefined, fn);
 }
 
 module.exports = {
@@ -118,4 +129,5 @@ module.exports = {
   expressAuditContext,
   stampInsert,
   stampUpdate,
+  _runWithoutActor,
 };

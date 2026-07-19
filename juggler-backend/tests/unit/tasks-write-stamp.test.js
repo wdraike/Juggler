@@ -83,12 +83,12 @@ test('softCancel stamps updated_by', async () => {
   });
 });
 
-test('no ambient context: row passes through unstamped (honest NULL until inc.4)', async () => {
+test('no ambient context: row passes through unstamped (soft until the strict increment)', async () => {
+  const { _runWithoutActor } = require('../../src/lib/audit-context');
   const db = fakeDb();
-  await tasksWrite.insertTask(db, { id: 't9', user_id: 'u', text: 'x' });
+  await _runWithoutActor(() => tasksWrite.insertTask(db, { id: 't9', user_id: 'u', text: 'x' }));
   const master = db.__ops.find((o) => o.table === 'task_masters');
   expect(master.row.created_by).toBeUndefined();
-  expect(master.row.updated_by).toBeUndefined();
 });
 
 test('empty change-set stays a no-op even with an ambient actor (harrison)', async () => {

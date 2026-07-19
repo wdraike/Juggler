@@ -115,7 +115,7 @@ async function enqueueWrite(userId, taskId, operation, fields, source) {
   // the ACTOR CARRIER — writes are applied later by the flusher (under the
   // 'scheduler' context), so the originator must ride the row. Soft capture
   // (peek, may be null) until the inc.4 tightening flips this strict.
-  var actor = require('./audit-context').peekActor();
+  var actor = require('./audit-context').peekActor(); // inc.4a: soft — see audit-context stampInsert note
   await db('task_write_queue').insert({
     user_id: userId,
     task_id: taskId,
