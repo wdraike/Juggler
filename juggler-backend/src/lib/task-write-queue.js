@@ -270,7 +270,11 @@ async function _doFlush(userId) {
       var fields = op.fields;
       // Fields came out of JSON, so datetime columns are ISO strings. MySQL
       // rejects those literally; rehydrate to Date so the driver formats them.
-      var DATETIME_FIELDS = ['scheduled_at', 'desired_at', 'deadline', 'start_after_at', 'disabled_at', 'recur_start', 'recur_end'];
+      // 999.1110 (harrison review): next_start is a DATE column too — omitting
+      // it here left a queued/locked-path anchor edit rejected by MySQL (ISO
+      // string literal on a DATE column), the exact class recur_start/recur_end
+      // are already listed for.
+      var DATETIME_FIELDS = ['scheduled_at', 'desired_at', 'deadline', 'start_after_at', 'disabled_at', 'recur_start', 'recur_end', 'next_start'];
       for (var dfi = 0; dfi < DATETIME_FIELDS.length; dfi++) {
         var f = DATETIME_FIELDS[dfi];
         if (fields && typeof fields[f] === 'string' && fields[f].length > 0) {

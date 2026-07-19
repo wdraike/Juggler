@@ -124,6 +124,10 @@ var TEMPLATE_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', '
   'when', 'day_req', 'recurring', 'time_flex', 'split', 'split_min',
   'travel_before', 'travel_after', 'depends_on',
   'notes', 'url', 'flex_when', 'recur', 'recur_start', 'recur_end',
+  // 999.1110: next_start (the "Next Cycle Starts" anchor) lives on the
+  // template/master row, same as recur_start/recur_end — an edit made via a
+  // recurring_instance row must route here, not onto the instance.
+  'next_start',
   'preferred_time_mins', 'placement_mode',
   'weather_precip', 'weather_cloud', 'weather_temp_min', 'weather_temp_max',
   'weather_temp_unit', 'weather_humidity_min', 'weather_humidity_max'];
@@ -701,6 +705,13 @@ function taskToRow(task, userId, timezone, _currentTask) {
   if (task.tz !== undefined) row.tz = task.tz || null;
   if (task.recurStart !== undefined) row.recur_start = task.recurStart || null;
   if (task.recurEnd !== undefined) row.recur_end = task.recurEnd || null;
+  // 999.1110: 'Next Cycle Starts' — next_start is the single unified
+  // recurrence anchor column. The command layer (UpdateTask.js) is
+  // responsible for snapping/validating task.nextStart against the recur
+  // pattern BEFORE it reaches this pure mapper (mirrors how the mapper
+  // trusts already-resolved values everywhere else — no business logic
+  // lives here, matching this file's PURE-relocation contract).
+  if (task.nextStart !== undefined) row.next_start = task.nextStart || null;
   if (task.preferredTimeMins !== undefined) row.preferred_time_mins = task.preferredTimeMins;
   if (task.weatherPrecip   !== undefined) row.weather_precip    = task.weatherPrecip;
   if (task.weatherCloud    !== undefined) row.weather_cloud     = task.weatherCloud;

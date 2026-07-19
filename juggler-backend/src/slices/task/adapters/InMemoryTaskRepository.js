@@ -47,6 +47,9 @@ var MASTER_UPDATE_FIELDS = [
   'when', 'day_req', 'time_flex', 'flex_when', 'placement_mode',
   'preferred_time_mins', 'tz',
   'recurring', 'recur', 'recur_start', 'recur_end',
+  // 999.1110: next_start — keep in sync with src/lib/tasks-write.js's
+  // MASTER_UPDATE_FIELDS (harrison review: this mirror had drifted).
+  'next_start',
   'split', 'split_min',
   'depends_on', 'location', 'tools', 'travel_before', 'travel_after',
   'disabled_at', 'disabled_reason',

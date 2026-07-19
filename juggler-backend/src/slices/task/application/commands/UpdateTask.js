@@ -212,6 +212,10 @@ UpdateTask.prototype.execute = async function execute(input) {
   var needsComplexPath = body.recur !== undefined
     || body.recurStart !== undefined
     || body.recurEnd !== undefined
+    // 999.1110: the "Next Cycle Starts" anchor edit needs recurCleanup's
+    // future-instance redraw (see the complex-path resolution block below) —
+    // the fast path never reaches recurCleanup.
+    || body.nextStart !== undefined
     || body.when !== undefined
     || body.anchorDate
     || body._allowUnfix
@@ -239,6 +243,20 @@ UpdateTask.prototype.execute = async function execute(input) {
   var crossFieldErr = this.validation.validateStartAfterDeadlineCrossField(body, existing);
   if (crossFieldErr) {
     return { status: 400, body: { error: crossFieldErr } };
+  }
+
+  // 999.1110/R5 (2026-07-19): "Next Cycle Starts" anchor edit — pattern-recur
+  // types snap the chosen date to the next date the master's own recur
+  // pattern allows (matching TaskEditForm's client-side snap byte-for-byte);
+  // rolling accepts any date. Re-derived server-side (never trust the
+  // client) so MCP/direct-API callers get the same guarantee the UI gives.
+  // A falsy nextStart (clearing the field) skips validation entirely.
+  if (body.nextStart !== undefined && body.nextStart) {
+    var anchorResolved = this.validation.resolveNextStartAnchor(body, existing);
+    if (anchorResolved.error) {
+      return { status: 400, body: { error: anchorResolved.error } };
+    }
+    body = Object.assign({}, body, { nextStart: anchorResolved.value });
   }
 
   var tz = this.safeTimezone(input.timezoneHeader);

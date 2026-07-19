@@ -241,6 +241,109 @@ describe('UpdateTask (updateTask)', function () {
   });
 });
 
+// ── 999.1110 (David 2026-07-04) / R5 (2026-07-19) — "Next Cycle Starts" anchor edit ──
+// Closes the gap: rolling/pattern recurring masters had no UI/API path to move
+// next_start (the unified recurrence anchor) once set — editing the legacy
+// 'recurrence start' field (recur_start) is silently a no-op post-first-
+// completion because expandRecurring's getAnchor() prefers next_start.
+describe('UpdateTask — 999.1110 "Next Cycle Starts" anchor edit', function () {
+  function seedWeeklyTemplate(extra) {
+    return new InMemoryTaskRepository({ rows: [
+      Object.assign({
+        id: 'anc1', user_id: USER, task_type: 'recurring_template', recurring: 1,
+        text: 'weekly report', pri: 'P3', dur: 30, status: '',
+        recur: JSON.stringify({ type: 'weekly', days: 'M' }),
+        recur_start: '2026-01-05', next_start: null,
+        updated_at: new Date('2026-06-01T00:00:00Z')
+      }, extra || {})
+    ] });
+  }
+
+  function seedNonRecurring() {
+    return new InMemoryTaskRepository({ rows: [
+      { id: 'plain1', user_id: USER, task_type: 'task', text: 'one-off', pri: 'P3',
+        status: '', recur: null, updated_at: new Date('2026-06-01T00:00:00Z') }
+    ] });
+  }
+
+  function anchorDeps(repo, trigger, events, extra) {
+    var cleanupCalls = [];
+    var deps = H.baseDeps(Object.assign({
+      repo: repo,
+      cache: H.makeCacheFake(),
+      events: events,
+      enqueueScheduleRun: trigger,
+      recurCleanup: function (ctx) {
+        cleanupCalls.push({ taskType: ctx.taskType, id: ctx.id, row: ctx.row });
+        return ctx.trxRepo.updateTaskById(ctx.id, ctx.row, ctx.userId);
+      }
+    }, extra || {}));
+    deps.__cleanupCalls = cleanupCalls;
+    return deps;
+  }
+
+  test('needsComplexPath: a nextStart-only edit routes through recurCleanup (fast path never reaches it)', function () {
+    var repo = seedWeeklyTemplate();
+    var trigger = H.makeTriggerSpy();
+    var deps = anchorDeps(repo, trigger, H.makeEventsSpy());
+    var uc = new UpdateTask(deps);
+    return uc.execute({ id: 'anc1', userId: USER, body: { nextStart: '2026-07-20' } }).then(function (out) {
+      expect(out.status).toBe(200);
+      expect(deps.__cleanupCalls.length).toBe(1);
+      expect(deps.__cleanupCalls[0].taskType).toBe('recurring_template');
+    });
+  });
+
+  test('pattern-recur type: chosen date already matches the pattern → persisted verbatim', function () {
+    var repo = seedWeeklyTemplate();
+    var uc = new UpdateTask(anchorDeps(repo, H.makeTriggerSpy(), H.makeEventsSpy()));
+    // 2026-07-20 is a Monday — matches the weekly-Monday pattern.
+    return uc.execute({ id: 'anc1', userId: USER, body: { nextStart: '2026-07-20' } }).then(function (out) {
+      expect(out.status).toBe(200);
+      expect(out.body.task.nextStart).toBe('2026-07-20');
+      return repo.fetchTaskWithEventIds('anc1', USER).then(function (r) {
+        expect(String(r.next_start)).toBe('2026-07-20');
+      });
+    });
+  });
+
+  test('VALIDATION (999.1110): pattern-mismatched date is SNAPPED forward to the next valid pattern date, not rejected', function () {
+    var repo = seedWeeklyTemplate();
+    var uc = new UpdateTask(anchorDeps(repo, H.makeTriggerSpy(), H.makeEventsSpy()));
+    // 2026-07-22 is a Wednesday; the pattern is Mondays-only → snaps to 2026-07-27.
+    return uc.execute({ id: 'anc1', userId: USER, body: { nextStart: '2026-07-22' } }).then(function (out) {
+      expect(out.status).toBe(200);
+      expect(out.body.task.nextStart).toBe('2026-07-27');
+      return repo.fetchTaskWithEventIds('anc1', USER).then(function (r) {
+        expect(String(r.next_start)).toBe('2026-07-27');
+      });
+    });
+  });
+
+  test('rolling recur type: ANY chosen date is accepted verbatim, no snapping (R5)', function () {
+    var repo = seedWeeklyTemplate({ recur: JSON.stringify({ type: 'rolling', every: 7, unit: 'days' }), recur_start: null });
+    var uc = new UpdateTask(anchorDeps(repo, H.makeTriggerSpy(), H.makeEventsSpy()));
+    return uc.execute({ id: 'anc1', userId: USER, body: { nextStart: '2026-07-22' } }).then(function (out) {
+      expect(out.status).toBe(200);
+      expect(out.body.task.nextStart).toBe('2026-07-22');
+    });
+  });
+
+  test('no active recurrence → 400, no write, no trigger', function () {
+    var repo = seedNonRecurring();
+    var trigger = H.makeTriggerSpy();
+    var uc = new UpdateTask(anchorDeps(repo, trigger, H.makeEventsSpy()));
+    return uc.execute({ id: 'plain1', userId: USER, body: { nextStart: '2026-07-22' } }).then(function (out) {
+      expect(out.status).toBe(400);
+      expect(out.body.error).toMatch(/active recurrence/);
+      expect(trigger.calls.length).toBe(0);
+      return repo.fetchTaskWithEventIds('plain1', USER).then(function (r) {
+        expect(r.next_start == null).toBe(true);
+      });
+    });
+  });
+});
+
 describe('BatchCreateTasks (batchCreateTasks)', function () {
   function batchDeps(repo, trigger, extra) {
     return H.baseDeps(Object.assign({

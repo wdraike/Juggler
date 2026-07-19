@@ -34,9 +34,10 @@
 'use strict';
 
 var PlacementMode = require('../value-objects/PlacementMode');
-var { isAnchorDependentRecur } = require('juggler-shared/scheduler/expandRecurring');
+var { isAnchorDependentRecur, nextMatchingDate } = require('juggler-shared/scheduler/expandRecurring');
 var { getNowInTimezone, DEFAULT_TIMEZONE } = require('juggler-shared/scheduler/getNowInTimezone');
 var { isoToDateKey } = require('../../../../scheduler/dateHelpers');
+var { parseDate, formatDateKey } = require('juggler-shared/scheduler/dateHelpers');
 
 // Verbatim from task.controller.js ~745.
 var VALID_WHEN_KEYWORDS = ['', 'fixed', 'allday', 'anytime'];
@@ -455,6 +456,86 @@ function validateEarliestStartDeadlineCrossField(body, existing) {
   return null;
 }
 
+/**
+ * Resolve the user-chosen "Next Cycle Starts" anchor (999.1110, David
+ * 2026-07-04; R5 ruling 2026-07-19) against the master's own recurrence
+ * pattern. Only called when `body.nextStart` is a non-empty value — clearing
+ * the anchor (empty string/null) needs no pattern check.
+ *
+ * Rolling has no calendar pattern — the chosen date is returned verbatim
+ * (R5: "rolling type accepts any date"). Pattern-recur types (daily/weekly/
+ * biweekly/monthly/interval) are SNAPPED forward to the next date the
+ * pattern actually allows via `nextMatchingDate` — the SAME forward-search
+ * `next-occurrence-anchor.js`'s terminal-event path calls (shared/scheduler/
+ * expandRecurring.js's `matchesRecurrenceDay` predicate) — never an
+ * arbitrary date. Phase-referenced against the CURRENT anchor
+ * (existing.next_start); when absent, against recur_start — preferring the
+ * INCOMING `body.recurStart` over the stale `existing.recur_start` when the
+ * SAME request also edits recurStart (harrison review, 2026-07-19: without
+ * this, a combined recurStart+nextStart save phase-referenced against the
+ * OLD recur_start here while the frontend's handleNextStartChange already
+ * phase-referenced against the user's freshly-typed recurStart, a real
+ * client/server snap divergence for any master whose next_start is not yet
+ * set) — then the chosen date itself as the last resort. BYTE-IDENTICAL to
+ * the frontend's client-side snap (juggler-frontend/src/components/tasks/
+ * TaskEditForm.jsx handleNextStartChange's `nextStart || recurStart || val`)
+ * so client and server never disagree about where a chosen date lands. This
+ * is the authoritative, defense-in-depth recomputation — a caller that
+ * bypasses the UI (MCP, direct API, curl) gets the identical guarantee,
+ * never a silently-accepted arbitrary date.
+ *
+ * @param {Object} body - request body; `body.recur` (if present) takes
+ *   precedence over `existing.recur` — a same-request recur type change
+ *   validates the anchor against the NEW pattern, not the stale one. Same
+ *   incoming-over-existing precedence applies to `body.recurStart` for the
+ *   phase-anchor tier (see above).
+ * @param {Object} existing - the existing task row (template OR instance —
+ *   recur/recur_start/next_start are inherited identically via tasks_v, see
+ *   canonical-views.sql).
+ * @returns {{ value: ?string, error: ?string }} `value` is the date to
+ *   persist ('YYYY-MM-DD'). `error` is set when there is no active
+ *   recurrence to anchor, the chosen date itself is unparseable, OR (house
+ *   style: contract over leniency, David's 999.1567 ruling) the pattern has
+ *   NO matching date at all within `nextMatchingDate`'s bounded forward walk
+ *   — a genuinely unmatchable recur config, rejected with 400 rather than
+ *   silently accepted. An ordinary pattern MISMATCH (a valid pattern, chosen
+ *   date just doesn't land on it) still SNAPS forward to the next date the
+ *   pattern allows — it does not reach this reject branch.
+ */
+function resolveNextStartAnchor(body, existing) {
+  var recurSource = body.recur !== undefined ? body.recur : (existing && existing.recur);
+  var recur = recurSource;
+  if (typeof recur === 'string') {
+    try { recur = JSON.parse(recur); } catch (_e) { recur = null; }
+  }
+  if (!recur || !recur.type || recur.type === 'none') {
+    return { value: null, error: 'Next Cycle Starts requires an active recurrence pattern' };
+  }
+  if (recur.type === 'rolling') {
+    return { value: body.nextStart, error: null };
+  }
+  var chosen = parseDate(body.nextStart);
+  if (!chosen) {
+    return { value: null, error: 'Next Cycle Starts must be a valid date' };
+  }
+  var dayBefore = new Date(chosen.getTime());
+  dayBefore.setDate(dayBefore.getDate() - 1);
+  var currentAnchor = existing && existing.next_start
+    ? String(existing.next_start).slice(0, 10) : null;
+  // 999.1110 (harrison review): the incoming recurStart (this SAME request)
+  // outranks the stale existing.recur_start, mirroring how `recur` above
+  // already prefers the incoming value — kills the combined-edit divergence.
+  var recurStartSource = body.recurStart !== undefined
+    ? body.recurStart
+    : (existing && existing.recur_start ? String(existing.recur_start).slice(0, 10) : null);
+  var phaseAnchorKey = currentAnchor || recurStartSource || body.nextStart;
+  var snapped = nextMatchingDate(recur, formatDateKey(dayBefore), phaseAnchorKey);
+  if (!snapped) {
+    return { value: null, error: 'Next Cycle Starts does not match this task’s recurrence pattern' };
+  }
+  return { value: snapped, error: null };
+}
+
 module.exports = {
   isFixedRecurringConflict,
   validateTaskInput,
@@ -462,6 +543,7 @@ module.exports = {
   validateStartAfterDeadlineCrossField: validateEarliestStartDeadlineCrossField,
   checkCalSyncEditGuard,
   guardFixedCalendarWhen,
+  resolveNextStartAnchor,
   VALID_WHEN_KEYWORDS,
   VALID_DAY_REQ,
   VALID_DAY_CODES,

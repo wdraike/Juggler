@@ -31,6 +31,9 @@ var MASTER_FIELDS = [
   'when', 'day_req', 'time_flex', 'flex_when', 'placement_mode',
   'preferred_time_mins', 'tz',
   'recurring', 'recur', 'recur_start', 'recur_end',
+  // 999.1110: next_start — the single unified recurrence anchor ("Next
+  // Cycle Starts"). Lives on task_masters only, same as recur_start/recur_end.
+  'next_start',
   'split', 'split_min',
   'depends_on', 'location', 'tools', 'travel_before', 'travel_after',
   'disabled_at', 'disabled_reason',
@@ -64,6 +67,13 @@ var MASTER_UPDATE_FIELDS = [
   'when', 'day_req', 'time_flex', 'flex_when', 'placement_mode',
   'preferred_time_mins', 'tz',
   'recurring', 'recur', 'recur_start', 'recur_end',
+  // 999.1110: next_start — the single unified recurrence anchor ("Next
+  // Cycle Starts"). A THIRD field-routing list (distinct from
+  // taskMappers.js's TEMPLATE_FIELDS, which is a DIFFERENT concern — routing
+  // an instance-row edit up to its template) — omitting it here silently
+  // dropped every next_start UPDATE (splitUpdateFields routes unlisted
+  // fields to NEITHER table).
+  'next_start',
   'split', 'split_min',
   'depends_on', 'location', 'tools', 'travel_before', 'travel_after',
   'disabled_at', 'disabled_reason',

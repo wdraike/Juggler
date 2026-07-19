@@ -248,6 +248,14 @@ async function recurCleanup(ctx) {
     // {recurring:false} skipped resetRecurringInstances entirely.
     if (templateUpdate.recur !== undefined || templateUpdate.recurring === 0) {
       await twrite.resetRecurringInstances(trx, userId, existing.source_id, '[RECUR] cycle reset via instance edit');
+    } else if (templateUpdate.next_start !== undefined) {
+      // 999.1110/R5 (2026-07-19): a "Next Cycle Starts" anchor edit made via
+      // an instance row routes to the template (next_start is a
+      // TEMPLATE_FIELDS entry) — redraw future instances from the new
+      // anchor exactly as the recurring_template branch below does for a
+      // direct template edit. Done/skip/cancel/missed instances are never
+      // touched (resetRecurringInstances only targets status='' rows).
+      await twrite.resetRecurringInstances(trx, userId, existing.source_id, '[RECUR] anchor edit redraw via instance (Next Cycle Starts)');
     }
 
     if (Object.keys(instanceUpdate).length > 0) {
@@ -265,7 +273,11 @@ async function recurCleanup(ctx) {
       // FR-5 (juggler-recur-lifecycle-redesign, W5): `dur`/`placement_mode` are
       // material fields too — must reach this branch so the classifier below
       // can fire reconciliation for a dur-only/placement_mode-only edit.
-      || row.dur !== undefined || row.placement_mode !== undefined;
+      || row.dur !== undefined || row.placement_mode !== undefined
+      // 999.1110/R5: a "Next Cycle Starts" (next_start) anchor edit also
+      // needs cleanup — see the dedicated branch below (not materialChanged;
+      // recur/split/dur/placement are unchanged, only the anchor moved).
+      || row.next_start !== undefined;
     if (needsCleanup) {
       if (row.recurring === 0) {
         // 999.967(a) (David ruling 2026-07-01: done instances keep status='done',
@@ -379,6 +391,16 @@ async function recurCleanup(ctx) {
             }
             await twrite.resetRecurringInstances(trx, userId, id, '[RECUR] cycle reset (recur/split/dur/placement change)');
           }
+        } else if (row.next_start !== undefined) {
+          // 999.1110/R5 (2026-07-19): editing the "Next Cycle Starts" anchor
+          // alone (no recur/split/dur/placementMode change) deletes
+          // not-yet-happened future instances generated from the OLD anchor
+          // and lets the next scheduler run regenerate from the NEW one
+          // (expandRecurring's getAnchor prefers next_start — see
+          // shared/scheduler/expandRecurring.js). resetRecurringInstances
+          // only targets status='' (open/pending) rows — done/skip/cancel/
+          // missed instances are NEVER touched (pencil-not-pen rule).
+          await twrite.resetRecurringInstances(trx, userId, id, '[RECUR] anchor edit redraw (Next Cycle Starts)');
         } else {
           var _dateMatch = require('juggler-shared/scheduler/dateMatchesRecurrence');
           var srcDateStr = updatedTmpl.recur_start

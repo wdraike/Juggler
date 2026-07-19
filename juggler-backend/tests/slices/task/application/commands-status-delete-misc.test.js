@@ -520,6 +520,34 @@ describe('BatchUpdateTasks (batchUpdateTasks)', function () {
       expect(out.body.code).toBe('CAL_SYNCED_READONLY');
     });
   });
+
+  // 999.1110 (harrison review, 2026-07-19): the batch path has no snap/
+  // validation and no redraw wiring for the anchor — reject rather than
+  // silently persist an unvalidated next_start + leave stale instances.
+  test('999.1110: a batch item carrying nextStart is REJECTED (400), no txn run, no trigger', function () {
+    var repo = new InMemoryTaskRepository();
+    var trigger = H.makeTriggerSpy();
+    var txnSpy = jest.fn();
+    var uc = new BatchUpdateTasks(buDeps(repo, trigger, { batchUpdateTxn: txnSpy }));
+    return uc.execute({ userId: USER, body: { updates: [{ id: 'x1', nextStart: '2026-07-20' }] } }).then(function (out) {
+      expect(out.status).toBe(400);
+      expect(out.body.error).toMatch(/nextStart/);
+      expect(out.body.error).toMatch(/batch updates/);
+      expect(txnSpy).not.toHaveBeenCalled();
+      expect(trigger.calls.length).toBe(0);
+    });
+  });
+
+  test('999.1110: nextStart rejection fires even when the offending item is NOT first in the batch', function () {
+    var repo = new InMemoryTaskRepository();
+    var txnSpy = jest.fn();
+    var uc = new BatchUpdateTasks(buDeps(repo, H.makeTriggerSpy(), { batchUpdateTxn: txnSpy }));
+    return uc.execute({ userId: USER, body: { updates: [{ id: 'x1', text: 'ok' }, { id: 'x2', nextStart: '2026-07-20' }] } }).then(function (out) {
+      expect(out.status).toBe(400);
+      expect(out.body.error).toMatch(/Update item 1 \(x2\)/);
+      expect(txnSpy).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('ReEnableTask (reEnableTask)', function () {

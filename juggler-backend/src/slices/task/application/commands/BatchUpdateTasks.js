@@ -101,6 +101,17 @@ BatchUpdateTasks.prototype.execute = async function execute(input) {
         && (bvFields.scheduledAt === undefined || bvFields.scheduledAt === null || bvFields.scheduledAt === '')) {
       bvExisting = await this.repo.fetchTaskWithEventIds(bvItem.id, userId);
     }
+    // 999.1110 (harrison review, 2026-07-19): the batch path has NO snap/
+    // validation (resolveNextStartAnchor) and NO redraw (recurCleanup's
+    // resetRecurringInstances call) wiring — batchUpdateTxn's per-item
+    // routing would persist next_start UNVALIDATED (an arbitrary date could
+    // slip through) and leave stale future instances un-redrawn (silently
+    // wrong, not merely incomplete). Bulk anchor editing is not an exposed
+    // product feature (the UI's "Next Cycle Starts" control only appears on
+    // the single-task edit form) — fail loud rather than silently-wrong.
+    if (bvFields.nextStart !== undefined) {
+      return { status: 400, body: { error: 'Update item ' + bvi + ' (' + bvItem.id + '): nextStart ("Next Cycle Starts") is not supported in batch updates — edit it via the single-task update endpoint' } };
+    }
     var bvErrs = this.validation.validateTaskInput(bvFields, bvExisting);
     if (bvErrs.length > 0) {
       return { status: 400, body: { error: 'Update item ' + bvi + ' (' + bvItem.id + '): ' + bvErrs.join('; ') } };
