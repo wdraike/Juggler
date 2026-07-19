@@ -214,6 +214,7 @@
             "active_task_key": "cal-sync-test-user-001|apple|<NEW-TASK-1>",
             "completed_at": null,
             "created_at": "<TS>",
+            "created_by": null,
             "done_frozen": 0,
             "error_detail": null,
             "event_all_day": 0,
@@ -239,6 +240,7 @@
             "task_id": "<NEW-TASK-1>",
             "task_updated_at": null,
             "updated_at": "<TS>",
+            "updated_by": null,
             "user_id": "cal-sync-test-user-001"
           }
         ]
@@ -249,6 +251,7 @@
             "action": "created",
             "calendar_name": "Home",
             "created_at": "<TS>",
+            "created_by": null,
             "detail": "New task from apple",
             "error_detail": null,
             "event_id": "uid-apple-remote-r1",
@@ -259,6 +262,8 @@
             "task_id": "<NEW-TASK-1>",
             "task_text": "Apple remote R1",
             "trigger_type": "manual",
+            "updated_at": "<TS>",
+            "updated_by": null,
             "user_id": "cal-sync-test-user-001"
           }
         ]

@@ -168,6 +168,7 @@
             "active_task_key": "cal-sync-test-user-001|gcal|w4a-1",
             "completed_at": null,
             "created_at": "<TS>",
+            "created_by": null,
             "done_frozen": 0,
             "error_detail": null,
             "event_all_day": 0,
@@ -193,12 +194,14 @@
             "task_id": "w4a-1",
             "task_updated_at": "2026-06-01 00:00:00",
             "updated_at": "<TS>",
+            "updated_by": null,
             "user_id": "cal-sync-test-user-001"
           },
           {
             "active_task_key": "cal-sync-test-user-001|gcal|w4a-2",
             "completed_at": null,
             "created_at": "<TS>",
+            "created_by": null,
             "done_frozen": 0,
             "error_detail": null,
             "event_all_day": 0,
@@ -224,6 +227,7 @@
             "task_id": "w4a-2",
             "task_updated_at": "2026-06-01 00:00:00",
             "updated_at": "<TS>",
+            "updated_by": null,
             "user_id": "cal-sync-test-user-001"
           }
         ]
@@ -234,6 +238,7 @@
             "action": "pushed",
             "calendar_name": null,
             "created_at": "<TS>",
+            "created_by": null,
             "detail": "Batch pushed 2 tasks to gcal",
             "error_detail": null,
             "event_id": null,
@@ -244,6 +249,8 @@
             "task_id": null,
             "task_text": "",
             "trigger_type": "manual",
+            "updated_at": "<TS>",
+            "updated_by": null,
             "user_id": "cal-sync-test-user-001"
           }
         ]
@@ -423,6 +430,7 @@
             "action": "skipped",
             "calendar_name": null,
             "created_at": "<TS>",
+            "created_by": null,
             "detail": null,
             "error_detail": null,
             "event_id": "ev-gcal-w4a-1",
@@ -433,12 +441,15 @@
             "task_id": "w4a-1",
             "task_text": "W4 w4a-1",
             "trigger_type": "manual",
+            "updated_at": "<TS>",
+            "updated_by": null,
             "user_id": "cal-sync-test-user-001"
           },
           {
             "action": "skipped",
             "calendar_name": null,
             "created_at": "<TS>",
+            "created_by": null,
             "detail": null,
             "error_detail": null,
             "event_id": "ev-gcal-w4a-2",
@@ -449,6 +460,8 @@
             "task_id": "w4a-2",
             "task_text": "W4 w4a-2",
             "trigger_type": "manual",
+            "updated_at": "<TS>",
+            "updated_by": null,
             "user_id": "cal-sync-test-user-001"
           }
         ]

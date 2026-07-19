@@ -170,6 +170,7 @@
             "action": "repush",
             "calendar_name": null,
             "created_at": "<TS>",
+            "created_by": null,
             "detail": "gcal event gone but juggler task content changed — will re-create",
             "error_detail": null,
             "event_id": "ev-gcal-w4e-miss3",
@@ -180,6 +181,8 @@
             "task_id": "w4e-miss3",
             "task_text": "W4 w4e-miss3",
             "trigger_type": "manual",
+            "updated_at": "<TS>",
+            "updated_by": null,
             "user_id": "cal-sync-test-user-001"
           }
         ]

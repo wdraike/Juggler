@@ -214,6 +214,7 @@
             "active_task_key": "cal-sync-test-user-001|gcal|<NEW-TASK-1>",
             "completed_at": null,
             "created_at": "<TS>",
+            "created_by": null,
             "done_frozen": 0,
             "error_detail": null,
             "event_all_day": 0,
@@ -239,12 +240,14 @@
             "task_id": "<NEW-TASK-1>",
             "task_updated_at": null,
             "updated_at": "<TS>",
+            "updated_by": null,
             "user_id": "cal-sync-test-user-001"
           },
           {
             "active_task_key": null,
             "completed_at": null,
             "created_at": "<TS>",
+            "created_by": null,
             "done_frozen": 0,
             "error_detail": null,
             "event_all_day": 0,
@@ -270,6 +273,7 @@
             "task_id": null,
             "task_updated_at": null,
             "updated_at": "<TS>",
+            "updated_by": null,
             "user_id": "cal-sync-test-user-001"
           }
         ]
@@ -280,6 +284,7 @@
             "action": "created",
             "calendar_name": null,
             "created_at": "<TS>",
+            "created_by": null,
             "detail": "New task from gcal",
             "error_detail": null,
             "event_id": "ev-gcal-ingest-future",
@@ -290,6 +295,8 @@
             "task_id": "<NEW-TASK-1>",
             "task_text": "Dentist appointment",
             "trigger_type": "manual",
+            "updated_at": "<TS>",
+            "updated_by": null,
             "user_id": "cal-sync-test-user-001"
           }
         ]

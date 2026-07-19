@@ -70,6 +70,10 @@ var { planMergedFollowerCleanup } = require('../slices/calendar/domain/merged-fo
 // the SHARED applyTerminalDelete applier at the call site (byte-identical to the
 // terminal / past-cleanup delete blocks).
 var { decideBothExistDisposition } = require('../slices/calendar/domain/both-exist-disposition');
+// 999.2062: the four residual inline decisions, carved (see each module's doc).
+var { decideStaleInstanceHeal } = require('../slices/calendar/domain/stale-instance-heal-decision');
+var { decideDoneFrozenSkip, shouldFreezeDonePush } = require('../slices/calendar/domain/done-frozen-policy');
+var { computeBackwardDepWarning } = require('../slices/calendar/domain/backward-dep-warning');
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('cal-sync.controller');
 
@@ -359,44 +363,22 @@ async function sync(req, res) {
         var ledger = pLedger[pli];
         var task = ledger.task_id ? tasksById[ledger.task_id] : null;
 
-        // Self-heal stale recurring-instance IDs. Reconcile re-numbers
-        // occurrence_ordinal over time; ledger task_ids end up pointing to
-        // instances that were replaced by new rows for the same date. Before
-        // taking the `!task && event` branch below (which deletes the GCal
-        // event + marks the ledger deleted_local, followed by a fresh push
-        // that creates a duplicate event), rewrite the ledger to the current
-        // live instance when we can find one by (master, date).
-        //
-        // Scope: recurring instance task_ids of the form `<masterId>-<ordinal>`.
-        // The trailing `-\d+` captures numeric ordinals for both UUID masters
-        // (dash-separated v7 UUIDs) and legacy short-id masters like
-        // `t1775853066082nuxt-1157`. Split chunks use `_part<N>` (underscore)
-        // so they're not matched by this regex — they fall through to the
-        // original branch. event_start is an ISO datetime from the provider;
-        // the leading YYYY-MM-DD is compared against the instance's `date`.
-        if (!task && ledger.task_id && ledger.event_start) {
-          var masterMatch = ledger.task_id.match(/^(.+)-\d+$/);
-          var dateMatch = ledger.event_start.match(/^(\d{4}-\d{2}-\d{2})/);
-          if (masterMatch && dateMatch) {
-            var healKey = masterMatch[1] + '|' + dateMatch[1];
-            var healed = tasksByMasterDate[healKey];
-            if (healed) {
-              // If the healed task is already tracked by another active ledger row,
-              // marking this row replaced avoids a unique-constraint violation on
-              // active_task_key when both rows would share the same (user,provider,task_id).
-              var healAlreadyTracked = pLedger.some(function(l) {
-                return l.task_id === healed.id && l.id !== ledger.id;
-              });
-              if (healAlreadyTracked) {
-                ledgerUpdates.push({ id: ledger.id, fields: { status: 'replaced' } });
-                ledger.task_id = null;
-              } else {
-                ledgerUpdates.push({ id: ledger.id, fields: { task_id: healed.id } });
-                ledger.task_id = healed.id; // keep in-memory consistent for the rest of this iteration
-                task = healed;
-              }
-            }
-          }
+        // Self-heal stale recurring-instance ledger task_ids. Decision is PURE
+        // (999.2062): decideStaleInstanceHeal owns the recurring-instance scope
+        // regex, the (master, date) lookup, and the already-tracked
+        // active_task_key guard (see module doc); the ledgerUpdates.push and
+        // in-memory ledger/task rebinding stay HERE.
+        var healDecision = decideStaleInstanceHeal({
+          task: task, ledger: ledger,
+          tasksByMasterDate: tasksByMasterDate, activeLedgers: pLedger
+        });
+        if (healDecision.action === 'mark-replaced') {
+          ledgerUpdates.push({ id: healDecision.ledgerId, fields: healDecision.fields });
+          ledger.task_id = null;
+        } else if (healDecision.action === 'relink') {
+          ledgerUpdates.push({ id: healDecision.ledgerId, fields: healDecision.fields });
+          ledger.task_id = healDecision.healedTask.id; // keep in-memory consistent for the rest of this iteration
+          task = healDecision.healedTask;
         }
 
         var event = ledger.provider_event_id ? pEventsById[ledger.provider_event_id] : null;
@@ -480,21 +462,18 @@ async function sync(req, res) {
             // regular push so ✓ prefix + transparency propagate to the calendar.
           }
 
-          // [FIX D-03] done_frozen guard — skip push for already-frozen rows
-          if (ledger.status === 'done_frozen') {
+          // [FIX D-03] done_frozen guard — already-frozen rows skip the push.
+          // Decision is PURE (999.2062): decideDoneFrozenSkip returns the
+          // ledger-update + 'skipped' log descriptors ([FIX D-10]); the stats
+          // bumps, calendarName resolution, and `continue` stay HERE.
+          var frozenDecision = decideDoneFrozenSkip({ task: task, event: event, ledger: ledger });
+          if (frozenDecision.action === 'skip') {
             pStats.skipped = (pStats.skipped || 0) + 1;
             stats.skipped = (stats.skipped || 0) + 1;
-            ledgerUpdates.push({ id: ledger.id, fields: {
-              event_summary: event ? (event.title || task.text) : task.text,
-              miss_count: 0
-            }});
-            // [FIX D-10] Log skipped item to sync_history so UI can show skipped count
-            logSyncAction(pid, 'skipped', {
-              taskId: task ? task.id : null,
-              taskText: task ? task.text : null,
-              eventId: ledger.provider_event_id,
+            ledgerUpdates.push(frozenDecision.ledgerUpdate);
+            logSyncAction(pid, frozenDecision.log.action, Object.assign({}, frozenDecision.log.opts, {
               calendarName: calendarLabels[pid] || null
-            });
+            }));
             continue;
           }
 
@@ -613,22 +592,12 @@ async function sync(req, res) {
                 } else if (pushDecision.action === 'pull') {
                   // Event changed, task stable, task not terminal → pull from event to task
                   var pullFields = _buildPullFields(event, task, tz, pAdapter);
-                  // Backward dependency check: warn if task is moved to before a task it depends on
-                  var backwardDepWarning = '';
-                  if (pullFields.scheduled_at && Array.isArray(task.dependsOn) && task.dependsOn.length > 0) {
-                    var newScheduledMs = new Date(pullFields.scheduled_at).getTime();
-                    for (var bdi = 0; bdi < task.dependsOn.length; bdi++) {
-                      var depId = task.dependsOn[bdi];
-                      var depTask = tasksById[depId];
-                      if (depTask && depTask._scheduled_at) {
-                        var depMs = new Date(depTask._scheduled_at).getTime();
-                        if (newScheduledMs < depMs) {
-                          backwardDepWarning = 'Task promoted to before dependency ' + depId;
-                          break;
-                        }
-                      }
-                    }
-                  }
+                  // Backward dependency check: warn if the task is pulled to
+                  // before a task it depends on. PURE (999.2062):
+                  // computeBackwardDepWarning; the log effect stays below.
+                  var backwardDepWarning = computeBackwardDepWarning({
+                    scheduledAt: pullFields.scheduled_at, dependsOn: task.dependsOn, tasksById: tasksById
+                  });
                   taskUpdates.push({ id: task.id, fields: pullFields });
                   pStats.pulled++;
                   stats.pulled++;
@@ -798,9 +767,9 @@ async function sync(req, res) {
             provider_etag: null
           }});
         }
-        // [FIX D-02] Freeze done tasks after first successful push (done_frozen)
-        var pushedTask = upd && upd.task;
-        if (pushedTask && pushedTask.status === 'done' && calCompletedBehavior === 'update') {
+        // [FIX D-02] Freeze done tasks after their first successful push.
+        // Predicate is PURE (999.2062): shouldFreezeDonePush.
+        if (shouldFreezeDonePush({ task: upd && upd.task, calCompletedBehavior: calCompletedBehavior })) {
           ledgerUpdates.push({ id: upd.ledgerId, fields: { status: 'done_frozen' } });
         }
       }

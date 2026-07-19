@@ -58,13 +58,25 @@ var CARVED_MODULES = [
   { fn: 'decideHashPushSync', mod: 'hash-push-decision' },
   { fn: 'isTaskPushEligible', mod: 'push-eligibility' },
   { fn: 'planMergedFollowerCleanup', mod: 'merged-follower-cleanup' },
-  { fn: 'decideBothExistDisposition', mod: 'both-exist-disposition' }
+  { fn: 'decideBothExistDisposition', mod: 'both-exist-disposition' },
+  // 999.2062 — the four former RESIDUAL allowlist entries, carved:
+  { fn: 'decideStaleInstanceHeal', mod: 'stale-instance-heal-decision' },
+  { fn: 'decideDoneFrozenSkip', mod: 'done-frozen-policy' },
+  { fn: 'shouldFreezeDonePush', mod: 'done-frozen-policy' },
+  { fn: 'computeBackwardDepWarning', mod: 'backward-dep-warning' }
 ];
 
-// The two predicates carved THIS increment — must NOT reappear inline in sync().
+// Carved predicates — must NOT reappear inline in sync(). Grows as residuals
+// are carved (each carve moves its RESIDUAL anchor down here, flipped from
+// asserted-present to asserted-absent).
 var CARVED_THIS_INCREMENT = [
-  "task.taskType === 'recurring_template'",  // recurring-template skip
-  "task.unscheduled && ledger.origin"        // unscheduled-task calendar-delete
+  "task.taskType === 'recurring_template'",  // recurring-template skip (inc. 11)
+  "task.unscheduled && ledger.origin",       // unscheduled-task calendar-delete (inc. 11)
+  // 999.2062 — the final four residuals:
+  'var masterMatch = ledger.task_id.match(/^(.+)-\\d+$/);',           // self-heal-stale-instance
+  "if (ledger.status === 'done_frozen') {",                           // done-frozen-skip
+  "backwardDepWarning = 'Task promoted to before dependency '",       // backward-dep-warning
+  "pushedTask.status === 'done' && calCompletedBehavior === 'update'" // done-frozen-freeze
 ];
 
 // FROZEN allowlist: business-decision predicates that REMAIN inline in sync().
@@ -73,22 +85,20 @@ var CARVED_THIS_INCREMENT = [
 // EXPECTED_RESIDUAL_COUNT. NEVER add a new entry — new inline decisions belong
 // in a decide* use-case.
 var RESIDUAL_DECISION_ANCHORS = [
-  // Self-heal stale recurring-instance ledger task_ids (reconcile re-numbering).
-  { id: 'self-heal-stale-instance', anchor: 'var masterMatch = ledger.task_id.match(/^(.+)-\\d+$/);' },
-  // done_frozen rows skip the push (already frozen after a prior successful push).
-  { id: 'done-frozen-skip', anchor: "if (ledger.status === 'done_frozen') {" },
-  // Backward-dependency warning: task pulled to before a task it depends on.
-  { id: 'backward-dep-warning', anchor: "backwardDepWarning = 'Task promoted to before dependency '" },
-  // Freeze done tasks after their first successful push (done_frozen).
-  { id: 'done-frozen-freeze', anchor: "pushedTask.status === 'done' && calCompletedBehavior === 'update'" }
+  // EMPTY (999.2062): all four residuals carved — self-heal-stale-instance →
+  // stale-instance-heal-decision, done-frozen-skip + done-frozen-freeze →
+  // done-frozen-policy, backward-dep-warning → backward-dep-warning. Their
+  // anchors moved to CARVED_THIS_INCREMENT (asserted absent). sync() now
+  // delegates every named business decision; the AST ceiling below is the
+  // remaining backstop.
 ];
-var EXPECTED_RESIDUAL_COUNT = 4;
+var EXPECTED_RESIDUAL_COUNT = 0;
 
 // Coarse AST backstop ceiling (see analyzer): number of IfStatements in sync()
 // whose test reads a raw domain object, excluding dispatch on a decision result.
-// Frozen at the post-increment-11 value. SHRINK-ONLY — lower as residual
-// decisions / dispatch gates are carved; NEVER raise.
-var DOMAIN_PREDICATE_IF_CEILING = 21;
+// Frozen at the post-999.2062 value (21 → 17: the four residual carves).
+// SHRINK-ONLY — lower as remaining dispatch gates are carved; NEVER raise.
+var DOMAIN_PREDICATE_IF_CEILING = 17;
 
 describe('sync() orchestrator shape — boundaries', function () {
   it('locates the sync() function body by its stable top-level boundaries', function () {

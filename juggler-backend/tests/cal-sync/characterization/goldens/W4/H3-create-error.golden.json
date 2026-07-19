@@ -221,6 +221,7 @@
             "active_task_key": null,
             "completed_at": null,
             "created_at": "<TS>",
+            "created_by": null,
             "done_frozen": 0,
             "error_detail": "Calendar API error 500: Backend Error",
             "event_all_day": 0,
@@ -246,6 +247,7 @@
             "task_id": "w4h3-1",
             "task_updated_at": null,
             "updated_at": "<TS>",
+            "updated_by": null,
             "user_id": "cal-sync-test-user-001"
           }
         ]
@@ -256,6 +258,7 @@
             "action": "error",
             "calendar_name": null,
             "created_at": "<TS>",
+            "created_by": null,
             "detail": "Push failed: Calendar API error 500: Backend Error",
             "error_detail": "{\"summary\":\"Google Calendar is temporarily unavailable — sync will retry automatically\",\"affectedTasks\":[{\"id\":\"w4h3-1\",\"title\":\"W4 w4h3-1\"}],\"provider\":\"gcal\",\"calendar\":null,\"retryable\":true}",
             "event_id": null,
@@ -266,12 +269,15 @@
             "task_id": "w4h3-1",
             "task_text": "W4 w4h3-1",
             "trigger_type": "manual",
+            "updated_at": "<TS>",
+            "updated_by": null,
             "user_id": "cal-sync-test-user-001"
           },
           {
             "action": "error",
             "calendar_name": null,
             "created_at": "<TS>",
+            "created_by": null,
             "detail": "Push new event failed: Calendar API error 500: Backend Error",
             "error_detail": "{\"summary\":\"Google Calendar is temporarily unavailable — sync will retry automatically\",\"affectedTasks\":[{\"id\":\"w4h3-1\",\"title\":\"W4 w4h3-1\"}],\"provider\":\"gcal\",\"calendar\":null,\"retryable\":true}",
             "event_id": null,
@@ -282,6 +288,8 @@
             "task_id": "w4h3-1",
             "task_text": "W4 w4h3-1",
             "trigger_type": "manual",
+            "updated_at": "<TS>",
+            "updated_by": null,
             "user_id": "cal-sync-test-user-001"
           }
         ]

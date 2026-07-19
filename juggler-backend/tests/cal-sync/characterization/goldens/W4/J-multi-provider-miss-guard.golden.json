@@ -263,6 +263,7 @@
             "active_task_key": "cal-sync-test-user-001|gcal|w4j-1",
             "completed_at": null,
             "created_at": "<TS>",
+            "created_by": null,
             "done_frozen": 0,
             "error_detail": null,
             "event_all_day": 0,
@@ -288,12 +289,14 @@
             "task_id": "w4j-1",
             "task_updated_at": "2026-06-01 00:00:00",
             "updated_at": "<TS>",
+            "updated_by": null,
             "user_id": "cal-sync-test-user-001"
           },
           {
             "active_task_key": "cal-sync-test-user-001|msft|w4j-1",
             "completed_at": null,
             "created_at": "<TS>",
+            "created_by": null,
             "done_frozen": 0,
             "error_detail": null,
             "event_all_day": 0,
@@ -319,6 +322,7 @@
             "task_id": "w4j-1",
             "task_updated_at": "2026-06-01 00:00:00",
             "updated_at": "<TS>",
+            "updated_by": null,
             "user_id": "cal-sync-test-user-001"
           }
         ]
@@ -329,6 +333,7 @@
             "action": "pushed",
             "calendar_name": null,
             "created_at": "<TS>",
+            "created_by": null,
             "detail": "Batch pushed 1 tasks to gcal",
             "error_detail": null,
             "event_id": null,
@@ -339,12 +344,15 @@
             "task_id": null,
             "task_text": "",
             "trigger_type": "manual",
+            "updated_at": "<TS>",
+            "updated_by": null,
             "user_id": "cal-sync-test-user-001"
           },
           {
             "action": "pushed",
             "calendar_name": null,
             "created_at": "<TS>",
+            "created_by": null,
             "detail": "Batch pushed 1 tasks to msft",
             "error_detail": null,
             "event_id": null,
@@ -355,6 +363,8 @@
             "task_id": null,
             "task_text": "",
             "trigger_type": "manual",
+            "updated_at": "<TS>",
+            "updated_by": null,
             "user_id": "cal-sync-test-user-001"
           }
         ]
@@ -603,6 +613,7 @@
             "action": "skipped",
             "calendar_name": null,
             "created_at": "<TS>",
+            "created_by": null,
             "detail": null,
             "error_detail": null,
             "event_id": "ev-msft-w4j-1",
@@ -613,6 +624,8 @@
             "task_id": "w4j-1",
             "task_text": "W4 w4j-1",
             "trigger_type": "manual",
+            "updated_at": "<TS>",
+            "updated_by": null,
             "user_id": "cal-sync-test-user-001"
           }
         ]
@@ -835,6 +848,7 @@
             "action": "skipped",
             "calendar_name": null,
             "created_at": "<TS>",
+            "created_by": null,
             "detail": null,
             "error_detail": null,
             "event_id": "ev-msft-w4j-1",
@@ -845,6 +859,8 @@
             "task_id": "w4j-1",
             "task_text": "W4 w4j-1",
             "trigger_type": "manual",
+            "updated_at": "<TS>",
+            "updated_by": null,
             "user_id": "cal-sync-test-user-001"
           }
         ]
@@ -1089,6 +1105,7 @@
             "action": "deleted_remote_partial",
             "calendar_name": null,
             "created_at": "<TS>",
+            "created_by": null,
             "detail": "Event deleted in gcal but still active on another provider — ledger removed, task kept",
             "error_detail": null,
             "event_id": "ev-gcal-w4j-1",
@@ -1099,12 +1116,15 @@
             "task_id": "w4j-1",
             "task_text": "W4 w4j-1",
             "trigger_type": "manual",
+            "updated_at": "<TS>",
+            "updated_by": null,
             "user_id": "cal-sync-test-user-001"
           },
           {
             "action": "skipped",
             "calendar_name": null,
             "created_at": "<TS>",
+            "created_by": null,
             "detail": null,
             "error_detail": null,
             "event_id": "ev-msft-w4j-1",
@@ -1115,6 +1135,8 @@
             "task_id": "w4j-1",
             "task_text": "W4 w4j-1",
             "trigger_type": "manual",
+            "updated_at": "<TS>",
+            "updated_by": null,
             "user_id": "cal-sync-test-user-001"
           }
         ]
