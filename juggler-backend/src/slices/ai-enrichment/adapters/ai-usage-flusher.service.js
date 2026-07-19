@@ -19,7 +19,7 @@ class AiUsageFlusher {
   start() {
     if (this._timer) return;
     this._timer = setInterval(() => { runWithActor('ai-usage-flusher', () => this._tick()).catch(() => {}); }, INTERVAL_MS); // 999.1576
-    setTimeout(() => { this._tick().catch(() => {}); }, 5_000);
+    setTimeout(() => { runWithActor('ai-usage-flusher', () => this._tick()).catch(() => {}); }, 5_000); // 999.1576 inc.4a: first tick fires from server boot — no ambient ALS context
   }
 
   stop() {

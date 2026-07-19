@@ -451,7 +451,17 @@ async function releaseClaim(userId, instanceId) {
 
 // ── Poll loop ───────────────────────────────────────────────────────────────
 
-async function pollOnce() {
+// 999.1576 inc.4a: the poll tick fires from a module-level setInterval — no
+// ambient ALS context — but its stuck-claim sweep is a stamped UPDATE
+// (SchedulerQueueRepository.sweepStuckClaims uses stampUpdate). Wrap the whole
+// tick in the scheduler identity, mirroring claimAndRun above; the nested
+// runWithActor inside claimAndRun re-asserts the same actor (harmless).
+function pollOnce() {
+  var runWithActor = require('../lib/audit-context').runWithActor;
+  return runWithActor('scheduler', function () { return pollOnceInner(); });
+}
+
+async function pollOnceInner() {
   _lastPollTime = _now();
 
   // DB-only poll: query for unclaimed rows that have been in the queue
