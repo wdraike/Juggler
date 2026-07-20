@@ -141,7 +141,7 @@ function makeCountingFetch() {
 
 describe('B1 — REGRESSION (real facade): plan-catalog cache split-brain after checkEntitlement warms cache', function () {
   beforeEach(() => {
-    jest.useFakeTimers();
+    // setSystemTime WITHOUT useFakeTimers — avoids hangs in async/retry code
     jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
   });
 

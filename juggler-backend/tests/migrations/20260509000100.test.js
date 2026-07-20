@@ -66,7 +66,7 @@ async function insertHistoryRow(userId, ageDays) {
 }
 
 beforeAll(async () => {
-  jest.useFakeTimers();
+  // setSystemTime WITHOUT useFakeTimers — avoids hangs in async/retry code
   jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
   if (!await isDbAvailable()) return;
   await cleanup();

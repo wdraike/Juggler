@@ -34,7 +34,7 @@ var msftAdapter = require('../../../src/lib/cal-adapters/msft.adapter');
 
 describe('C2a: buildMsftEventBody — task.url included as "Link: …" in body.content', function () {
   beforeEach(() => {
-    jest.useFakeTimers();
+    // setSystemTime WITHOUT useFakeTimers — avoids hangs in async/retry code
     jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
   });
 

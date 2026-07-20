@@ -68,7 +68,7 @@ async function clearUserTasks() {
 describe('MCP update_task — composed one-transaction update+status (999.1570 fix, was ACCEPTED tradeoff ernie E3)', function () {
 
   beforeAll(async function () {
-    jest.useFakeTimers();
+    // setSystemTime WITHOUT useFakeTimers — avoids hangs in async/retry code
     jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
     await assertDbAvailable();
     await clearUserTasks();

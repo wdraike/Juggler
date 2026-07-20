@@ -48,7 +48,7 @@ function createDeps(r, trigger, events, extra) {
 
 describe('W5 use-cases — DB-backed (KnexTaskRepository, test-bed @3407)', function () {
   beforeAll(async function () {
-    jest.useFakeTimers();
+    // setSystemTime WITHOUT useFakeTimers — avoids hangs in async/retry code
     jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
     await assertDbAvailable();
     await knex('task_instances').where('user_id', USER).del();

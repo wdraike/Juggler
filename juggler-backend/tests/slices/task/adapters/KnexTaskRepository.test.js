@@ -219,7 +219,7 @@ var OTHER = 'knexrepo-user-B';
 
 describe('KnexTaskRepository — DB-backed characterization (test-bed @3407)', function () {
   beforeAll(async function () {
-    jest.useFakeTimers();
+    // setSystemTime WITHOUT useFakeTimers — avoids hangs in async/retry code
     jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
     await assertDbAvailable();
     for (var u of [USER, OTHER]) {

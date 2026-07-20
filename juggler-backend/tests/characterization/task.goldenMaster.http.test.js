@@ -154,7 +154,7 @@ const { EventTypes, getEventBus, resetEventBus } = require('../../src/lib/events
 let app, request;
 
 beforeAll(() => {
-  jest.useFakeTimers();
+  // setSystemTime WITHOUT useFakeTimers — avoids hangs in async/retry code
   jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
   app = require('../../src/app');
   request = require('supertest');

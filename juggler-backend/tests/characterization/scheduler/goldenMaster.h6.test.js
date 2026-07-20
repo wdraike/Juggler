@@ -174,7 +174,7 @@ describe('GOLDEN-MASTER CORE — frozen literal snapshot (S8)', () => {
 
   let result;
   beforeAll(function() {
-    jest.useFakeTimers();
+    // setSystemTime WITHOUT useFakeTimers — avoids hangs in async/retry code
     jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
     var statuses = {};
     FIXTURE_TASKS.forEach(function(t) { statuses[t.id] = ''; });

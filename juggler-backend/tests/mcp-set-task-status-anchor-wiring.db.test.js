@@ -127,7 +127,7 @@ async function seedWeeklyMasterAndInstance(tmplId, instId, instanceDate, schedul
 describe('MCP set_task_status anchor wiring (999.1100)', function () {
 
   beforeAll(async function () {
-    jest.useFakeTimers();
+    // setSystemTime WITHOUT useFakeTimers — avoids hangs in async/retry code
     jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
     await assertDbAvailable();
     var existing = await db('users').where('id', USER_ID).first();

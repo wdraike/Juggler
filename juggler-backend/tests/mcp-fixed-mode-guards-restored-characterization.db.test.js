@@ -147,7 +147,7 @@ var LEGACY_FIXED_GUARD_STRING = 'Validation error: placementMode "fixed" require
 describe('MCP fixed-mode-requires-schedule guards — restored at the adapter layer; existing-scheduled_at exemption restored end-to-end (999.1396 fixed the shared-facade shadow formerly pinned per cookie WARN-2 / backlog 999.1382)', function () {
 
   beforeAll(async function () {
-    jest.useFakeTimers();
+    // setSystemTime WITHOUT useFakeTimers — avoids hangs in async/retry code
     jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
     await assertDbAvailable();
     await clearUserTasks();

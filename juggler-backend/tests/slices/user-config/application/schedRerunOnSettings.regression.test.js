@@ -35,7 +35,7 @@ var USER = 'sched-rerun-user';
 // ── AC1 — UpdateConfig: template_defaults / template_overrides must fire scheduleAfter ─────
 describe('AC1: UpdateConfig — template_defaults / template_overrides missing from SCHED_KEYS [BUG-1 / 999.464]', () => {
   beforeEach(() => {
-    jest.useFakeTimers();
+    // setSystemTime WITHOUT useFakeTimers — avoids hangs in async/retry code
     jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
   });
 

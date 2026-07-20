@@ -273,7 +273,6 @@ Object.keys(ADAPTERS).forEach(function (name) {
 
     // ── CATALOG 5min TTL (INVARIANT EP-2 / golden-master H8-1) ────────────────
     test('resolvePlanCatalog caches within 5min and refetches after', async function () {
-      jest.useFakeTimers();
       // F1-FIX: pin the epoch immediately so Date.now() inside every .then()
       // callback is deterministic (no wall-clock bleeding across the
       // useRealTimers boundary in afterEach).
@@ -297,7 +296,6 @@ Object.keys(ADAPTERS).forEach(function (name) {
 
     // ── USER-PLAN 2min TTL (INVARIANT EP-2 / golden-master H8-2) ──────────────
     test('resolveUserPlanId caches within 2min and refetches after', async function () {
-      jest.useFakeTimers();
       // F1-FIX: pin the epoch immediately so Date.now() inside every .then()
       // callback is deterministic (no wall-clock bleeding across the
       // useRealTimers boundary in afterEach).

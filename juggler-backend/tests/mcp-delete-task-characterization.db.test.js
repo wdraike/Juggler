@@ -72,7 +72,7 @@ async function clearUserTasks() {
 describe('MCP delete_task — AFTER-migration R55 soft-cancel behavior pin', function () {
 
   beforeAll(async function () {
-    jest.useFakeTimers();
+    // setSystemTime WITHOUT useFakeTimers — avoids hangs in async/retry code
     jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
     await assertDbAvailable();
     await clearUserTasks();

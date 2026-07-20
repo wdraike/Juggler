@@ -41,7 +41,7 @@ var deleteFromDbTaskId = null;
 var ingestedEventId = null;
 
 beforeAll(async () => {
-  jest.useFakeTimers();
+  // setSystemTime WITHOUT useFakeTimers — avoids hangs in async/retry code
   jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
   await assertDbAvailable();
   if (!hasGCalCredentials()) return;

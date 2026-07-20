@@ -93,7 +93,7 @@ async function clearUserTasks(userId) {
 describe('getUserTimezone — 3 copies (tasks.js/data.js/schedule.js) resolve IDENTICALLY (BEFORE dedup)', function () {
 
   beforeEach(function () {
-    jest.useFakeTimers();
+    // setSystemTime WITHOUT useFakeTimers — avoids hangs in async/retry code
     jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
     dateHelpers.safeTimezone.mockClear();
   });
