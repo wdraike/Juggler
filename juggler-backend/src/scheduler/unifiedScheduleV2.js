@@ -1578,6 +1578,11 @@ var compareItems = ConstraintSolver.compareItems;
 function placeSplitInline(item, remaining, splitMin, dates, dayWindows, dayBlocks, dayOcc, _cfg) {
   var placed = [];
   var STEP = 15; // placement granularity
+  // 999.1079 (ruling R7) — each split chunk is a session that needs transition
+  // time, so it reserves travel buffers exactly like a whole-task placement
+  // (reserveWithTravel semantics), instead of the old core-only reserve().
+  var tb = item.travelBefore || 0;
+  var ta = item.travelAfter || 0;
 
   // Build search index range.
   var earliestIdx = 0;
@@ -1622,28 +1627,33 @@ function placeSplitInline(item, remaining, splitMin, dates, dayWindows, dayBlock
     for (var w = 0; w < wins.length && remaining > 0; w++) {
       var winStart = wins[w][0];
       var winEnd = wins[w][1];
-      // Walk the window looking for free runs of >= splitMin minutes.
+      // Walk the window looking for free runs that fit a chunk PLUS its travel
+      // buffers (999.1079 R7). A chunk at `s` occupies core [s, s+chunk) and
+      // reserves [s-tb, s+chunk+ta); its footprint must be free, mirroring the
+      // whole-task placement path (isFreeWithTravel + reserveWithTravel).
       var s = winStart;
       while (s < winEnd && remaining > 0) {
         if (occ[s]) { s++; continue; }
-        // Count the free run from s.
-        var freeEnd = s;
-        while (freeEnd < winEnd && !occ[freeEnd]) freeEnd++;
-        var freeLen = freeEnd - s;
-        if (freeLen < splitMin) { s = freeEnd + 1; continue; }
-        // Clamp chunk to remaining and floor to STEP granularity.
-        var chunk = Math.min(freeLen, remaining);
-        chunk = Math.floor(chunk / STEP) * STEP;
+        // Travel-before must be clear so the chunk doesn't crowd whatever
+        // precedes it (a neighbour's core or its after-buffer).
+        if (tb > 0 && !_isFree(occ, Math.max(0, s - tb), Math.min(tb, s))) { s++; continue; }
+        // Largest core (<= remaining, within the window) whose after-buffer also
+        // stays free: scan to the first busy minute at/after s; the footprint end
+        // s+chunk+ta must land before it.
+        var busyAt = s;
+        while (busyAt < 1440 && !occ[busyAt]) busyAt++;
+        var coreCap = Math.min(remaining, winEnd - s, busyAt - ta - s);
+        var chunk = Math.floor(coreCap / STEP) * STEP;
         if (chunk < splitMin) {
           // After flooring, chunk may be too small — try without flooring.
-          chunk = Math.min(freeLen, remaining);
-          if (chunk < splitMin) { s = freeEnd + 1; continue; }
+          chunk = coreCap;
+          if (chunk < splitMin) { s = (busyAt > s ? busyAt : s + 1); continue; }
         }
-        // Place this chunk.
-        reserve(occ, s, chunk);
+        // Place this chunk, reserving its travel buffers on the grid.
+        reserveWithTravel(occ, s, chunk, tb, ta);
         placed.push({ dateKey: d.key, start: s, dur: chunk });
         remaining -= chunk;
-        s += chunk;
+        s = s + chunk + ta;
       }
     }
   }
@@ -2078,8 +2088,14 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
         if (splitResult.placed.length > 0) {
           var splitPlacedFirst = splitResult.placed[0];
           splitResult.placed.forEach(function(chunk) {
+            // 999.1079 (R7) — each chunk reserved its travel buffers on the grid
+            // (placeSplitInline → reserveWithTravel), so the entry MUST record the
+            // same travel. Whole-task entries already do (parity). This keeps the
+            // recurring-split-overflow RELEASE (which clears [start-tb, end+ta) from
+            // c.entry.travelBefore/After) symmetric with what was reserved —
+            // otherwise the buffer minutes leak and phantom-block other tasks.
             var chunkEntry = { task: item.task, start: chunk.start, dur: chunk.dur, locked: false,
-              travelBefore: 0, travelAfter: 0,
+              travelBefore: item.travelBefore || 0, travelAfter: item.travelAfter || 0,
               _placementReason: buildPlacementReason(item, false, getBlockNameForItem(item, chunk.dateKey, dayBlocks)) };
             if (!dayPlaced[chunk.dateKey]) dayPlaced[chunk.dateKey] = [];
             if (!dayPlacements[chunk.dateKey]) dayPlacements[chunk.dateKey] = [];
@@ -2105,10 +2121,17 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
             splitResult.placed.forEach(function(chunk) {
               var chunkIdx = indexOfDate(dates, chunk.dateKey);
               if (chunkIdx < 0) return;
+              // REG-23/a3-01 — the committed chunk reserved its travel buffers on
+              // the grid (reserveWithTravel), so the incremental slack debit must
+              // use the SAME travel-inclusive footprint as the whole-task path
+              // above, or other items' capacity is under-debited by the buffer
+              // minutes the commit actually consumed (999.1079 R7).
+              var cTb = item.travelBefore || 0;
+              var cTa = item.travelAfter || 0;
               queue.forEach(function(other) {
                 if (other.slack == null || !isFinite(other.slack)) return;
                 if (!rangeIncludesDate(other, chunkIdx)) return;
-                var ov = overlapWithEligibleWindows(other, chunk.dateKey, chunk.start, chunk.dur, dayWindows, dayBlocks);
+                var ov = overlapWithEligibleWindows(other, chunk.dateKey, chunk.start - cTb, chunk.dur + cTb + cTa, dayWindows, dayBlocks);
                 if (ov > 0) { other.capacity -= ov; other.slack = other.capacity - other.dur; }
               });
             });
