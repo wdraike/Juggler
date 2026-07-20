@@ -276,6 +276,7 @@ Object.keys(ADAPTERS).forEach(function (name) {
       // F1-FIX: pin the epoch immediately so Date.now() inside every .then()
       // callback is deterministic (no wall-clock bleeding across the
       // useRealTimers boundary in afterEach).
+      jest.useFakeTimers();
       jest.setSystemTime(new Date('2026-01-01T00:00:00Z'));
       var spec = freshSpec();
       var adapter = A.makeAdapter(spec);
@@ -299,6 +300,7 @@ Object.keys(ADAPTERS).forEach(function (name) {
       // F1-FIX: pin the epoch immediately so Date.now() inside every .then()
       // callback is deterministic (no wall-clock bleeding across the
       // useRealTimers boundary in afterEach).
+      jest.useFakeTimers();
       jest.setSystemTime(new Date('2026-01-01T00:00:00Z'));
       var spec = freshSpec({ userPlanId: 'plan-starter' });
       var adapter = A.makeAdapter(spec);

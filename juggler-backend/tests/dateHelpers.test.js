@@ -104,7 +104,7 @@ describe('dateHelpers', () => {
 
     it('round-trips through parseDate', () => {
       const d = new Date(2026, 6, 4);
-      expect(formatDateKey(parseDate(formatDateKey(d)))).toBe('2020-01-04');
+      expect(formatDateKey(parseDate(formatDateKey(d)))).toBe('2026-07-04');
     });
   });
 
