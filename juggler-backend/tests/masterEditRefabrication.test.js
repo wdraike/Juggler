@@ -48,11 +48,14 @@ describe('master-edit refabrication (R53): resetRecurringInstances', () => {
   test('HARD-DELETES future not-started; keeps past pending, past done, and future started', async () => {
     if (!available) return;
     await insMaster();
-    await insInst('past-done', 1, 'done', '2026-06-01 10:00:00');   // terminal past → keep
-    await insInst('past-pending', 2, '', '2026-06-05 10:00:00');     // past overdue (status='') → keep (R50)
-    await insInst('future-pending', 3, '', '2026-07-20 10:00:00');   // future not-started → DELETE
+    // ponytail: use far-past/far-future dates so the test never goes stale
+    // when "today" crosses the hardcoded future boundary (CI nightly bit us
+    // when 2026-07-20 arrived and the "future" instance was already past).
+    await insInst('past-done', 1, 'done', '2020-06-01 10:00:00');     // terminal past → keep
+    await insInst('past-pending', 2, '', '2020-06-05 10:00:00');     // past overdue (status='') → keep (R50)
+    await insInst('future-pending', 3, '', '2099-07-20 10:00:00');    // future not-started → DELETE
     await insInst('future-unplaced', 4, '', null);                   // future unplaced → DELETE
-    await insInst('future-started', 5, 'wip', '2026-07-21 10:00:00'); // started → keep (frozen, R52)
+    await insInst('future-started', 5, 'wip', '2099-07-21 10:00:00'); // started → keep (frozen, R52)
 
     var dropped = await tasksWrite.resetRecurringInstances(db, USER_ID, 'M', '[test]');
     expect(dropped).toBe(2); // only the two future not-started
