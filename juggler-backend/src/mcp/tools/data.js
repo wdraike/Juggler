@@ -229,7 +229,9 @@ function registerDataTools(server, userId) {
             };
           });
           for (var oi = 0; oi < insertRows.length; oi += 50) {
-            await db('task_instances').insert(insertRows.slice(oi, oi + 50));
+            // 999.1576 inc.4 (harrison WARN-3): who-cols NOT NULL — stamp with
+            // the ambient actor ('mcp' dispatch context).
+            await db('task_instances').insert(stampInsert(insertRows.slice(oi, oi + 50)));
           }
           fixed.push('Recreated ' + orphanedMasters.length + ' instance rows for orphaned masters');
         }

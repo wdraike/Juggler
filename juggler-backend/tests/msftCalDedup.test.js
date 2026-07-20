@@ -174,9 +174,9 @@ test('markCodeUsed sweeps expired rows and succeeds for the same code hash', asy
     [hash]
   );
   await db.raw(
-    'INSERT INTO oauth_code_nonces (code_hash, expires_at) ' +
-    'VALUES (?, DATE_SUB(NOW(), INTERVAL 1 MINUTE))',
-    [hash]
+    'INSERT INTO oauth_code_nonces (code_hash, expires_at, created_by, updated_by) ' +
+    'VALUES (?, DATE_SUB(NOW(), INTERVAL 1 MINUTE), ?, ?)',
+    [hash, 'jest', 'jest']
   );
 
   // Verify the stale row is there before we call markCodeUsed

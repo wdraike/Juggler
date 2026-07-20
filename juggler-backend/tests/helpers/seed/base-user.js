@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../../src/lib/audit-context').stampInsert(rows);
 /**
  * Seed a fully-configured test user into the real test DB.
  *
@@ -50,40 +53,40 @@ async function seedBaseUser(db, idSuffix) {
 
   // Upsert user
   await db('users')
-    .insert({
+    .insert(__stampFixture({
       id: userId,
       email: email,
       name: TEST_USER.name,
       timezone: TEST_USER.timezone,
       created_at: db.fn.now(),
       updated_at: db.fn.now()
-    })
+    }))
     .onConflict('id')
     .merge(['email', 'name', 'timezone', 'updated_at']);
 
   // Upsert all config keys
   for (var [key, value] of Object.entries(CONFIG_KEYS)) {
     await db('user_config')
-      .insert({
+      .insert(__stampFixture({
         user_id: userId,
         config_key: key,
         config_value: JSON.stringify(value),
         created_at: db.fn.now(),
         updated_at: db.fn.now()
-      })
+      }))
       .onConflict(['user_id', 'config_key'])
       .merge(['config_value', 'updated_at']);
   }
 
   // Seed default project
   await db('projects')
-    .insert({
+    .insert(__stampFixture({
       user_id: userId,
       name: 'Inbox',
       color: '#6B7280',
       created_at: db.fn.now(),
       updated_at: db.fn.now()
-    })
+    }))
     .onConflict(['user_id', 'name'])
     .ignore();
 

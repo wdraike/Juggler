@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * Integration tests pinning the row shape returned by `tasks_v` and
  * `tasks_with_sync_v` for every distinct branch:
@@ -25,10 +28,10 @@ beforeAll(async () => {
   await db('task_instances').where('user_id', USER_ID).del();
   await db('task_masters').where('user_id', USER_ID).del();
   await db('users').where('id', USER_ID).del();
-  await db('users').insert({
+  await db('users').insert(__stampFixture({
     id: USER_ID, email: 'viewshape@test.com', name: 'View Shape Test',
     timezone: 'America/New_York', created_at: db.fn.now(), updated_at: db.fn.now()
-  });
+  }));
 }, 15000);
 
 afterAll(async () => {
@@ -167,7 +170,7 @@ describe('tasks_v shape — by row class', () => {
       updated_at: db.fn.now()
     });
     for (var ord = 2; ord <= 3; ord++) {
-      await db('task_instances').insert({
+      await db('task_instances').insert(__stampFixture({
         id: id + '-occ' + baseInst.occurrence_ordinal + '-' + ord,
         master_id: id,
         user_id: USER_ID,
@@ -181,7 +184,7 @@ describe('tasks_v shape — by row class', () => {
         generated: 0,
         created_at: db.fn.now(),
         updated_at: db.fn.now()
-      });
+      }));
     }
     var rows = await db('tasks_v')
       .where('user_id', USER_ID)
@@ -203,11 +206,11 @@ describe('tasks_with_sync_v — provider event ids from ledger', () => {
       dur: 30, pri: 'P3', scheduled_at: new Date('2026-06-04T10:00:00Z'),
       created_at: db.fn.now(), updated_at: db.fn.now()
     });
-    await db('cal_sync_ledger').insert({
+    await db('cal_sync_ledger').insert(__stampFixture({
       user_id: USER_ID, provider: 'gcal', task_id: id,
       provider_event_id: 'gcal_evt_abc123', origin: 'juggler',
       status: 'active', synced_at: db.fn.now(), created_at: db.fn.now()
-    });
+    }));
 
     var row = await db('tasks_with_sync_v').where('id', id).first();
     expect(row.gcal_event_id).toBe('gcal_evt_abc123');
@@ -227,11 +230,11 @@ describe('tasks_with_sync_v — provider event ids from ledger', () => {
       dur: 30, pri: 'P3', scheduled_at: new Date('2026-06-05T10:00:00Z'),
       created_at: db.fn.now(), updated_at: db.fn.now()
     });
-    await db('cal_sync_ledger').insert({
+    await db('cal_sync_ledger').insert(__stampFixture({
       user_id: USER_ID, provider: 'gcal', task_id: id,
       provider_event_id: 'should_not_appear', origin: 'juggler',
       status: 'deleted_local', synced_at: db.fn.now(), created_at: db.fn.now()
-    });
+    }));
     var row = await db('tasks_with_sync_v').where('id', id).first();
     expect(row.gcal_event_id).toBeNull();
   });

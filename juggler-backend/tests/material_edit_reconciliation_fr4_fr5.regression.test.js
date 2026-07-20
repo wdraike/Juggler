@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * material_edit_reconciliation_fr4_fr5.regression.test.js
  *
@@ -188,14 +191,14 @@ beforeAll(async function () {
   await assertDbAvailable();
   await cleanupUserData();
   await db('users').where('id', USER_ID).del();
-  await db('users').insert({
+  await db('users').insert(__stampFixture({
     id: USER_ID,
     email: 'fr4-material-edit@test.invalid',
     name: 'FR-4 material edit reconciliation test',
     timezone: TZ,
     created_at: new Date(),
     updated_at: new Date()
-  });
+  }));
 }, 20000);
 
 afterEach(async function () {
@@ -213,7 +216,7 @@ function nextId(prefix) { idSeq++; return prefix + '-' + Date.now() + '-' + idSe
 
 async function seedMaster(recur, overrides) {
   var id = nextId('fr4-master');
-  await db('task_masters').insert(Object.assign({
+  await db('task_masters').insert(__stampFixture(Object.assign({
     id: id,
     user_id: USER_ID,
     text: 'FR-4 material edit test master',
@@ -228,13 +231,13 @@ async function seedMaster(recur, overrides) {
     placement_mode: 'anytime',
     created_at: new Date(),
     updated_at: new Date()
-  }, overrides || {}));
+  }, overrides || {})));
   return id;
 }
 
 async function seedInstance(masterId, ordinal, dateObj, status) {
   var id = nextId('fr4-inst');
-  await db('task_instances').insert({
+  await db('task_instances').insert(__stampFixture({
     id: id,
     master_id: masterId,
     user_id: USER_ID,
@@ -248,7 +251,7 @@ async function seedInstance(masterId, ordinal, dateObj, status) {
     generated: 0,
     created_at: new Date(),
     updated_at: new Date()
-  });
+  }));
   return id;
 }
 
@@ -583,7 +586,7 @@ describe('ernie ernie-w5-datecol-exclusive WARN-2 — NULL-date open instance is
     // NULL `date`, but `scheduled_at` carries the in-cycle signal (e.g. an
     // on-demand-materialized row — ernie's reachability note).
     var nullDateOpenId = nextId('fr4-inst');
-    await db('task_instances').insert({
+    await db('task_instances').insert(__stampFixture({
       id: nullDateOpenId,
       master_id: masterId,
       user_id: USER_ID,
@@ -597,7 +600,7 @@ describe('ernie ernie-w5-datecol-exclusive WARN-2 — NULL-date open instance is
       generated: 0,
       created_at: new Date(),
       updated_at: new Date()
-    });
+    }));
 
     var before = await instancesFor(masterId);
     expect(before.length).toBe(2);

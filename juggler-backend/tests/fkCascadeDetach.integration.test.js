@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * End-to-end test for the FK ON DELETE SET NULL behavior introduced in
  * migration 20260415010700. When a recurring template is deleted:
@@ -18,10 +21,10 @@ beforeAll(async () => {
   await db('task_instances').where('user_id', USER_ID).del();
   await db('task_masters').where('user_id', USER_ID).del();
   await db('users').where('id', USER_ID).del();
-  await db('users').insert({
+  await db('users').insert(__stampFixture({
     id: USER_ID, email: 'fkcascade@test.com', name: 'FK Cascade Test',
     timezone: 'America/New_York', created_at: db.fn.now(), updated_at: db.fn.now()
-  });
+  }));
 }, 15000);
 
 afterAll(async () => {

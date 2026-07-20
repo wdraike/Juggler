@@ -9,6 +9,7 @@ const rows = [
 ];
 
 const makeFlusher = () => {
+  const updates = [];
   const db = (table) => ({
     select:    jest.fn().mockReturnThis(),
     where:     jest.fn().mockReturnThis(),
@@ -16,8 +17,12 @@ const makeFlusher = () => {
     limit:     jest.fn().mockResolvedValue(rows),
     whereIn:   jest.fn().mockReturnThis(),
     delete:    jest.fn().mockResolvedValue(1),
-    increment: jest.fn().mockResolvedValue(1),
+    // 999.1576 inc.4: retry bump is a stamped .update (raw increment expr),
+    // no longer knex .increment
+    update:    jest.fn((changes) => { updates.push(changes); return Promise.resolve(1); }),
   });
+  db.raw = jest.fn((expr) => expr);
+  db.__updates = updates;
   return new AiUsageFlusher({
     db,
     billingUrl: 'http://billing:5020',
@@ -57,11 +62,16 @@ describe('AiUsageFlusher [juggler]', () => {
     expect(body.source_app).toBe('juggler');
   });
 
-  test('does not throw when ingest POST fails', async () => {
+  test('does not throw when ingest POST fails, and the retry bump stamps updated_by', async () => {
     global.fetch
       .mockResolvedValueOnce({ ok: true, status: 200 })
       .mockRejectedValueOnce(new Error('billing down'));
     const flusher = makeFlusher();
     await expect(flusher._tick()).resolves.not.toThrow();
+    // inc.4: flush_attempts bump is an audit-stamped UPDATE ('jest' = the
+    // sandbox-armed test default; production ticks run under 'ai-usage-flusher').
+    expect(flusher._db.__updates).toHaveLength(1);
+    expect(flusher._db.__updates[0].flush_attempts).toBe('flush_attempts + 1');
+    expect(flusher._db.__updates[0].updated_by).toBe('jest');
   });
 });

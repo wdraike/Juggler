@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * FIX-04: DB-based claiming tests for scheduleQueue.js
  *
@@ -43,14 +46,14 @@ beforeAll(async function() {
   var userId = '__claim_test_user__';
   await db.raw('DELETE FROM schedule_queue WHERE user_id = ?', [userId]);
   await db('users').where('id', userId).del();
-  await db('users').insert({
+  await db('users').insert(__stampFixture({
     id: userId,
     email: 'claim-test@test.com',
     name: 'Claim Test User',
     timezone: 'America/New_York',
     created_at: db.fn.now(),
     updated_at: db.fn.now()
-  });
+  }));
 
   // Import scheduleQueue — if it exports _internal.tryClaim and
   // _internal.releaseClaim these tests will run; otherwise they'll
@@ -92,10 +95,10 @@ test('only one of two concurrent claim attempts wins', async function() {
 
   // Insert a fresh unclaimed queue row
   await db.raw('DELETE FROM schedule_queue WHERE user_id = ?', [userId]);
-  await db('schedule_queue').insert({
+  await db('schedule_queue').insert(__stampFixture({
     user_id: userId,
     source: 'test-race'
-  });
+  }));
 
   // Two instances race — call tryClaim sequentially to simulate concurrent
   // reads that both saw claimed_by=NULL before either wrote.
@@ -131,9 +134,9 @@ test('fresh instance reclaims a stale claim past CLAIM_TTL_SECONDS', async funct
   // Insert a row that looks like it was claimed 120s ago by a now-dead instance
   await db.raw('DELETE FROM schedule_queue WHERE user_id = ?', [userId]);
   await db.raw(
-    'INSERT INTO schedule_queue (user_id, source, claimed_by, claimed_at) ' +
-    'VALUES (?, ?, ?, DATE_SUB(NOW(), INTERVAL 120 SECOND))',
-    [userId, 'test-stale', 'instance-old']
+    'INSERT INTO schedule_queue (user_id, source, claimed_by, claimed_at, created_by, updated_by) ' +
+    'VALUES (?, ?, ?, DATE_SUB(NOW(), INTERVAL 120 SECOND), ?, ?)',
+    [userId, 'test-stale', 'instance-old', 'jest', 'jest']
   );
 
   // Verify the stale claim is present
@@ -167,10 +170,10 @@ test('released claim allows immediate re-claim (no TTL wait)', async function() 
 
   // Insert fresh unclaimed row
   await db.raw('DELETE FROM schedule_queue WHERE user_id = ?', [userId]);
-  await db('schedule_queue').insert({
+  await db('schedule_queue').insert(__stampFixture({
     user_id: userId,
     source: 'test-release'
-  });
+  }));
 
   // Claim it
   var claim1 = await tryClaim(userId, 'instance-C');
@@ -238,7 +241,7 @@ test('FakeClockAdapter drives claim TTL expiry deterministically (no SQL backdat
   setClockPort(fake);
   try {
     await db.raw('DELETE FROM schedule_queue WHERE user_id = ?', [userId]);
-    await db('schedule_queue').insert({ user_id: userId, source: 'test-fake-clock' });
+    await db('schedule_queue').insert(__stampFixture({ user_id: userId, source: 'test-fake-clock' }));
 
     // instance-A claims at fake T0 — claimed_at is stamped FROM the fake clock.
     var claimA = await tryClaim(userId, 'instance-A');

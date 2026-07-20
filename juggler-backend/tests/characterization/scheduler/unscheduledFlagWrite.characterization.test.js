@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../../src/lib/audit-context').stampInsert(rows);
 /**
  * B2 (W3a) — runSchedule.js:1273 unscheduled-flag bulk update characterization
  *
@@ -157,10 +160,10 @@ beforeAll(async () => {
   db = testDb.getDb();
   await cleanupUser();
   await testDb.seedUser({ id: USER_ID, email: 'unschedflag@test.com', name: 'Unsched Flag User', timezone: TZ });
-  await db('user_config').insert([
+  await db('user_config').insert(__stampFixture([
     { user_id: USER_ID, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) },
     { user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) }
-  ]);
+  ]));
 }, 20000);
 
 afterAll(async () => {
@@ -193,7 +196,7 @@ async function seedOrphanMaster(overrides) {
     created_at: db.fn.now(),
     updated_at: db.fn.now()
   }, overrides);
-  await db('task_masters').insert(row);
+  await db('task_masters').insert(__stampFixture(row));
   return row;
 }
 
@@ -212,7 +215,7 @@ async function seedOrphanInstance(masterId, overrides) {
     created_at: db.fn.now(),
     updated_at: db.fn.now()
   }, overrides);
-  await db('task_instances').insert(row);
+  await db('task_instances').insert(__stampFixture(row));
   return row;
 }
 

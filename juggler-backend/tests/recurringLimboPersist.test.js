@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * Integration test — 999.848 recurring-instance LIMBO (placed-in-memory, lost-in-persist).
  *
@@ -55,9 +58,9 @@ beforeAll(async () => {
     console.warn('Test DB not available:', e.message); return;
   }
   await cleanup();
-  await db('users').insert({ id: USER_ID, email: 'recurlimbo@test.com', timezone: TZ, created_at: db.fn.now(), updated_at: db.fn.now() });
-  await db('user_config').insert({ user_id: USER_ID, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) });
-  await db('user_config').insert({ user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) });
+  await db('users').insert(__stampFixture({ id: USER_ID, email: 'recurlimbo@test.com', timezone: TZ, created_at: db.fn.now(), updated_at: db.fn.now() }));
+  await db('user_config').insert(__stampFixture({ user_id: USER_ID, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) }));
+  await db('user_config').insert(__stampFixture({ user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) }));
 }, 15000);
 
 afterAll(async () => { if (available) await cleanup(); await db.destroy(); });
@@ -189,12 +192,12 @@ describe('999.848 AC1 TRUE-RED — roam-with-dateChanged triggers persist-guard 
     // Anchor: tomorrow (day+1). Morning on day+1 is blocked → scheduler roams to day+2.
     var anchorKey = dayKey(1);
     var masterId = 'rl-ac1-true-red';
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: masterId, user_id: USER_ID, text: 'AC1 Roamer', dur: 120, status: '', recurring: 1,
       recur: JSON.stringify({ type: 'weekly', days: 'MTWRFSU', timesPerCycle: 1 }),
       recur_start: anchorKey, when: 'morning', placement_mode: 'anytime',
       created_at: db.fn.now(), updated_at: db.fn.now()
-    });
+    }));
 
     // Block tomorrow's entire morning with a correctly-UTC-stamped fixed task.
     // blockMorning now uses localToUtc so the blocker actually occupies 06:00–08:00
@@ -243,12 +246,12 @@ describe('999.848 recurring LIMBO — flexible-TPC roam persists, never limbo', 
     if (!available) return;
     // Flexible-TPC weekly (tpc 1 < 7 selected days → roams within the cycle), morning home
     // block, dur=120 (fills the morning exactly). Anchored at today+1.
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: 'rl-tmpl-roam', user_id: USER_ID, text: 'Roamer', dur: 120, status: '', recurring: 1,
       recur: JSON.stringify({ type: 'weekly', days: 'MTWRFSU', timesPerCycle: 1 }),
       recur_start: dayKey(1), when: 'morning', placement_mode: 'time_window', time_flex: 10080,
       created_at: db.fn.now(), updated_at: db.fn.now()
-    });
+    }));
     // Block the anchor day's morning so the only-occurrence MUST roam to a later day this cycle.
     await blockMorning(1);
 
@@ -266,12 +269,12 @@ describe('999.848 recurring LIMBO — flexible-TPC roam persists, never limbo', 
 
   test('no drift: a second run leaves the placed instance stable and still not limbo', async () => {
     if (!available) return;
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: 'rl-tmpl-stable', user_id: USER_ID, text: 'Stable roamer', dur: 120, status: '', recurring: 1,
       recur: JSON.stringify({ type: 'weekly', days: 'MTWRFSU', timesPerCycle: 1 }),
       recur_start: dayKey(1), when: 'morning', placement_mode: 'time_window', time_flex: 10080,
       created_at: db.fn.now(), updated_at: db.fn.now()
-    });
+    }));
     await blockMorning(1);
 
     await runScheduleAndPersist(USER_ID);
@@ -297,12 +300,12 @@ describe('999.848 recurring LIMBO — flexible-TPC roam persists, never limbo', 
     // on any day (tz-independent, unlike capacity blocking). It must surface in the
     // Unplaced list (unscheduled=1), never vanish into limbo. (Strategy A, mirrors the
     // BUG-142 AC2 unplaceable-recurring seed.)
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: 'rl-tmpl-noslot', user_id: USER_ID, text: 'No slot roamer', dur: 120, status: '', recurring: 1,
       recur: JSON.stringify({ type: 'weekly', days: 'MTWRFSU', timesPerCycle: 1 }),
       recur_start: dayKey(1), when: '_invalid_window_', placement_mode: 'time_window', time_flex: 10080,
       created_at: db.fn.now(), updated_at: db.fn.now()
-    });
+    }));
 
     await runScheduleAndPersist(USER_ID);
 
@@ -382,12 +385,12 @@ describe('999.848 AC3 HARD CASE — convergence under a changing blocker (no cum
     // Seed a flexible-TPC weekly recurring — same shape as the existing tests.
     // days: all 7, timesPerCycle: 1, when: morning, dur: 120, placement_mode: anytime.
     // Anchor: day+1.
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: masterId, user_id: USER_ID, text: 'AC3 Hard Roamer', dur: 120, status: '', recurring: 1,
       recur: JSON.stringify({ type: 'weekly', days: 'MTWRFSU', timesPerCycle: 1 }),
       recur_start: dayKey(1), when: 'morning', placement_mode: 'anytime',
       created_at: db.fn.now(), updated_at: db.fn.now()
-    });
+    }));
 
     // ── RUN 1: anchor morning blocked → instance roams to a later morning ──────────────────
     await blockMorning(1); // block day+1 morning

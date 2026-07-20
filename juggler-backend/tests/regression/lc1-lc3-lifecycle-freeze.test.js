@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../src/lib/audit-context').stampInsert(rows);
 /**
  * LC-1 / LC-2 / LC-3 regression tests — fixy-lifecycle (999.808) Leg A
  *
@@ -122,18 +125,18 @@ beforeAll(async () => {
   await cleanupUser(USER_LC1_LC2);
   await cleanupUser(USER_LC3);
 
-  await db('users').insert({
+  await db('users').insert(__stampFixture({
     id: USER_LC1_LC2, email: 'lc1@fixy.test',
     timezone: TZ, created_at: db.fn.now(), updated_at: db.fn.now()
-  });
-  await db('users').insert({
+  }));
+  await db('users').insert(__stampFixture({
     id: USER_LC3, email: 'lc3@fixy.test',
     timezone: TZ, created_at: db.fn.now(), updated_at: db.fn.now()
-  });
+  }));
 
   var { DEFAULT_TIME_BLOCKS, DEFAULT_TOOL_MATRIX } = require('../../src/scheduler/constants');
-  await db('user_config').insert({ user_id: USER_LC1_LC2, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) });
-  await db('user_config').insert({ user_id: USER_LC1_LC2, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) });
+  await db('user_config').insert(__stampFixture({ user_id: USER_LC1_LC2, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) }));
+  await db('user_config').insert(__stampFixture({ user_id: USER_LC1_LC2, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) }));
 }, 20000);
 
 afterAll(async () => {
@@ -172,7 +175,7 @@ beforeEach(async () => {
  * current code.
  */
 async function seedEndedTemplate(id, extraOverrides) {
-  await db('task_masters').insert(Object.assign({
+  await db('task_masters').insert(__stampFixture(Object.assign({
     id: id,
     user_id: USER_LC1_LC2,
     text: 'LC test — ended template',
@@ -186,7 +189,7 @@ async function seedEndedTemplate(id, extraOverrides) {
     when: 'morning',
     created_at: db.fn.now(),
     updated_at: db.fn.now()
-  }, extraOverrides || {}));
+  }, extraOverrides || {})));
 }
 
 /**
@@ -195,7 +198,7 @@ async function seedEndedTemplate(id, extraOverrides) {
  * The instance will be the only pending row for its template.
  */
 async function seedPlacedInstance(id, masterId, extraOverrides) {
-  await db('task_instances').insert(Object.assign({
+  await db('task_instances').insert(__stampFixture(Object.assign({
     id: id,
     master_id: masterId,
     user_id: USER_LC1_LC2,
@@ -209,7 +212,7 @@ async function seedPlacedInstance(id, masterId, extraOverrides) {
     status: '',
     created_at: db.fn.now(),
     updated_at: db.fn.now()
-  }, extraOverrides || {}));
+  }, extraOverrides || {})));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -439,10 +442,10 @@ describe('LC-3: done with future completedAt clamps to <= now (REGRESSION GUARD)
     knexRepo = new KnexTaskRepository({ db: knex });
     // Ensure LC-3 user exists
     try {
-      await knex('users').insert({
+      await knex('users').insert(__stampFixture({
         id: USER_LC3, email: USER_LC3 + '@fixy.test',
         timezone: TZ, created_at: new Date(), updated_at: new Date()
-      });
+      }));
     } catch (e) {
       // May already exist from beforeAll setup via main db handle — ignore dup
       if (!e.message || !e.message.includes('Duplicate')) throw e;

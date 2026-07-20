@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * Tests for scheduleQueue.js — event queue, single-flight, retry, error handling.
  *
@@ -65,7 +68,7 @@ beforeAll(async () => {
         created_at: db.fn.now(), updated_at: db.fn.now()
       };
     });
-    await db('users').insert(rows);
+    await db('users').insert(__stampFixture(rows));
   } catch (e) { console.warn('[scheduleQueue.test] seed failed:', e.message); }
 });
 

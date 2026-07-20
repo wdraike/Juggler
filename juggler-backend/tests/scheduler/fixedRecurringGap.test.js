@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../src/lib/audit-context').stampInsert(rows);
 // TELLY-17a: fixed+recurring contract tests TS-301 to TS-304
 // CONTRA-1: fixed+recurring placement-mode combination
 // File: fixedRecurringGap.test.js
@@ -65,7 +68,7 @@ async function countMastersByText(text) {
 async function seedMaster(fields) {
   const now = new Date();
   const id = 'tm-' + require('crypto').randomBytes(6).toString('hex');
-  await db('task_masters').insert(Object.assign({
+  await db('task_masters').insert(__stampFixture(Object.assign({
     id,
     user_id: '1',
     dur: 30,
@@ -73,7 +76,7 @@ async function seedMaster(fields) {
     status: '',
     created_at: now,
     updated_at: now
-  }, fields));
+  }, fields)));
   return id;
 }
 

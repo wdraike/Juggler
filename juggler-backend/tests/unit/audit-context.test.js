@@ -13,12 +13,18 @@ const {
   getActor,
   peekActor,
   expressAuditContext,
+  _runWithoutActor,
 } = require('../../src/lib/audit-context');
 
 describe('audit-context', () => {
-  test('getActor throws outside any context (no silent NULL)', () => {
-    expect(() => getActor()).toThrow(/no actor established/);
-    expect(peekActor()).toBeNull();
+  test('getActor throws outside any context (no silent NULL)', async () => {
+    // inc.4: the jest sandbox arms a test-default actor (approved test-only
+    // fallback); production no-actor behavior is asserted inside the
+    // default-suppressing zone.
+    await _runWithoutActor(() => {
+      expect(() => getActor()).toThrow(/no actor established/);
+      expect(peekActor()).toBeNull();
+    });
   });
 
   test('runWithActor establishes the actor across await boundaries', async () => {
@@ -66,11 +72,18 @@ describe('audit-context', () => {
 
   describe('expressAuditContext (lazy req.user)', () => {
     test('actor resolves from req.user set AFTER the middleware ran (route-level auth)', (done) => {
+      const { _armTestDefaultActor, _disarmTestDefaultActor } = require('../../src/lib/audit-context');
       const req = {};
       expressAuditContext(req, {}, () => {
         // auth middleware has not run yet
         expect(peekActor()).toBeNull();
-        expect(() => getActor()).toThrow(/no actor established/);
+        // Production behavior (no armed test default): pre-auth getActor throws.
+        _disarmTestDefaultActor();
+        try {
+          expect(() => getActor()).toThrow(/no actor established/);
+        } finally {
+          _armTestDefaultActor('jest');
+        }
 
         // route-level JWT auth populates req.user later on the same chain
         req.user = { sub: 'user-777' };

@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * Integration tests for remaining task controller handlers.
  * Covers: getVersion, deleteTask cascade, updateTaskStatus with recurring templates,
@@ -53,7 +56,7 @@ beforeAll(async () => {
   await db('task_masters').where('user_id', USER_ID).del();
   await db('projects').where('user_id', USER_ID).del();
   await db('users').where('id', USER_ID).del();
-  await db('users').insert({ id: USER_ID, email: 'crud2@test.com', timezone: 'America/New_York', created_at: db.fn.now(), updated_at: db.fn.now() });
+  await db('users').insert(__stampFixture({ id: USER_ID, email: 'crud2@test.com', timezone: 'America/New_York', created_at: db.fn.now(), updated_at: db.fn.now() }));
 }, 15000);
 
 afterAll(async () => {
@@ -203,7 +206,7 @@ describe('updateTaskStatus: recurring templates', () => {
     var nowMs = Date.now();
     var futureTime = new Date(nowMs + 86400000);
     await tasksWrite.insertTask(db, { id: 'ingest-cancel', user_id: USER_ID, task_type: 'task', text: 'Cancel me', status: '', scheduled_at: futureTime, created_at: db.fn.now(), updated_at: db.fn.now() });
-    await db('cal_sync_ledger').insert({ task_id: 'ingest-cancel', user_id: USER_ID, provider: 'gcal', provider_event_id: 'evt-cancel', origin: 'gcal', status: 'active', created_at: db.fn.now(), updated_at: db.fn.now() });
+    await db('cal_sync_ledger').insert(__stampFixture({ task_id: 'ingest-cancel', user_id: USER_ID, provider: 'gcal', provider_event_id: 'evt-cancel', origin: 'gcal', status: 'active', created_at: db.fn.now(), updated_at: db.fn.now() }));
     var req = mockReq({ params: { id: 'ingest-cancel' }, body: { status: 'cancel' } });
     var res = mockRes();
     await controller.updateTaskStatus(req, res);
@@ -218,7 +221,7 @@ describe('updateTaskStatus: recurring templates', () => {
     if (!available) return;
     var scheduledTime = new Date(Date.now() - 3600000);
     await tasksWrite.insertTask(db, { id: 'ingest-done', user_id: USER_ID, task_type: 'task', text: 'Done me', status: '', scheduled_at: scheduledTime, created_at: db.fn.now(), updated_at: db.fn.now() });
-    await db('cal_sync_ledger').insert({ task_id: 'ingest-done', user_id: USER_ID, provider: 'gcal', provider_event_id: 'evt-done', origin: 'gcal', status: 'active', created_at: db.fn.now(), updated_at: db.fn.now() });
+    await db('cal_sync_ledger').insert(__stampFixture({ task_id: 'ingest-done', user_id: USER_ID, provider: 'gcal', provider_event_id: 'evt-done', origin: 'gcal', status: 'active', created_at: db.fn.now(), updated_at: db.fn.now() }));
     var customCompleted = new Date(Date.now() - 1800000).toISOString();
     var req = mockReq({ params: { id: 'ingest-done' }, body: { status: 'done', completedAt: customCompleted } });
     var res = mockRes();
@@ -285,7 +288,7 @@ describe('batchUpdateTasks', () => {
   test('batch blocks disallowed fields on ingested cal-synced tasks', async () => {
     if (!available) return;
     await tasksWrite.insertTask(db, { id: 'bu-gcal', user_id: USER_ID, task_type: 'task', text: 'Ingested batch', status: '', created_at: db.fn.now(), updated_at: db.fn.now() });
-    await db('cal_sync_ledger').insert({
+    await db('cal_sync_ledger').insert(__stampFixture({
       task_id: 'bu-gcal',
       user_id: USER_ID,
       provider: 'gcal',
@@ -294,7 +297,7 @@ describe('batchUpdateTasks', () => {
       status: 'active',
       created_at: db.fn.now(),
       updated_at: db.fn.now()
-    });
+    }));
 
     var req = mockReq({ body: { updates: [{ id: 'bu-gcal', text: 'Blocked' }] }});
     var res = mockRes();
@@ -313,7 +316,7 @@ describe('batchUpdateTasks', () => {
     // Terminal status 'done' requires non-null scheduled_at (chk_task_instances_terminal_scheduled).
     // Seed with scheduled_at so the status='done' batch update is not blocked by the constraint.
     await tasksWrite.insertTask(db, { id: 'bu-gcal-ok', user_id: USER_ID, task_type: 'task', text: 'Ingested batch ok', status: '', scheduled_at: db.fn.now(), created_at: db.fn.now(), updated_at: db.fn.now() });
-    await db('cal_sync_ledger').insert({
+    await db('cal_sync_ledger').insert(__stampFixture({
       task_id: 'bu-gcal-ok',
       user_id: USER_ID,
       provider: 'gcal',
@@ -322,7 +325,7 @@ describe('batchUpdateTasks', () => {
       status: 'active',
       created_at: db.fn.now(),
       updated_at: db.fn.now()
-    });
+    }));
 
     var req = mockReq({ body: { updates: [{ id: 'bu-gcal-ok', status: 'done' }] }});
     var res = mockRes();
@@ -360,7 +363,7 @@ xdescribe('unpinTask — endpoint removed', () => {
   test('rejects unpin on ingested cal-synced task', async () => {
     if (!available) return;
     await tasksWrite.insertTask(db, { id: 'unpin-gcal', user_id: USER_ID, task_type: 'task', text: 'Ingested pinned', status: '', date_pinned: 1, when: 'fixed', prev_when: 'afternoon', created_at: db.fn.now(), updated_at: db.fn.now() });
-    await db('cal_sync_ledger').insert({ task_id: 'unpin-gcal', user_id: USER_ID, provider: 'gcal', provider_event_id: 'evt-unpin', origin: 'gcal', status: 'active', created_at: db.fn.now(), updated_at: db.fn.now() });
+    await db('cal_sync_ledger').insert(__stampFixture({ task_id: 'unpin-gcal', user_id: USER_ID, provider: 'gcal', provider_event_id: 'evt-unpin', origin: 'gcal', status: 'active', created_at: db.fn.now(), updated_at: db.fn.now() }));
     var req = mockReq({ params: { id: 'unpin-gcal' } });
     var res = mockRes();
     await controller.unpinTask(req, res);

@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../../src/lib/audit-context').stampInsert(rows);
 /**
  * B11 RED regression tests — STEP 0 (pre-fix, must FAIL against current code)
  *
@@ -118,7 +121,7 @@ async function seedRows(userId, count) {
     rows.push({ user_id: userId });
   }
   // Insert in a single batch for speed; created_at defaults to NOW().
-  await testDb('ai_command_log').insert(rows);
+  await testDb('ai_command_log').insert(__stampFixture(rows));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -134,20 +137,20 @@ describe('B11 — quota TOCTOU: concurrent acquisitions must not overshoot the 5
 
     // Ensure test users exist (ai_command_log.user_id FK → users.id).
     await testDb('users')
-      .insert({
+      .insert(__stampFixture({
         id: USER_B11,
         email: 'telly-b11-toctou@example.com',
         name: 'Telly B11 TOCTOU Test',
-      })
+      }))
       .onConflict('id')
       .ignore();
 
     await testDb('users')
-      .insert({
+      .insert(__stampFixture({
         id: USER_DENY,
         email: 'telly-b11-deny@example.com',
         name: 'Telly B11 DENY Test',
-      })
+      }))
       .onConflict('id')
       .ignore();
   });

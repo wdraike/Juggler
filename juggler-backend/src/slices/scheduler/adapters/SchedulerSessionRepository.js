@@ -14,6 +14,7 @@
 
 var SCHEDULER_SESSION_PORT_METHODS =
   require('../domain/ports/SchedulerSessionPort').SCHEDULER_SESSION_PORT_METHODS;
+var stampInsert = require('../../../lib/audit-context').stampInsert; // 999.1576 inc.4
 
 function SchedulerSessionRepository() {}
 
@@ -29,7 +30,7 @@ SchedulerSessionRepository.prototype.deleteExpiredSessions = function deleteExpi
  * Insert a new session row (verbatim — `startSession` ~119-133).
  */
 SchedulerSessionRepository.prototype.insertSession = function insertSession(db, row) {
-  return db('scheduler_sessions').insert(row);
+  return db('scheduler_sessions').insert(stampInsert(row));
 };
 
 /**

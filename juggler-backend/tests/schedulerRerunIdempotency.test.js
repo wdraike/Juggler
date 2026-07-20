@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * Characterization guard — scheduler re-run idempotency (B2).
  *
@@ -30,12 +33,12 @@ beforeAll(async () => {
     return;
   }
   await cleanup();
-  await db('users').insert({
+  await db('users').insert(__stampFixture({
     id: USER_ID, email: 'rerunidem@test.com', timezone: TZ,
     created_at: db.fn.now(), updated_at: db.fn.now()
-  });
-  await db('user_config').insert({ user_id: USER_ID, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) });
-  await db('user_config').insert({ user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) });
+  }));
+  await db('user_config').insert(__stampFixture({ user_id: USER_ID, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) }));
+  await db('user_config').insert(__stampFixture({ user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) }));
 }, 15000);
 
 afterAll(async () => {

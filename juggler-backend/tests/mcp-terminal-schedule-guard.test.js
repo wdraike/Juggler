@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * 999.895 — MCP terminal-requires-schedule guard regression test
  *
@@ -136,13 +139,13 @@ beforeAll(async () => {
 
   // Seed user — handlers query db('users') for timezone; default is 'America/New_York'
   // when absent, but seed explicitly to avoid any null-tz edge case.
-  await db('users').insert({
+  await db('users').insert(__stampFixture({
     id: USER_ID,
     email: 'guard895@test.invalid',
     timezone: 'America/New_York',
     created_at: db.fn.now(),
     updated_at: db.fn.now()
-  });
+  }));
 
   // R1: three unscheduled non-rolling tasks (one per terminal status: done/skip/cancel).
   await tasksWrite.insertTask(db, baseTask(UNSCHEDULED_DONE_ID));

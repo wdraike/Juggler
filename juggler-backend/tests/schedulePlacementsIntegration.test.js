@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * Integration tests for deriveSchedulePlacements — the W3 DB-sourced read helper.
  *
@@ -32,9 +35,9 @@ beforeAll(async () => {
   await db('task_masters').where('user_id', USER_ID).del();
   await db('user_config').where('user_id', USER_ID).del();
   await db('users').where('id', USER_ID).del();
-  await db('users').insert({ id: USER_ID, email: 'place@test.com', timezone: 'America/New_York', created_at: db.fn.now(), updated_at: db.fn.now() });
-  await db('user_config').insert({ user_id: USER_ID, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) });
-  await db('user_config').insert({ user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) });
+  await db('users').insert(__stampFixture({ id: USER_ID, email: 'place@test.com', timezone: 'America/New_York', created_at: db.fn.now(), updated_at: db.fn.now() }));
+  await db('user_config').insert(__stampFixture({ user_id: USER_ID, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) }));
+  await db('user_config').insert(__stampFixture({ user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) }));
 }, 15000);
 
 afterAll(async () => {
@@ -175,18 +178,18 @@ describe('deriveSchedulePlacements', () => {
     // overdue injection fires: isPastDue=true, startMin<nowMins → snap to lastBlockEnd-dur.
     // recur type is weekly/TPC (not 'daily') so isPlacedRecurringInstance stays false and
     // dueKey resolves through the implied_deadline fallback, not the scheduled_at branch.
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: 'gp-snap-001-tmpl', user_id: USER_ID, text: 'Overdue snap test',
       dur: dur, status: '', when: '_invalid_window_',
       recurring: 1, recur: JSON.stringify({ type: 'weekly', timesPerCycle: 4, days: 'MTWRSFU' }),
       created_at: db.fn.now(), updated_at: db.fn.now()
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: 'gp-snap-001', master_id: 'gp-snap-001-tmpl', user_id: USER_ID,
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1,
       date: todayKey, scheduled_at: scheduledAt, implied_deadline: impliedDeadline,
       dur: dur, status: '', created_at: db.fn.now(), updated_at: db.fn.now()
-    });
+    }));
     // Use runScheduleAndPersist directly: overdue injection (snap + _overdue flag) is in
     // runScheduleAndPersist, not in deriveSchedulePlacements (read-only helper).
     // Freeze the scheduler clock at 14:00 ET on the fixture's own todayKey —
@@ -231,17 +234,17 @@ describe('deriveSchedulePlacements', () => {
     if (!available) return;
     var pastDate = '2025-01-15';
     var scheduledAt = pastDate + ' 14:00:00';
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: 'gp-pastdue-001', user_id: USER_ID, text: 'Past due floating task',
       dur: 30, status: '', when: '_invalid_window_',
       created_at: db.fn.now(), updated_at: db.fn.now()
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: 'gp-pastdue-001', master_id: 'gp-pastdue-001', user_id: USER_ID,
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1,
       date: pastDate, scheduled_at: scheduledAt,
       dur: 30, status: '', created_at: db.fn.now(), updated_at: db.fn.now()
-    });
+    }));
     var result = await runScheduleAndPersist(USER_ID, undefined, { timezone: 'America/New_York' });
 
     // ASSERTION (roll-forward contract): floating + no-deadline task must NOT appear
@@ -308,18 +311,18 @@ describe('deriveSchedulePlacements', () => {
     if (!available) return;
     var pastDate = '2025-01-15';
     var scheduledAt = pastDate + ' 14:00:00';
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: 'gp-pastdue-deadline-001', user_id: USER_ID, text: 'Past deadline unplaceable task',
       dur: 30, status: '', when: '_invalid_window_',
       deadline: '2025-01-10 23:59:59', // deadline clearly in the past
       created_at: db.fn.now(), updated_at: db.fn.now()
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: 'gp-pastdue-deadline-001', master_id: 'gp-pastdue-deadline-001', user_id: USER_ID,
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1,
       date: pastDate, scheduled_at: scheduledAt,
       dur: 30, status: '', created_at: db.fn.now(), updated_at: db.fn.now()
-    });
+    }));
     var result = await runScheduleAndPersist(USER_ID, undefined, { timezone: 'America/New_York' });
 
     // NEVER-MISSING (999.1569): must NOT appear on the calendar grid — it is

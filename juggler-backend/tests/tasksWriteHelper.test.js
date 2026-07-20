@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * Unit tests for src/lib/tasks-write.js — the write-path helper that will
  * replace `db('tasks').insert/update/del` calls once all sites are flipped.
@@ -23,10 +26,10 @@ beforeAll(async () => {
   await db('task_instances').where('user_id', USER_ID).del();
   await db('task_masters').where('user_id', USER_ID).del();
   await db('users').where('id', USER_ID).del();
-  await db('users').insert({
+  await db('users').insert(__stampFixture({
     id: USER_ID, email: 'write-helper@test.com', name: 'Write Helper Test',
     timezone: 'America/New_York', created_at: db.fn.now(), updated_at: db.fn.now()
-  });
+  }));
 }, 15000);
 
 afterAll(async () => {

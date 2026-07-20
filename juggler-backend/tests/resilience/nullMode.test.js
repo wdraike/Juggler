@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../src/lib/audit-context').stampInsert(rows);
 /**
  * Resilience tests for scheduler edge cases (TS-269 to TS-272)
  * 
@@ -173,11 +176,11 @@ describe('Resilience Tests (TS-269 to TS-272)', () => {
         // Create a test user and some tasks
         testUserId = 'test_user_' + Math.random().toString(36).slice(2, 8);
         
-        await knex('users').insert({
+        await knex('users').insert(__stampFixture({
           id: testUserId,
           email: 'test@example.com',
           name: 'Test User'
-        });
+        }));
       } catch (error) {
         console.log('Database not available, skipping TS-271 tests');
         dbAvailable = false;
@@ -200,7 +203,7 @@ describe('Resilience Tests (TS-269 to TS-272)', () => {
 
       // Insert a task
       const taskId = 'task_' + Math.random().toString(36).slice(2, 8);
-      await knex('task_masters').insert({
+      await knex('task_masters').insert(__stampFixture({
         id: taskId,
         user_id: testUserId,
         text: 'Test task before crash',
@@ -211,7 +214,7 @@ describe('Resilience Tests (TS-269 to TS-272)', () => {
         when: '',
         created_at: new Date(),
         updated_at: new Date()
-      });
+      }));
 
       // Verify task exists
       const taskBefore = await knex('task_masters').where('id', taskId).first();
@@ -258,13 +261,13 @@ describe('Resilience Tests (TS-269 to TS-272)', () => {
       
       try {
         // Insert test data
-        await knex('users').insert({
+        await knex('users').insert(__stampFixture({
           id: testUserId,
           email: 'migration@example.com',
           name: 'Migration Test User'
-        });
+        }));
 
-        await knex('task_masters').insert({
+        await knex('task_masters').insert(__stampFixture({
           id: taskId,
           user_id: testUserId,
           text: 'Task before migration',
@@ -275,7 +278,7 @@ describe('Resilience Tests (TS-269 to TS-272)', () => {
           when: 'morning',
           created_at: new Date(),
           updated_at: new Date()
-        });
+        }));
 
         // Verify data exists before "migration"
         const taskBefore = await knex('task_masters').where('id', taskId).first();

@@ -4,10 +4,11 @@
 
 const { v7: uuidv7 } = require('uuid');
 const { aiUsageQueueLogger } = require('../../../lib/logger');
+const { stampInsert } = require('../../../lib/audit-context'); // 999.1576 inc.4
 
 async function enqueue(db, event) {
   try {
-    await db('ai_usage_outbox').insert({
+    await db('ai_usage_outbox').insert(stampInsert({
       id:             uuidv7(),
       user_id:        event.userId ?? null,
       use_case:       event.useCase,
@@ -22,7 +23,7 @@ async function enqueue(db, event) {
       occurred_at:    event.occurredAt,
       queued_at:      new Date(),
       flush_attempts: 0,
-    });
+    }));
   } catch (err) {
     aiUsageQueueLogger.warn('Enqueue failed', { error: err });
   }

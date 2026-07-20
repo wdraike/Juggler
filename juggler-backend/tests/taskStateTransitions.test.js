@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * Real-DB integration tests for the task state machine.
  *
@@ -54,14 +57,14 @@ beforeAll(async () => {
   await db('users').where('id', USER_ID).del();
 
   // Seed test user
-  await db('users').insert({
+  await db('users').insert(__stampFixture({
     id: USER_ID,
     email: 'state@test.com',
     name: 'State Test',
     timezone: 'America/New_York',
     created_at: db.fn.now(),
     updated_at: db.fn.now()
-  });
+  }));
 }, 15000);
 
 afterAll(async () => {
@@ -354,7 +357,7 @@ describe('status transition: pause/unpause on recurring template', () => {
     var farFuture = new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000);  // +5 days
 
     // Insert recurring template directly
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: tmplId,
       user_id: USER_ID,
       text: 'Daily recurring',
@@ -365,18 +368,18 @@ describe('status transition: pause/unpause on recurring template', () => {
       recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU', every: 1 }),
       created_at: now,
       updated_at: now
-    });
+    }));
 
     // Insert 3 future open instances pointing to the template
     var inst1Id = tmplId + '-inst1';
     var inst2Id = tmplId + '-inst2';
     var inst3Id = tmplId + '-inst3';
 
-    await db('task_instances').insert([
+    await db('task_instances').insert(__stampFixture([
       { id: inst1Id, master_id: tmplId, user_id: USER_ID, status: '', occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30, scheduled_at: futureDate, created_at: now, updated_at: now },
       { id: inst2Id, master_id: tmplId, user_id: USER_ID, status: '', occurrence_ordinal: 2, split_ordinal: 1, split_total: 1, dur: 30, scheduled_at: farFuture, created_at: now, updated_at: now },
       { id: inst3Id, master_id: tmplId, user_id: USER_ID, status: '', occurrence_ordinal: 3, split_ordinal: 1, split_total: 1, dur: 30, scheduled_at: farFuture, created_at: now, updated_at: now }
-    ]);
+    ]));
 
     // Pause the template
     var pauseReq = mockReq({ params: { id: tmplId }, body: { status: 'pause' } });
@@ -420,7 +423,7 @@ describe('status transition: pause/unpause on recurring template', () => {
     var now = new Date();
 
     // Insert a paused template
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: tmplId,
       user_id: USER_ID,
       text: 'Paused recurring',
@@ -431,7 +434,7 @@ describe('status transition: pause/unpause on recurring template', () => {
       recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU', every: 1 }),
       created_at: now,
       updated_at: now
-    });
+    }));
 
     var { enqueueScheduleRun } = require('../src/scheduler/scheduleQueue');
     enqueueScheduleRun.mockClear();
@@ -456,7 +459,7 @@ describe('status transition: pause/unpause on recurring template', () => {
     var tmplId = 'tmpl-bad-status-' + Date.now();
     var now = new Date();
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: tmplId,
       user_id: USER_ID,
       text: 'Cannot done-template',
@@ -467,7 +470,7 @@ describe('status transition: pause/unpause on recurring template', () => {
       recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU', every: 1 }),
       created_at: now,
       updated_at: now
-    });
+    }));
 
     var badReq = mockReq({ params: { id: tmplId }, body: { status: 'done' } });
     var badRes = mockRes();
@@ -488,7 +491,7 @@ describe('status transition: disabled → re-enable (real DB)', () => {
     var taskId = 'disabled-reenable-' + Date.now();
 
     // Insert a disabled task directly
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: taskId,
       user_id: USER_ID,
       text: 'Disabled task to re-enable',
@@ -500,8 +503,8 @@ describe('status transition: disabled → re-enable (real DB)', () => {
       disabled_reason: 'plan_limit',
       created_at: now,
       updated_at: now
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: taskId,
       master_id: taskId,
       user_id: USER_ID,
@@ -512,7 +515,7 @@ describe('status transition: disabled → re-enable (real DB)', () => {
       dur: 30,
       created_at: now,
       updated_at: now
-    });
+    }));
 
     // Re-enable with unlimited plan (active_tasks: -1)
     var req = mockReq({
@@ -548,31 +551,31 @@ describe('status transition: disabled → re-enable (real DB)', () => {
     // Pre-seed 3 active tasks to fill a limit of 3
     for (var i = 0; i < 3; i++) {
       var tid = 'active-limit-task-' + i + '-' + Date.now();
-      await db('task_masters').insert({
+      await db('task_masters').insert(__stampFixture({
         id: tid, user_id: USER_ID, text: 'Active task ' + i,
         dur: 30, pri: 'P3', recurring: 0, status: '',
         created_at: now, updated_at: now
-      });
-      await db('task_instances').insert({
+      }));
+      await db('task_instances').insert(__stampFixture({
         id: tid, master_id: tid, user_id: USER_ID, status: '',
         occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
         created_at: now, updated_at: now
-      });
+      }));
     }
 
     // Insert the disabled task we want to re-enable
     var disabledId = 'at-limit-disabled-' + Date.now();
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: disabledId, user_id: USER_ID, text: 'Would-be 4th task',
       dur: 30, pri: 'P3', recurring: 0, status: 'disabled',
       disabled_at: now, disabled_reason: 'plan_limit',
       created_at: now, updated_at: now
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: disabledId, master_id: disabledId, user_id: USER_ID, status: 'disabled',
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
       created_at: now, updated_at: now
-    });
+    }));
 
     // Attempt re-enable with a limit of 3
     var req = mockReq({
@@ -618,18 +621,18 @@ describe('status transition: missed status — invalid status (400)', () => {
     // Simulate a system-applied missed status by writing directly to DB
     var now = new Date();
     var taskId = 'system-missed-' + Date.now();
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: taskId, user_id: USER_ID, text: 'System-missed task',
       dur: 30, pri: 'P3', recurring: 0, status: '',
       created_at: now, updated_at: now
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: taskId, master_id: taskId, user_id: USER_ID,
       status: 'missed', // written as if by the scheduler
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
       scheduled_at: new Date('2026-05-01T07:00:00Z'),
       created_at: now, updated_at: now
-    });
+    }));
 
     // Reading the task via getTask should return status=missed without errors
     var getReq = mockReq({ params: { id: taskId } });
@@ -778,17 +781,17 @@ describe('terminal-status edge cases', () => {
 
     var now = new Date();
     var taskId = 'guard-disabled-' + Date.now();
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: taskId, user_id: USER_ID, text: 'Frozen disabled',
       dur: 30, pri: 'P3', recurring: 0, status: 'disabled',
       disabled_at: now, disabled_reason: 'plan_limit',
       created_at: now, updated_at: now
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: taskId, master_id: taskId, user_id: USER_ID, status: 'disabled',
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
       created_at: now, updated_at: now
-    });
+    }));
 
     var req = mockReq({ params: { id: taskId }, body: { status: '' } });
     var res = mockRes();

@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * Integration tests for task controller CRUD handlers.
  * Uses real test DB via NODE_ENV=test.
@@ -28,10 +31,10 @@ beforeAll(async () => {
   await db('task_masters').where('user_id', USER_ID).del();
   await db('projects').where('user_id', USER_ID).del();
   await db('users').where('id', USER_ID).del();
-  await db('users').insert({
+  await db('users').insert(__stampFixture({
     id: USER_ID, email: 'crud@test.com', name: 'CRUD Test',
     timezone: 'America/New_York', created_at: db.fn.now(), updated_at: db.fn.now()
-  });
+  }));
 }, 15000);
 
 afterAll(async () => {
@@ -83,10 +86,10 @@ async function seedCalSyncTask(taskBody, ledger) {
   var res = mockRes();
   await controller.createTask(req, res);
   var id = res._json.task.id;
-  await db('cal_sync_ledger').insert(Object.assign({
+  await db('cal_sync_ledger').insert(__stampFixture(Object.assign({
     user_id: USER_ID, task_id: id,
     created_at: db.fn.now(), updated_at: db.fn.now()
-  }, ledger));
+  }, ledger)));
   return id;
 }
 
@@ -469,11 +472,11 @@ describe('updateTask', () => {
   test('inactive ledger row makes task editable', async () => {
     if (!available) return;
     await tasksWrite.insertTask(db, { id: 'inact-led', user_id: USER_ID, task_type: 'task', text: 'Inactive ledger', status: '', created_at: db.fn.now(), updated_at: db.fn.now() });
-    await db('cal_sync_ledger').insert({
+    await db('cal_sync_ledger').insert(__stampFixture({
       task_id: 'inact-led', user_id: USER_ID, provider: 'gcal',
       provider_event_id: 'evt-inact', origin: 'gcal', status: 'deleted',
       created_at: db.fn.now(), updated_at: db.fn.now()
-    });
+    }));
     var req = mockReq({ params: { id: 'inact-led' }, body: { text: 'Edited' } });
     var res = mockRes();
     await controller.updateTask(req, res);
@@ -485,16 +488,16 @@ describe('updateTask', () => {
   test('multi-provider origin collision prefers non-juggler', async () => {
     if (!available) return;
     await tasksWrite.insertTask(db, { id: 'multi-prov', user_id: USER_ID, task_type: 'task', text: 'Multi', status: '', created_at: db.fn.now(), updated_at: db.fn.now() });
-    await db('cal_sync_ledger').insert({
+    await db('cal_sync_ledger').insert(__stampFixture({
       task_id: 'multi-prov', user_id: USER_ID, provider: 'gcal',
       provider_event_id: 'evt-g', origin: 'juggler', status: 'active',
       created_at: db.fn.now(), updated_at: db.fn.now()
-    });
-    await db('cal_sync_ledger').insert({
+    }));
+    await db('cal_sync_ledger').insert(__stampFixture({
       task_id: 'multi-prov', user_id: USER_ID, provider: 'msft',
       provider_event_id: 'evt-m', origin: 'msft', status: 'active',
       created_at: db.fn.now(), updated_at: db.fn.now()
-    });
+    }));
     var req = mockReq({ params: { id: 'multi-prov' }, body: { text: 'Blocked' } });
     var res = mockRes();
     await controller.updateTask(req, res);
@@ -649,21 +652,21 @@ describe('updateTaskStatus', () => {
     var chunk2Id = masterShort.slice(0, 27) + '-c2'; // 30 chars
     var now = new Date();
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: masterId, user_id: USER_ID, text: 'Split recurring', dur: 60,
       pri: 'P3', recurring: 1, split: 1, split_min: 30,
       recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU', every: 1 }),
       created_at: now, updated_at: now,
-    });
+    }));
     for (var i = 0; i < 2; i++) {
-      await db('task_instances').insert({
+      await db('task_instances').insert(__stampFixture({
         id: i === 0 ? chunk1Id : chunk2Id,
         master_id: masterId, user_id: USER_ID,
         occurrence_ordinal: 1, split_ordinal: i + 1, split_total: 2,
         scheduled_at: new Date(Date.parse('2026-04-16T14:00:00Z') + i * 3600000),
         dur: 30, status: '', generated: 0,
         created_at: now, updated_at: now,
-      });
+      }));
     }
 
     // Mark chunk 1 done via updateTaskStatus.

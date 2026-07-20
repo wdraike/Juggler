@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../src/lib/audit-context').stampInsert(rows);
 /**
  * RED regression tests — rolling-past-due-forward-roll — bugfix — 2026-06-29
  *
@@ -1203,13 +1206,13 @@ describe('juggy3/W1/R-OD1/AC1a — Shape C-2 UNPLACEABLE {time_blocks,no-home-bl
       Mon: allWorkBlocks, Tue: allWorkBlocks, Wed: allWorkBlocks,
       Thu: allWorkBlocks, Fri: allWorkBlocks, Sat: allWorkBlocks, Sun: allWorkBlocks
     };
-    await db('user_config').insert({
+    await db('user_config').insert(__stampFixture({
       user_id: '1',
       config_key: 'time_blocks',
       config_value: JSON.stringify(allWorkTimeBlocks),
       created_at: new Date(),
       updated_at: new Date()
-    });
+    }));
     masterC2U = await createC2Master();
     instanceC2U = await createC2Instance(masterC2U.id);
     await runScheduler([], {}, TODAY, 480, { persist: true });

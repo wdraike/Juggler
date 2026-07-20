@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../../src/lib/audit-context').stampInsert(rows);
 /**
  * JUG-FACADE-DB-VIOLATIONS stage 1 — db-backed pin for the scheduler slice's
  * admin/debug reads, moved verbatim from scheduler/facade.js (L87-94) into
@@ -41,10 +44,10 @@ beforeAll(async () => {
   available = true;
   await cleanup();
   for (const id of [USER_ID, OTHER_USER]) {
-    await db('users').insert({
+    await db('users').insert(__stampFixture({
       id: id, email: id + '@test.com', name: id,
       timezone: 'America/New_York', created_at: db.fn.now(), updated_at: db.fn.now()
-    });
+    }));
   }
   await tasksWrite.insertTask(db, { id: 'kdr-active', user_id: USER_ID, text: 'active task', dur: 30, pri: 'P3' });
   await tasksWrite.insertTask(db, { id: 'kdr-done', user_id: USER_ID, text: 'done task', dur: 30, pri: 'P3' });
@@ -73,14 +76,14 @@ describe('KnexDebugReads.loadDebugTasks', () => {
 
 describe('KnexDebugReads.findStepperSessionOwner', () => {
   test('returns the row for an existing session and undefined when absent', async () => {
-    await db('scheduler_sessions').insert({
+    await db('scheduler_sessions').insert(__stampFixture({
       session_id: 'kdr-sess-1', user_id: USER_ID,
       today_key: '2026-07-13', now_mins: 600, timezone: 'America/New_York',
       snapshots: JSON.stringify([]), tasks_by_id: JSON.stringify({}),
       unplaced: JSON.stringify([]), score: JSON.stringify({}),
       warnings: JSON.stringify([]), slack_by_task_id: JSON.stringify({}),
       expires_at: db.raw('DATE_ADD(NOW(), INTERVAL 1 HOUR)')
-    });
+    }));
     var row = await debugReads.findStepperSessionOwner('kdr-sess-1');
     expect(row).toBeTruthy();
     expect(row.user_id).toBe(USER_ID);

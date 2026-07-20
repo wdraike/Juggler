@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * mcp-tasks-write-tools-db-side-effects.characterization.db.test.js
  *
@@ -66,10 +69,10 @@ describe('MCP tasks.js write tools — real-DB side effects (BEFORE facade migra
     await assertDbAvailable();
     await clearUserTasks();
     await db('users').where('id', USER_ID).del();
-    await db('users').insert({
+    await db('users').insert(__stampFixture({
       id: USER_ID, email: 'mcp-tasks-dbfx@test.invalid', name: 'MCP tasks db-fx test',
       timezone: 'America/New_York', created_at: new Date(), updated_at: new Date()
-    });
+    }));
   }, 15000);
 
   afterEach(async function () {
@@ -168,18 +171,18 @@ describe('MCP tasks.js write tools — real-DB side effects (BEFORE facade migra
   test('update_task: cal-synced task blocks non-allowed fields -> exact error string, DB row UNCHANGED', async function () {
     var now = new Date();
     var taskId = 'mcp-dbfx-calsync-' + Date.now();
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: taskId, user_id: USER_ID, text: 'Calendar-linked task', dur: 30, pri: 'P3',
       recurring: 0, status: '', created_at: now, updated_at: now
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: taskId, master_id: taskId, user_id: USER_ID, status: '',
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30, created_at: now, updated_at: now
-    });
-    await db('cal_sync_ledger').insert({
+    }));
+    await db('cal_sync_ledger').insert(__stampFixture({
       user_id: USER_ID, task_id: taskId, provider: 'gcal', origin: 'gcal',
       status: 'active', provider_event_id: 'gcal-evt-' + Date.now(), created_at: now, synced_at: now
-    });
+    }));
 
     var handlers = captureHandlers(USER_ID);
     var result = await handlers.update_task({ id: taskId, text: 'Attempted edit' });
@@ -196,14 +199,14 @@ describe('MCP tasks.js write tools — real-DB side effects (BEFORE facade migra
   test('update_task: REAL row updated in DB for an allowed field', async function () {
     var now = new Date();
     var taskId = 'mcp-dbfx-update-' + Date.now();
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: taskId, user_id: USER_ID, text: 'Task to update', dur: 30, pri: 'P3',
       recurring: 0, status: '', created_at: now, updated_at: now
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: taskId, master_id: taskId, user_id: USER_ID, status: '',
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30, created_at: now, updated_at: now
-    });
+    }));
 
     var handlers = captureHandlers(USER_ID);
     var result = await handlers.update_task({ id: taskId, text: 'Updated text', pri: 'P1' });
@@ -227,15 +230,15 @@ describe('MCP tasks.js write tools — real-DB side effects (BEFORE facade migra
   test('set_task_status: REAL status column updated in task_instances', async function () {
     var now = new Date();
     var taskId = 'mcp-dbfx-status-' + Date.now();
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: taskId, user_id: USER_ID, text: 'Status probe task', dur: 30, pri: 'P3',
       recurring: 0, status: '', created_at: now, updated_at: now
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: taskId, master_id: taskId, user_id: USER_ID, status: '',
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
       scheduled_at: new Date(now.getTime() + 3600000), created_at: now, updated_at: now
-    });
+    }));
 
     var handlers = captureHandlers(USER_ID);
     var result = await handlers.set_task_status({ id: taskId, status: 'done' });
@@ -251,22 +254,22 @@ describe('MCP tasks.js write tools — real-DB side effects (BEFORE facade migra
     var now = new Date();
     var calId = 'mcp-dbfx-batch-cal-' + Date.now();
     var plainId = 'mcp-dbfx-batch-plain-' + Date.now();
-    await db('task_masters').insert([
+    await db('task_masters').insert(__stampFixture([
       { id: calId, user_id: USER_ID, text: 'Cal task', dur: 30, pri: 'P3', recurring: 0, status: '',
         created_at: now, updated_at: now },
       { id: plainId, user_id: USER_ID, text: 'Plain task', dur: 30, pri: 'P3', recurring: 0, status: '',
         created_at: now, updated_at: now }
-    ]);
-    await db('task_instances').insert([
+    ]));
+    await db('task_instances').insert(__stampFixture([
       { id: calId, master_id: calId, user_id: USER_ID, status: '', occurrence_ordinal: 1,
         split_ordinal: 1, split_total: 1, dur: 30, created_at: now, updated_at: now },
       { id: plainId, master_id: plainId, user_id: USER_ID, status: '', occurrence_ordinal: 1,
         split_ordinal: 1, split_total: 1, dur: 30, created_at: now, updated_at: now }
-    ]);
-    await db('cal_sync_ledger').insert({
+    ]));
+    await db('cal_sync_ledger').insert(__stampFixture({
       user_id: USER_ID, task_id: calId, provider: 'gcal', origin: 'gcal',
       status: 'active', provider_event_id: 'gcal-evt-' + Date.now(), created_at: now, synced_at: now
-    });
+    }));
 
     var handlers = captureHandlers(USER_ID);
     var result = await handlers.batch_update_tasks({
@@ -288,18 +291,18 @@ describe('MCP tasks.js write tools — real-DB side effects (BEFORE facade migra
     var now = new Date();
     var idA = 'mcp-dbfx-batch-a-' + Date.now();
     var idB = 'mcp-dbfx-batch-b-' + Date.now();
-    await db('task_masters').insert([
+    await db('task_masters').insert(__stampFixture([
       { id: idA, user_id: USER_ID, text: 'A', dur: 30, pri: 'P3', recurring: 0, status: '',
         created_at: now, updated_at: now },
       { id: idB, user_id: USER_ID, text: 'B', dur: 30, pri: 'P3', recurring: 0, status: '',
         created_at: now, updated_at: now }
-    ]);
-    await db('task_instances').insert([
+    ]));
+    await db('task_instances').insert(__stampFixture([
       { id: idA, master_id: idA, user_id: USER_ID, status: '', occurrence_ordinal: 1,
         split_ordinal: 1, split_total: 1, dur: 30, created_at: now, updated_at: now },
       { id: idB, master_id: idB, user_id: USER_ID, status: '', occurrence_ordinal: 1,
         split_ordinal: 1, split_total: 1, dur: 30, created_at: now, updated_at: now }
-    ]);
+    ]));
 
     var handlers = captureHandlers(USER_ID);
     var result = await handlers.batch_update_tasks({

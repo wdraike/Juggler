@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../src/lib/audit-context').stampInsert(rows);
 // Tests for morning-schedule-cron (999.1408).
 //
 // Root cause: unifiedScheduleV2's nowSlot gate is correct — it refuses to
@@ -34,10 +37,10 @@ describe('MorningScheduleCron', () => {
   afterAll(async () => { await db.destroy(); });
 
   test('enqueues a run for a user within 15 min of local midnight, not for one at midday', async () => {
-    await db('users').insert([
+    await db('users').insert(__stampFixture([
       { id: TEST_USER_A, email: 'morningcron-a@test.local', timezone: 'Pacific/Auckland' },
       { id: TEST_USER_B, email: 'morningcron-b@test.local', timezone: 'America/New_York' }
-    ]);
+    ]));
     const enqueueScheduleRun = jest.fn();
     const cron = new MorningScheduleCron({
       enqueueScheduleRun,
@@ -52,7 +55,7 @@ describe('MorningScheduleCron', () => {
   });
 
   test('does not enqueue twice for the same user on the same local day', async () => {
-    await db('users').insert({ id: TEST_USER_A, email: 'morningcron-a@test.local', timezone: 'Pacific/Auckland' });
+    await db('users').insert(__stampFixture({ id: TEST_USER_A, email: 'morningcron-a@test.local', timezone: 'Pacific/Auckland' }));
     const enqueueScheduleRun = jest.fn();
     const cron = new MorningScheduleCron({
       enqueueScheduleRun,
@@ -67,7 +70,7 @@ describe('MorningScheduleCron', () => {
   });
 
   test('re-enqueues once the local day rolls over to a new early-morning window', async () => {
-    await db('users').insert({ id: TEST_USER_A, email: 'morningcron-a@test.local', timezone: 'Pacific/Auckland' });
+    await db('users').insert(__stampFixture({ id: TEST_USER_A, email: 'morningcron-a@test.local', timezone: 'Pacific/Auckland' }));
     const enqueueScheduleRun = jest.fn();
     var todayKey = '2026-07-08';
     const cron = new MorningScheduleCron({

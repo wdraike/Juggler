@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../src/lib/audit-context').stampInsert(rows);
 /**
  * Leg D (scheduler-recurring-rework §4) — auto-miss removed.
  *
@@ -28,9 +31,9 @@ beforeAll(async () => {
   await assertDbAvailable();
   try { await db.raw('SELECT 1'); available = true; } catch (e) { console.warn('no DB', e.message); return; }
   await cleanup();
-  await db('users').insert({ id: USER_ID, email: 'nam@test.com', timezone: TZ, created_at: db.fn.now(), updated_at: db.fn.now() });
-  await db('user_config').insert({ user_id: USER_ID, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) });
-  await db('user_config').insert({ user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) });
+  await db('users').insert(__stampFixture({ id: USER_ID, email: 'nam@test.com', timezone: TZ, created_at: db.fn.now(), updated_at: db.fn.now() }));
+  await db('user_config').insert(__stampFixture({ user_id: USER_ID, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) }));
+  await db('user_config').insert(__stampFixture({ user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) }));
 }, 15000);
 
 afterAll(async () => { if (available) await cleanup(); await db.destroy(); });
@@ -74,20 +77,20 @@ describe('Leg D — no auto-miss; past-incomplete recurring stays visible', () =
     // 10-day-old occurrence is outside BOTH the timeFlex window AND its (1-day) period →
     // pre-fix code froze it on its day then auto-missed it. Day-locked → reconcile won't
     // move it forward, so the miss path is reliably exercised.
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: 'nam-tmpl', user_id: USER_ID, text: 'Past recurring', dur: 30, status: '', recurring: 1,
       recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU' }),
       recur_start: dayKey(-30), when: 'morning', placement_mode: 'time_window', time_flex: 60,
       created_at: db.fn.now(), updated_at: db.fn.now()
-    });
+    }));
     // a NEVER-PLACED past instance 10 days ago (scheduled_at NULL), still pending. This is
     // the case PATH-C does NOT spare → pre-fix code auto-marks it 'missed' (RED).
-    await db('task_instances').insert({
+    await db('task_instances').insert(__stampFixture({
       id: 'nam-inst', master_id: 'nam-tmpl', user_id: USER_ID,
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1,
       scheduled_at: null, date: dayKey(-10), time: null,
       status: '', dur: 30, created_at: db.fn.now(), updated_at: db.fn.now()
-    });
+    }));
 
     await runScheduleAndPersist(USER_ID);
 

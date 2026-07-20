@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * mcp-fixed-mode-guards-restored-characterization.db.test.js
  *
@@ -116,10 +119,10 @@ function captureHandlers(userId) {
 async function seedUser() {
   var existing = await db('users').where('id', USER_ID).first();
   if (!existing) {
-    await db('users').insert({
+    await db('users').insert(__stampFixture({
       id: USER_ID, email: 'mcp-fixedguard-restored@test.invalid', name: 'MCP fixed-mode guard restored',
       timezone: 'America/New_York', created_at: new Date(), updated_at: new Date()
-    });
+    }));
   }
 }
 
@@ -131,15 +134,15 @@ async function clearUserTasks() {
 
 async function insertTask(id, overrides) {
   var now = new Date();
-  await db('task_masters').insert(Object.assign({
+  await db('task_masters').insert(__stampFixture(Object.assign({
     id: id, user_id: USER_ID, text: 'Fixed-guard test task ' + id, dur: 30, pri: 'P3',
     recurring: 0, status: '', created_at: now, updated_at: now
-  }, overrides.master || {}));
-  await db('task_instances').insert(Object.assign({
+  }, overrides.master || {})));
+  await db('task_instances').insert(__stampFixture(Object.assign({
     id: id, master_id: id, user_id: USER_ID, status: '',
     occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
     created_at: now, updated_at: now
-  }, overrides.instance || {}));
+  }, overrides.instance || {})));
 }
 
 var LEGACY_FIXED_GUARD_STRING = 'Validation error: placementMode "fixed" requires a date, time, or scheduledAt';

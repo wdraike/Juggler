@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../src/lib/audit-context').stampInsert(rows);
 /**
  * BUG-1 (leg sched-chunk-collision-lockbypass, 999.1314-adjacent) — regression
  * DB/integration test.
@@ -230,9 +233,9 @@ beforeAll(async function () {
   }
   var { DEFAULT_TIME_BLOCKS, DEFAULT_TOOL_MATRIX } = require('../../src/scheduler/constants');
   await cleanup();
-  await db('users').insert({ id: USER_ID, email: 'bug1overflow@test.invalid', timezone: TZ, created_at: db.fn.now(), updated_at: db.fn.now() });
-  await db('user_config').insert({ user_id: USER_ID, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) });
-  await db('user_config').insert({ user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) });
+  await db('users').insert(__stampFixture({ id: USER_ID, email: 'bug1overflow@test.invalid', timezone: TZ, created_at: db.fn.now(), updated_at: db.fn.now() }));
+  await db('user_config').insert(__stampFixture({ user_id: USER_ID, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) }));
+  await db('user_config').insert(__stampFixture({ user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) }));
 }, 600000); // 999.1409: fresh-test-bed provisioning of an isolated DB runs the full migration set (~min-scale)
 
 afterAll(async function () {
@@ -249,7 +252,7 @@ beforeEach(async function () {
 });
 
 async function seedSplitMaster() {
-  await db('task_masters').insert({
+  await db('task_masters').insert(__stampFixture({
     id: MASTER_ID,
     user_id: USER_ID,
     text: 'Apply for Jobs (BUG-1 overflow fixture)',
@@ -264,7 +267,7 @@ async function seedSplitMaster() {
     recur_start: FROZEN_DAY,
     created_at: db.fn.now(),
     updated_at: db.fn.now()
-  });
+  }));
 }
 
 // 3 FIXED same-day sibling tasks that consume all but three 60-min gaps
@@ -294,7 +297,7 @@ async function seedCapacityBlockers() {
 // as PLACED at a STALE prior scheduled_at — exactly the DB row shape the real
 // dev-bed incident left behind (chunks stuck at an old slot forever).
 async function seedPreExistingOccurrenceWithStalePin() {
-  await db('task_instances').insert([
+  await db('task_instances').insert(__stampFixture([
     {
       id: CHUNK_IDS[0], user_id: USER_ID, master_id: MASTER_ID,
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 4, split_group: OCC_PRIMARY_ID,
@@ -320,7 +323,7 @@ async function seedPreExistingOccurrenceWithStalePin() {
       dur: 60, status: '', date: FROZEN_DAY, scheduled_at: STALE_TIME, unscheduled: null,
       created_at: db.fn.now(), updated_at: db.fn.now()
     }
-  ]);
+  ]));
 }
 
 function rowsQuery() {
@@ -484,13 +487,13 @@ describe('zoe-scso-1 (999.1561 FIX) — rolling forward-roll NOW preserves split
     await db('task_masters').where('user_id', USER_ID2).del();
     await db('users').where('id', USER_ID2).del();
     var { DEFAULT_TIME_BLOCKS, DEFAULT_TOOL_MATRIX } = require('../../src/scheduler/constants');
-    await db('users').insert({ id: USER_ID2, email: 'bug1overflowfr@test.invalid', timezone: TZ, created_at: db.fn.now(), updated_at: db.fn.now() });
+    await db('users').insert(__stampFixture({ id: USER_ID2, email: 'bug1overflowfr@test.invalid', timezone: TZ, created_at: db.fn.now(), updated_at: db.fn.now() }));
     await db('user_config').where({ user_id: USER_ID2, config_key: 'time_blocks' }).del();
-    await db('user_config').insert({ user_id: USER_ID2, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) });
+    await db('user_config').insert(__stampFixture({ user_id: USER_ID2, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) }));
     await db('user_config').where({ user_id: USER_ID2, config_key: 'tool_matrix' }).del();
-    await db('user_config').insert({ user_id: USER_ID2, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) });
+    await db('user_config').insert(__stampFixture({ user_id: USER_ID2, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) }));
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: MASTER_ID2,
       user_id: USER_ID2,
       text: 'Rolling Split Forward-Roll Collapse Fixture (zoe-scso-1 disposition)',
@@ -506,9 +509,9 @@ describe('zoe-scso-1 (999.1561 FIX) — rolling forward-roll NOW preserves split
       next_start: ANCHOR2,
       created_at: db.fn.now(),
       updated_at: db.fn.now()
-    });
+    }));
 
-    await db('task_instances').insert([
+    await db('task_instances').insert(__stampFixture([
       {
         // The PRIMARY chunk — past-dated (PAST_DAY2), stale non-null
         // scheduled_at. This is the row the forward-roll IIFE finds
@@ -527,7 +530,7 @@ describe('zoe-scso-1 (999.1561 FIX) — rolling forward-roll NOW preserves split
         dur: 60, status: '', date: FROZEN_DAY, scheduled_at: null, unscheduled: null,
         created_at: db.fn.now(), updated_at: db.fn.now()
       }
-    ]);
+    ]));
   }, 60000);
 
   afterAll(async function () {

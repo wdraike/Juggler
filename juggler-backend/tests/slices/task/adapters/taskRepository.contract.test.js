@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../../../src/lib/audit-context').stampInsert(rows);
 /**
  * H3 W3 — TaskRepositoryPort CONTRACT suite (run against BOTH adapters).
  *
@@ -78,10 +81,10 @@ var ADAPTERS = {
         await knex('task_instances').where('user_id', u).del();
         await knex('task_masters').where('user_id', u).del();
         await knex('users').where('id', u).del();
-        await knex('users').insert({
+        await knex('users').insert(__stampFixture({
           id: u, email: u + '@contract.test', name: u,
           timezone: 'America/New_York', created_at: new Date(), updated_at: new Date()
-        });
+        }));
       }
     },
     afterAll: async function () {

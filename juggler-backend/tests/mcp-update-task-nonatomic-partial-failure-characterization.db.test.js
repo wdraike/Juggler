@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * mcp-update-task-nonatomic-partial-failure-characterization.db.test.js
  *
@@ -52,10 +55,10 @@ function captureHandlers(userId) {
 async function seedUser() {
   var existing = await db('users').where('id', USER_ID).first();
   if (!existing) {
-    await db('users').insert({
+    await db('users').insert(__stampFixture({
       id: USER_ID, email: 'mcp-nonatomic@test.invalid', name: 'MCP non-atomic update_task test',
       timezone: 'America/New_York', created_at: new Date(), updated_at: new Date()
-    });
+    }));
   }
 }
 
@@ -68,13 +71,37 @@ async function clearUserTasks() {
 describe('MCP update_task — composed one-transaction update+status (999.1570 fix, was ACCEPTED tradeoff ernie E3)', function () {
 
   beforeAll(async function () {
-    // setSystemTime WITHOUT useFakeTimers — avoids hangs in async/retry code
-    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
     await assertDbAvailable();
     await clearUserTasks();
     await db('users').where('id', USER_ID).del();
     await seedUser();
   }, 15000);
+
+  beforeEach(function () {
+    // Date-ONLY fake timers: setSystemTime NO-OPS (with a warning) unless fake
+    // timers are installed, so the bare-setSystemTime pattern silently ran on
+    // real "now" (DST-shifted assertions, day-roam resolved against today).
+    // doNotFake keeps every timer API real — the async/retry hang the bare
+    // pattern tried to avoid can't happen; only Date is frozen.
+    // Frozen mid-July: '7/1' must resolve PAST (the W2/W3 no-snap premise) and
+    // the expected instants below are EDT math — the original suite ran under a
+    // real July "now" (fc20c720); the time-mocking migration's Jan-15 freeze +
+    // mechanical 2026-07→2020-01 date rewrite broke both premises (DST hour +
+    // future-date snap). The two DST/snap-sensitive tests are restored to the
+    // fc20c720 fixtures/expectations; other tests keep migration-era dates whose
+    // premises (stale-past anchor, far-future row) stay valid under this clock.
+    jest.useFakeTimers({
+      now: new Date('2026-07-15T12:00:00Z'),
+      doNotFake: [
+        'hrtime', 'nextTick', 'performance', 'queueMicrotask',
+        'requestAnimationFrame', 'cancelAnimationFrame',
+        'requestIdleCallback', 'cancelIdleCallback',
+        'setImmediate', 'clearImmediate',
+        'setInterval', 'clearInterval',
+        'setTimeout', 'clearTimeout',
+      ],
+    });
+  });
 
   afterEach(async function () {
     jest.useRealTimers();
@@ -89,12 +116,12 @@ describe('MCP update_task — composed one-transaction update+status (999.1570 f
   test('ATOMIC ROLLBACK PIN (999.1570): notes field change is ROLLED BACK when the combined call returns isError:true (status transition rejected)', async function () {
     var now = new Date();
     var tmplId = 'mcp-nonatomic-tmpl-' + Date.now();
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: tmplId, user_id: USER_ID, text: 'non-atomic test template', notes: 'original notes',
       dur: 30, pri: 'P3', recurring: 1, status: '',
       recur: JSON.stringify({ type: 'weekly', days: 'M' }), recur_start: '2026-01-01',
       tz: 'America/New_York', created_at: now, updated_at: now
-    });
+    }));
 
     var handlers = captureHandlers(USER_ID);
     // Both a non-status field (notes) AND an invalid status transition
@@ -126,15 +153,15 @@ describe('MCP update_task — composed one-transaction update+status (999.1570 f
     // (facade.updateTask, inside the shared trx) so facade.updateTaskStatus's
     // re-fetch of `existing` (same trx, sees its own uncommitted write) finds
     // a scheduled_at already set and does NOT snap to "now" instead.
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: taskId, user_id: USER_ID, text: 'ordering test', notes: 'x',
       dur: 30, pri: 'P3', recurring: 0, status: '', created_at: now, updated_at: now
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: taskId, master_id: taskId, user_id: USER_ID, status: '',
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
       scheduled_at: null, created_at: now, updated_at: now
-    });
+    }));
 
     var handlers = captureHandlers(USER_ID);
     // PAST date deliberately (harrison 999.1570 W2): 'done' on a FUTURE
@@ -147,13 +174,13 @@ describe('MCP update_task — composed one-transaction update+status (999.1570 f
     expect(result.isError).toBeFalsy();
     var instRow = await db('task_instances').where('id', taskId).first();
     expect(instRow.status).toBe('done');
-    // EXACT instant: 2020-01-01 3:00pm America/New_York = 19:00 UTC.
-    // Discriminating: a lost step-1 write yields a snap-to-now (July 14+)
+    // EXACT instant: 2026-07-01 3:00pm America/New_York (EDT) = 19:00 UTC.
+    // Discriminating: a lost step-1 write yields a snap-to-now (frozen July 15)
     // instant instead. Compare the RAW stored string — dateStrings:true hands
     // back a tz-less string and new Date() would re-parse it as LOCAL (the
     // repo's documented +4h misparse trap).
     expect(instRow.scheduled_at).not.toBeNull();
-    expect(String(instRow.scheduled_at).slice(0, 19)).toBe('2020-01-01 19:00:00');
+    expect(String(instRow.scheduled_at).slice(0, 19)).toBe('2026-07-01 19:00:00');
   });
 
   test('NESTED TRANSACTION (999.1570): UpdateTask complex-path (time-only edit) runs its own repo.runInTransaction as a SAVEPOINT inside the composed transaction', async function () {
@@ -166,21 +193,21 @@ describe('MCP update_task — composed one-transaction update+status (999.1570 f
     // the nested call as a SAVEPOINT on the same connection, not a
     // deadlocked/second connection — both the time change and the status
     // change must land together.
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: taskId, user_id: USER_ID, text: 'complex-path nested-trx test', notes: 'x',
       dur: 30, pri: 'P3', recurring: 0, status: '', created_at: now, updated_at: now
-    });
+    }));
     // PAST scheduled_at deliberately (harrison 999.1570 W3): a FUTURE row's
     // 'done' snaps scheduled_at to now, which would satisfy a mere
     // "changed from the old value" assertion even if the nested-savepoint
     // time write rolled back. Past row → no snap → only the complex path's
     // committed time edit can produce the exact instant asserted below.
-    await db('task_instances').insert({
+    await db('task_instances').insert(__stampFixture({
       id: taskId, master_id: taskId, user_id: USER_ID, status: '',
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
-      scheduled_at: new Date('2020-01-01T19:00:00Z'),
+      scheduled_at: new Date('2026-07-01T19:00:00Z'),
       created_at: now, updated_at: now
-    });
+    }));
 
     var handlers = captureHandlers(USER_ID);
     var result = await handlers.update_task({ id: taskId, time: '4:00 PM', status: 'done' });
@@ -188,11 +215,11 @@ describe('MCP update_task — composed one-transaction update+status (999.1570 f
     expect(result.isError).toBeFalsy();
     var instRow = await db('task_instances').where('id', taskId).first();
     expect(instRow.status).toBe('done');
-    // EXACT instant: existing date 2020-01-01, new time 4:00 PM
-    // America/New_York = 20:00 UTC — proof the complex path's nested
+    // EXACT instant: existing date 2026-07-01, new time 4:00 PM
+    // America/New_York (EDT) = 20:00 UTC — proof the complex path's nested
     // transaction (savepoint) committed the time change, not just the
     // status half. Raw-string compare (dateStrings +4h misparse trap).
-    expect(String(instRow.scheduled_at).slice(0, 19)).toBe('2020-01-01 20:00:00');
+    expect(String(instRow.scheduled_at).slice(0, 19)).toBe('2026-07-01 20:00:00');
   });
 
   test('TRX-THREADED ANCHOR (999.1570 harrison BLOCK-1): template-field edit + done on a rolling recurring instance completes in one call — anchor write joins the composed transaction instead of deadlocking on the base pool', async function () {
@@ -205,19 +232,19 @@ describe('MCP update_task — composed one-transaction update+status (999.1570 f
     // X-locking task_masters inside the composed trx. Pre-fix, step 2's
     // applyRollingAnchor then wrote the SAME master row on the BASE POOL and
     // blocked on our own uncommitted lock until innodb_lock_wait_timeout.
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: masterId, user_id: USER_ID, text: 'rolling anchor trx test', notes: 'original notes',
       dur: 30, pri: 'P3', recurring: 1, status: '',
       recur: JSON.stringify({ type: 'rolling', interval: 7 }),
       next_start: '2020-01-10', recur_start: '2026-01-01',
       tz: 'America/New_York', created_at: now, updated_at: now
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: instId, master_id: masterId, user_id: USER_ID, status: '',
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
       date: '2020-01-10', scheduled_at: new Date('2020-01-10T14:00:00Z'),
       created_at: now, updated_at: now
-    });
+    }));
 
     var handlers = captureHandlers(USER_ID);
     var result = await handlers.update_task({ id: instId, notes: 'CHANGED with done', status: 'done' });
@@ -240,16 +267,16 @@ describe('MCP update_task — composed one-transaction update+status (999.1570 f
   test('CONTRAST: when the status transition SUCCEEDS, both halves land together (the common, non-degenerate case)', async function () {
     var now = new Date();
     var taskId = 'mcp-nonatomic-ok-' + Date.now();
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: taskId, user_id: USER_ID, text: 'non-atomic success case', notes: 'original',
       dur: 30, pri: 'P3', recurring: 0, status: '', created_at: now, updated_at: now
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: taskId, master_id: taskId, user_id: USER_ID, status: '',
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
       scheduled_at: new Date('2099-12-01T15:00:00Z'),
       created_at: now, updated_at: now
-    });
+    }));
 
     var handlers = captureHandlers(USER_ID);
     var result = await handlers.update_task({ id: taskId, notes: 'both halves land', status: 'done' });

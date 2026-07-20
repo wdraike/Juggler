@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../../../src/lib/audit-context').stampInsert(rows);
 /**
  * JUG-FACADE-DB-VIOLATIONS stage 2 — db-backed pin for checkAndIncrement,
  * moved verbatim from user-config/facade.js (L394-415) into
@@ -38,10 +41,10 @@ beforeAll(async () => {
   await assertDbAvailable();
   available = true;
   await cleanup();
-  await db('users').insert({
+  await db('users').insert(__stampFixture({
     id: USER_ID, email: 'planusage@test.com', name: 'Plan Usage',
     timezone: 'America/New_York', created_at: db.fn.now(), updated_at: db.fn.now()
-  });
+  }));
 }, 20000);
 
 beforeEach(async () => {

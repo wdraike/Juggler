@@ -67,3 +67,93 @@ test('who-columns carry utf8mb4_unicode_ci', async () => {
   );
   expect(rows.map((r) => `${r.table_name}.${r.column_name}: ${r.collation_name}`)).toEqual([]);
 });
+
+// ── inc.4 tightening (20260720210000) ────────────────────────────────────────
+
+test('who-columns are NOT NULL on every base table — zero silent NULL attribution', async () => {
+  const [rows] = await db.raw(
+    `SELECT c.table_name AS table_name, c.column_name AS column_name
+     FROM information_schema.columns c
+     JOIN information_schema.tables t
+       ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+     WHERE c.table_schema = DATABASE()
+       AND t.table_type = 'BASE TABLE'
+       AND c.column_name IN ('created_by', 'updated_by')
+       AND c.table_name NOT IN (${EXEMPT.map(() => '?').join(',')})
+       AND c.is_nullable = 'YES'`,
+    EXEMPT
+  );
+  expect(rows.map((r) => `${r.table_name}.${r.column_name}`)).toEqual([]);
+});
+
+test('created_at carries a CURRENT_TIMESTAMP default on every base table', async () => {
+  const [rows] = await db.raw(
+    `SELECT c.table_name AS table_name, c.column_default AS column_default
+     FROM information_schema.columns c
+     JOIN information_schema.tables t
+       ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+     WHERE c.table_schema = DATABASE()
+       AND t.table_type = 'BASE TABLE'
+       AND c.column_name = 'created_at'
+       AND c.table_name NOT IN (${EXEMPT.map(() => '?').join(',')})
+       AND (c.column_default IS NULL OR c.column_default NOT LIKE 'CURRENT_TIMESTAMP%')`,
+    EXEMPT
+  );
+  expect(rows.map((r) => `${r.table_name}: ${r.column_default}`)).toEqual([]);
+});
+
+// Tables whose updated_at is deliberately APP-MANAGED (no ON UPDATE
+// CURRENT_TIMESTAMP): cal-sync dirty-detection reads updated_at
+// (KnexSyncStateRepository `.where('updated_at','>',since)`) and the task
+// repos force-stamp it (P1) — a DB-side auto-bump on internal writes would
+// corrupt modified-since semantics. Additions to this list need the same
+// justification; NEW tables get ON UPDATE by default and this test enforces it.
+const APP_MANAGED_UPDATED_AT = [
+  'cal_history',
+  'impersonation_log',
+  'plan_usage',
+  'projects',
+  'task_instances',
+  'task_masters',
+  'user_calendars',
+  'user_config',
+  'users',
+];
+
+test('updated_at carries ON UPDATE CURRENT_TIMESTAMP outside the app-managed allowlist', async () => {
+  const [rows] = await db.raw(
+    `SELECT c.table_name AS table_name, c.extra AS extra
+     FROM information_schema.columns c
+     JOIN information_schema.tables t
+       ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+     WHERE c.table_schema = DATABASE()
+       AND t.table_type = 'BASE TABLE'
+       AND c.column_name = 'updated_at'
+       AND c.table_name NOT IN (${EXEMPT.concat(APP_MANAGED_UPDATED_AT).map(() => '?').join(',')})
+       AND c.extra NOT LIKE '%on update CURRENT_TIMESTAMP%'`,
+    EXEMPT.concat(APP_MANAGED_UPDATED_AT)
+  );
+  expect(rows.map((r) => `${r.table_name}: ${r.extra}`)).toEqual([]);
+});
+
+test('no row carries a NULL who-value anywhere (backfill completeness)', async () => {
+  const [tables] = await db.raw(
+    `SELECT DISTINCT c.table_name AS table_name
+     FROM information_schema.columns c
+     JOIN information_schema.tables t
+       ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+     WHERE c.table_schema = DATABASE()
+       AND t.table_type = 'BASE TABLE'
+       AND c.column_name IN ('created_by', 'updated_by')
+       AND c.table_name NOT IN (${EXEMPT.map(() => '?').join(',')})`,
+    EXEMPT
+  );
+  const offenders = [];
+  for (const { table_name: tbl } of tables) {
+    const [[{ n }]] = await db.raw(
+      'SELECT COUNT(*) AS n FROM `' + tbl + '` WHERE created_by IS NULL OR updated_by IS NULL'
+    );
+    if (Number(n) > 0) offenders.push(`${tbl}: ${n} rows`);
+  }
+  expect(offenders).toEqual([]);
+});

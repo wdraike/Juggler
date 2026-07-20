@@ -1,4 +1,4 @@
-var { runWithActor } = require('../../../lib/audit-context'); // 999.1576 inc.3b
+var { runWithActor, stampUpdate } = require('../../../lib/audit-context'); // 999.1576 inc.3b + inc.4
 const BATCH_SIZE     = 500;
 const INTERVAL_MS    = 60_000;
 const MAX_ATTEMPTS   = 10;
@@ -83,14 +83,24 @@ class AiUsageFlusher {
         if (resp.ok) {
           await this._db('ai_usage_outbox').whereIn('id', ids).delete();
         } else {
-          await this._db('ai_usage_outbox').whereIn('id', ids).increment('flush_attempts', 1);
+          await this._bumpAttempts(ids);
         }
       } catch {
-        await this._db('ai_usage_outbox').whereIn('id', ids).increment('flush_attempts', 1);
+        await this._bumpAttempts(ids);
       }
     } catch (err) {
       aiUsageFlusherLogger.warn('Tick error', { error: err });
     }
+  }
+
+  // 999.1576 inc.4: flush_attempts is an UPDATE — it stamps updated_by like
+  // any other write (ambient 'ai-usage-flusher' from the tick's runWithActor
+  // wrap). Raw expression replaces knex .increment so the change-set can
+  // carry the stamp in one statement.
+  _bumpAttempts(ids) {
+    return this._db('ai_usage_outbox')
+      .whereIn('id', ids)
+      .update(stampUpdate({ flush_attempts: this._db.raw('flush_attempts + 1') }));
   }
 }
 

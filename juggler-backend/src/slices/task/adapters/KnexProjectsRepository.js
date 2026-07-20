@@ -32,7 +32,9 @@ KnexProjectsRepository.prototype.ensureProject = async function ensureProject(us
   var db = this.getDb();
   var exists = await db('projects').where({ user_id: userId, name: projectName }).first();
   if (!exists) {
-    await db('projects').insert({ user_id: userId, name: projectName });
+    // 999.1576 inc.4: who-cols are NOT NULL — stamp with the ambient actor.
+    var stampInsert = require('../../../lib/audit-context').stampInsert;
+    await db('projects').insert(stampInsert({ user_id: userId, name: projectName }));
   }
 };
 

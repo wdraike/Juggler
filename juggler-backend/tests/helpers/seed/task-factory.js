@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../../src/lib/audit-context').stampInsert(rows);
 /**
  * Task factory — writes task_masters + task_instances to the real test DB.
  *
@@ -105,13 +108,13 @@ async function createTask(db, userId, props) {
   master.created_at = now(db);
   master.updated_at = now(db);
 
-  await db('task_masters').insert(master);
+  await db('task_masters').insert(__stampFixture(master));
 
   var inst = instanceDefaults(db, master.id, userId, props, master);
   inst.created_at = now(db);
   inst.updated_at = now(db);
 
-  await db('task_instances').insert(inst);
+  await db('task_instances').insert(__stampFixture(inst));
   return { master, instance: inst };
 }
 
@@ -124,7 +127,7 @@ async function createRecurring(db, userId, props) {
   var master = masterDefaults(userId, props);
   master.created_at = now(db);
   master.updated_at = now(db);
-  await db('task_masters').insert(master);
+  await db('task_masters').insert(__stampFixture(master));
   return { master };
 }
 
@@ -158,7 +161,7 @@ async function createSplitTask(db, userId, props) {
   var master = masterDefaults(userId, props);
   master.created_at = now(db);
   master.updated_at = now(db);
-  await db('task_masters').insert(master);
+  await db('task_masters').insert(__stampFixture(master));
 
   var instances = [];
   var groupId = master.id;
@@ -177,7 +180,7 @@ async function createSplitTask(db, userId, props) {
     }, master);
     inst.created_at = now(db);
     inst.updated_at = now(db);
-    await db('task_instances').insert(inst);
+    await db('task_instances').insert(__stampFixture(inst));
     instances.push(inst);
   }
   return { master, instances };

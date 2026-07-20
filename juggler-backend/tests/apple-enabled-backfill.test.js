@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * 999.860 — reconcile Apple sync source-of-truth.
  *
@@ -23,9 +26,9 @@ var URL_C = 'https://caldav.icloud.com/test-calendar/';
 async function seedCalendars(rows) {
   await db('user_calendars').where({ user_id: USER, provider: 'apple' }).del();
   for (var i = 0; i < rows.length; i++) {
-    await db('user_calendars').insert(Object.assign({
+    await db('user_calendars').insert(__stampFixture(Object.assign({
       user_id: USER, provider: 'apple', sync_direction: 'full'
-    }, rows[i]));
+    }, rows[i])));
   }
 }
 

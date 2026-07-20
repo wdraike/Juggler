@@ -31,14 +31,18 @@ const INSTANCE_ID = crypto.randomUUID();
 async function acquireLock(lockName, ttl = 3600) {
   const knex = getDb();
   try {
+    // 999.1576 inc.4: who-cols are NOT NULL — the cron's actor context
+    // attributes the lock row; takeover of an expired row re-attributes it.
+    const actor = require('../lib/audit-context').getActor();
     await knex.raw(
-      `INSERT INTO cron_locks (lock_name, locked_by, locked_at, expires_at)
-       VALUES (?, ?, NOW(), DATE_ADD(NOW(), INTERVAL ? SECOND))
+      `INSERT INTO cron_locks (lock_name, locked_by, locked_at, expires_at, created_by, updated_by)
+       VALUES (?, ?, NOW(), DATE_ADD(NOW(), INTERVAL ? SECOND), ?, ?)
        ON DUPLICATE KEY UPDATE
          locked_by  = IF(expires_at < NOW(), VALUES(locked_by),  locked_by),
          locked_at  = IF(expires_at < NOW(), VALUES(locked_at),  locked_at),
+         updated_by = IF(expires_at < NOW(), VALUES(updated_by), updated_by),
          expires_at = IF(expires_at < NOW(), VALUES(expires_at), expires_at)`,
-      [lockName, INSTANCE_ID, ttl]
+      [lockName, INSTANCE_ID, ttl, actor, actor]
     );
     // We hold the lock only if our token owns a still-unexpired row.
     const held = await knex('cron_locks')

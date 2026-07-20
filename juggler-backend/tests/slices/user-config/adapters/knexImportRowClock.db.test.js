@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../../../src/lib/audit-context').stampInsert(rows);
 /**
  * JUG-FACADE-DB-VIOLATIONS stage 2b — db-backed pin for KnexImportRowClock.now(),
  * moved verbatim out of user-config/facade.js's importBuildTaskRow (the
@@ -33,10 +36,10 @@ beforeAll(async () => {
   await assertDbAvailable();
   available = true;
   await cleanup();
-  await db('users').insert({
+  await db('users').insert(__stampFixture({
     id: USER_ID, email: 'importrowclock@test.com', name: 'Import Row Clock',
     timezone: 'America/New_York', created_at: db.fn.now(), updated_at: db.fn.now()
-  });
+  }));
 }, 20000);
 
 afterAll(async () => {

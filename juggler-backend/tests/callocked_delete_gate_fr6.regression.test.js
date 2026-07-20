@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * callocked_delete_gate_fr6.regression.test.js
  *
@@ -62,14 +65,14 @@ var facade = require('../src/slices/task/facade');
 async function seedUser() {
   var existing = await db('users').where('id', USER_ID).first();
   if (!existing) {
-    await db('users').insert({
+    await db('users').insert(__stampFixture({
       id: USER_ID,
       email: 'fr6-callocked@test.invalid',
       name: 'FR-6 cal_locked delete gate test',
       timezone: 'America/New_York',
       created_at: new Date(),
       updated_at: new Date()
-    });
+    }));
   }
 }
 
@@ -81,26 +84,26 @@ async function clearUserTasks() {
 
 async function seedSeries(tmplId) {
   var now = new Date();
-  await db('task_masters').insert({
+  await db('task_masters').insert(__stampFixture({
     id: tmplId, user_id: USER_ID, text: 'FR-6 cal_locked gate series', dur: 30, pri: 'P3',
     recurring: 1, status: '', recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU', every: 1 }),
     created_at: now, updated_at: now
-  });
+  }));
   var instId = tmplId + '-i1';
-  await db('task_instances').insert({
+  await db('task_instances').insert(__stampFixture({
     id: instId, master_id: tmplId, user_id: USER_ID, status: '',
     occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
     date: '2020-01-10', scheduled_at: new Date('2020-01-10T10:00:00Z'),
     created_at: now, updated_at: now
-  });
+  }));
   return instId;
 }
 
 async function lockWithCalendarOrigin(instId) {
-  await db('cal_sync_ledger').insert({
+  await db('cal_sync_ledger').insert(__stampFixture({
     user_id: USER_ID, provider: 'gcal', task_id: instId,
     provider_event_id: 'gcal-evt-' + Date.now(), origin: 'gcal', status: 'active'
-  });
+  }));
 }
 
 describe('FR-6 — cal_locked instance blocks/warns series delete', function () {

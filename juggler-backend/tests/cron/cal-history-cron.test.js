@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../src/lib/audit-context').stampInsert(rows);
 // Tests for cal-history cron job (999.313 — replaced 3× expect(true).toBe(true)
 // coverage-theater placeholders with real DB-backed assertions against test-bed).
 //
@@ -34,7 +37,7 @@ async function clearOurRows() {
 
 async function seedUser() {
   // task_masters.user_id / task_instances.user_id FK → users.id.
-  await db('users').insert({ id: TEST_USER, email: 'calhist-cron@test.local' });
+  await db('users').insert(__stampFixture({ id: TEST_USER, email: 'calhist-cron@test.local' }));
 }
 
 describe('Cal History Cron Job', () => {
@@ -51,18 +54,18 @@ describe('Cal History Cron Job', () => {
     // cal_history.task_id FK → task_instances(id) (fk_cal_history_task_id, added by
     // a later migration). Production cal_history rows always reference a real
     // instance; seed the parent master + instances so the fixture satisfies the FK.
-    await db('task_masters').insert({ id: 'ch-master', user_id: TEST_USER, text: 'Cal-history purge master' });
+    await db('task_masters').insert(__stampFixture({ id: 'ch-master', user_id: TEST_USER, text: 'Cal-history purge master' }));
     // Distinct occurrence_ordinal per instance — uq_instance_ordinals is
     // (master_id, occurrence_ordinal, split_ordinal), both default 1, so two
     // instances under one master collide unless the ordinal differs.
-    await db('task_instances').insert([
+    await db('task_instances').insert(__stampFixture([
       { id: 'ch-old', master_id: 'ch-master', user_id: TEST_USER, scheduled_at: thirteenMonthsAgo, status: '', occurrence_ordinal: 1 },
       { id: 'ch-new', master_id: 'ch-master', user_id: TEST_USER, scheduled_at: new Date(), status: '', occurrence_ordinal: 2 },
-    ]);
-    await db('cal_history').insert([
+    ]));
+    await db('cal_history').insert(__stampFixture([
       { task_id: 'ch-old', user_id: TEST_USER, status: 'missed', created_by: 'test', scheduled_at: thirteenMonthsAgo, created_at: thirteenMonthsAgo },
       { task_id: 'ch-new', user_id: TEST_USER, status: 'missed', created_by: 'test', scheduled_at: new Date(), created_at: new Date() },
-    ]);
+    ]));
 
     await purgeOldEntries();
 

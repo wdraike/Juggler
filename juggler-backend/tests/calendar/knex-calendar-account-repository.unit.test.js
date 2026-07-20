@@ -77,24 +77,26 @@ describe('KnexCalendarAccountRepository — thin passthrough (no repo-injected t
     expect(repo.now()).toEqual({ __knexRawNow: true });
   });
 
-  test('updateUser writes exactly the fields object passed — no timestamp injected by the repo', function () {
+  test('updateUser writes the fields object plus ONLY the audit stamp — no timestamp injected by the repo', function () {
     var stub = makeKnexStub();
     var repo = new KnexCalendarAccountRepository({ db: stub.db });
     repo.updateUser(7, { gcal_access_token: 'x' });
     expect(stub.calls.table).toBe('users');
-    expect(stub.calls.updatePayload).toEqual({ gcal_access_token: 'x' }); // no injected updated_at
+    // inc.4 (999.1576): stampUpdate adds updated_by ('jest' = the sandbox-armed
+    // test default). Still no injected updated_at — that pin stands.
+    expect(stub.calls.updatePayload).toEqual({ gcal_access_token: 'x', updated_by: 'jest' });
   });
 
-  test('deleteExpiredOAuthNonces / insertOAuthNonceIgnoreDuplicate issue the exact verbatim SQL', function () {
+  test('deleteExpiredOAuthNonces / insertOAuthNonceIgnoreDuplicate issue the exact verbatim SQL (who-cols stamped, 999.1576 inc.4)', function () {
     var stub = makeKnexStub();
     var repo = new KnexCalendarAccountRepository({ db: stub.db });
     repo.deleteExpiredOAuthNonces();
     repo.insertOAuthNonceIgnoreDuplicate('hash-abc');
     expect(stub.calls.rawCalls[0].sql).toBe('DELETE FROM oauth_code_nonces WHERE expires_at < NOW()');
     expect(stub.calls.rawCalls[1].sql).toBe(
-      'INSERT IGNORE INTO oauth_code_nonces (code_hash, expires_at) VALUES (?, DATE_ADD(NOW(), INTERVAL 2 MINUTE))'
+      'INSERT IGNORE INTO oauth_code_nonces (code_hash, expires_at, created_by, updated_by) VALUES (?, DATE_ADD(NOW(), INTERVAL 2 MINUTE), ?, ?)'
     );
-    expect(stub.calls.rawCalls[1].bindings).toEqual(['hash-abc']);
+    expect(stub.calls.rawCalls[1].bindings).toEqual(['hash-abc', 'jest', 'jest']);
   });
 });
 

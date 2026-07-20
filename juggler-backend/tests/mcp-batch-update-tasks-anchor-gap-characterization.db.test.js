@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * mcp-batch-update-tasks-anchor-gap-characterization.db.test.js
  *
@@ -55,32 +58,32 @@ function captureHandlers(userId) {
 
 async function seedRollingMasterAndInstance(tmplId, instId, instanceDate, scheduledAt) {
   var now = new Date();
-  await db('task_masters').insert({
+  await db('task_masters').insert(__stampFixture({
     id: tmplId, user_id: USER_ID, text: 'rolling master — batch anchor gap test', dur: 30, pri: 'P3',
     recurring: 1, status: '', recur: JSON.stringify({ type: 'rolling', window: 7 }),
     recur_start: '2026-01-01', next_start: null,
     tz: 'America/New_York', created_at: now, updated_at: now
-  });
-  await db('task_instances').insert({
+  }));
+  await db('task_instances').insert(__stampFixture({
     id: instId, master_id: tmplId, user_id: USER_ID, status: '',
     occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
     date: instanceDate, scheduled_at: scheduledAt, created_at: now, updated_at: now
-  });
+  }));
 }
 
 async function seedWeeklyMasterAndInstance(tmplId, instId, instanceDate, scheduledAt) {
   var now = new Date();
-  await db('task_masters').insert({
+  await db('task_masters').insert(__stampFixture({
     id: tmplId, user_id: USER_ID, text: 'weekly master — batch anchor gap test', dur: 30, pri: 'P3',
     recurring: 1, status: '', recur: JSON.stringify({ type: 'weekly', days: 'W' }),
     recur_start: '2026-01-01', next_start: null,
     tz: 'America/New_York', created_at: now, updated_at: now
-  });
-  await db('task_instances').insert({
+  }));
+  await db('task_instances').insert(__stampFixture({
     id: instId, master_id: tmplId, user_id: USER_ID, status: '',
     occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
     date: instanceDate, scheduled_at: scheduledAt, created_at: now, updated_at: now
-  });
+  }));
 }
 
 describe('MCP batch_update_tasks — rolling/next-occurrence anchor projection (AFTER state — gap closed)', function () {
@@ -91,10 +94,10 @@ describe('MCP batch_update_tasks — rolling/next-occurrence anchor projection (
     await assertDbAvailable();
     var existing = await db('users').where('id', USER_ID).first();
     if (!existing) {
-      await db('users').insert({
+      await db('users').insert(__stampFixture({
         id: USER_ID, email: 'mcp-batch-anchor-gap@test.invalid', name: 'MCP batch anchor gap test',
         timezone: 'America/New_York', created_at: new Date(), updated_at: new Date()
-      });
+      }));
     }
   });
 

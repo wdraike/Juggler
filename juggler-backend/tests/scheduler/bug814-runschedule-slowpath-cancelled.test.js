@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../src/lib/audit-context').stampInsert(rows);
 /**
  * BUG-814 slow-path coverage — runSchedule.js:2183 query + expandRecurring filter.
  *
@@ -94,10 +97,10 @@ async function cleanup() {
 beforeAll(async function() {
   await assertDbAvailable();
   await cleanup();
-  await db('users').insert({
+  await db('users').insert(__stampFixture({
     id: USER_ID, email: 'bug814sp@test.invalid', timezone: 'America/New_York',
     created_at: db.fn.now(), updated_at: db.fn.now(),
-  });
+  }));
 }, 15000);
 
 afterAll(async function() { await cleanup(); await db.destroy(); }, 10000);
@@ -154,20 +157,20 @@ describe('BUG-814 slow-path: load query — recurring_instance rows with cancell
     var tmplId = 'sp-tpl-' + Math.random().toString(36).slice(2, 8);
     var instId = tmplId + '-inst1';
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: tmplId, user_id: USER_ID, text: 'Template', dur: 30, pri: 'P3',
       recurring: 1, status: 'cancelled',
       recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU' }),
       created_at: new Date(), updated_at: new Date(),
-    });
+    }));
     // Fabricated instance row with status='cancelled' — this is what softCancelWhere
     // sets on fabricated task_instances rows after cancel-series.
-    await db('task_instances').insert({
+    await db('task_instances').insert(__stampFixture({
       id: instId, master_id: tmplId, user_id: USER_ID,
       status: 'cancelled', occurrence_ordinal: 1, split_ordinal: 1, split_total: 1,
       dur: 30, scheduled_at: new Date(Date.now() + 86400000),
       created_at: new Date(), updated_at: new Date(),
-    });
+    }));
 
     var rows = await slowPathQuery(USER_ID);
     var instanceRows = rows.filter(function(r) {
@@ -186,18 +189,18 @@ describe('BUG-814 slow-path: load query — recurring_instance rows with cancell
     var tmplId = 'sp-wip-' + Math.random().toString(36).slice(2, 8);
     var instId = tmplId + '-inst1';
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: tmplId, user_id: USER_ID, text: 'WIP template', dur: 30, pri: 'P3',
       recurring: 1, status: '',
       recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU' }),
       created_at: new Date(), updated_at: new Date(),
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: instId, master_id: tmplId, user_id: USER_ID,
       status: 'wip', occurrence_ordinal: 1, split_ordinal: 1, split_total: 1,
       dur: 30, scheduled_at: new Date(Date.now() + 86400000),
       created_at: new Date(), updated_at: new Date(),
-    });
+    }));
 
     var rows = await slowPathQuery(USER_ID);
     var wipRows = rows.filter(function(r) {
@@ -225,19 +228,19 @@ describe('BUG-814 slow-path: load query — recurring_instance rows with cancell
     var tmplId = 'sp-gap-' + Math.random().toString(36).slice(2, 8);
     var instId = tmplId + '-inst1';
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: tmplId, user_id: USER_ID, text: 'Gap template', dur: 30, pri: 'P3',
       recurring: 1, status: 'cancelled',
       recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU' }),
       created_at: new Date(), updated_at: new Date(),
-    });
+    }));
     // Fabricated instance with cancelled status (distinct id from template)
-    await db('task_instances').insert({
+    await db('task_instances').insert(__stampFixture({
       id: instId, master_id: tmplId, user_id: USER_ID,
       status: 'cancelled', occurrence_ordinal: 1, split_ordinal: 1, split_total: 1,
       dur: 30, scheduled_at: new Date(Date.now() + 86400000),
       created_at: new Date(), updated_at: new Date(),
-    });
+    }));
 
     var rows = await slowPathQuery(USER_ID);
     var templateHeaderRows = rows.filter(function(r) {

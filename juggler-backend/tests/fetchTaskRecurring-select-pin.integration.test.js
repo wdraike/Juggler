@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * BLOCK-2 adapter SELECT pin — fetchTaskRecurring includes placement_mode
  *
@@ -55,14 +58,14 @@ describe('BLOCK-2a — KnexTaskRepository.fetchTaskRecurring includes placement_
     await testDb('task_instances').where('user_id', USER_ID).del();
     await testDb('task_masters').where('user_id', USER_ID).del();
     await testDb('users').where('id', USER_ID).del();
-    await testDb('users').insert({
+    await testDb('users').insert(__stampFixture({
       id: USER_ID,
       email: 'fetchrecurpin@test.local',
       name: 'fetchTaskRecurring SELECT pin',
       timezone: 'America/New_York',
       created_at: testDb.fn.now(),
       updated_at: testDb.fn.now(),
-    });
+    }));
   }, 15000);
 
   afterAll(async function () {

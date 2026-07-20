@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * Integration tests for runScheduleAndPersist — the full scheduler pipeline.
  * Uses real test DB via NODE_ENV=test.
@@ -27,13 +30,13 @@ beforeAll(async () => {
     return;
   }
   await cleanup();
-  await db('users').insert({
+  await db('users').insert(__stampFixture({
     id: USER_ID, email: 'runsched@test.com', timezone: TZ,
     created_at: db.fn.now(), updated_at: db.fn.now()
-  });
+  }));
   // Seed default config so scheduler can run
-  await db('user_config').insert({ user_id: USER_ID, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) });
-  await db('user_config').insert({ user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) });
+  await db('user_config').insert(__stampFixture({ user_id: USER_ID, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) }));
+  await db('user_config').insert(__stampFixture({ user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) }));
 }, 15000);
 
 afterAll(async () => {
@@ -446,11 +449,11 @@ describe('runScheduleAndPersist: scheduled_at validation', () => {
     await seedTemplate({ id: 'tmpl-test', text: 'Test template', dur: 30 });
 
     // Manually insert a recurring instance without scheduled_at (bypassing normal flow)
-    await db('task_instances').insert({
+    await db('task_instances').insert(__stampFixture({
       id: 'inst-no-sched', master_id: 'tmpl-test', user_id: USER_ID,
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1,
       status: '', dur: 30, created_at: db.fn.now(), updated_at: db.fn.now()
-    });
+    }));
 
     // Should NOT throw — the scheduler assigns scheduled_at during placement
     var result = await runScheduleAndPersist(USER_ID);
@@ -576,7 +579,7 @@ describe('BUG-671 regression: floating tasks must never be flagged overdue', () 
 
     // when='_invalid_window_' forces the task into result.unplaced (no matching
     // time block exists), triggering the synthesis loop at runSchedule.js:1815.
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: 'floating-red-master',
       user_id: USER_ID,
       text: 'Floating RED test task',
@@ -585,10 +588,10 @@ describe('BUG-671 regression: floating tasks must never be flagged overdue', () 
       when: '_invalid_window_',    // unplaceable: no time block matches this tag
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
+    }));
     // Insert instance with stale past date and a non-null scheduled_at
     // (simulating a prior scheduler run that placed it at 9 AM on STALE_DATE_KEY)
-    await db('task_instances').insert({
+    await db('task_instances').insert(__stampFixture({
       id: 'floating-red-001',
       master_id: 'floating-red-master',
       user_id: USER_ID,
@@ -601,7 +604,7 @@ describe('BUG-671 regression: floating tasks must never be flagged overdue', () 
       status: '',                               // non-recurring, non-terminal
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
+    }));
 
     var result = await runScheduleAndPersist(USER_ID);
 
@@ -681,7 +684,7 @@ describe('BUG-671 regression: floating tasks must never be flagged overdue', () 
   test('AC3 (guard): deadline-bearing UNPLACEABLE task past its deadline is genuinely overdue — routed to unplaced (999.1569), never silently exempted like a floating task', async () => {
     if (!available) return;
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: 'deadline-past-unplaceable',
       user_id: USER_ID,
       text: 'Past deadline unplaceable task',
@@ -691,8 +694,8 @@ describe('BUG-671 regression: floating tasks must never be flagged overdue', () 
       deadline: '2025-06-01 23:59:59', // clearly past deadline
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: 'deadline-past-unplaceable',
       master_id: 'deadline-past-unplaceable',
       user_id: USER_ID,
@@ -705,7 +708,7 @@ describe('BUG-671 regression: floating tasks must never be flagged overdue', () 
       status: '',
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
+    }));
 
     var result = await runScheduleAndPersist(USER_ID);
 
@@ -904,7 +907,7 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
   test('AC1-HOLE1a (RED): floating time_window task, past+unplaceable, must NOT get overdue=1', async () => {
     if (!available) return;
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: 'b700-tw-master',
       user_id: USER_ID,
       text: 'BUG-700 time_window floating',
@@ -917,8 +920,8 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
       deadline: null,            // FLOATING -- the key condition
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: 'b700-tw-inst',
       master_id: 'b700-tw-master',
       user_id: USER_ID,
@@ -930,7 +933,7 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
       status: '',
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
+    }));
 
     await runScheduleAndPersist(USER_ID);
 
@@ -953,7 +956,7 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
   test('AC1-HOLE1b (RED): floating time_blocks task, past+unplaceable, must NOT get overdue=1', async () => {
     if (!available) return;
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: 'b700-tb-master',
       user_id: USER_ID,
       text: 'BUG-700 time_blocks floating',
@@ -964,8 +967,8 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
       deadline: null,            // FLOATING
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: 'b700-tb-inst',
       master_id: 'b700-tb-master',
       user_id: USER_ID,
@@ -977,7 +980,7 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
       status: '',
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
+    }));
 
     await runScheduleAndPersist(USER_ID);
 
@@ -1001,7 +1004,7 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
   test('AC1-HOLE2 (RED): floating anytime task placed in past, unplaceable now, must NOT get overdue=1', async () => {
     if (!available) return;
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: 'b700-any-past-master',
       user_id: USER_ID,
       text: 'BUG-700 anytime floating in-past',
@@ -1012,8 +1015,8 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
       deadline: null,            // FLOATING -- no deadline
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: 'b700-any-past-inst',
       master_id: 'b700-any-past-master',
       user_id: USER_ID,
@@ -1025,7 +1028,7 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
       status: '',
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
+    }));
 
     await runScheduleAndPersist(USER_ID);
 
@@ -1051,7 +1054,7 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
   test('AC2 (RED): floating task already overdue=1 in DB -- run must write overdue=0', async () => {
     if (!available) return;
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: 'b700-clear-master',
       user_id: USER_ID,
       text: 'BUG-700 clear stale overdue',
@@ -1064,8 +1067,8 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
       deadline: null,            // FLOATING
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: 'b700-clear-inst',
       master_id: 'b700-clear-master',
       user_id: USER_ID,
@@ -1078,7 +1081,7 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
       status: '',
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
+    }));
 
     await runScheduleAndPersist(USER_ID);
 
@@ -1111,7 +1114,7 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
   test('AC3 (guard, GREEN): deadline-bearing time_blocks task, past deadline, unplaceable -- gets overdue=1', async () => {
     if (!available) return;
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: 'b700-dl-master',
       user_id: USER_ID,
       text: 'BUG-700 deadline task guard',
@@ -1122,8 +1125,8 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
       deadline: '2025-01-01 23:59:59', // clearly past deadline (not floating)
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: 'b700-dl-inst',
       master_id: 'b700-dl-master',
       user_id: USER_ID,
@@ -1135,7 +1138,7 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
       status: '',
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
+    }));
 
     await runScheduleAndPersist(USER_ID);
 
@@ -1164,7 +1167,7 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
   test('AC4 (guard, GREEN): deadline-bearing anytime task, never placed -- Case C: unscheduled=1, no overdue', async () => {
     if (!available) return;
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: 'b700-ac4-master',
       user_id: USER_ID,
       text: 'BUG-700 AC4 never-placed deadline guard',
@@ -1175,8 +1178,8 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
       deadline: '2099-12-31 23:59:59', // has a deadline (NOT floating)
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: 'b700-ac4-inst',
       master_id: 'b700-ac4-master',
       user_id: USER_ID,
@@ -1188,7 +1191,7 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
       status: '',
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
+    }));
 
     await runScheduleAndPersist(USER_ID);
 
@@ -1233,7 +1236,7 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
     var Z3_PAST_DEADLINE_KEY = '2026-06-15'; // fixed always-past deadline day
     var Z3_STALE_DATE_KEY = '2026-06-20';    // stale prior `date`, DIFFERENT from the deadline
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: 'z3-persist-master',
       user_id: USER_ID,
       text: 'z-3 Case C date-persist coverage (past deadline)',
@@ -1244,8 +1247,8 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
       deadline: Z3_PAST_DEADLINE_KEY + ' 23:59:59',   // PAST deadline (NOT 2099 like AC4 above)
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: 'z3-persist-inst',
       master_id: 'z3-persist-master',
       user_id: USER_ID,
@@ -1258,7 +1261,7 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
       status: '',
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
+    }));
 
     await runScheduleAndPersist(USER_ID);
 
@@ -1318,7 +1321,7 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
     if (!available) return;
 
     // Blocker task: unplaceable, no deadline (its own overdue state is not under test)
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: 'b700-chain-blocker-master',
       user_id: USER_ID,
       text: 'BUG-700 chain blocker',
@@ -1329,8 +1332,8 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
       deadline: null,
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: 'b700-chain-blocker-inst',
       master_id: 'b700-chain-blocker-master',
       user_id: USER_ID,
@@ -1342,11 +1345,11 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
       status: '',
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
+    }));
 
     // Chain member: depends on blocker, has a prior past placement, no deadline.
     // depends_on stored as JSON array in task_masters.
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: 'b700-chain-member-master',
       user_id: USER_ID,
       text: 'BUG-700 chain member floating',
@@ -1358,8 +1361,8 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
       depends_on: JSON.stringify(['b700-chain-blocker-inst']), // chain member
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: 'b700-chain-member-inst',
       master_id: 'b700-chain-member-master',
       user_id: USER_ID,
@@ -1371,7 +1374,7 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
       status: '',
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
+    }));
 
     await runScheduleAndPersist(USER_ID);
 
@@ -1482,7 +1485,7 @@ describe('BUG-142 regression: past recurring instance auto-miss (Plan C)', () =>
 
     // Template with recur_end in the past → expandRecurring generates NO future
     // desired occurrences → the instance has no match in desiredIds.
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: 'b142-tmpl-ac1',
       user_id: USER_ID,
       text: 'BUG-142 AC1 legacy date=NULL recurring',
@@ -1496,12 +1499,12 @@ describe('BUG-142 regression: past recurring instance auto-miss (Plan C)', () =>
       when: 'morning',
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
+    }));
 
     // LEGACY/ANOMALOUS state: date=NULL + scheduled_at=NULL.
     // Modern expandRecurring always writes a non-null date; this state only
     // arises from old code. The reconciler treats this as an unmatched orphan.
-    await db('task_instances').insert({
+    await db('task_instances').insert(__stampFixture({
       id: 'b142-inst-ac1',
       master_id: 'b142-tmpl-ac1',
       user_id: USER_ID,
@@ -1515,7 +1518,7 @@ describe('BUG-142 regression: past recurring instance auto-miss (Plan C)', () =>
       dur: 30,
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
+    }));
 
     await runScheduleAndPersist(USER_ID);
 
@@ -1550,7 +1553,7 @@ describe('BUG-142 regression: past recurring instance auto-miss (Plan C)', () =>
     // This exercises the reconcile-move path (PATH B + occurrenceMove).
     // The template recurs daily but started in the past; the instance should
     // still become 'missed' even if the reconciler tries to reuse it for the future.
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: 'b142-tmpl-ac1b',
       user_id: USER_ID,
       text: 'BUG-142 AC1b date-set never-placed',
@@ -1564,7 +1567,7 @@ describe('BUG-142 regression: past recurring instance auto-miss (Plan C)', () =>
       when: 'morning',
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
+    }));
 
     // Instance has `date` set to the past but `scheduled_at=NULL` (never placed).
     // buildExistingGroups will see g.dateObj from row.date → includes in `remaining`.
@@ -1572,7 +1575,7 @@ describe('BUG-142 regression: past recurring instance auto-miss (Plan C)', () =>
     // In-memory: t.date gets set to future date → Plan C td >= today → skips.
     // OR if not matched: toDeleteIds → deleted.
     // Either way: AC1 behavior (status='missed') is not achieved.
-    await db('task_instances').insert({
+    await db('task_instances').insert(__stampFixture({
       id: 'b142-inst-ac1b',
       master_id: 'b142-tmpl-ac1b',
       user_id: USER_ID,
@@ -1586,7 +1589,7 @@ describe('BUG-142 regression: past recurring instance auto-miss (Plan C)', () =>
       dur: 30,
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
+    }));
 
     await runScheduleAndPersist(USER_ID);
 
@@ -1638,7 +1641,7 @@ describe('BUG-142 regression: past recurring instance auto-miss (Plan C)', () =>
     var y = tomorrow.getUTCFullYear(), m = tomorrow.getUTCMonth() + 1, d = tomorrow.getUTCDate();
     var tomorrowKey = y + '-' + (m < 10 ? '0' : '') + m + '-' + (d < 10 ? '0' : '') + d;
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: 'b142-tmpl-ac2',
       user_id: USER_ID,
       text: 'BUG-142 AC2 future unplaceable',
@@ -1652,10 +1655,10 @@ describe('BUG-142 regression: past recurring instance auto-miss (Plan C)', () =>
       when: '_invalid_window_',   // Strategy A: unplaceable (no matching time block)
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
+    }));
 
     // Instance for TOMORROW — not yet past. The scheduler must NOT mark it missed.
-    await db('task_instances').insert({
+    await db('task_instances').insert(__stampFixture({
       id: 'b142-inst-ac2',
       master_id: 'b142-tmpl-ac2',
       user_id: USER_ID,
@@ -1669,7 +1672,7 @@ describe('BUG-142 regression: past recurring instance auto-miss (Plan C)', () =>
       dur: 30,
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
+    }));
 
     await runScheduleAndPersist(USER_ID);
 
@@ -1700,7 +1703,7 @@ describe('BUG-142 regression: past recurring instance auto-miss (Plan C)', () =>
     if (!available) return;
 
     // Stuck past recurring instance (same setup as AC1)
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: 'b142-tmpl-ac3-stuck',
       user_id: USER_ID,
       text: 'BUG-142 AC3 stuck recurring',
@@ -1714,8 +1717,8 @@ describe('BUG-142 regression: past recurring instance auto-miss (Plan C)', () =>
       when: 'morning',
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: 'b142-inst-ac3-stuck',
       master_id: 'b142-tmpl-ac3-stuck',
       user_id: USER_ID,
@@ -1729,7 +1732,7 @@ describe('BUG-142 regression: past recurring instance auto-miss (Plan C)', () =>
       dur: 30,
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
+    }));
 
     // A separate, placeable non-recurring task in the same run.
     await seedTask({
@@ -1837,7 +1840,7 @@ describe('BUG-142 regression: past recurring instance auto-miss (Plan C)', () =>
     // This guarantees: flex >= daysPast * 1440  → guard fires → early return → NOT missed.
     var timeFlex = daysPast * 1440 + 1440;
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: 'b142-tmpl-ac5',
       user_id: USER_ID,
       text: 'BUG-142 AC5 within-timeFlex should NOT be missed',
@@ -1852,9 +1855,9 @@ describe('BUG-142 regression: past recurring instance auto-miss (Plan C)', () =>
       when: '_invalid_window_',  // unplaceable (no matching time block)
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
+    }));
 
-    await db('task_instances').insert({
+    await db('task_instances').insert(__stampFixture({
       id: 'b142-inst-ac5',
       master_id: 'b142-tmpl-ac5',
       user_id: USER_ID,
@@ -1868,7 +1871,7 @@ describe('BUG-142 regression: past recurring instance auto-miss (Plan C)', () =>
       dur: 30,
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
+    }));
 
     await runScheduleAndPersist(USER_ID);
 

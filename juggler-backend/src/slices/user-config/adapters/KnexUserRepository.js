@@ -28,7 +28,10 @@ KnexUserRepository.prototype.findById = function (id) {
 };
 
 KnexUserRepository.prototype.insertUser = function (row) {
-  return this._db('users').insert(row);
+  // 999.1576 inc.4 (harrison BLOCK-1): users.created_by/updated_by are NOT
+  // NULL — first-login provisioning must stamp (actor = the authenticated
+  // JWT sub via expressAuditContext; req.user is set before provisioning runs).
+  return this._db('users').insert(stampInsert(row));
 };
 
 KnexUserRepository.prototype.updateTimezone = function (id, timezone) {

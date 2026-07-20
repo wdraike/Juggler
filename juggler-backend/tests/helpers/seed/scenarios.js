@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../../src/lib/audit-context').stampInsert(rows);
 /**
  * Named test scenarios — composable DB-backed setups for specific test categories.
  *
@@ -209,7 +212,7 @@ async function gcalCalendar(db, userId, opts) {
 
   if (!refreshToken) return { skipped: true, reason: 'TEST_GCAL_REFRESH_TOKEN not set' };
 
-  await db('user_calendars').insert({
+  await db('user_calendars').insert(__stampFixture({
     user_id:       userId,
     provider:      'gcal',
     provider_account_id: calendarId,
@@ -219,7 +222,7 @@ async function gcalCalendar(db, userId, opts) {
     ingest_mode:   'task',
     created_at:    db.fn.now(),
     updated_at:    db.fn.now()
-  }).onConflict(['user_id', 'provider', 'provider_account_id']).merge();
+  })).onConflict(['user_id', 'provider', 'provider_account_id']).merge();
 
   return { skipped: false, calendarId };
 }
@@ -236,7 +239,7 @@ async function msftCalendar(db, userId, opts) {
 
   if (!refreshToken) return { skipped: true, reason: 'TEST_MSFT_REFRESH_TOKEN not set' };
 
-  await db('user_calendars').insert({
+  await db('user_calendars').insert(__stampFixture({
     user_id:       userId,
     provider:      'msft',
     provider_account_id: calendarId,
@@ -246,7 +249,7 @@ async function msftCalendar(db, userId, opts) {
     ingest_mode:   'task',
     created_at:    db.fn.now(),
     updated_at:    db.fn.now()
-  }).onConflict(['user_id', 'provider', 'provider_account_id']).merge();
+  })).onConflict(['user_id', 'provider', 'provider_account_id']).merge();
 
   return { skipped: false, calendarId };
 }
@@ -266,7 +269,7 @@ async function appleCalendar(db, userId, opts) {
     return { skipped: true, reason: 'TEST_APPLE_CALENDAR_URL / USERNAME / APP_PASSWORD not set' };
   }
 
-  await db('user_calendars').insert({
+  await db('user_calendars').insert(__stampFixture({
     user_id:       userId,
     provider:      'apple',
     provider_account_id: calendarUrl,
@@ -276,7 +279,7 @@ async function appleCalendar(db, userId, opts) {
     ingest_mode:   'task',
     created_at:    db.fn.now(),
     updated_at:    db.fn.now()
-  }).onConflict(['user_id', 'provider', 'provider_account_id']).merge();
+  })).onConflict(['user_id', 'provider', 'provider_account_id']).merge();
 
   return { skipped: false, calendarUrl };
 }

@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../../src/lib/audit-context').stampInsert(rows);
 /**
  * B1 (W2) — hasWeatherConstraint duplication characterization
  *
@@ -90,18 +93,18 @@ beforeAll(async () => {
   db = testDb.getDb();
   await cleanupUser();
   await testDb.seedUser({ id: USER_ID, email: 'wxcheck@test.com', name: 'Weather Check User', timezone: TZ });
-  await db('user_config').insert([
+  await db('user_config').insert(__stampFixture([
     { user_id: USER_ID, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) },
     { user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) }
-  ]);
+  ]));
   // A real lat/lon location — runSchedule.js:1585 gates the loader call on
   // BOTH hasWeatherTasks AND cfg.locations.length > 0. Without a seeded
   // location the loader would never fire regardless of hasWeatherTasks,
   // breaking the has-weather-task proxy this suite depends on.
-  await db('locations').insert({
+  await db('locations').insert(__stampFixture({
     location_id: 'wxcheck-loc-1', user_id: USER_ID, name: 'Home',
     lat: 37.7749, lon: -122.4194, sort_order: 0
-  });
+  }));
   originalProvider = getWeatherProvider();
 }, 20000);
 

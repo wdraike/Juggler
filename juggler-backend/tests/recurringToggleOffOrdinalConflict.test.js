@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * BUG-999.833 — Toggle-off recurring→one-shot 500 on existing (1,1) instance.
  *
@@ -55,13 +58,13 @@ beforeAll(async () => {
   await assertDbAvailable();
   try { await db.raw('SELECT 1'); available = true; } catch (e) { return; }
   await cleanup();
-  await db('users').insert({
+  await db('users').insert(__stampFixture({
     id: USER_ID,
     email: 'toggleoff-ordinal@test.com',
     timezone: TZ,
     created_at: db.fn.now(),
     updated_at: db.fn.now()
-  });
+  }));
 }, 20000);
 
 afterAll(async () => {
@@ -95,7 +98,7 @@ var MASTER_ID = 'tog-off-master-001';
  * in tasks_v (always 'recurring_template' when recurring=1).
  */
 async function seedMaster() {
-  await db('task_masters').insert({
+  await db('task_masters').insert(__stampFixture({
     id: MASTER_ID,
     user_id: USER_ID,
     text: 'Daily standup',
@@ -106,7 +109,7 @@ async function seedMaster() {
     recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU' }),
     created_at: db.fn.now(),
     updated_at: db.fn.now()
-  });
+  }));
 }
 
 /**
@@ -124,7 +127,7 @@ async function seedMaster() {
  * swallows ALL duplicate-key errors including the ordinal constraint.
  */
 async function seedExistingDoneInstance() {
-  await db('task_instances').insert({
+  await db('task_instances').insert(__stampFixture({
     id: 'tog-off-inst-existing-done',   // different from MASTER_ID — the crux of the bug
     master_id: MASTER_ID,
     user_id: USER_ID,
@@ -138,7 +141,7 @@ async function seedExistingDoneInstance() {
     generated: 0,
     created_at: db.fn.now(),
     updated_at: db.fn.now()
-  });
+  }));
 }
 
 // ─── tests ──────────────────────────────────────────────────────────────────
@@ -320,14 +323,14 @@ describe('BUG-999.833: FK-path regression — cal_history + cal_sync_ledger inte
    *   'SCHEDULED', 'COMPLETED', 'MISSED', 'CANCELLED'
    */
   async function seedCalHistoryForInstance(instanceId) {
-    await db('cal_history').insert({
+    await db('cal_history').insert(__stampFixture({
       task_id: instanceId,
       user_id: USER_ID,
       scheduled_at: '2026-01-15 09:00:00',
       status: 'COMPLETED',
       created_at: db.fn.now(),
       updated_at: db.fn.now()
-    });
+    }));
   }
 
   /**
@@ -343,14 +346,14 @@ describe('BUG-999.833: FK-path regression — cal_history + cal_sync_ledger inte
    *   ... (provider_event_id, hashes, event_summary, etc. nullable)
    */
   async function seedCalSyncLedgerForInstance(instanceId) {
-    await db('cal_sync_ledger').insert({
+    await db('cal_sync_ledger').insert(__stampFixture({
       user_id: USER_ID,
       provider: 'gcal',
       task_id: instanceId,
       origin: 'juggler',
       status: 'active',
       created_at: db.fn.now()
-    });
+    }));
   }
 
   /**

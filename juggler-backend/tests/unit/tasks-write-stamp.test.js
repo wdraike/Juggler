@@ -83,12 +83,15 @@ test('softCancel stamps updated_by', async () => {
   });
 });
 
-test('no ambient context: row passes through unstamped (soft until the strict increment)', async () => {
+test('no ambient context (and no armed test default): insert THROWS — strict since inc.4, zero silent NULLs', async () => {
   const { _runWithoutActor } = require('../../src/lib/audit-context');
   const db = fakeDb();
-  await _runWithoutActor(() => tasksWrite.insertTask(db, { id: 't9', user_id: 'u', text: 'x' }));
-  const master = db.__ops.find((o) => o.table === 'task_masters');
-  expect(master.row.created_by).toBeUndefined();
+  await _runWithoutActor(async () => {
+    await expect(
+      Promise.resolve().then(() => tasksWrite.insertTask(db, { id: 't9', user_id: 'u', text: 'x' }))
+    ).rejects.toThrow(/no actor established/);
+  });
+  expect(db.__ops.find((o) => o.table === 'task_masters')).toBeUndefined();
 });
 
 test('empty change-set stays a no-op even with an ambient actor (harrison)', async () => {

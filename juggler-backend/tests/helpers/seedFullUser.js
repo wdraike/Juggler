@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../src/lib/audit-context').stampInsert(rows);
 /**
  * Full-user seed and teardown helper for real-DB integration tests.
  *
@@ -44,37 +47,37 @@ async function seedFullUser(db, userId, opts = {}) {
     tasks = [],
   } = opts;
 
-  await db('users').insert({
+  await db('users').insert(__stampFixture({
     id: userId,
     email,
     name,
     timezone,
     created_at: db.fn.now(),
     updated_at: db.fn.now(),
-  });
+  }));
 
   // Insert default scheduler config (same keys used by runScheduleIntegration.test.js)
-  await db('user_config').insert({
+  await db('user_config').insert(__stampFixture({
     user_id: userId,
     config_key: 'time_blocks',
     config_value: JSON.stringify(DEFAULT_TIME_BLOCKS),
-  });
-  await db('user_config').insert({
+  }));
+  await db('user_config').insert(__stampFixture({
     user_id: userId,
     config_key: 'tool_matrix',
     config_value: JSON.stringify(DEFAULT_TOOL_MATRIX),
-  });
+  }));
 
   for (const loc of locations) {
-    await db('locations').insert({ user_id: userId, ...loc });
+    await db('locations').insert(__stampFixture({ user_id: userId, ...loc }));
   }
 
   for (const proj of projects) {
-    await db('projects').insert({ user_id: userId, ...proj });
+    await db('projects').insert(__stampFixture({ user_id: userId, ...proj }));
   }
 
   for (const tool of tools) {
-    await db('tools').insert({ user_id: userId, ...tool });
+    await db('tools').insert(__stampFixture({ user_id: userId, ...tool }));
   }
 
   for (const task of tasks) {

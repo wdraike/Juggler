@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../src/lib/audit-context').stampInsert(rows);
 /**
  * 999.841 — split-part persistence
  *
@@ -97,9 +100,9 @@ async function ensureIsolatedDbProvisioned() {
 beforeAll(async () => {
   try { await ensureIsolatedDbProvisioned(); dbAvailable = true; } catch (e) { dbAvailable = false; throw e; }
   await cleanup();
-  await db('users').insert({ id: USER_ID, email: 'splitpart@test.com', timezone: TZ, created_at: db.fn.now(), updated_at: db.fn.now() });
-  await db('user_config').insert({ user_id: USER_ID, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) });
-  await db('user_config').insert({ user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) });
+  await db('users').insert(__stampFixture({ id: USER_ID, email: 'splitpart@test.com', timezone: TZ, created_at: db.fn.now(), updated_at: db.fn.now() }));
+  await db('user_config').insert(__stampFixture({ user_id: USER_ID, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) }));
+  await db('user_config').insert(__stampFixture({ user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) }));
 }, 600000); // 999.1409 (via 999.1247 gate triage): fresh-test-bed provisioning of the
             // isolated DB runs the full migration set (~6 min measured) — 20s timed out
             // mid-provision and left a stuck knex_migrations_lock behind.
@@ -120,7 +123,7 @@ beforeEach(async () => {
 });
 
 async function seedSplitMaster() {
-  await db('task_masters').insert({
+  await db('task_masters').insert(__stampFixture({
     id: MASTER_ID,
     user_id: USER_ID,
     text: 'Apply for Jobs',
@@ -135,7 +138,7 @@ async function seedSplitMaster() {
     recur_start: todayISO(),
     created_at: db.fn.now(),
     updated_at: db.fn.now()
-  });
+  }));
 }
 
 describe('999.841 — split chunks persist as separate rows (not merge-deleted)', () => {
@@ -186,14 +189,14 @@ describe('999.841 — split chunks persist as separate rows (not merge-deleted)'
     // Seed 4 pending chunks for yesterday (so1 placed, so2-4 split parts).
     for (var k = 1; k <= 4; k++) {
       var chunkId = k === 1 ? primaryId : primaryId + '-' + k;
-      await db('task_instances').insert({
+      await db('task_instances').insert(__stampFixture({
         id: chunkId, user_id: USER_ID, master_id: MASTER_ID,
         occurrence_ordinal: 50, split_ordinal: k, split_total: 4, split_group: primaryId,
         dur: 60, status: '', date: yISO,
         scheduled_at: k === 1 ? yISO + ' 09:00:00' : null,
         unscheduled: k === 1 ? null : 1,
         created_at: db.fn.now(), updated_at: db.fn.now()
-      });
+      }));
     }
 
     await runScheduleAndPersist(USER_ID);

@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../src/lib/audit-context').stampInsert(rows);
 /**
  * RED regression test — juggler-recur-delete-vs-freeze
  *
@@ -153,23 +156,23 @@ beforeAll(async () => {
     );
   }
   await cleanup();
-  await db('users').insert({
+  await db('users').insert(__stampFixture({
     id: USER_ID,
     email: 'recurdel@test.com',
     timezone: TZ,
     created_at: db.fn.now(),
     updated_at: db.fn.now()
-  });
-  await db('user_config').insert({
+  }));
+  await db('user_config').insert(__stampFixture({
     user_id: USER_ID,
     config_key: 'time_blocks',
     config_value: JSON.stringify(DEFAULT_TIME_BLOCKS)
-  });
-  await db('user_config').insert({
+  }));
+  await db('user_config').insert(__stampFixture({
     user_id: USER_ID,
     config_key: 'tool_matrix',
     config_value: JSON.stringify(DEFAULT_TOOL_MATRIX)
-  });
+  }));
 }, 600000); // 999.1409: fresh-test-bed provisioning runs the full migration set (~6 min measured)
 
 afterAll(async () => {
@@ -206,7 +209,7 @@ async function seedMaster(overrides) {
     created_at: db.fn.now(),
     updated_at: db.fn.now()
   }, overrides);
-  await db('task_masters').insert(row);
+  await db('task_masters').insert(__stampFixture(row));
   return row;
 }
 
@@ -231,7 +234,7 @@ async function seedInstance(masterId, overrides) {
     created_at: db.fn.now(),
     updated_at: db.fn.now()
   }, overrides);
-  await db('task_instances').insert(row);
+  await db('task_instances').insert(__stampFixture(row));
   return row;
 }
 
@@ -386,7 +389,7 @@ describe('AC4 — control cases: terminal and future instances unaffected', () =
     // Terminal rows are loaded separately via terminalDedupRows, not taskRows.
     // Insert directly into task_instances with terminal status.
     // Note: no task_type, recurring, text, pri columns in task_instances — VIEW-derived.
-    await db('task_instances').insert({
+    await db('task_instances').insert(__stampFixture({
       id: master.id + '-done',
       user_id: USER_ID,
       master_id: master.id,
@@ -399,7 +402,7 @@ describe('AC4 — control cases: terminal and future instances unaffected', () =
       dur: 5,
       created_at: db.fn.now(),
       updated_at: db.fn.now()
-    });
+    }));
 
     await runScheduleAndPersist(USER_ID);
 
@@ -444,7 +447,7 @@ describe('AC4 — control cases: terminal and future instances unaffected', () =
   it('AC4c: skip past instance stays skip (soft-deleted terminal, R32.5)', async () => {
     var master = await seedMaster({ id: 'rdm-ac4c-master' });
     // No task_type, recurring, text, pri — VIEW-derived
-    await db('task_instances').insert({
+    await db('task_instances').insert(__stampFixture({
       id: master.id + '-skip',
       user_id: USER_ID,
       master_id: master.id,
@@ -457,7 +460,7 @@ describe('AC4 — control cases: terminal and future instances unaffected', () =
       dur: 5,
       created_at: db.fn.now(),
       updated_at: db.fn.now()
-    });
+    }));
 
     await runScheduleAndPersist(USER_ID);
 

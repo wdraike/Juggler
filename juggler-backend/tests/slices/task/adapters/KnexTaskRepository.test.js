@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../../../src/lib/audit-context').stampInsert(rows);
 /**
  * H3 W3 — KnexTaskRepository adapter tests.
  *
@@ -226,10 +229,10 @@ describe('KnexTaskRepository — DB-backed characterization (test-bed @3407)', f
       await knex('task_instances').where('user_id', u).del();
       await knex('task_masters').where('user_id', u).del();
       await knex('users').where('id', u).del();
-      await knex('users').insert({
+      await knex('users').insert(__stampFixture({
         id: u, email: u + '@knexrepo.test', name: u,
         timezone: 'America/New_York', created_at: new Date(), updated_at: new Date()
-      });
+      }));
     }
   }, 20000);
 
@@ -284,11 +287,11 @@ describe('KnexTaskRepository — DB-backed characterization (test-bed @3407)', f
     var row = plainRow({ text: 'cal-linked' });
     await r.insertTask(row);
     // cal_sync_ledger.id is an auto-increment integer — do NOT supply it.
-    await knex('cal_sync_ledger').insert({
+    await knex('cal_sync_ledger').insert(__stampFixture({
       user_id: USER, task_id: row.id, provider: 'gcal',
       provider_event_id: 'gcal-evt-xyz', status: 'active', origin: 'juggler',
       created_at: new Date(), updated_at: new Date()
-    });
+    }));
 
     var fetched = await r.fetchTaskWithEventIds(row.id, USER);
     expect(fetched.gcal_event_id).toBe('gcal-evt-xyz');
@@ -299,11 +302,11 @@ describe('KnexTaskRepository — DB-backed characterization (test-bed @3407)', f
     var r = repo();
     var row = plainRow({ text: 'msft-linked' });
     await r.insertTask(row);
-    await knex('cal_sync_ledger').insert({
+    await knex('cal_sync_ledger').insert(__stampFixture({
       user_id: USER, task_id: row.id, provider: 'msft',
       provider_event_id: 'msft-evt-abc', status: 'active', origin: 'msft',
       created_at: new Date(), updated_at: new Date()
-    });
+    }));
 
     var fetched = await r.fetchTaskWithEventIds(row.id, USER);
     expect(fetched.msft_event_id).toBe('msft-evt-abc');
@@ -412,18 +415,18 @@ describe('KnexTaskRepository — DB-backed characterization (test-bed @3407)', f
     var r = repo();
     var now = new Date();
     var masterId = uuidv7();
-    await knex('task_masters').insert({
+    await knex('task_masters').insert(__stampFixture({
       id: masterId, user_id: USER, text: 'recur-master', dur: 30, pri: 'P3',
       recurring: 1, status: '', created_at: now, updated_at: now
-    });
-    await knex('task_instances').insert([
+    }));
+    await knex('task_instances').insert(__stampFixture([
       { id: uuidv7(), master_id: masterId, user_id: USER, status: 'disabled',
         occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30, created_at: now, updated_at: now },
       { id: uuidv7(), master_id: masterId, user_id: USER, status: 'disabled',
         occurrence_ordinal: 2, split_ordinal: 1, split_total: 1, dur: 30, created_at: now, updated_at: now },
       { id: uuidv7(), master_id: masterId, user_id: USER, status: '',
         occurrence_ordinal: 3, split_ordinal: 1, split_total: 1, dur: 30, created_at: now, updated_at: now }
-    ]);
+    ]));
 
     expect(await r.countDisabledInstances(USER, masterId)).toBe(2);
     expect(await r.countDisabledInstances(OTHER, masterId)).toBe(0);

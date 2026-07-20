@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * Master-edit refabrication (R53) — resetRecurringInstances drops ONLY future
  * not-started instances (soft-cancel, R55) and PRESERVES past + started + terminal.
@@ -20,7 +23,7 @@ beforeAll(async () => {
   await assertDbAvailable();
   try { await db.raw('SELECT 1'); available = true; } catch (e) { return; }
   await cleanup();
-  await db('users').insert({ id: USER_ID, email: 'masteredit@test.com', timezone: 'America/New_York', created_at: db.fn.now(), updated_at: db.fn.now() });
+  await db('users').insert(__stampFixture({ id: USER_ID, email: 'masteredit@test.com', timezone: 'America/New_York', created_at: db.fn.now(), updated_at: db.fn.now() }));
 }, 15000);
 
 afterAll(async () => { if (available) await cleanup(); await db.destroy(); });
@@ -38,10 +41,10 @@ beforeEach(async () => {
 });
 
 async function insMaster() {
-  await db('task_masters').insert({ id: 'M', user_id: USER_ID, text: 'Recurring', status: '', recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU' }), created_at: db.fn.now(), updated_at: db.fn.now() });
+  await db('task_masters').insert(__stampFixture({ id: 'M', user_id: USER_ID, text: 'Recurring', status: '', recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU' }), created_at: db.fn.now(), updated_at: db.fn.now() }));
 }
 async function insInst(id, ord, status, scheduledAt) {
-  await db('task_instances').insert({ id: id, master_id: 'M', user_id: USER_ID, occurrence_ordinal: ord, split_ordinal: 1, split_total: 1, dur: 30, status: status, scheduled_at: scheduledAt, generated: 0, created_at: db.fn.now(), updated_at: db.fn.now() });
+  await db('task_instances').insert(__stampFixture({ id: id, master_id: 'M', user_id: USER_ID, occurrence_ordinal: ord, split_ordinal: 1, split_total: 1, dur: 30, status: status, scheduled_at: scheduledAt, generated: 0, created_at: db.fn.now(), updated_at: db.fn.now() }));
 }
 
 describe('master-edit refabrication (R53): resetRecurringInstances', () => {

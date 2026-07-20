@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../../../src/lib/audit-context').stampInsert(rows);
 /**
  * 999.586 — DB-backed JSON reference-field validation (depends_on / location /
  * tools) driven through the REAL controller → facade → validateTaskReferences
@@ -66,23 +69,23 @@ describe('999.586 — reference validation (DB, test-bed @3407)', function () {
     await db('locations').where('user_id', USER).del();
     await db('tools').where('user_id', USER).del();
     await db('users').where('id', USER).del();
-    await db('users').insert({
+    await db('users').insert(__stampFixture({
       id: USER, email: USER + '@ref.test', name: USER,
       timezone: 'America/New_York', created_at: new Date(), updated_at: new Date()
-    });
+    }));
     // Seed a configured location + tool + an existing dependency task.
-    await db('locations').insert({
+    await db('locations').insert(__stampFixture({
       user_id: USER, location_id: 'home', name: 'Home', sort_order: 0,
       created_at: new Date(), updated_at: new Date()
-    });
-    await db('tools').insert({
+    }));
+    await db('tools').insert(__stampFixture({
       user_id: USER, tool_id: 'phone', name: 'Phone', sort_order: 0,
       created_at: new Date(), updated_at: new Date()
-    });
-    await db('task_masters').insert({
+    }));
+    await db('task_masters').insert(__stampFixture({
       id: 'dep-existing', user_id: USER, text: 'dep target',
       status: '', created_at: new Date(), updated_at: new Date()
-    });
+    }));
   });
 
   afterAll(async function () {
@@ -130,8 +133,8 @@ describe('999.586 — reference validation (DB, test-bed @3407)', function () {
     // Seed a location owned by a different user; this user must NOT see it.
     var OTHER = 'ref-val-other-user';
     await db('users').where('id', OTHER).del();
-    await db('users').insert({ id: OTHER, email: OTHER + '@ref.test', name: OTHER, created_at: new Date(), updated_at: new Date() });
-    await db('locations').insert({ user_id: OTHER, location_id: 'secret', name: 'Secret', sort_order: 0, created_at: new Date(), updated_at: new Date() });
+    await db('users').insert(__stampFixture({ id: OTHER, email: OTHER + '@ref.test', name: OTHER, created_at: new Date(), updated_at: new Date() }));
+    await db('locations').insert(__stampFixture({ user_id: OTHER, location_id: 'secret', name: 'Secret', sort_order: 0, created_at: new Date(), updated_at: new Date() }));
     try {
       var res = mockRes();
       await controller.createTask(mockReq({ text: 'cross-tenant', location: ['secret'] }), res);

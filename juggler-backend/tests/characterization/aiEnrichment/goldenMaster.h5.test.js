@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../../src/lib/audit-context').stampInsert(rows);
 /**
  * H5 W0 — AI Enrichment Characterization Golden Master
  *
@@ -977,11 +980,11 @@ describe('B3 :db — ai_command_log + ai_usage_outbox integration (test-bed 3407
   beforeAll(async () => {
     if (!await testDb.isAvailable()) return;
     // Ensure test user exists (ai_command_log FK references users.id).
-    await testDb('users').insert({
+    await testDb('users').insert(__stampFixture({
       id: TEST_USER_ID,
       email: 'telly-h5-test@example.com',
       name: 'Telly H5 Test',
-    }).onConflict('id').ignore();
+    })).onConflict('id').ignore();
   });
 
   afterAll(async () => {
@@ -1000,7 +1003,7 @@ describe('B3 :db — ai_command_log + ai_usage_outbox integration (test-bed 3407
   it('ai_command_log: insert row has user_id and created_at', async () => {
     if (!await testDb.isAvailable()) return;
 
-    await testDb('ai_command_log').insert({ user_id: TEST_USER_ID });
+    await testDb('ai_command_log').insert(__stampFixture({ user_id: TEST_USER_ID }));
     const rows = await testDb('ai_command_log').where('user_id', TEST_USER_ID);
     expect(rows).toHaveLength(1);
     expect(rows[0].user_id).toBe(TEST_USER_ID);
@@ -1031,7 +1034,7 @@ describe('B3 :db — ai_command_log + ai_usage_outbox integration (test-bed 3407
 
     // Insert exactly 50 rows for this user (at the daily limit).
     for (let i = 0; i < 50; i++) {
-      await testDb('ai_command_log').insert({ user_id: TEST_USER_ID });
+      await testDb('ai_command_log').insert(__stampFixture({ user_id: TEST_USER_ID }));
     }
 
     // Call the real SUT with the test-bed DB — checkQuota must return { allowed: false }.

@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../src/lib/audit-context').stampInsert(rows);
 /**
  * Leg sched-overdue-reasons — step 0 RED tests.
  *
@@ -496,12 +499,12 @@ describe('F6 — missed PAST recurring occurrence: unplaced_reason must be "miss
   beforeAll(async () => {
     await assertDbAvailable();
     await cleanup();
-    await db('users').insert({
+    await db('users').insert(__stampFixture({
       id: USER_ID, email: 'sched-overdue-reasons-f6@test.com', timezone: TZ,
       created_at: db.fn.now(), updated_at: db.fn.now()
-    });
-    await db('user_config').insert({ user_id: USER_ID, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) });
-    await db('user_config').insert({ user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) });
+    }));
+    await db('user_config').insert(__stampFixture({ user_id: USER_ID, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) }));
+    await db('user_config').insert(__stampFixture({ user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) }));
   }, 15000);
 
   afterAll(async () => {
@@ -510,7 +513,7 @@ describe('F6 — missed PAST recurring occurrence: unplaced_reason must be "miss
   });
 
   test('day-locked (non-flexible-TPC) daily recurring instance, never placed, date strictly in the past: unplaced_reason === "missed" (RED — currently falls back to NO_SLOT)', async () => {
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: 'sor-f6-tmpl',
       user_id: USER_ID,
       text: 'F6 day-locked recurring, past occurrence, never placed',
@@ -526,9 +529,9 @@ describe('F6 — missed PAST recurring occurrence: unplaced_reason must be "miss
       when: 'morning',
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
+    }));
 
-    await db('task_instances').insert({
+    await db('task_instances').insert(__stampFixture({
       id: 'sor-f6-inst',
       master_id: 'sor-f6-tmpl',
       user_id: USER_ID,
@@ -543,7 +546,7 @@ describe('F6 — missed PAST recurring occurrence: unplaced_reason must be "miss
       dur: 30,
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
-    });
+    }));
 
     await runScheduleAndPersist(USER_ID);
 

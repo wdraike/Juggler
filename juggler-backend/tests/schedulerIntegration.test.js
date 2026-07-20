@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * Scheduler Integration Tests
  *
@@ -68,12 +71,12 @@ beforeAll(async function() {
 
   // Seed test user
   var userId = 'test-user-scheduler-integration';
-  await knex('users').insert({
+  await knex('users').insert(__stampFixture({
     id: userId,
     email: 'scheduler-test@juggler.local',
     name: 'Scheduler Test User',
     timezone: 'America/New_York'
-  }).onConflict('id').merge();
+  })).onConflict('id').merge();
 
   // Seed config
   var configs = [
@@ -84,7 +87,7 @@ beforeAll(async function() {
     { user_id: userId, config_key: 'preferences', config_value: JSON.stringify({ splitDefault: false, splitMinDefault: 15 }) }
   ];
   for (var i = 0; i < configs.length; i++) {
-    await knex('user_config').insert(configs[i]).onConflict(['user_id', 'config_key']).merge();
+    await knex('user_config').insert(__stampFixture(configs[i])).onConflict(['user_id', 'config_key']).merge();
   }
 }, 30000);
 
@@ -137,8 +140,8 @@ async function insertTask(taskData) {
   };
   if (taskData.scheduledAt) instanceRow.scheduled_at = taskData.scheduledAt;
 
-  await knex('task_masters').insert(masterRow).onConflict('id').merge();
-  await knex('task_instances').insert(instanceRow).onConflict('id').merge();
+  await knex('task_masters').insert(__stampFixture(masterRow)).onConflict('id').merge();
+  await knex('task_instances').insert(__stampFixture(instanceRow)).onConflict('id').merge();
   return { master: masterRow, instance: instanceRow };
 }
 

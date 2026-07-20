@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * mcp-delete-task-characterization.db.test.js
  *
@@ -56,10 +59,10 @@ function captureHandlers(userId) {
 async function seedUser() {
   var existing = await db('users').where('id', USER_ID).first();
   if (!existing) {
-    await db('users').insert({
+    await db('users').insert(__stampFixture({
       id: USER_ID, email: 'mcp-del-char@test.invalid', name: 'MCP delete_task characterization',
       timezone: 'America/New_York', created_at: new Date(), updated_at: new Date()
-    });
+    }));
   }
 }
 
@@ -94,15 +97,15 @@ describe('MCP delete_task — AFTER-migration R55 soft-cancel behavior pin', fun
     var now = new Date();
     var taskId = 'mcp-del-solo-' + Date.now();
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: taskId, user_id: USER_ID, text: 'Solo task to delete', dur: 30, pri: 'P3',
       recurring: 0, status: '', created_at: now, updated_at: now
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: taskId, master_id: taskId, user_id: USER_ID, status: '',
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
       created_at: now, updated_at: now
-    });
+    }));
 
     var handlers = captureHandlers(USER_ID);
     var result = await handlers.delete_task({ id: taskId });
@@ -139,18 +142,18 @@ describe('MCP delete_task — AFTER-migration R55 soft-cancel behavior pin', fun
     var idA = 'mcp-del-depA-' + Date.now();
     var idB = 'mcp-del-depB-' + Date.now();
 
-    await db('task_masters').insert([
+    await db('task_masters').insert(__stampFixture([
       { id: idA, user_id: USER_ID, text: 'A', dur: 30, pri: 'P3', recurring: 0, status: '',
         depends_on: null, created_at: now, updated_at: now },
       { id: idB, user_id: USER_ID, text: 'B depends on A', dur: 30, pri: 'P3', recurring: 0,
         status: '', depends_on: JSON.stringify([idA]), created_at: now, updated_at: now }
-    ]);
-    await db('task_instances').insert([
+    ]));
+    await db('task_instances').insert(__stampFixture([
       { id: idA, master_id: idA, user_id: USER_ID, status: '', occurrence_ordinal: 1,
         split_ordinal: 1, split_total: 1, dur: 30, created_at: now, updated_at: now },
       { id: idB, master_id: idB, user_id: USER_ID, status: '', occurrence_ordinal: 1,
         split_ordinal: 1, split_total: 1, dur: 30, created_at: now, updated_at: now }
-    ]);
+    ]));
 
     var handlers = captureHandlers(USER_ID);
     var result = await handlers.delete_task({ id: idA });
@@ -165,23 +168,23 @@ describe('MCP delete_task — AFTER-migration R55 soft-cancel behavior pin', fun
     var now = new Date();
     var taskId = 'mcp-del-cal-' + Date.now();
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: taskId, user_id: USER_ID, text: 'GCal-linked task', dur: 30, pri: 'P3',
       recurring: 0, status: '', created_at: now, updated_at: now
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: taskId, master_id: taskId, user_id: USER_ID, status: '',
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
       created_at: now, updated_at: now
-    });
+    }));
     // gcal_event_id is DERIVED on tasks_with_sync_v from cal_sync_ledger.provider_event_id
     // (join on task_id + provider='gcal') — it is not a column on task_instances itself.
     var providerEventId = 'gcal-evt-' + Date.now();
-    var insertedIds = await db('cal_sync_ledger').insert({
+    var insertedIds = await db('cal_sync_ledger').insert(__stampFixture({
       user_id: USER_ID, task_id: taskId, provider: 'gcal', origin: 'juggler',
       status: 'active', provider_event_id: providerEventId,
       created_at: now, synced_at: now
-    });
+    }));
     var ledgerId = insertedIds[0];
 
     var handlers = captureHandlers(USER_ID);

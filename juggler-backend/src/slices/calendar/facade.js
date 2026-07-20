@@ -36,7 +36,7 @@
  */
 
 // ── sync-lock (re-exported by reference, no wrapper logic) ──────────
-var { stampInsert, stampUpdate } = require('../../lib/audit-context'); // 999.1576 inc.3b.3
+var { stampInsert, stampUpdate, runWithActor } = require('../../lib/audit-context'); // 999.1576 inc.3b.3 + inc.4
 var syncLock = require('../../lib/sync-lock');
 
 // ── date helpers backing the 60d sync window (same refs as controller) ──
@@ -219,30 +219,37 @@ async function gcalCallback(code, state, reqUser) {
     return { status: 403, body: 'OAuth state does not match authenticated user' };
   }
 
-  if (!(await gcalMarkCodeUsed(code))) {
-    logger.info('[GCAL CALLBACK] Duplicate code detected, redirecting without re-exchange');
-    var frontUrl = require('../../proxy-config').services.juggler.frontend;
-    return { status: 302, redirect: frontUrl + '/?gcal=connected' };
-  }
+  // 999.1576 inc.4 (harrison BLOCK-2): this callback route is unauthenticated
+  // (browser redirect — no req.user), so the state-token's VERIFIED userId
+  // establishes the actor for every write below (oauth_code_nonces claim,
+  // users token update). Without this, strict getActor() throws and every
+  // calendar connect 500s.
+  return runWithActor(String(userId), async function () {
+    if (!(await gcalMarkCodeUsed(code))) {
+      logger.info('[GCAL CALLBACK] Duplicate code detected, redirecting without re-exchange');
+      var frontUrl = require('../../proxy-config').services.juggler.frontend;
+      return { status: 302, redirect: frontUrl + '/?gcal=connected' };
+    }
 
-  var oauth2Client = gcalApi.createOAuth2Client();
-  var tokens = await gcalApi.getTokensFromCode(oauth2Client, code);
+    var oauth2Client = gcalApi.createOAuth2Client();
+    var tokens = await gcalApi.getTokensFromCode(oauth2Client, code);
 
-  var update = {
-    gcal_access_token: tokens.access_token,
-    updated_at: accountRepo.now()
-  };
-  if (tokens.refresh_token) {
-    update.gcal_refresh_token = tokens.refresh_token;
-  }
-  if (tokens.expiry_date) {
-    update.gcal_token_expiry = new Date(tokens.expiry_date);
-  }
+    var update = {
+      gcal_access_token: tokens.access_token,
+      updated_at: accountRepo.now()
+    };
+    if (tokens.refresh_token) {
+      update.gcal_refresh_token = tokens.refresh_token;
+    }
+    if (tokens.expiry_date) {
+      update.gcal_token_expiry = new Date(tokens.expiry_date);
+    }
 
-  await accountRepo.updateUser(userId, update);
+    await accountRepo.updateUser(userId, update);
 
-  var frontendUrl = require('../../proxy-config').services.juggler.frontend;
-  return { status: 302, redirect: frontendUrl + '/?gcal=connected' };
+    var frontendUrl = require('../../proxy-config').services.juggler.frontend;
+    return { status: 302, redirect: frontendUrl + '/?gcal=connected' };
+  });
 }
 
 async function gcalDisconnect(userId) {
@@ -463,36 +470,41 @@ async function msftCallback(code, state, reqUser) {
     return { status: 400, body: 'Missing PKCE code_verifier in state' };
   }
 
-  if (!(await msftMarkCodeUsed(code))) {
-    logger.info('[MSFT CALLBACK] Duplicate code detected, redirecting without re-exchange');
-    var frontUrl = require('../../proxy-config').services.juggler.frontend;
-    return { status: 302, redirect: frontUrl + '/?msftcal=connected' };
-  }
+  // 999.1576 inc.4 (harrison BLOCK-2): unauthenticated browser-redirect route —
+  // the state-token's VERIFIED userId establishes the actor for the writes
+  // below (oauth_code_nonces claim, users token update). See gcalCallback.
+  return runWithActor(String(userId), async function () {
+    if (!(await msftMarkCodeUsed(code))) {
+      logger.info('[MSFT CALLBACK] Duplicate code detected, redirecting without re-exchange');
+      var frontUrl = require('../../proxy-config').services.juggler.frontend;
+      return { status: 302, redirect: frontUrl + '/?msftcal=connected' };
+    }
 
-  var tokens = await msftCalApi.getTokensFromCode(code, codeVerifier);
+    var tokens = await msftCalApi.getTokensFromCode(code, codeVerifier);
 
-  var update = {
-    msft_cal_access_token: tokens.accessToken,
-    updated_at: accountRepo.now()
-  };
-  if (tokens.refreshToken) {
-    update.msft_cal_refresh_token = tokens.refreshToken;
-  }
-  if (tokens.expiresOn) {
-    update.msft_cal_token_expiry = new Date(tokens.expiresOn);
-  }
+    var update = {
+      msft_cal_access_token: tokens.accessToken,
+      updated_at: accountRepo.now()
+    };
+    if (tokens.refreshToken) {
+      update.msft_cal_refresh_token = tokens.refreshToken;
+    }
+    if (tokens.expiresOn) {
+      update.msft_cal_token_expiry = new Date(tokens.expiresOn);
+    }
 
-  try {
-    var info = await msftCalApi.getUserInfo(tokens.accessToken);
-    if (info && info.email) update.msft_cal_email = info.email;
-  } catch (e) {
-    logger.warn('MSFT account email capture failed (non-fatal):', e.message);
-  }
+    try {
+      var info = await msftCalApi.getUserInfo(tokens.accessToken);
+      if (info && info.email) update.msft_cal_email = info.email;
+    } catch (e) {
+      logger.warn('MSFT account email capture failed (non-fatal):', e.message);
+    }
 
-  await accountRepo.updateUser(userId, update);
+    await accountRepo.updateUser(userId, update);
 
-  var frontendUrl = require('../../proxy-config').services.juggler.frontend;
-  return { status: 302, redirect: frontendUrl + '/?msftcal=connected' };
+    var frontendUrl = require('../../proxy-config').services.juggler.frontend;
+    return { status: 302, redirect: frontendUrl + '/?msftcal=connected' };
+  });
 }
 
 async function msftDisconnect(userId) {

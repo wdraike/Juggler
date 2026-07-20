@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../../../src/lib/audit-context').stampInsert(rows);
 /**
  * W3 DB-backed test — two-mode import dispatcher (facade.importData → dispatchImport).
  *
@@ -49,7 +52,7 @@ async function cleanup() {
 // later assertion can prove a rejected call wrote NOTHING.
 async function seedExisting() {
   await tasksWrite.insertTask(db, { id: 'seed-1', user_id: USER_ID, text: 'Seed task', dur: 30, pri: 'P3' });
-  await db('projects').insert({ user_id: USER_ID, name: 'SeedProject', color: '#abc', icon: null, sort_order: 0, created_at: db.fn.now(), updated_at: db.fn.now() });
+  await db('projects').insert(__stampFixture({ user_id: USER_ID, name: 'SeedProject', color: '#abc', icon: null, sort_order: 0, created_at: db.fn.now(), updated_at: db.fn.now() }));
 }
 
 async function snapshot() {
@@ -64,10 +67,10 @@ beforeAll(async () => {
   available = true;
   await cleanup();
   await db('users').where('id', USER_ID).del();
-  await db('users').insert({
+  await db('users').insert(__stampFixture({
     id: USER_ID, email: 'routing@test.com', name: 'Routing Test',
     timezone: 'America/New_York', created_at: db.fn.now(), updated_at: db.fn.now()
-  });
+  }));
 }, 20000);
 
 afterAll(async () => {

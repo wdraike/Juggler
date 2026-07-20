@@ -147,7 +147,8 @@ function buildTestUser(overrides) {
 async function seedTestUser(overrides) {
   var user = buildTestUser(overrides);
   await db('users').where('id', user.id).del();
-  await db('users').insert(user);
+  // 999.1576 inc.4: fixture inserts are test-context writes — stamp 'jest'.
+  await db('users').insert(require('../../../src/lib/audit-context').stampInsert(user));
   // Return a fresh read so we have DB-generated fields
   return db('users').where('id', user.id).first();
 }

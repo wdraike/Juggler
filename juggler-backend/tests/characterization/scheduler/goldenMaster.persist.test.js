@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../../src/lib/audit-context').stampInsert(rows);
 /**
  * Golden-Master Persist — DB-level characterization harness for runScheduleAndPersist
  *
@@ -57,18 +60,18 @@ beforeAll(async () => {
   await assertDbAvailable();
   await db.raw('SELECT 1');
   await cleanupUser(SHARED_USER);
-  await db('users').insert({
+  await db('users').insert(__stampFixture({
     id: SHARED_USER, email: 'gmpersist@test.com', timezone: TZ,
     created_at: db.fn.now(), updated_at: db.fn.now()
-  });
-  await db('user_config').insert({
+  }));
+  await db('user_config').insert(__stampFixture({
     user_id: SHARED_USER, config_key: 'time_blocks',
     config_value: JSON.stringify(DEFAULT_TIME_BLOCKS)
-  });
-  await db('user_config').insert({
+  }));
+  await db('user_config').insert(__stampFixture({
     user_id: SHARED_USER, config_key: 'tool_matrix',
     config_value: JSON.stringify(DEFAULT_TOOL_MATRIX)
-  });
+  }));
 }, 15000);
 
 afterAll(async () => {

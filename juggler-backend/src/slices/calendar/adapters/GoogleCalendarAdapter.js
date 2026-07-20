@@ -140,7 +140,7 @@ async function discoverCalendars(token, userId) {
       });
 
     if (toInsert.length > 0) {
-      await getDb()('user_calendars').insert(toInsert);
+      await getDb()('user_calendars').insert(toInsert.map(stampInsert)); // 999.1576 inc.4
     }
   } catch (e) {
     loggers.calAdapterGcal.warn('Calendar discovery failed (non-fatal — pull continues with already-enabled calendars)', {

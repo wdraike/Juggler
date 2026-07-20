@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../../../src/lib/audit-context').stampInsert(rows);
 /**
  * JUG-FACADE-DB-VIOLATIONS stage 2b — db-backed pin for logFeatureEvent + query,
  * moved verbatim from user-config/facade.js into
@@ -38,10 +41,10 @@ beforeAll(async () => {
   await assertDbAvailable();
   available = true;
   await cleanup();
-  await db('users').insert({
+  await db('users').insert(__stampFixture({
     id: USER_ID, email: 'featureevents@test.com', name: 'Feature Events',
     timezone: 'America/New_York', created_at: db.fn.now(), updated_at: db.fn.now()
-  });
+  }));
 }, 20000);
 
 beforeEach(async () => {
@@ -105,17 +108,17 @@ describe('KnexFeatureEventsRepository.logFeatureEvent', () => {
 
 describe('KnexFeatureEventsRepository.query', () => {
   test('reads rows seeded directly, chainable like GetFeatureEventsReport uses it', async () => {
-    await db('feature_events').insert([
+    await db('feature_events').insert(__stampFixture([
       { user_id: USER_ID, feature_key: 'ai.commands', event_type: 'used', created_at: new Date() },
       { user_id: USER_ID, feature_key: 'ai.commands', event_type: 'blocked', created_at: new Date() }
-    ]);
+    ]));
 
     var rows = await featureEvents.query().where('user_id', USER_ID).orderBy('event_type', 'asc');
     expect(rows.map(function (r) { return r.event_type; })).toEqual(['blocked', 'used']);
   });
 
   test('two calls return independent query builders (no shared mutable state)', async () => {
-    await db('feature_events').insert({ user_id: USER_ID, feature_key: 'k1', event_type: 'used', created_at: new Date() });
+    await db('feature_events').insert(__stampFixture({ user_id: USER_ID, feature_key: 'k1', event_type: 'used', created_at: new Date() }));
     var a = featureEvents.query().where('feature_key', 'k1');
     var b = featureEvents.query().where('feature_key', 'nope');
     var aRows = await a;

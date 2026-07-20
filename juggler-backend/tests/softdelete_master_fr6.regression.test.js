@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * softdelete_master_fr6.regression.test.js
  *
@@ -66,14 +69,14 @@ var facade = require('../src/slices/task/facade');
 async function seedUser() {
   var existing = await db('users').where('id', USER_ID).first();
   if (!existing) {
-    await db('users').insert({
+    await db('users').insert(__stampFixture({
       id: USER_ID,
       email: 'fr6-softdelete@test.invalid',
       name: 'FR-6 soft-delete master test',
       timezone: 'America/New_York',
       created_at: new Date(),
       updated_at: new Date()
-    });
+    }));
   }
 }
 
@@ -85,14 +88,14 @@ async function clearUserTasks() {
 
 async function seedSeriesWithHistory(tmplId) {
   var now = new Date();
-  await db('task_masters').insert({
+  await db('task_masters').insert(__stampFixture({
     id: tmplId, user_id: USER_ID, text: 'FR-6 series with done history', dur: 30, pri: 'P3',
     recurring: 1, status: '', recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU', every: 1 }),
     created_at: now, updated_at: now
-  });
+  }));
   var doneId = tmplId + '-done1';
   var openId = tmplId + '-open1';
-  await db('task_instances').insert([
+  await db('task_instances').insert(__stampFixture([
     {
       id: doneId, master_id: tmplId, user_id: USER_ID, status: 'done',
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
@@ -105,7 +108,7 @@ async function seedSeriesWithHistory(tmplId) {
       date: '2020-01-10', scheduled_at: new Date('2020-01-10T10:00:00Z'),
       created_at: now, updated_at: now
     }
-  ]);
+  ]));
   return { doneId: doneId, openId: openId };
 }
 

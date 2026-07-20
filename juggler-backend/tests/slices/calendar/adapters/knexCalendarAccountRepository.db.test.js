@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../../../src/lib/audit-context').stampInsert(rows);
 /**
  * JUG-FACADE-DB-VIOLATIONS stage 3 — characterization pins for the calendar
  * facade's 18 account/OAuth management functions (gcal/msft/apple connect,
@@ -73,7 +76,7 @@ async function seedUser(overrides) {
   var row = makeUser(overrides);
   row.created_at = db.fn.now();
   row.updated_at = db.fn.now();
-  await db('users').insert(row);
+  await db('users').insert(__stampFixture(row));
   return db('users').where('id', USER_ID).first();
 }
 
@@ -120,7 +123,7 @@ describe('GCal account management — real DB', () => {
 
   test('getGcalStatus: connected + real auto-sync row (JSON string config_value) → autoSync:true', requireDB(async () => {
     var user = await seedUser({ gcal_refresh_token: 'rt-1' });
-    await db('user_config').insert({ user_id: USER_ID, config_key: 'gcal_auto_sync', config_value: JSON.stringify(true) });
+    await db('user_config').insert(__stampFixture({ user_id: USER_ID, config_key: 'gcal_auto_sync', config_value: JSON.stringify(true) }));
 
     var status = await facade.getGcalStatus(user);
     expect(status.connected).toBe(true);
@@ -207,7 +210,7 @@ describe('MSFT account management — real DB', () => {
 
   test('getMsftStatus: connected with email already present → skips lazy backfill, real auto-sync row read', requireDB(async () => {
     var user = await seedUser({ msft_cal_refresh_token: 'rt-1', msft_cal_email: 'a@work.com' });
-    await db('user_config').insert({ user_id: USER_ID, config_key: 'msft_cal_auto_sync', config_value: JSON.stringify(false) });
+    await db('user_config').insert(__stampFixture({ user_id: USER_ID, config_key: 'msft_cal_auto_sync', config_value: JSON.stringify(false) }));
 
     var status = await facade.getMsftStatus(user);
     expect(status.connected).toBe(true);
@@ -336,7 +339,7 @@ describe('Apple account management — real DB (user_calendars CRUD)', () => {
 
   test('appleGetCalendars: reads real user_calendars rows for the user+provider', requireDB(async () => {
     await seedUser();
-    await db('user_calendars').insert({ user_id: USER_ID, provider: 'apple', calendar_id: 'u1', enabled: true, sync_direction: 'full' });
+    await db('user_calendars').insert(__stampFixture({ user_id: USER_ID, provider: 'apple', calendar_id: 'u1', enabled: true, sync_direction: 'full' }));
     var result = await facade.appleGetCalendars(USER_ID);
     expect(result.status).toBe(200);
     expect(result.body.calendars.length).toBe(1);
@@ -347,7 +350,7 @@ describe('Apple account management — real DB (user_calendars CRUD)', () => {
     var notFound = await facade.appleUpdateCalendar(USER_ID, 999999, { enabled: true });
     expect(notFound.status).toBe(404);
 
-    var [id] = await db('user_calendars').insert({ user_id: USER_ID, provider: 'apple', calendar_id: 'u1', enabled: false, sync_direction: 'full' });
+    var [id] = await db('user_calendars').insert(__stampFixture({ user_id: USER_ID, provider: 'apple', calendar_id: 'u1', enabled: false, sync_direction: 'full' }));
     var result = await facade.appleUpdateCalendar(USER_ID, id, { enabled: true, syncDirection: 'pull' });
     expect(result.status).toBe(200);
     expect(!!result.body.calendar.enabled).toBe(true);
@@ -359,7 +362,7 @@ describe('Apple account management — real DB (user_calendars CRUD)', () => {
 
   test('appleRefreshCalendars: existing calendar rename UPDATEs; new remote calendar INSERTs with BOTH created_at+updated_at', requireDB(async () => {
     var user = await seedUser({ apple_cal_username: 'a@icloud.com', apple_cal_password: require('../../../../src/lib/credential-encrypt').encrypt('pw') });
-    await db('user_calendars').insert({ user_id: USER_ID, provider: 'apple', calendar_id: 'u-existing', display_name: 'Old Name', enabled: true, sync_direction: 'full' });
+    await db('user_calendars').insert(__stampFixture({ user_id: USER_ID, provider: 'apple', calendar_id: 'u-existing', display_name: 'Old Name', enabled: true, sync_direction: 'full' }));
 
     appleCalApi.createClient.mockResolvedValue({ fake: 'client' });
     appleCalApi.discoverCalendars.mockResolvedValue([
@@ -383,8 +386,8 @@ describe('Apple account management — real DB (user_calendars CRUD)', () => {
 
   test('appleDisconnect: real user_calendars rows deleted, users columns nulled, auto-sync config row deleted', requireDB(async () => {
     await seedUser({ apple_cal_username: 'a@icloud.com', apple_cal_password: 'enc', apple_cal_calendar_url: 'u1' });
-    await db('user_calendars').insert({ user_id: USER_ID, provider: 'apple', calendar_id: 'u1', enabled: true, sync_direction: 'full' });
-    await db('user_config').insert({ user_id: USER_ID, config_key: 'apple_cal_auto_sync', config_value: JSON.stringify(true) });
+    await db('user_calendars').insert(__stampFixture({ user_id: USER_ID, provider: 'apple', calendar_id: 'u1', enabled: true, sync_direction: 'full' }));
+    await db('user_config').insert(__stampFixture({ user_id: USER_ID, config_key: 'apple_cal_auto_sync', config_value: JSON.stringify(true) }));
 
     var result = await facade.appleDisconnect(USER_ID);
 

@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../../src/lib/audit-context').stampInsert(rows);
 /**
  * facade.collaborators.db.test.js — H3 W6 coverage lift.
  *
@@ -82,14 +85,14 @@ function mockRes() {
 async function seedUser() {
   var existing = await db('users').where('id', USER_ID).first();
   if (!existing) {
-    await db('users').insert({
+    await db('users').insert(__stampFixture({
       id: USER_ID,
       email: 'facade-collab@test.com',
       name: 'Facade Collab Test',
       timezone: 'America/New_York',
       created_at: new Date(),
       updated_at: new Date()
-    });
+    }));
   }
 }
 
@@ -132,7 +135,7 @@ describe('recurCleanup: updateTask on a recurring_instance routes via COMPLEX PA
     var tmplId = 'rc-tmpl-A-' + Date.now();
     var instId = tmplId + '-inst1';
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: tmplId,
       user_id: USER_ID,
       text: 'RC Template A',
@@ -143,8 +146,8 @@ describe('recurCleanup: updateTask on a recurring_instance routes via COMPLEX PA
       recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU', every: 1 }),
       created_at: now,
       updated_at: now
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: instId,
       master_id: tmplId,
       user_id: USER_ID,
@@ -156,7 +159,7 @@ describe('recurCleanup: updateTask on a recurring_instance routes via COMPLEX PA
       scheduled_at: new Date(now.getTime() + 24 * 60 * 60 * 1000),
       created_at: now,
       updated_at: now
-    });
+    }));
 
     // Update a NON-TEMPLATE_FIELD (notes → goes to instanceUpdate, not templateUpdate)
     // On a recurring_instance — this forces the complex path + recurCleanup
@@ -193,7 +196,7 @@ describe('recurCleanup: updateTask on a recurring_instance routes via COMPLEX PA
     var instId = tmplId + '-inst1';
     var oldRecur = { type: 'daily', days: 'MTWRFSU', every: 1 };
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: tmplId,
       user_id: USER_ID,
       text: 'RC Template B',
@@ -204,8 +207,8 @@ describe('recurCleanup: updateTask on a recurring_instance routes via COMPLEX PA
       recur: JSON.stringify(oldRecur),
       created_at: now,
       updated_at: now
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: instId,
       master_id: tmplId,
       user_id: USER_ID,
@@ -217,7 +220,7 @@ describe('recurCleanup: updateTask on a recurring_instance routes via COMPLEX PA
       scheduled_at: new Date(now.getTime() + 24 * 60 * 60 * 1000),
       created_at: now,
       updated_at: now
-    });
+    }));
 
     // Sending recur with a NEW type on an instance fires recurCleanup L208-212
     // (templateUpdate.recur !== undefined) → resetRecurringInstances.
@@ -265,7 +268,7 @@ describe('recurCleanup: updateTask on a recurring_template', () => {
     var instId = tmplId + '-inst1';
     var oldRecur = { type: 'daily', days: 'MTWRFSU', every: 1 };
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: tmplId,
       user_id: USER_ID,
       text: 'RC Template C',
@@ -277,8 +280,8 @@ describe('recurCleanup: updateTask on a recurring_template', () => {
       scheduled_at: new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000),
       created_at: now,
       updated_at: now
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: instId,
       master_id: tmplId,
       user_id: USER_ID,
@@ -290,7 +293,7 @@ describe('recurCleanup: updateTask on a recurring_template', () => {
       scheduled_at: new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000),
       created_at: now,
       updated_at: now
-    });
+    }));
 
     // PUT on the template itself with a changed recur fires the
     // recurring_template branch of recurCleanup (L220) → needsCleanup (L223)
@@ -336,7 +339,7 @@ describe('handleTemplatePause: pause on template with future instances deletes t
     var inst1Id = tmplId + '-i1';
     var inst2Id = tmplId + '-i2';
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: tmplId,
       user_id: USER_ID,
       text: 'Pause Template',
@@ -347,8 +350,8 @@ describe('handleTemplatePause: pause on template with future instances deletes t
       recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU', every: 1 }),
       created_at: now,
       updated_at: now
-    });
-    await db('task_instances').insert([
+    }));
+    await db('task_instances').insert(__stampFixture([
       { id: inst1Id, master_id: tmplId, user_id: USER_ID, status: '',
         occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
         scheduled_at: futureDate, created_at: now, updated_at: now },
@@ -356,7 +359,7 @@ describe('handleTemplatePause: pause on template with future instances deletes t
         occurrence_ordinal: 2, split_ordinal: 1, split_total: 1, dur: 30,
         scheduled_at: new Date(futureDate.getTime() + 24 * 60 * 60 * 1000),
         created_at: now, updated_at: now }
-    ]);
+    ]));
 
     var req = mockReq({ params: { id: tmplId }, body: { status: 'pause' } });
     var res = mockRes();
@@ -389,7 +392,7 @@ describe('cascadeRecurringDelete: deleteTask on a recurring template with instan
     var pend2 = tmplId + '-p2';
     var done1 = tmplId + '-d1';
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: tmplId,
       user_id: USER_ID,
       text: 'Cascade Template R55',
@@ -400,9 +403,9 @@ describe('cascadeRecurringDelete: deleteTask on a recurring template with instan
       recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU', every: 1 }),
       created_at: now,
       updated_at: now
-    });
+    }));
     // 2 pending + 1 done instance
-    await db('task_instances').insert([
+    await db('task_instances').insert(__stampFixture([
       { id: pend1, master_id: tmplId, user_id: USER_ID, status: '',
         occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
         scheduled_at: new Date(now.getTime() + 24 * 60 * 60 * 1000),
@@ -414,7 +417,7 @@ describe('cascadeRecurringDelete: deleteTask on a recurring template with instan
       { id: done1, master_id: tmplId, user_id: USER_ID, status: 'done',
         occurrence_ordinal: 0, split_ordinal: 1, split_total: 1, dur: 30,
         scheduled_at: now, completed_at: now, created_at: now, updated_at: now }
-    ]);
+    ]));
 
     // DELETE with cascade='recurring' routes through cascadeRecurringDelete
     // (DeleteTask.execute: cascade === 'recurring').
@@ -455,7 +458,7 @@ describe('cascadeRecurringDelete: deleteTask on a recurring template with instan
     var tmplId = 'casc-inst-' + Date.now();
     var instId = tmplId + '-i1';
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: tmplId,
       user_id: USER_ID,
       text: 'Cascade Instance Parent',
@@ -466,8 +469,8 @@ describe('cascadeRecurringDelete: deleteTask on a recurring template with instan
       recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU', every: 1 }),
       created_at: now,
       updated_at: now
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: instId,
       master_id: tmplId,
       user_id: USER_ID,
@@ -479,7 +482,7 @@ describe('cascadeRecurringDelete: deleteTask on a recurring template with instan
       scheduled_at: new Date(now.getTime() + 24 * 60 * 60 * 1000),
       created_at: now,
       updated_at: now
-    });
+    }));
 
     var req = mockReq({ params: { id: instId }, query: {} });
     var res = mockRes();
@@ -501,21 +504,21 @@ describe('standardDelete: delete a task that other tasks depend on', () => {
     var idA = 'dep-A-' + Date.now();
     var idB = 'dep-B-' + Date.now();
 
-    await db('task_masters').insert([
+    await db('task_masters').insert(__stampFixture([
       { id: idA, user_id: USER_ID, text: 'Task A', dur: 30, pri: 'P3',
         recurring: 0, status: '', depends_on: null, created_at: now, updated_at: now },
       { id: idB, user_id: USER_ID, text: 'Task B', dur: 30, pri: 'P3',
         recurring: 0, status: '', depends_on: JSON.stringify([idA]),
         created_at: now, updated_at: now }
-    ]);
-    await db('task_instances').insert([
+    ]));
+    await db('task_instances').insert(__stampFixture([
       { id: idA, master_id: idA, user_id: USER_ID, status: '',
         occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
         created_at: now, updated_at: now },
       { id: idB, master_id: idB, user_id: USER_ID, status: '',
         occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
         created_at: now, updated_at: now }
-    ]);
+    ]));
 
     // Deleting A fires the depends_on rewire in standardDelete
     // (B depends on A — affected.length > 0 branch at L545).
@@ -543,7 +546,7 @@ describe('standardDelete: delete a task that other tasks depend on', () => {
     var now = new Date();
     var id = 'cal-del-' + Date.now();
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: id,
       user_id: USER_ID,
       text: 'Cal-synced task',
@@ -553,8 +556,8 @@ describe('standardDelete: delete a task that other tasks depend on', () => {
       status: '',
       created_at: now,
       updated_at: now
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: id,
       master_id: id,
       user_id: USER_ID,
@@ -565,9 +568,9 @@ describe('standardDelete: delete a task that other tasks depend on', () => {
       dur: 30,
       created_at: now,
       updated_at: now
-    });
+    }));
     // Insert an active cal_sync_ledger row so the gcal_event_id branch fires.
-    await db('cal_sync_ledger').insert({
+    await db('cal_sync_ledger').insert(__stampFixture({
       user_id: USER_ID,
       task_id: id,
       provider: 'gcal',
@@ -576,7 +579,7 @@ describe('standardDelete: delete a task that other tasks depend on', () => {
       gcal_event_id: 'gcal-evt-' + Date.now(),
       created_at: now,
       updated_at: now
-    }).catch(() => {
+    })).catch(() => {
       // cal_sync_ledger may have different schema — insert without optional columns
     });
 
@@ -603,7 +606,7 @@ describe('batchUpdateTxn: batch update includes a recurring_instance', () => {
     var tmplId = 'batch-tmpl-' + Date.now();
     var instId = tmplId + '-bi1';
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: tmplId,
       user_id: USER_ID,
       text: 'Batch Template',
@@ -614,8 +617,8 @@ describe('batchUpdateTxn: batch update includes a recurring_instance', () => {
       recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU', every: 1 }),
       created_at: now,
       updated_at: now
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: instId,
       master_id: tmplId,
       user_id: USER_ID,
@@ -627,7 +630,7 @@ describe('batchUpdateTxn: batch update includes a recurring_instance', () => {
       scheduled_at: new Date(now.getTime() + 24 * 60 * 60 * 1000),
       created_at: now,
       updated_at: now
-    });
+    }));
 
     // A batch update including the recurring_instance fires the
     // taskType==='recurring_instance' branch (L757) in batchUpdateTxn,
@@ -653,7 +656,7 @@ describe('batchUpdateTxn: batch update includes a recurring_instance', () => {
     var now = new Date();
     var tmplId = 'batch-tmpl2-' + Date.now();
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: tmplId,
       user_id: USER_ID,
       text: 'Batch Template 2',
@@ -664,9 +667,9 @@ describe('batchUpdateTxn: batch update includes a recurring_instance', () => {
       recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU', every: 1 }),
       created_at: now,
       updated_at: now
-    });
+    }));
     // A template has an instance row with the same id (as seeded by the repo).
-    await db('task_instances').insert({
+    await db('task_instances').insert(__stampFixture({
       id: tmplId,
       master_id: tmplId,
       user_id: USER_ID,
@@ -677,7 +680,7 @@ describe('batchUpdateTxn: batch update includes a recurring_instance', () => {
       dur: 45,
       created_at: now,
       updated_at: now
-    });
+    }));
 
     var req = mockReq({
       body: {
@@ -703,7 +706,7 @@ describe('lockedBatchUpdate: batch update fires queue path when sync lock is hel
     var now = new Date();
     var taskId = 'locked-task-' + Date.now();
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: taskId,
       user_id: USER_ID,
       text: 'Locked batch task',
@@ -713,8 +716,8 @@ describe('lockedBatchUpdate: batch update fires queue path when sync lock is hel
       status: '',
       created_at: now,
       updated_at: now
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: taskId,
       master_id: taskId,
       user_id: USER_ID,
@@ -725,18 +728,18 @@ describe('lockedBatchUpdate: batch update fires queue path when sync lock is hel
       dur: 30,
       created_at: now,
       updated_at: now
-    });
+    }));
 
     // Insert a live sync_lock — this causes isLocked() to return true,
     // routing the batchUpdateTasks call into lockedBatchUpdate (L573+).
     // sync_locks schema: user_id, expires_at, lock_token, acquired_at
     var lockExpiry = new Date(now.getTime() + 60 * 1000); // expires in 60s
-    await db('sync_locks').insert({
+    await db('sync_locks').insert(__stampFixture({
       user_id: USER_ID,
       expires_at: lockExpiry,
       lock_token: 'test-lock-' + Date.now(),
       acquired_at: now
-    });
+    }));
 
     // Batch update with a NON-scheduling field (text) — lockedBatchUpdate
     // writes non-scheduling fields directly (L627) and skips queuing.
@@ -760,7 +763,7 @@ describe('lockedBatchUpdate: batch update fires queue path when sync lock is hel
     var now = new Date();
     var taskId = 'locked-sched-' + Date.now();
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: taskId,
       user_id: USER_ID,
       text: 'Locked sched task',
@@ -770,8 +773,8 @@ describe('lockedBatchUpdate: batch update fires queue path when sync lock is hel
       status: '',
       created_at: now,
       updated_at: now
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: taskId,
       master_id: taskId,
       user_id: USER_ID,
@@ -782,16 +785,16 @@ describe('lockedBatchUpdate: batch update fires queue path when sync lock is hel
       dur: 30,
       created_at: now,
       updated_at: now
-    });
+    }));
 
     // Insert live sync_lock (schema: user_id, expires_at, lock_token, acquired_at).
     var lockExpiry = new Date(now.getTime() + 60 * 1000);
-    await db('sync_locks').insert({
+    await db('sync_locks').insert(__stampFixture({
       user_id: USER_ID,
       expires_at: lockExpiry,
       lock_token: 'test-lock-sched-' + Date.now(),
       acquired_at: now
-    });
+    }));
 
     // Scheduling field (scheduledAt → maps to scheduled_at) gets queued via
     // enqueueWrite (lockedBatchUpdate L632-635).
@@ -825,7 +828,7 @@ describe('applyRollingAnchor: updateTaskStatus done on a rolling-master instance
 
     // A rolling master has recur.type === 'rolling'.
     // Also needs rolling=1, rolling_window (col name may differ — set via recur).
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: tmplId,
       user_id: USER_ID,
       text: 'Rolling Master',
@@ -836,7 +839,7 @@ describe('applyRollingAnchor: updateTaskStatus done on a rolling-master instance
       recur: JSON.stringify({ type: 'rolling', window: 7 }),
       created_at: now,
       updated_at: now
-    });
+    }));
     // task_masters next_start column already defaults to NULL on insert above
     // (rolling_anchor dropped — juggler-anchor-column-cleanup); no extra update needed.
 
@@ -844,7 +847,7 @@ describe('applyRollingAnchor: updateTaskStatus done on a rolling-master instance
     // a date (used by applyRollingAnchor L402) and a scheduled_at (required for
     // done terminal status).
     var scheduledAt = new Date('2026-06-01T10:00:00Z');
-    await db('task_instances').insert({
+    await db('task_instances').insert(__stampFixture({
       id: instId,
       master_id: tmplId,
       user_id: USER_ID,
@@ -857,7 +860,7 @@ describe('applyRollingAnchor: updateTaskStatus done on a rolling-master instance
       scheduled_at: scheduledAt,
       created_at: now,
       updated_at: now
-    });
+    }));
 
     // Mark the instance done — this fires applyRollingAnchor (L192-200 of
     // UpdateTaskStatus: _anchorMasterId = existing.master_id, status = 'done').
@@ -897,7 +900,7 @@ describe('cascadeRecurringDelete: keptIds branch — R55 soft-cancel keeps all r
     var doneId = tmplId + '-done1';
     var pendId = tmplId + '-pend1';
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: tmplId,
       user_id: USER_ID,
       text: 'Cascade Kept Template R55',
@@ -908,11 +911,11 @@ describe('cascadeRecurringDelete: keptIds branch — R55 soft-cancel keeps all r
       recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU', every: 1 }),
       created_at: now,
       updated_at: now
-    });
+    }));
     // Done instance (keptIds path) + pending instance (pendingIds → soft-cancel).
     // Note: terminal status 'done' requires scheduled_at per the
     // chk_task_instances_terminal_scheduled CHECK constraint.
-    await db('task_instances').insert([
+    await db('task_instances').insert(__stampFixture([
       { id: doneId, master_id: tmplId, user_id: USER_ID, status: 'done',
         occurrence_ordinal: 0, split_ordinal: 1, split_total: 1, dur: 30,
         scheduled_at: now, completed_at: now, created_at: now, updated_at: now },
@@ -920,7 +923,7 @@ describe('cascadeRecurringDelete: keptIds branch — R55 soft-cancel keeps all r
         occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
         scheduled_at: new Date(now.getTime() + 24 * 60 * 60 * 1000),
         created_at: now, updated_at: now }
-    ]);
+    ]));
 
     var req = mockReq({
       params: { id: tmplId },
@@ -961,7 +964,7 @@ describe('materializeRcInstance: updateTaskStatus on an rc_-prefixed id', () => 
     var tmplId = 'rc-mat-' + Date.now();
 
     // Insert only the template (no instance yet for the target date).
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: tmplId,
       user_id: USER_ID,
       text: 'RC Materialize',
@@ -973,10 +976,10 @@ describe('materializeRcInstance: updateTaskStatus on an rc_-prefixed id', () => 
       scheduled_at: new Date('2026-09-01T10:00:00Z'),
       created_at: now,
       updated_at: now
-    });
+    }));
     // NOTE: a task_masters row alone is NOT visible through tasks_v (needs an instance).
     // We insert the master instance row so the template is reachable.
-    await db('task_instances').insert({
+    await db('task_instances').insert(__stampFixture({
       id: tmplId,
       master_id: tmplId,
       user_id: USER_ID,
@@ -987,7 +990,7 @@ describe('materializeRcInstance: updateTaskStatus on an rc_-prefixed id', () => 
       dur: 30,
       created_at: now,
       updated_at: now
-    });
+    }));
 
     // An rc_-prefixed id: 'rc_<sourceId>_<dateDigits>'
     // The date digits: for Sep 1 → '91' (single-digit month, 2-digit day) or '901' etc.
@@ -1078,7 +1081,7 @@ describe('materializeRcInstance: updateTaskStatus on an rc_-prefixed id', () => 
       var now = new Date();
       var tmplId = 'rc-roll-' + Date.now();
 
-      await db('task_masters').insert({
+      await db('task_masters').insert(__stampFixture({
         id: tmplId,
         user_id: USER_ID,
         text: 'Rolling RC Materialize',
@@ -1092,10 +1095,10 @@ describe('materializeRcInstance: updateTaskStatus on an rc_-prefixed id', () => 
         scheduled_at: new Date('2026-01-01T10:00:00Z'),
         created_at: now,
         updated_at: now
-      });
+      }));
       // NOTE: a task_masters row alone is NOT visible through tasks_v (needs an
       // instance) — mirrors the existing 'rc_ id with valid source' test above.
-      await db('task_instances').insert({
+      await db('task_instances').insert(__stampFixture({
         id: tmplId,
         master_id: tmplId,
         user_id: USER_ID,
@@ -1106,7 +1109,7 @@ describe('materializeRcInstance: updateTaskStatus on an rc_-prefixed id', () => 
         dur: 30,
         created_at: now,
         updated_at: now
-      });
+      }));
 
       var rcId = 'rc_' + tmplId + '_' + encodeRcDateDigits(occDateKey);
       var req = mockReq({ params: { id: rcId }, body: { status: 'wip' } });
@@ -1152,7 +1155,7 @@ describe('batchUpdateTxn: additional branches', () => {
     var taskId = 'batch-time-' + Date.now();
     var existingScheduled = new Date('2026-06-15T14:30:00Z');
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: taskId,
       user_id: USER_ID,
       text: 'Batch time test',
@@ -1163,8 +1166,8 @@ describe('batchUpdateTxn: additional branches', () => {
       scheduled_at: existingScheduled,
       created_at: now,
       updated_at: now
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: taskId,
       master_id: taskId,
       user_id: USER_ID,
@@ -1176,7 +1179,7 @@ describe('batchUpdateTxn: additional branches', () => {
       scheduled_at: existingScheduled,
       created_at: now,
       updated_at: now
-    });
+    }));
 
     // Update with only date (no time) — fires the keep-time branch (L728-734)
     // in batchUpdateTxn: if existing has scheduled_at and we only change the date,
@@ -1197,7 +1200,7 @@ describe('batchUpdateTxn: additional branches', () => {
     var tmplId = 'batch-recur-reset-' + Date.now();
     var instId = tmplId + '-bi2';
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: tmplId,
       user_id: USER_ID,
       text: 'Batch Recur Reset',
@@ -1208,8 +1211,8 @@ describe('batchUpdateTxn: additional branches', () => {
       recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU', every: 1 }),
       created_at: now,
       updated_at: now
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: instId,
       master_id: tmplId,
       user_id: USER_ID,
@@ -1221,7 +1224,7 @@ describe('batchUpdateTxn: additional branches', () => {
       scheduled_at: new Date(now.getTime() + 24 * 60 * 60 * 1000),
       created_at: now,
       updated_at: now
-    });
+    }));
 
     // Batch update recurring_instance with recur=null fires L776-779 (recur reset
     // + archiveCompletedInstances since recur===null).

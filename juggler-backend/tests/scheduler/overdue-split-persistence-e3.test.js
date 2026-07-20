@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../src/lib/audit-context').stampInsert(rows);
 /**
  * ernie-juggy4-E3 — DB/integration coverage for overdue-split-chunk +
  * overdue-recurring-instance PERSISTENCE end-state (leg juggy4).
@@ -184,9 +187,9 @@ beforeAll(async function () {
   }
   var { DEFAULT_TIME_BLOCKS, DEFAULT_TOOL_MATRIX } = require('../../src/scheduler/constants');
   await cleanup();
-  await db('users').insert({ id: USER_ID, email: 'e3persist@test.invalid', timezone: TZ, created_at: db.fn.now(), updated_at: db.fn.now() });
-  await db('user_config').insert({ user_id: USER_ID, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) });
-  await db('user_config').insert({ user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) });
+  await db('users').insert(__stampFixture({ id: USER_ID, email: 'e3persist@test.invalid', timezone: TZ, created_at: db.fn.now(), updated_at: db.fn.now() }));
+  await db('user_config').insert(__stampFixture({ user_id: USER_ID, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) }));
+  await db('user_config').insert(__stampFixture({ user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) }));
 }, 180000);
 
 afterAll(async function () {
@@ -207,7 +210,7 @@ beforeEach(async function () {
 // DB harness, anchored on a date the daily recurrence period has strictly
 // passed (unambiguously overdue, not merely "unplaced this run").
 async function seedOverdueSplitMaster() {
-  await db('task_masters').insert({
+  await db('task_masters').insert(__stampFixture({
     id: SPLIT_MASTER_ID,
     user_id: USER_ID,
     text: 'Overdue split task (E3 DB coverage)',
@@ -222,8 +225,8 @@ async function seedOverdueSplitMaster() {
     recur_start: MISSED_DATE,
     created_at: db.fn.now(),
     updated_at: db.fn.now()
-  });
-  await db('task_instances').insert([
+  }));
+  await db('task_instances').insert(__stampFixture([
     {
       id: SPLIT_MASTER_ID + '-y-1', user_id: USER_ID, master_id: SPLIT_MASTER_ID,
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 3, split_group: SPLIT_MASTER_ID + '-y',
@@ -246,12 +249,12 @@ async function seedOverdueSplitMaster() {
       dur: 20, status: 'done', date: MISSED_DATE, scheduled_at: MISSED_DATE + ' 09:00:00', unscheduled: null,
       created_at: db.fn.now(), updated_at: db.fn.now()
     }
-  ]);
+  ]));
 }
 
 // J1 — non-split overdue recurring instance, same missed-window shape.
 async function seedOverdueNonSplitRecurring() {
-  await db('task_masters').insert({
+  await db('task_masters').insert(__stampFixture({
     id: NONSPLIT_MASTER_ID,
     user_id: USER_ID,
     text: 'Overdue non-split recurring instance (E3 J1 DB coverage)',
@@ -265,14 +268,14 @@ async function seedOverdueNonSplitRecurring() {
     recur_start: MISSED_DATE,
     created_at: db.fn.now(),
     updated_at: db.fn.now()
-  });
-  await db('task_instances').insert({
+  }));
+  await db('task_instances').insert(__stampFixture({
     id: NONSPLIT_MASTER_ID + '-y-1', user_id: USER_ID, master_id: NONSPLIT_MASTER_ID,
     occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, split_group: null,
     dur: 30, status: '', date: MISSED_DATE, scheduled_at: null, unscheduled: null,
     implied_deadline: IMPLIED_DEADLINE,
     created_at: db.fn.now(), updated_at: db.fn.now()
-  });
+  }));
 }
 
 // Scoped to occurrence_ordinal=1 (the single seeded MISSED_DATE occurrence).

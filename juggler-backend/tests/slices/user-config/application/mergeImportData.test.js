@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../../../src/lib/audit-context').stampInsert(rows);
 /**
  * W2 DB-backed test — MergeImportData (two-mode import, Wave 1).
  *
@@ -51,10 +54,10 @@ beforeAll(async () => {
   available = true;
   await cleanup();
   await db('users').where('id', USER_ID).del();
-  await db('users').insert({
+  await db('users').insert(__stampFixture({
     id: USER_ID, email: 'merge@test.com', name: 'Merge Test',
     timezone: 'America/New_York', created_at: db.fn.now(), updated_at: db.fn.now()
-  });
+  }));
 }, 20000);
 
 afterAll(async () => {
@@ -80,13 +83,13 @@ test('merge is additive: keeps existing rows, re-keys colliding tasks, renames c
   await tasksWrite.insertTask(db, { id: 'existing-2', user_id: USER_ID, text: 'My existing task TWO', dur: 30, pri: 'P3' });
 
   // Existing project / location / tool — names the import will collide with.
-  await db('projects').insert({ user_id: USER_ID, name: 'Work', color: '#abc', icon: null, sort_order: 0, created_at: db.fn.now(), updated_at: db.fn.now() });
-  await db('locations').insert({ user_id: USER_ID, location_id: 'loc-home', name: 'Home', icon: '🏠', sort_order: 0, created_at: db.fn.now(), updated_at: db.fn.now() });
-  await db('tools').insert({ user_id: USER_ID, tool_id: 'tool-laptop', name: 'Laptop', icon: '💻', sort_order: 0, created_at: db.fn.now(), updated_at: db.fn.now() });
+  await db('projects').insert(__stampFixture({ user_id: USER_ID, name: 'Work', color: '#abc', icon: null, sort_order: 0, created_at: db.fn.now(), updated_at: db.fn.now() }));
+  await db('locations').insert(__stampFixture({ user_id: USER_ID, location_id: 'loc-home', name: 'Home', icon: '🏠', sort_order: 0, created_at: db.fn.now(), updated_at: db.fn.now() }));
+  await db('tools').insert(__stampFixture({ user_id: USER_ID, tool_id: 'tool-laptop', name: 'Laptop', icon: '💻', sort_order: 0, created_at: db.fn.now(), updated_at: db.fn.now() }));
 
   // Existing settings the import must NOT change (KEEP-MINE).
-  await db('user_config').insert({ user_id: USER_ID, config_key: 'preferences', config_value: JSON.stringify({ gridZoom: 45 }), created_at: db.fn.now(), updated_at: db.fn.now() });
-  await db('user_config').insert({ user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify({ mine: true }), created_at: db.fn.now(), updated_at: db.fn.now() });
+  await db('user_config').insert(__stampFixture({ user_id: USER_ID, config_key: 'preferences', config_value: JSON.stringify({ gridZoom: 45 }), created_at: db.fn.now(), updated_at: db.fn.now() }));
+  await db('user_config').insert(__stampFixture({ user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify({ mine: true }), created_at: db.fn.now(), updated_at: db.fn.now() }));
 
   var mastersBefore = await db('task_masters').where('user_id', USER_ID).count('* as c').first();
   expect(Number(mastersBefore.c)).toBe(2);
@@ -231,8 +234,8 @@ test('WARN-2: second-suffix increment — -imported-2 and (3) forms; tasksRekeye
   await tasksWrite.insertTask(db, { id: 'existing-2',           user_id: USER_ID, text: 'Existing TWO',           dur: 25, pri: 'P2' });
 
   // Projects 'Work' and 'Work (2)' already exist → import of 'Work' must go to 'Work (3)'
-  await db('projects').insert({ user_id: USER_ID, name: 'Work',    color: '#111', icon: null, sort_order: 0, created_at: db.fn.now(), updated_at: db.fn.now() });
-  await db('projects').insert({ user_id: USER_ID, name: 'Work (2)', color: '#222', icon: null, sort_order: 1, created_at: db.fn.now(), updated_at: db.fn.now() });
+  await db('projects').insert(__stampFixture({ user_id: USER_ID, name: 'Work',    color: '#111', icon: null, sort_order: 0, created_at: db.fn.now(), updated_at: db.fn.now() }));
+  await db('projects').insert(__stampFixture({ user_id: USER_ID, name: 'Work (2)', color: '#222', icon: null, sort_order: 1, created_at: db.fn.now(), updated_at: db.fn.now() }));
 
   var mastersBefore = await db('task_masters').where('user_id', USER_ID).count('* as c').first();
   expect(Number(mastersBefore.c)).toBe(3);

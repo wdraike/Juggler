@@ -285,7 +285,8 @@ describe('B5 — backfillRollingAnchorIfNull: NULL-only backfill, never overwrit
     // This whereNull is the ENTIRE no-overwrite guarantee for the real DB path —
     // a mutation that drops it would let the update run unconditionally.
     expect(calls.whereNull).toBe('next_start');
-    expect(calls.update).toEqual({ next_start: '2026-06-10', updated_at: fixedNow });
+    // inc.4 (999.1576): stampUpdate adds updated_by ('jest' = sandbox-armed default).
+    expect(calls.update).toEqual({ next_start: '2026-06-10', updated_at: fixedNow, updated_by: 'jest' });
     expect(result).toBe(1);
   });
 });

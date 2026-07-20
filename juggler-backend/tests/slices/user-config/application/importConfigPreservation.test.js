@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../../../src/lib/audit-context').stampInsert(rows);
 /**
  * 999.1603 — replace-mode import must not lose config keys it does not carry,
  * export must be round-trip complete, and imports are version-checked + verified.
@@ -67,7 +70,7 @@ async function seedConfig() {
       created_at: db.fn.now(), updated_at: db.fn.now()
     };
   });
-  await db('user_config').insert(rows);
+  await db('user_config').insert(__stampFixture(rows));
 }
 
 async function readConfig(key) {
@@ -95,10 +98,10 @@ beforeAll(async () => {
   await assertDbAvailable();
   available = true;
   await db('users').where('id', USER_ID).del();
-  await db('users').insert({
+  await db('users').insert(__stampFixture({
     id: USER_ID, email: 'preserve@test.com', name: 'Preserve Test',
     timezone: 'America/New_York', created_at: db.fn.now(), updated_at: db.fn.now()
-  });
+  }));
 }, 20000);
 
 beforeEach(async () => {

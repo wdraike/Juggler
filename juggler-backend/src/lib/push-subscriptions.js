@@ -10,6 +10,7 @@
 
 const { v7: uuidv7 } = require('uuid');
 const db = require('../db');
+const { stampInsert, stampUpdate } = require('./audit-context'); // 999.1576 inc.4
 
 /**
  * Upsert a subscription for a user. Endpoint is the unique identity — re-subscribing
@@ -29,19 +30,19 @@ async function upsertSubscription(userId, subscription) {
   if (existing) {
     await db('push_subscriptions')
       .where('id', existing.id)
-      .update({ user_id: userId, p256dh, auth });
+      .update(stampUpdate({ user_id: userId, p256dh, auth }));
     return { id: existing.id, created: false };
   }
 
   const id = uuidv7();
-  await db('push_subscriptions').insert({
+  await db('push_subscriptions').insert(stampInsert({
     id,
     user_id: userId,
     endpoint,
     p256dh,
     auth,
     created_at: new Date(),
-  });
+  }));
   return { id, created: true };
 }
 

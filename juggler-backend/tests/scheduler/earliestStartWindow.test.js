@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../src/lib/audit-context').stampInsert(rows);
 /**
  * Leg A (scheduler-recurring-rework) — instance-owns-window foundation.
  *
@@ -27,9 +30,9 @@ beforeAll(async () => {
   await assertDbAvailable();
   try { await db.raw('SELECT 1'); available = true; } catch (e) { console.warn('no DB', e.message); return; }
   await cleanup();
-  await db('users').insert({ id: USER_ID, email: 'es@test.com', timezone: TZ, created_at: db.fn.now(), updated_at: db.fn.now() });
-  await db('user_config').insert({ user_id: USER_ID, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) });
-  await db('user_config').insert({ user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) });
+  await db('users').insert(__stampFixture({ id: USER_ID, email: 'es@test.com', timezone: TZ, created_at: db.fn.now(), updated_at: db.fn.now() }));
+  await db('user_config').insert(__stampFixture({ user_id: USER_ID, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) }));
+  await db('user_config').insert(__stampFixture({ user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) }));
 }, 15000);
 
 afterAll(async () => { if (available) await cleanup(); await db.destroy(); });
@@ -52,12 +55,12 @@ beforeEach(async () => {
 describe('Leg A — instance earliest_start window foundation', () => {
   test('freshly prefabricated recurring instances persist earliest_start = their day', async () => {
     if (!available) return;
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: 'es-tmpl', user_id: USER_ID, text: 'Window task', dur: 30, status: '', recurring: 1,
       recur: JSON.stringify({ type: 'weekly', days: 'MTWRFSU', timesPerCycle: 4 }),
       recur_start: dayKey(0), when: 'morning', placement_mode: 'time_window', time_flex: 10080,
       created_at: db.fn.now(), updated_at: db.fn.now()
-    });
+    }));
     await runScheduleAndPersist(USER_ID);
 
     var rows = await db('task_instances')

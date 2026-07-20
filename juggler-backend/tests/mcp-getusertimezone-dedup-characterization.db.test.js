@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * mcp-getusertimezone-dedup-characterization.db.test.js
  *
@@ -105,10 +108,10 @@ describe('getUserTimezone — 3 copies (tasks.js/data.js/schedule.js) resolve ID
   });
 
   test('(A) explicit-timezone user: all 3 tools call the shared safeTimezone with the IDENTICAL (rawTz, default) pair', async function () {
-    await db('users').insert({
+    await db('users').insert(__stampFixture({
       id: USER_ID, email: 'mcp-tz-dedup@test.invalid', name: 'tz dedup test',
       timezone: 'America/Los_Angeles', created_at: new Date(), updated_at: new Date()
-    });
+    }));
 
     await captureHandlers(registerTaskTools, USER_ID).list_tasks({});
     await captureHandlers(registerDataTools, USER_ID).export_data({});
@@ -137,10 +140,10 @@ describe('getUserTimezone — 3 copies (tasks.js/data.js/schedule.js) resolve ID
   });
 
   test('(B) explicit non-UTC-aligned timezone: list_tasks (tasks.js) and export_data (data.js) derive the IDENTICAL local date/time for the same task', async function () {
-    await db('users').insert({
+    await db('users').insert(__stampFixture({
       id: USER_ID, email: 'mcp-tz-dedup2@test.invalid', name: 'tz dedup test 2',
       timezone: 'America/Los_Angeles', created_at: new Date(), updated_at: new Date()
-    });
+    }));
 
     var taskId = 'tz-dedup-task-' + Date.now();
     var now = new Date();
@@ -148,15 +151,15 @@ describe('getUserTimezone — 3 copies (tasks.js/data.js/schedule.js) resolve ID
     // July DST) — differs from the naive UTC calendar date, so a wrong/
     // divergent timezone resolution would produce a visibly different date.
     var scheduledAt = new Date('2020-01-08T05:30:00Z');
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: taskId, user_id: USER_ID, text: 'tz probe task', dur: 30, pri: 'P3',
       recurring: 0, status: '', created_at: now, updated_at: now
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: taskId, master_id: taskId, user_id: USER_ID, status: '',
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
       scheduled_at: scheduledAt, date: '2020-01-08', created_at: now, updated_at: now
-    });
+    }));
 
     var listResult = await captureHandlers(registerTaskTools, USER_ID).list_tasks({});
     var listedTasks = JSON.parse(listResult.content[0].text);

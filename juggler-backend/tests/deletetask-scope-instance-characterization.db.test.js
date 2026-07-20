@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * deletetask-scope-instance-characterization.db.test.js
  *
@@ -68,14 +71,14 @@ var facade = require('../src/slices/task/facade');
 async function seedUser() {
   var existing = await db('users').where('id', USER_ID).first();
   if (!existing) {
-    await db('users').insert({
+    await db('users').insert(__stampFixture({
       id: USER_ID,
       email: 'deltask-scope-inst@test.invalid',
       name: 'DeleteTask scope=instance characterization',
       timezone: 'America/New_York',
       created_at: new Date(),
       updated_at: new Date()
-    });
+    }));
   }
 }
 
@@ -111,17 +114,17 @@ describe('DeleteTask.execute scope="instance" — CURRENT (pre-migration) behavi
     var tmplId = 'del-inst-tmpl-' + Date.now();
     var instId = tmplId + '-ri1';
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: tmplId, user_id: USER_ID, text: 'Recurring template', dur: 30, pri: 'P3',
       recurring: 1, status: '', recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU', every: 1 }),
       created_at: now, updated_at: now
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: instId, master_id: tmplId, user_id: USER_ID, status: '',
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
       scheduled_at: new Date(now.getTime() + 24 * 60 * 60 * 1000),
       created_at: now, updated_at: now
-    });
+    }));
 
     var result = await facade.deleteTask({ id: instId, userId: USER_ID, scope: 'instance' });
 
@@ -144,15 +147,15 @@ describe('DeleteTask.execute scope="instance" — CURRENT (pre-migration) behavi
     var now = new Date();
     var taskId = 'del-inst-solo-' + Date.now();
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: taskId, user_id: USER_ID, text: 'Solo task', dur: 30, pri: 'P3',
       recurring: 0, status: '', created_at: now, updated_at: now
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: taskId, master_id: taskId, user_id: USER_ID, status: '',
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
       created_at: now, updated_at: now
-    });
+    }));
 
     var result = await facade.deleteTask({ id: taskId, userId: USER_ID, scope: 'instance' });
 
@@ -170,18 +173,18 @@ describe('DeleteTask.execute scope="instance" — CURRENT (pre-migration) behavi
     var idA = 'del-inst-depA-' + Date.now();
     var idB = 'del-inst-depB-' + Date.now();
 
-    await db('task_masters').insert([
+    await db('task_masters').insert(__stampFixture([
       { id: idA, user_id: USER_ID, text: 'A', dur: 30, pri: 'P3', recurring: 0, status: '',
         depends_on: null, created_at: now, updated_at: now },
       { id: idB, user_id: USER_ID, text: 'B (depends on A)', dur: 30, pri: 'P3', recurring: 0,
         status: '', depends_on: JSON.stringify([idA]), created_at: now, updated_at: now }
-    ]);
-    await db('task_instances').insert([
+    ]));
+    await db('task_instances').insert(__stampFixture([
       { id: idA, master_id: idA, user_id: USER_ID, status: '', occurrence_ordinal: 1,
         split_ordinal: 1, split_total: 1, dur: 30, created_at: now, updated_at: now },
       { id: idB, master_id: idB, user_id: USER_ID, status: '', occurrence_ordinal: 1,
         split_ordinal: 1, split_total: 1, dur: 30, created_at: now, updated_at: now }
-    ]);
+    ]));
 
     var result = await facade.deleteTask({ id: idA, userId: USER_ID, scope: 'instance' });
     expect(result.status).toBe(200);

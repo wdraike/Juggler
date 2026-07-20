@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../src/lib/audit-context').stampInsert(rows);
 /**
  * Integration tests for cal-history cron leader election + DB-handle fix
  * (jug-elected-sweeper-topology / 999.555). Runs against test-bed MySQL @3407.
@@ -44,12 +47,12 @@ describe('cal-history cron leader election (999.555)', () => {
   });
 
   test('acquireLock returns false while another instance holds an UNEXPIRED lock', async () => {
-    await db('cron_locks').insert({
+    await db('cron_locks').insert(__stampFixture({
       lock_name: 'test:held',
       locked_by: 'other-instance',
       locked_at: db.raw('NOW()'),
       expires_at: db.raw('DATE_ADD(NOW(), INTERVAL 1 HOUR)')
-    });
+    }));
     const got = await cron.acquireLock('test:held', 3600);
     expect(got).toBe(false);
     // The foreign owner must be untouched — no silent takeover of a live lock.
@@ -58,12 +61,12 @@ describe('cal-history cron leader election (999.555)', () => {
   });
 
   test('acquireLock atomically takes over an EXPIRED foreign lock', async () => {
-    await db('cron_locks').insert({
+    await db('cron_locks').insert(__stampFixture({
       lock_name: 'test:expired',
       locked_by: 'dead-instance',
       locked_at: db.raw('DATE_SUB(NOW(), INTERVAL 2 HOUR)'),
       expires_at: db.raw('DATE_SUB(NOW(), INTERVAL 1 HOUR)')
-    });
+    }));
     const got = await cron.acquireLock('test:expired', 3600);
     expect(got).toBe(true);
     const row = await db('cron_locks').where('lock_name', 'test:expired').first();

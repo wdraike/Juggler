@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * task_masters_next_start_unified_anchor.regression.test.js
  *
@@ -158,14 +161,14 @@ beforeAll(async () => {
   await db('task_instances').where('user_id', TEST_USER_ID).del();
   await db('task_masters').where('user_id', TEST_USER_ID).del();
   await db('users').where('id', TEST_USER_ID).del();
-  await db('users').insert({
+  await db('users').insert(__stampFixture({
     id: TEST_USER_ID,
     email: 'telly-tasksmasters-nextstart@test.invalid',
     name: 'Telly next_start Test',
     timezone: 'America/New_York',
     created_at: db.fn.now(),
     updated_at: db.fn.now()
-  });
+  }));
 });
 
 afterAll(async () => {
@@ -214,7 +217,7 @@ describe('FR-1/AC1 — task_masters.next_start unified anchor column + backfill'
     // trigger removed, a plain INSERT already leaves next_start NULL by column
     // default (migration line 114) -- no bypass mechanism is needed to reach this
     // state, it is simply what happens today.
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: masterId,
       user_id: TEST_USER_ID,
       text: 'backfill rolling-only test',
@@ -225,7 +228,7 @@ describe('FR-1/AC1 — task_masters.next_start unified anchor column + backfill'
       next_occurrence_anchor: null,
       created_at: db.fn.now(),
       updated_at: db.fn.now()
-    });
+    }));
 
     var preRow = await db('task_masters').where('id', masterId).select('next_start').first();
     expect(preRow.next_start).toBeNull(); // sanity: confirms no trigger auto-derives on INSERT
@@ -240,7 +243,7 @@ describe('FR-1/AC1 — task_masters.next_start unified anchor column + backfill'
 
   test.skip('3. [RETIRED — column dropped] backfill: next_occurrence_anchor-only pre-existing row -> next_start == next_occurrence_anchor', async () => {
     var masterId = uuidv7();
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: masterId,
       user_id: TEST_USER_ID,
       text: 'backfill next-occurrence-only test',
@@ -251,7 +254,7 @@ describe('FR-1/AC1 — task_masters.next_start unified anchor column + backfill'
       next_occurrence_anchor: '2026-07-08',
       created_at: db.fn.now(),
       updated_at: db.fn.now()
-    });
+    }));
 
     var preRow = await db('task_masters').where('id', masterId).select('next_start').first();
     expect(preRow.next_start).toBeNull();
@@ -265,7 +268,7 @@ describe('FR-1/AC1 — task_masters.next_start unified anchor column + backfill'
 
   test.skip('4. [RETIRED — columns dropped] backfill tie-break: pre-existing row with BOTH set -> next_start == rolling_anchor (rolling_anchor wins)', async () => {
     var masterId = uuidv7();
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: masterId,
       user_id: TEST_USER_ID,
       text: 'backfill tie-break test',
@@ -276,7 +279,7 @@ describe('FR-1/AC1 — task_masters.next_start unified anchor column + backfill'
       next_occurrence_anchor: '2026-07-08',
       created_at: db.fn.now(),
       updated_at: db.fn.now()
-    });
+    }));
 
     var preRow = await db('task_masters').where('id', masterId).select('next_start').first();
     expect(preRow.next_start).toBeNull();
@@ -299,7 +302,7 @@ describe('FR-1/AC1 — task_masters.next_start unified anchor column + backfill'
     // anchor-event -- this is the CORRECT, accepted state, not a defect. See
     // cookie's ARCH-REVIEW-W1.json W1-ARCH-3 (INFO) and the migration header
     // (20260709120000_add_next_start_unified_anchor.js lines 56-59).
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: masterId,
       user_id: TEST_USER_ID,
       text: 'post-migration new row, no derivation yet',
@@ -310,7 +313,7 @@ describe('FR-1/AC1 — task_masters.next_start unified anchor column + backfill'
       next_occurrence_anchor: null,
       created_at: db.fn.now(),
       updated_at: db.fn.now()
-    });
+    }));
 
     // Deliberately do NOT invoke runMigrationBackfillUpdate() here -- the backfill
     // is a ONE-TIME migration-time operation, not something re-run per INSERT.
@@ -343,7 +346,7 @@ describe('FR-1/AC1 — task_masters.next_start unified anchor column + backfill'
 
   test('7. seeded next_start round-trips through tasks_v and tasks_with_sync_v', async () => {
     var masterId = uuidv7();
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: masterId,
       user_id: TEST_USER_ID,
       text: 'next_start round-trip test',
@@ -353,7 +356,7 @@ describe('FR-1/AC1 — task_masters.next_start unified anchor column + backfill'
       next_start: '2026-07-15',
       created_at: db.fn.now(),
       updated_at: db.fn.now()
-    });
+    }));
 
     var viewRow = await db('tasks_v').where('id', masterId).select('next_start').first();
     expect(viewRow).toBeTruthy();

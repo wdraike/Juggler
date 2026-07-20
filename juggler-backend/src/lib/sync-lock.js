@@ -46,9 +46,12 @@ async function acquireLock(userId) {
   );
 
   try {
+    // 999.1576 inc.4: who-cols are NOT NULL — the acquiring context attributes
+    // the lock row (strict getActor; every acquirer runs inside an actor context).
+    var actor = require('./audit-context').getActor();
     await db.raw(
-      'INSERT INTO sync_locks (user_id, lock_token, acquired_at, expires_at) VALUES (?, ?, NOW(), DATE_ADD(NOW(), INTERVAL ? SECOND))',
-      [userId, token, LOCK_TTL_SECONDS]
+      'INSERT INTO sync_locks (user_id, lock_token, acquired_at, expires_at, created_by, updated_by) VALUES (?, ?, NOW(), DATE_ADD(NOW(), INTERVAL ? SECOND), ?, ?)',
+      [userId, token, LOCK_TTL_SECONDS, actor, actor]
     );
     return { acquired: true, token: token };
   } catch (err) {

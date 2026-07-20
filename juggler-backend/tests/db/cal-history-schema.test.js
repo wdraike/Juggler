@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../src/lib/audit-context').stampInsert(rows);
 /**
  * Tests for cal_history table schema and status transitions.
  *
@@ -28,31 +31,31 @@ describe('cal_history table — schema validation', () => {
     // Create a test user
     // de-rot 2026-06-09: removed stale `sub` field (no such column in users table)
     userId = 'test-' + Date.now();
-    await knex('users').insert({
+    await knex('users').insert(__stampFixture({
       id: userId,
       email: 'test-cal-history@example.com',
       created_at: knex.fn.now()
-    });
+    }));
 
     // Create a task master
     taskMasterId = 'tm-' + Date.now();
-    await knex('task_masters').insert({
+    await knex('task_masters').insert(__stampFixture({
       id: taskMasterId,
       user_id: userId,
       text: 'Test task for cal_history',
       dur: 30,
       created_at: knex.fn.now()
-    });
+    }));
 
     // Create a task instance
     taskInstanceId = 'ti-' + Date.now();
-    await knex('task_instances').insert({
+    await knex('task_instances').insert(__stampFixture({
       id: taskInstanceId,
       master_id: taskMasterId,
       user_id: userId,
       dur: 30,
       created_at: knex.fn.now()
-    });
+    }));
   });
 
   afterAll(async () => {
@@ -116,7 +119,7 @@ describe('cal_history table — schema validation', () => {
 
   test('can insert a valid cal_history record with SCHEDULED status', async () => {
     const scheduledAt = new Date('2026-05-30T10:00:00Z');
-    const [id] = await knex('cal_history').insert({
+    const [id] = await knex('cal_history').insert(__stampFixture({
       task_id: taskInstanceId,
       user_id: userId,
       scheduled_at: scheduledAt,
@@ -126,7 +129,7 @@ describe('cal_history table — schema validation', () => {
       created_by: 'user',
       created_at: knex.fn.now(),
       updated_at: knex.fn.now()
-    });
+    }));
 
     const record = await knex('cal_history').where('id', id).first();
     expect(record.status).toBe('SCHEDULED');
@@ -145,7 +148,7 @@ describe('cal_history table — schema validation', () => {
 
   test('can transition status from SCHEDULED to COMPLETED', async () => {
     const scheduledAt = new Date('2026-05-30T10:00:00Z');
-    const [id] = await knex('cal_history').insert({
+    const [id] = await knex('cal_history').insert(__stampFixture({
       task_id: taskInstanceId,
       user_id: userId,
       scheduled_at: scheduledAt,
@@ -153,7 +156,7 @@ describe('cal_history table — schema validation', () => {
       created_by: 'user',
       created_at: knex.fn.now(),
       updated_at: knex.fn.now()
-    });
+    }));
 
     // Transition to COMPLETED
     await knex('cal_history').where('id', id).update({
@@ -175,7 +178,7 @@ describe('cal_history table — schema validation', () => {
 
   test('can transition status from SCHEDULED to MISSED', async () => {
     const scheduledAt = new Date('2026-05-30T10:00:00Z');
-    const [id] = await knex('cal_history').insert({
+    const [id] = await knex('cal_history').insert(__stampFixture({
       task_id: taskInstanceId,
       user_id: userId,
       scheduled_at: scheduledAt,
@@ -183,7 +186,7 @@ describe('cal_history table — schema validation', () => {
       created_by: 'user',
       created_at: knex.fn.now(),
       updated_at: knex.fn.now()
-    });
+    }));
 
     // Transition to MISSED (e.g., by cron)
     await knex('cal_history').where('id', id).update({
@@ -207,7 +210,7 @@ describe('cal_history table — schema validation', () => {
 
   test('can transition status from SCHEDULED to CANCELLED', async () => {
     const scheduledAt = new Date('2026-05-30T10:00:00Z');
-    const [id] = await knex('cal_history').insert({
+    const [id] = await knex('cal_history').insert(__stampFixture({
       task_id: taskInstanceId,
       user_id: userId,
       scheduled_at: scheduledAt,
@@ -215,7 +218,7 @@ describe('cal_history table — schema validation', () => {
       created_by: 'user',
       created_at: knex.fn.now(),
       updated_at: knex.fn.now()
-    });
+    }));
 
     // Transition to CANCELLED
     await knex('cal_history').where('id', id).update({
@@ -243,14 +246,14 @@ describe('cal_history table — schema validation', () => {
   test('insert invalid status throws CHECK constraint error', async () => {
     expect.assertions(1);
     try {
-      await knex('cal_history').insert({
+      await knex('cal_history').insert(__stampFixture({
         task_id: taskInstanceId,
         user_id: userId,
         scheduled_at: new Date(),
         status: 'INVALID_STATUS',
         created_at: knex.fn.now(),
         updated_at: knex.fn.now()
-      });
+      }));
     } catch (err) {
       // MySQL CHECK constraint violation
       expect(err.message).toMatch(/CHECK CONSTRAINT|check constraint/i);

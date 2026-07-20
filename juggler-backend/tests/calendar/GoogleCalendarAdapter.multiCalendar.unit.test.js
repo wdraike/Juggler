@@ -338,6 +338,7 @@ describe('GoogleCalendarAdapter.listEvents — sync token storage (999.1626 WARN
     await GoogleCalendarAdapter.listEvents('tok', '2026-08-01', '2026-08-02', USER_ID);
 
     expect(mock.userUpdates).toHaveLength(1);
-    expect(mock.userUpdates[0]).toEqual({ userId: USER_ID, fields: { gcal_sync_token: 'solo-token' } });
+    // inc.4 (999.1576): stampUpdate adds updated_by ('jest' = sandbox-armed default).
+    expect(mock.userUpdates[0]).toEqual({ userId: USER_ID, fields: { gcal_sync_token: 'solo-token', updated_by: 'jest' } });
   });
 });

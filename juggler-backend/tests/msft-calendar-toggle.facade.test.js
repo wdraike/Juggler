@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * 999.1977 — msftGetCalendars / msftUpdateCalendar facade functions.
  *
@@ -37,10 +40,10 @@ afterEach(async function () {
 
 describe('msftGetCalendars (999.1977)', function () {
   test('lists the calendars saved for this user+provider only', async function () {
-    await db('user_calendars').insert([
+    await db('user_calendars').insert(__stampFixture([
       { user_id: TEST_USER_ID, provider: 'msft', calendar_id: 'default-cal-id', display_name: 'Calendar', enabled: true, sync_direction: 'full', ingest_mode: 'task' },
       { user_id: TEST_USER_ID, provider: 'msft', calendar_id: 'secondary', display_name: 'Team', enabled: true, sync_direction: 'full', ingest_mode: 'task' }
-    ]);
+    ]));
 
     var result = await facade.msftGetCalendars(TEST_USER_ID);
 
@@ -59,10 +62,10 @@ describe('msftGetCalendars (999.1977)', function () {
 
 describe('msftUpdateCalendar (999.1977)', function () {
   test('toggling a calendar off persists enabled=false', async function () {
-    var inserted = await db('user_calendars').insert({
+    var inserted = await db('user_calendars').insert(__stampFixture({
       user_id: TEST_USER_ID, provider: 'msft', calendar_id: 'noisy-cal', display_name: 'Noisy',
       enabled: true, sync_direction: 'full', ingest_mode: 'task'
-    });
+    }));
     var id = inserted[0];
 
     var result = await facade.msftUpdateCalendar(TEST_USER_ID, id, { enabled: false });
@@ -74,10 +77,10 @@ describe('msftUpdateCalendar (999.1977)', function () {
   });
 
   test('does not touch fields the caller did not send', async function () {
-    var inserted = await db('user_calendars').insert({
+    var inserted = await db('user_calendars').insert(__stampFixture({
       user_id: TEST_USER_ID, provider: 'msft', calendar_id: 'keep-mode', display_name: 'Keep Mode',
       enabled: true, sync_direction: 'full', ingest_mode: 'reminder'
-    });
+    }));
     var id = inserted[0];
 
     await facade.msftUpdateCalendar(TEST_USER_ID, id, { enabled: false });
@@ -98,11 +101,11 @@ describe('msftUpdateCalendar (999.1977)', function () {
   test('404s (never mutates) when the calendarId belongs to a DIFFERENT user', async function () {
     var OTHER_USER_ID = 'other-user-999.1977';
     await db('users').where('id', OTHER_USER_ID).del();
-    await db('users').insert({ id: OTHER_USER_ID, email: 'other-999-1977@test.com' });
-    var inserted = await db('user_calendars').insert({
+    await db('users').insert(__stampFixture({ id: OTHER_USER_ID, email: 'other-999-1977@test.com' }));
+    var inserted = await db('user_calendars').insert(__stampFixture({
       user_id: OTHER_USER_ID, provider: 'msft', calendar_id: 'not-yours',
       enabled: true, sync_direction: 'full', ingest_mode: 'task'
-    });
+    }));
     var otherUsersCalendarId = inserted[0];
 
     try {

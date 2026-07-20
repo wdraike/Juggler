@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../src/lib/audit-context').stampInsert(rows);
 /**
  * 999.834 recurring lifecycle bugfix — pre-fix RED repro tests
  *
@@ -167,18 +170,18 @@ describe('999.835-B — Cancelled template no-fabricate [DB @ 3407, EXPECT RED p
   beforeAll(async function() {
     await assertDbAvailable();
     await cleanupB();
-    await db('users').insert({
+    await db('users').insert(__stampFixture({
       id: USER_B, email: '834b@test.invalid', timezone: TZ,
       created_at: db.fn.now(), updated_at: db.fn.now()
-    });
-    await db('user_config').insert({
+    }));
+    await db('user_config').insert(__stampFixture({
       user_id: USER_B, config_key: 'time_blocks',
       config_value: JSON.stringify(DEFAULT_TIME_BLOCKS)
-    });
-    await db('user_config').insert({
+    }));
+    await db('user_config').insert(__stampFixture({
       user_id: USER_B, config_key: 'tool_matrix',
       config_value: JSON.stringify(DEFAULT_TOOL_MATRIX)
-    });
+    }));
   }, 15000);
 
   afterAll(cleanupB, 10000);
@@ -195,7 +198,7 @@ describe('999.835-B — Cancelled template no-fabricate [DB @ 3407, EXPECT RED p
     // task_masters.status='cancelled' — should stop fabrication.
     // BUG: tasks_v returns status=NULL for this template header row (view hardcodes NULL).
     // The orWhereNull at runSchedule.js:526 loads it → expandRecurring can't see 'cancelled'.
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id:          CANCELLED_MASTER,
       user_id:     USER_B,
       text:        'Cancelled recurring task 999.835',
@@ -207,11 +210,11 @@ describe('999.835-B — Cancelled template no-fabricate [DB @ 3407, EXPECT RED p
       recur_start: dayKey(0),
       created_at:  db.fn.now(),
       updated_at:  db.fn.now()
-    });
+    }));
 
     // ── Seed: active control template ─────────────────────────────────────────
     // status='' (active) — must still fabricate. No-regression guard.
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id:          CONTROL_MASTER,
       user_id:     USER_B,
       text:        'Active recurring task control 999.835',
@@ -223,7 +226,7 @@ describe('999.835-B — Cancelled template no-fabricate [DB @ 3407, EXPECT RED p
       recur_start: dayKey(0),
       created_at:  db.fn.now(),
       updated_at:  db.fn.now()
-    });
+    }));
 
     await runScheduleAndPersist(USER_B);
 
@@ -269,18 +272,18 @@ describe('999.843-C — Null-date ghost surfaces as unscheduled [DB @ 3407, EXPE
   beforeAll(async function() {
     await assertDbAvailable();
     await cleanupC();
-    await db('users').insert({
+    await db('users').insert(__stampFixture({
       id: USER_C, email: '834c@test.invalid', timezone: TZ,
       created_at: db.fn.now(), updated_at: db.fn.now()
-    });
-    await db('user_config').insert({
+    }));
+    await db('user_config').insert(__stampFixture({
       user_id: USER_C, config_key: 'time_blocks',
       config_value: JSON.stringify(DEFAULT_TIME_BLOCKS)
-    });
-    await db('user_config').insert({
+    }));
+    await db('user_config').insert(__stampFixture({
       user_id: USER_C, config_key: 'tool_matrix',
       config_value: JSON.stringify(DEFAULT_TOOL_MATRIX)
-    });
+    }));
   }, 15000);
 
   afterAll(cleanupC, 10000);
@@ -293,7 +296,7 @@ describe('999.843-C — Null-date ghost surfaces as unscheduled [DB @ 3407, EXPE
 
   test('orphan ghost (date=NULL, scheduled_at=NULL, status=\'\') is not deleted and is surfaced as unscheduled', async function() {
     // ── Seed: the recurring master ────────────────────────────────────────────
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id:          GHOST_MASTER,
       user_id:     USER_C,
       text:        'Ghost master 999.843',
@@ -305,14 +308,14 @@ describe('999.843-C — Null-date ghost surfaces as unscheduled [DB @ 3407, EXPE
       recur_start: dayKey(0),
       created_at:  db.fn.now(),
       updated_at:  db.fn.now()
-    });
+    }));
 
     // ── Seed: the orphan ghost instance ──────────────────────────────────────
     // date=NULL, scheduled_at=NULL, status='' (non-terminal) — the grandfather-spared ghost.
     // occurrence_ordinal=999: far outside the normal expansion window (1..~90 daily instances),
     // so reconcile won't pair this with any desired occurrence and won't overwrite it.
     // This instance is in visible limbo: not placed, not unscheduled, not terminal → invisible.
-    await db('task_instances').insert({
+    await db('task_instances').insert(__stampFixture({
       id:                 GHOST_INST,
       master_id:          GHOST_MASTER,
       user_id:            USER_C,
@@ -325,7 +328,7 @@ describe('999.843-C — Null-date ghost surfaces as unscheduled [DB @ 3407, EXPE
       status:             '',             // ← non-terminal (must remain live)
       created_at:         db.fn.now(),
       updated_at:         db.fn.now()
-    });
+    }));
 
     await runScheduleAndPersist(USER_C);
 
@@ -376,7 +379,7 @@ describe('999.843-C — Null-date ghost surfaces as unscheduled [DB @ 3407, EXPE
     var CTRL_INST_ID   = '834-c-ctrl-inst';
     var placedAt       = localToUtc(dayKey(1), '9:00 AM', TZ);
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id:          CTRL_MASTER_ID,
       user_id:     USER_C,
       text:        'No-over-flagging control master 999.843',
@@ -388,9 +391,9 @@ describe('999.843-C — Null-date ghost surfaces as unscheduled [DB @ 3407, EXPE
       recur_start: dayKey(0),
       created_at:  db.fn.now(),
       updated_at:  db.fn.now()
-    });
+    }));
 
-    await db('task_instances').insert({
+    await db('task_instances').insert(__stampFixture({
       id:                 CTRL_INST_ID,
       master_id:          CTRL_MASTER_ID,
       user_id:            USER_C,
@@ -403,7 +406,7 @@ describe('999.843-C — Null-date ghost surfaces as unscheduled [DB @ 3407, EXPE
       status:             '',        // non-terminal
       created_at:         db.fn.now(),
       updated_at:         db.fn.now()
-    });
+    }));
 
     await runScheduleAndPersist(USER_C);
 

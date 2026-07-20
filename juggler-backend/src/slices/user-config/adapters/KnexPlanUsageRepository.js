@@ -17,16 +17,20 @@ function getDb() { return libDb.getDefaultDb(); }
 
 async function checkAndIncrement(userId, usageKey, limit, periodStart, periodEnd) {
   var db = getDb();
+  // 999.1576 inc.4: who-cols are NOT NULL — the metered user's context
+  // attributes both the first insert and later increments (strict getActor).
+  var actor = require('../../../lib/audit-context').getActor();
   // `await` (not `.then`) — db.raw resolves to a query that is awaited, exactly as
   // the legacy feature-gate.js:133-140 did (the mock's raw returns a plain value).
   await db.raw(
-    'INSERT INTO plan_usage (user_id, usage_key, period_start, period_end, `count`, limit_value, updated_at)\n' +
-    '    VALUES (?, ?, ?, ?, 1, ?, NOW())\n' +
+    'INSERT INTO plan_usage (user_id, usage_key, period_start, period_end, `count`, limit_value, updated_at, created_by, updated_by)\n' +
+    '    VALUES (?, ?, ?, ?, 1, ?, NOW(), ?, ?)\n' +
     '    ON DUPLICATE KEY UPDATE\n' +
     '      `count` = `count` + 1,\n' +
     '      limit_value = ?,\n' +
-    '      updated_at = NOW()',
-    [userId, usageKey, periodStart, periodEnd, limit, limit]
+    '      updated_at = NOW(),\n' +
+    '      updated_by = VALUES(updated_by)',
+    [userId, usageKey, periodStart, periodEnd, limit, actor, actor, limit]
   );
 
   var row = await db('plan_usage')

@@ -122,7 +122,8 @@ KnexAIUsageRepository.prototype.commitQuota = async function commitQuota(userId)
     );
     const count = Number((lockRow && lockRow[0] && lockRow[0].cnt) || 0);
     if (count < limit) {
-      await trx('ai_command_log').insert({ user_id: userId });
+      // 999.1576 inc.4: who-cols are NOT NULL — stamp with the ambient actor.
+      await trx('ai_command_log').insert(require('../../../lib/audit-context').stampInsert({ user_id: userId }));
     }
     // If count >= limit: skip INSERT; transaction commits cleanly with no new row.
   });

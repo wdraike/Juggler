@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * reopen_date_gate_fr2.regression.test.js
  *
@@ -57,14 +60,14 @@ var tasksWrite = require('../src/lib/tasks-write');
 async function seedUser() {
   var existing = await db('users').where('id', USER_ID).first();
   if (!existing) {
-    await db('users').insert({
+    await db('users').insert(__stampFixture({
       id: USER_ID,
       email: 'fr2-reopen-gate@test.invalid',
       name: 'FR-2 reopen date gate test',
       timezone: 'America/New_York',
       created_at: new Date(),
       updated_at: new Date()
-    });
+    }));
   }
 }
 

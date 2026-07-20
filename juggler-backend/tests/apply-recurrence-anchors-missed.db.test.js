@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * apply-recurrence-anchors-missed.db.test.js (999.1098)
  *
@@ -51,17 +54,17 @@ function captureHandlers(userId) {
 
 async function seedMasterAndInstance(recur, tmplId, instId, instanceDate, scheduledAt) {
   var now = new Date();
-  await db('task_masters').insert({
+  await db('task_masters').insert(__stampFixture({
     id: tmplId, user_id: USER_ID, text: 'anchor gate test master', dur: 30, pri: 'P3',
     recurring: 1, status: '', recur: JSON.stringify(recur),
     recur_start: '2026-01-01', next_start: null,
     tz: 'America/New_York', created_at: now, updated_at: now
-  });
-  await db('task_instances').insert({
+  }));
+  await db('task_instances').insert(__stampFixture({
     id: instId, master_id: tmplId, user_id: USER_ID, status: '',
     occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
     date: instanceDate, scheduled_at: scheduledAt, created_at: now, updated_at: now
-  });
+  }));
 }
 
 describe('ANCHOR_PROJECTION_STATUSES gate contract (999.1098 — single source)', function () {
@@ -89,10 +92,10 @@ describe('batch write path — missed reanchors (ruling 2020-01-06 / 999.844, wi
     await assertDbAvailable();
     var existing = await db('users').where('id', USER_ID).first();
     if (!existing) {
-      await db('users').insert({
+      await db('users').insert(__stampFixture({
         id: USER_ID, email: 'recur-anchor-missed@test.invalid', name: 'anchor gate test',
         timezone: 'America/New_York', created_at: new Date(), updated_at: new Date()
-      });
+      }));
     }
   });
 

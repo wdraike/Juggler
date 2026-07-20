@@ -521,7 +521,7 @@ KnexConfigRepository.prototype.clearUserConfigTables = function clearUserConfigT
  */
 KnexConfigRepository.prototype.insertLocations = function insertLocations(userId, rows) {
   if (!rows || rows.length === 0) return Promise.resolve();
-  return this.db('locations').insert(rows).then(function () { /* void */ });
+  return this.db('locations').insert(rows.map(stampInsert)).then(function () { /* void */ });
 };
 
 /**
@@ -533,7 +533,7 @@ KnexConfigRepository.prototype.insertLocations = function insertLocations(userId
  */
 KnexConfigRepository.prototype.insertTools = function insertTools(userId, rows) {
   if (!rows || rows.length === 0) return Promise.resolve();
-  return this.db('tools').insert(rows).then(function () { /* void */ });
+  return this.db('tools').insert(rows.map(stampInsert)).then(function () { /* void */ });
 };
 
 /**
@@ -545,7 +545,7 @@ KnexConfigRepository.prototype.insertTools = function insertTools(userId, rows) 
  */
 KnexConfigRepository.prototype.insertProjects = function insertProjects(userId, rows) {
   if (!rows || rows.length === 0) return Promise.resolve();
-  return this.db('projects').insert(rows).then(function () { /* void */ });
+  return this.db('projects').insert(rows.map(stampInsert)).then(function () { /* void */ });
 };
 
 /**
@@ -558,7 +558,7 @@ KnexConfigRepository.prototype.insertProjects = function insertProjects(userId, 
  */
 KnexConfigRepository.prototype.insertConfigRows = function insertConfigRows(userId, rows) {
   if (!rows || rows.length === 0) return Promise.resolve();
-  return this.db('user_config').insert(rows).then(function () { /* void */ });
+  return this.db('user_config').insert(rows.map(stampInsert)).then(function () { /* void */ });
 };
 
 // ── IMPERSONATION (impersonation.controller.js) ──────────────────────────────
@@ -578,7 +578,7 @@ KnexConfigRepository.prototype.insertImpersonationLog = function insertImpersona
       if (row[col] !== undefined) assertDate(row[col], col);
     });
   }
-  return this.db('impersonation_log').insert(row).then(function () { /* void */ });
+  return this.db('impersonation_log').insert(stampInsert(row)).then(function () { /* void */ });
 };
 
 /**

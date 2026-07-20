@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * mcp-reference-validation-characterization.db.test.js
  *
@@ -44,10 +47,10 @@ function captureHandlers(userId) {
 async function seedUser() {
   var existing = await db('users').where('id', USER_ID).first();
   if (!existing) {
-    await db('users').insert({
+    await db('users').insert(__stampFixture({
       id: USER_ID, email: 'mcp-refval@test.invalid', name: 'MCP reference validation test',
       timezone: 'America/New_York', created_at: new Date(), updated_at: new Date()
-    });
+    }));
   }
 }
 

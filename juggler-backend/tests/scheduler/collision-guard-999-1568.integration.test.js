@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../src/lib/audit-context').stampInsert(rows);
 /**
  * 999.1568 (David ruling 2026-07-12 part 2) — defense-in-depth collision guard,
  * INTEGRATION-level wiring check via the real DB persist path
@@ -55,17 +58,17 @@ beforeAll(async () => {
     return;
   }
   await cleanup();
-  await db('users').insert({
+  await db('users').insert(__stampFixture({
     id: USER_ID, email: 'collguard1568@test.com', timezone: TZ,
     created_at: db.fn.now(), updated_at: db.fn.now()
-  });
+  }));
   var narrowBlock = { id: 'narrow_blk', tag: 'narrow', name: 'Narrow', start: 840, end: 870, color: '#000', loc: 'home' };
   var blocks = {
     Mon: [narrowBlock], Tue: [narrowBlock], Wed: [narrowBlock], Thu: [narrowBlock],
     Fri: [narrowBlock], Sat: [narrowBlock], Sun: [narrowBlock],
   };
-  await db('user_config').insert({ user_id: USER_ID, config_key: 'time_blocks', config_value: JSON.stringify(blocks) });
-  await db('user_config').insert({ user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify({}) });
+  await db('user_config').insert(__stampFixture({ user_id: USER_ID, config_key: 'time_blocks', config_value: JSON.stringify(blocks) }));
+  await db('user_config').insert(__stampFixture({ user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify({}) }));
 }, 15000);
 
 afterAll(async () => {

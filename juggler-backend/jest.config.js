@@ -40,7 +40,14 @@ module.exports = {
   // so a stray timer tick can't fire post-teardown and call getQueueBackend() on a
   // torn-down/mocked registry. Also prevents a background timer from firing during
   // jest's forceExit window (a known test-isolation defect).
-  setupFilesAfterEnv: ['<rootDir>/test-helpers/afterEachFile.js'],
+  // 999.1576 inc.4: armAuditTestActor arms the sandbox-scoped audit
+  // test-default actor ('jest') in every test file — the approved test-only
+  // fallback that lets strict stampInsert/stampUpdate run in tests without
+  // per-suite runWithActor wrapping (see juggler/CLAUDE.md Approved Fallbacks).
+  setupFilesAfterEnv: [
+    '<rootDir>/tests/helpers/armAuditTestActor.js',
+    '<rootDir>/test-helpers/afterEachFile.js',
+  ],
   forceExit: true,
   // Run sequentially — integration tests share a DB connection that
   // conflicts with jest.mock('../src/db') in parallel workers.

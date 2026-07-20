@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../../src/lib/audit-context').stampInsert(rows);
 /**
  * facade-next-start-anchor-redraw.db.test.js
  *
@@ -97,7 +100,7 @@ function mockRes() {
 
 async function seedMaster(tmplId, overrides) {
   var now = new Date();
-  await db('task_masters').insert(Object.assign({
+  await db('task_masters').insert(__stampFixture(Object.assign({
     id: tmplId,
     user_id: USER_ID,
     text: 'weekly (Monday) master — 999.1110 anchor redraw test',
@@ -110,12 +113,12 @@ async function seedMaster(tmplId, overrides) {
     next_start: null,
     created_at: now,
     updated_at: now
-  }, overrides || {}));
+  }, overrides || {})));
 }
 
 async function seedInstance(tmplId, instId, overrides) {
   var now = new Date();
-  await db('task_instances').insert(Object.assign({
+  await db('task_instances').insert(__stampFixture(Object.assign({
     id: instId,
     master_id: tmplId,
     user_id: USER_ID,
@@ -126,7 +129,7 @@ async function seedInstance(tmplId, instId, overrides) {
     dur: 30,
     created_at: now,
     updated_at: now
-  }, overrides || {}));
+  }, overrides || {})));
 }
 
 describe('facade.updateTask -> recurCleanup "Next Cycle Starts" anchor redraw (999.1110 / R5)', () => {
@@ -136,14 +139,14 @@ describe('facade.updateTask -> recurCleanup "Next Cycle Starts" anchor redraw (9
     await assertDbAvailable();
     var existing = await db('users').where('id', USER_ID).first();
     if (!existing) {
-      await db('users').insert({
+      await db('users').insert(__stampFixture({
         id: USER_ID,
         email: 'facade-nsar-999-1110@test.invalid',
         name: '999.1110 anchor redraw test',
         timezone: 'America/New_York',
         created_at: new Date(),
         updated_at: new Date()
-      });
+      }));
     }
   });
 

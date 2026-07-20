@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * Regression test for the "deleted calendar-linked tasks come back" bug.
  *
@@ -24,10 +27,10 @@ beforeAll(async () => {
   await db('task_instances').where('user_id', USER_ID).del();
   await db('task_masters').where('user_id', USER_ID).del();
   await db('users').where('id', USER_ID).del();
-  await db('users').insert({
+  await db('users').insert(__stampFixture({
     id: USER_ID, email: 'delcal@test.com', name: 'Del Cal Link',
     timezone: 'America/New_York', created_at: db.fn.now(), updated_at: db.fn.now()
-  });
+  }));
 }, 15000);
 
 afterAll(async () => {
@@ -65,11 +68,11 @@ describe('deleteTask: calendar-linked task cleanup', () => {
       created_at: db.fn.now(), updated_at: db.fn.now()
     });
     // Simulate a prior gcal sync — ledger row points at this task
-    await db('cal_sync_ledger').insert({
+    await db('cal_sync_ledger').insert(__stampFixture({
       user_id: USER_ID, provider: 'gcal', task_id: id,
       provider_event_id: 'gcal_evt_will_be_orphaned', origin: 'juggler',
       status: 'active', synced_at: db.fn.now(), created_at: db.fn.now()
-    });
+    }));
 
     // User deletes the task
     var res = mockRes();

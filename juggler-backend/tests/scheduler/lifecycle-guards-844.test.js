@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../src/lib/audit-context').stampInsert(rows);
 /**
  * 999.844 — pencil-vs-pen lifecycle guards (narrow scope, David ruling 2026-06-23).
  *
@@ -66,9 +69,9 @@ beforeAll(async () => {
   try { await db.raw('SELECT 1'); available = true; } catch (e) { available = false; }
   if (!available) throw new Error('TEST-FR-001: test-bed DB not reachable. Run: cd test-bed && make up');
   await cleanup();
-  await db('users').insert({ id: USER_ID, email: 'lc844@test.com', timezone: TZ, created_at: db.fn.now(), updated_at: db.fn.now() });
-  await db('user_config').insert({ user_id: USER_ID, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) });
-  await db('user_config').insert({ user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) });
+  await db('users').insert(__stampFixture({ id: USER_ID, email: 'lc844@test.com', timezone: TZ, created_at: db.fn.now(), updated_at: db.fn.now() }));
+  await db('user_config').insert(__stampFixture({ user_id: USER_ID, config_key: 'time_blocks', config_value: JSON.stringify(DEFAULT_TIME_BLOCKS) }));
+  await db('user_config').insert(__stampFixture({ user_id: USER_ID, config_key: 'tool_matrix', config_value: JSON.stringify(DEFAULT_TOOL_MATRIX) }));
 }, 600000); // 999.1409: fresh-test-bed provisioning runs the full migration set (~6 min measured)
 
 afterAll(async () => { if (available) await cleanup(); await db.destroy(); });
@@ -80,21 +83,21 @@ beforeEach(async () => {
 });
 
 async function seedMaster() {
-  await db('task_masters').insert({
+  await db('task_masters').insert(__stampFixture({
     id: MASTER_ID, user_id: USER_ID, text: 'Meds', dur: 5, pri: 'P1', status: '',
     recurring: 1, recur: JSON.stringify({ type: 'daily' }), placement_mode: 'anytime',
     created_at: db.fn.now(), updated_at: db.fn.now()
-  });
+  }));
 }
 
 async function seedInst(suffix, status, ord) {
-  await db('task_instances').insert({
+  await db('task_instances').insert(__stampFixture({
     id: MASTER_ID + '-' + suffix, user_id: USER_ID, master_id: MASTER_ID,
     occurrence_ordinal: ord, split_ordinal: 1, split_total: 1, dur: 5, status: status,
     // terminal statuses require a non-null scheduled_at (CHECK constraint)
     date: ymd(-2), scheduled_at: status === '' ? null : ymd(-2) + ' 08:00:00',
     created_at: db.fn.now(), updated_at: db.fn.now()
-  });
+  }));
 }
 
 describe('999.844 Guard 1 — series-delete keeps history (done/skip/pause/cancel) verbatim', () => {

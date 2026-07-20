@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * mcp-delete-task-provider-origin-block-characterization.db.test.js
  *
@@ -51,10 +54,10 @@ function captureHandlers(userId) {
 async function seedUser() {
   var existing = await db('users').where('id', USER_ID).first();
   if (!existing) {
-    await db('users').insert({
+    await db('users').insert(__stampFixture({
       id: USER_ID, email: 'mcp-del-provider-block@test.invalid', name: 'MCP delete provider-origin block',
       timezone: 'America/New_York', created_at: new Date(), updated_at: new Date()
-    });
+    }));
   }
 }
 
@@ -66,20 +69,20 @@ async function clearUserTasks() {
 
 async function seedTaskWithLedger(taskId, ledgerOverrides) {
   var now = new Date();
-  await db('task_masters').insert({
+  await db('task_masters').insert(__stampFixture({
     id: taskId, user_id: USER_ID, text: 'Provider-origin block test task', dur: 30, pri: 'P3',
     recurring: 0, status: '', created_at: now, updated_at: now
-  });
-  await db('task_instances').insert({
+  }));
+  await db('task_instances').insert(__stampFixture({
     id: taskId, master_id: taskId, user_id: USER_ID, status: '',
     occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
     created_at: now, updated_at: now
-  });
-  await db('cal_sync_ledger').insert(Object.assign({
+  }));
+  await db('cal_sync_ledger').insert(__stampFixture(Object.assign({
     user_id: USER_ID, task_id: taskId, provider: 'gcal', origin: 'gcal',
     status: 'active', provider_event_id: 'gcal-evt-' + Date.now(),
     created_at: now, synced_at: now
-  }, ledgerOverrides || {}));
+  }, ledgerOverrides || {})));
 }
 
 describe('MCP delete_task — provider-origin delete block (AFTER state, David RULING exception d)', function () {

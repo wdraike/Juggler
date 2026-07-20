@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * mcp-set-task-status-strict-enum-characterization.db.test.js
  *
@@ -59,10 +62,10 @@ function captureHandlersAndSchemas(userId) {
 async function seedUser() {
   var existing = await db('users').where('id', USER_ID).first();
   if (!existing) {
-    await db('users').insert({
+    await db('users').insert(__stampFixture({
       id: USER_ID, email: 'mcp-strict-enum@test.invalid', name: 'MCP strict enum test',
       timezone: 'America/New_York', created_at: new Date(), updated_at: new Date()
-    });
+    }));
   }
 }
 
@@ -96,15 +99,15 @@ describe('MCP set_task_status — stricter enum + template/disabled rejections (
   test('invalid status "dropped" (the OLD tool description\'s own fictional value) -> 400 rejected with the real enum listed', async function () {
     var now = new Date();
     var taskId = 'mcp-enum-invalid-' + Date.now();
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: taskId, user_id: USER_ID, text: 'enum test', dur: 30, pri: 'P3',
       recurring: 0, status: '', created_at: now, updated_at: now
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: taskId, master_id: taskId, user_id: USER_ID, status: '',
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
       created_at: now, updated_at: now
-    });
+    }));
 
     var { handlers } = captureHandlersAndSchemas(USER_ID);
     var result = await handlers.set_task_status({ id: taskId, status: 'dropped' });
@@ -125,11 +128,11 @@ describe('MCP set_task_status — stricter enum + template/disabled rejections (
   test('status change on a recurring_template with a non-pause/unpause status -> 400 "Recurring templates can only be paused or unpaused"', async function () {
     var now = new Date();
     var tmplId = 'mcp-enum-tmpl-' + Date.now();
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: tmplId, user_id: USER_ID, text: 'template enum test', dur: 30, pri: 'P3',
       recurring: 1, status: '', recur: JSON.stringify({ type: 'weekly', days: 'M' }),
       recur_start: '2026-01-01', tz: 'America/New_York', created_at: now, updated_at: now
-    });
+    }));
 
     var { handlers } = captureHandlersAndSchemas(USER_ID);
     var result = await handlers.set_task_status({ id: tmplId, status: 'done' });
@@ -144,11 +147,11 @@ describe('MCP set_task_status — stricter enum + template/disabled rejections (
   test('status change on a recurring_template TO "pause" -> succeeds (the one allowed transition)', async function () {
     var now = new Date();
     var tmplId = 'mcp-enum-tmpl-pause-' + Date.now();
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: tmplId, user_id: USER_ID, text: 'template pause test', dur: 30, pri: 'P3',
       recurring: 1, status: '', recur: JSON.stringify({ type: 'weekly', days: 'M' }),
       recur_start: '2026-01-01', tz: 'America/New_York', created_at: now, updated_at: now
-    });
+    }));
 
     var { handlers } = captureHandlersAndSchemas(USER_ID);
     var result = await handlers.set_task_status({ id: tmplId, status: 'pause' });
@@ -161,15 +164,15 @@ describe('MCP set_task_status — stricter enum + template/disabled rejections (
   test('status change on a DISABLED task -> 403 TASK_DISABLED (was: no such guard pre-migration)', async function () {
     var now = new Date();
     var taskId = 'mcp-enum-disabled-' + Date.now();
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: taskId, user_id: USER_ID, text: 'disabled task enum test', dur: 30, pri: 'P3',
       recurring: 0, status: 'disabled', created_at: now, updated_at: now
-    });
-    await db('task_instances').insert({
+    }));
+    await db('task_instances').insert(__stampFixture({
       id: taskId, master_id: taskId, user_id: USER_ID, status: 'disabled',
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
       created_at: now, updated_at: now
-    });
+    }));
 
     var { handlers } = captureHandlersAndSchemas(USER_ID);
     var result = await handlers.set_task_status({ id: taskId, status: 'done' });

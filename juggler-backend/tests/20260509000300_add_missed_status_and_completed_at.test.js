@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * 20260509000300_add_missed_status_and_completed_at.test.js
  *
@@ -26,14 +29,14 @@ beforeAll(async () => {
   await db('task_instances').where('user_id', TEST_USER_ID).del();
   await db('task_masters').where('user_id', TEST_USER_ID).del();
   await db('users').where('id', TEST_USER_ID).del();
-  await db('users').insert({
+  await db('users').insert(__stampFixture({
     id: TEST_USER_ID,
     email: 'test-20260509@test.invalid',
     name: 'Test 20260509',
     timezone: 'America/New_York',
     created_at: db.fn.now(),
     updated_at: db.fn.now()
-  });
+  }));
 });
 
 afterAll(async () => {
@@ -53,13 +56,13 @@ describe('20260509000300_add_missed_status_and_completed_at', () => {
     test('task_instances accepts missed status', async () => {
       const masterId = await createTestMaster();
 
-      await db('task_instances').insert({
+      await db('task_instances').insert(__stampFixture({
         id: 'test-task-missed-' + Date.now(),
         master_id: masterId,
         user_id: TEST_USER_ID,
         status: 'missed',
         scheduled_at: new Date('2024-01-15 10:00:00')
-      });
+      }));
 
       const row = await db('task_instances')
         .where('user_id', TEST_USER_ID)
@@ -69,13 +72,13 @@ describe('20260509000300_add_missed_status_and_completed_at', () => {
     });
 
     test('task_masters accepts missed status', async () => {
-      await db('task_masters').insert({
+      await db('task_masters').insert(__stampFixture({
         id: 'test-master-missed-' + Date.now(),
         user_id: TEST_USER_ID,
         text: 'Test Master',
         dur: 30,
         status: 'missed'
-      });
+      }));
 
       const row = await db('task_masters')
         .where('user_id', TEST_USER_ID)
@@ -93,14 +96,14 @@ describe('20260509000300_add_missed_status_and_completed_at', () => {
       const masterId = await createTestMaster();
       const id = 'test-task-cat-' + Date.now();
 
-      await db('task_instances').insert({
+      await db('task_instances').insert(__stampFixture({
         id,
         master_id: masterId,
         user_id: TEST_USER_ID,
         status: 'done',
         scheduled_at: new Date('2024-01-15 10:00:00'),
         completed_at: new Date('2024-01-15 11:00:00')
-      });
+      }));
 
       const row = await db('task_instances').where('id', id).first();
       expect(row.completed_at).not.toBeNull();
@@ -142,11 +145,11 @@ describe('20260509000300_add_missed_status_and_completed_at', () => {
 
 async function createTestMaster() {
   const masterId = 'test-master-' + Date.now();
-  await db('task_masters').insert({
+  await db('task_masters').insert(__stampFixture({
     id: masterId,
     user_id: TEST_USER_ID,
     text: 'Test Task',
     dur: 30
-  });
+  }));
   return masterId;
 }

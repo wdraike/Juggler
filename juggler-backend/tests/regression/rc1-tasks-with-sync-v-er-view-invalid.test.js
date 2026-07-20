@@ -1,5 +1,9 @@
 'use strict';
 
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../../src/lib/audit-context').stampInsert(rows);
+
 /**
  * RC1 Regression: tasks_with_sync_v ER_VIEW_INVALID (999.816)
  *
@@ -50,14 +54,14 @@ beforeAll(async () => {
   await db('task_masters').where('user_id', USER_ID).del().catch(() => {});
   await db('users').where('id', USER_ID).del().catch(() => {});
 
-  await db('users').insert({
+  await db('users').insert(__stampFixture({
     id: USER_ID,
     email: 'rc1-regression@test.com',
     name: 'RC1 Regression Test',
     timezone: 'America/New_York',
     created_at: db.fn.now(),
     updated_at: db.fn.now()
-  });
+  }));
 }, 15000);
 
 afterAll(async () => {
@@ -170,7 +174,7 @@ describe('RC1: end_date value round-trips through view chain', () => {
     var testEndDate = '2026-06-30';
 
     // Insert master (non-recurring so it surfaces in the instance branch)
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: masterId,
       user_id: USER_ID,
       text: 'RC1 multiday task',
@@ -179,10 +183,10 @@ describe('RC1: end_date value round-trips through view chain', () => {
       recurring: 0,
       created_at: db.fn.now(),
       updated_at: db.fn.now()
-    });
+    }));
 
     // Insert instance with end_date
-    await db('task_instances').insert({
+    await db('task_instances').insert(__stampFixture({
       id: instanceId,
       user_id: USER_ID,
       master_id: masterId,
@@ -195,7 +199,7 @@ describe('RC1: end_date value round-trips through view chain', () => {
       split_total: 1,
       created_at: db.fn.now(),
       updated_at: db.fn.now()
-    });
+    }));
 
     // Read back through tasks_v
     var tvRow = await db('tasks_v').where('id', instanceId).first();
@@ -219,7 +223,7 @@ describe('RC1: end_date value round-trips through view chain', () => {
   test('recurring template branch: tasks_v end_date column is present (NULL for templates)', async () => {
     var masterId = uuidv7();
 
-    await db('task_masters').insert({
+    await db('task_masters').insert(__stampFixture({
       id: masterId,
       user_id: USER_ID,
       text: 'RC1 recurring template',
@@ -229,7 +233,7 @@ describe('RC1: end_date value round-trips through view chain', () => {
       recur: JSON.stringify({ type: 'daily' }),
       created_at: db.fn.now(),
       updated_at: db.fn.now()
-    });
+    }));
 
     var row = await db('tasks_v').where('id', masterId).first();
     expect(row).toBeDefined();

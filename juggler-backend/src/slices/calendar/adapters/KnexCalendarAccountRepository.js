@@ -124,10 +124,13 @@ KnexCalendarAccountRepository.prototype.deleteExpiredOAuthNonces = function () {
  * @returns {Promise<*>}
  */
 KnexCalendarAccountRepository.prototype.insertOAuthNonceIgnoreDuplicate = function (hash) {
+  // 999.1576 inc.4: who-cols are NOT NULL — the redeeming user's request
+  // context attributes the nonce claim (strict getActor).
+  var actor = require('../../../lib/audit-context').getActor();
   return this.db.raw(
-    'INSERT IGNORE INTO oauth_code_nonces (code_hash, expires_at) ' +
-    'VALUES (?, DATE_ADD(NOW(), INTERVAL 2 MINUTE))',
-    [hash]
+    'INSERT IGNORE INTO oauth_code_nonces (code_hash, expires_at, created_by, updated_by) ' +
+    'VALUES (?, DATE_ADD(NOW(), INTERVAL 2 MINUTE), ?, ?)',
+    [hash, actor, actor]
   );
 };
 

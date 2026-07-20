@@ -37,6 +37,7 @@
 
 var GeoPoint = require('../domain/value-objects/GeoPoint');
 var WeatherConstraint = require('../domain/entities/WeatherConstraint');
+var stampInsert = require('../../../lib/audit-context').stampInsert; // 999.1576 inc.4
 
 var WEATHER_CACHE_REPOSITORY_PORT_METHODS =
   require('../domain/ports/WeatherCacheRepositoryPort').WEATHER_CACHE_REPOSITORY_PORT_METHODS;
@@ -133,13 +134,13 @@ KnexWeatherCacheRepository.prototype.putForecast = function putForecast(point, f
     throw new TypeError('KnexWeatherCacheRepository.putForecast: fetchedAt/expiresAt must be JS Date (INVARIANT W-1)');
   }
   return this.db('weather_cache')
-    .insert({
+    .insert(stampInsert({
       lat_grid: p.latGrid(),
       lon_grid: p.lonGrid(),
       fetched_at: fetchedAt,
       expires_at: expiresAt,
       forecast_json: JSON.stringify(fc.toForecastJson())
-    })
+    }))
     .then(function () {});
 };
 

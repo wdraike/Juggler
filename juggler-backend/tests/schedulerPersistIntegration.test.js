@@ -1,3 +1,6 @@
+// 999.1576 inc.4: fixture inserts are test-context writes — stamp them 'jest'
+// (array-aware; explicit fixture attribution wins). See juggler/CLAUDE.md Approved Fallbacks.
+const __stampFixture = (rows) => require('../src/lib/audit-context').stampInsert(rows);
 /**
  * Integration tests for runSchedule.js persist step and task CRUD.
  * Uses a real MySQL test database (test-bed Docker MySQL on port 3407).
@@ -156,16 +159,16 @@ describe('Scheduler persist (real DB)', () => {
 
     // Seed minimal config
     var db = testDb.getDb();
-    await db('user_config').insert({
+    await db('user_config').insert(__stampFixture({
       user_id: 'test-user-001',
       config_key: 'time_blocks',
       config_value: JSON.stringify(require('../src/scheduler/constants').DEFAULT_TIME_BLOCKS)
-    });
-    await db('user_config').insert({
+    }));
+    await db('user_config').insert(__stampFixture({
       user_id: 'test-user-001',
       config_key: 'tool_matrix',
       config_value: JSON.stringify(require('../src/scheduler/constants').DEFAULT_TOOL_MATRIX)
-    });
+    }));
 
     // Note: we can't easily test runScheduleAndPersist here because it imports
     // the production db module. Instead, verify the data model is correct.
@@ -375,7 +378,7 @@ describe('SC-37: Split chunk scheduling persisted to DB', () => {
 
     // Simulate scheduler creating a second split chunk instance (split_ordinal=2)
     var now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-    await db('task_instances').insert({
+    await db('task_instances').insert(__stampFixture({
       id: 'split-b_i2',
       master_id: 'split-b',
       user_id: 'test-user-001',
@@ -387,7 +390,7 @@ describe('SC-37: Split chunk scheduling persisted to DB', () => {
       generated: 1,
       created_at: now,
       updated_at: now
-    });
+    }));
 
     var chunks = await db('task_instances').where('master_id', 'split-b').orderBy('split_ordinal');
     expect(chunks.length).toBe(2);
