@@ -57,6 +57,15 @@ function makeFakeTrx(opts) {
 }
 
 describe('resetRecurringInstances — ledger failure aborts the hard-delete (999.1218)', function () {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   it('rejects when the cal_sync_ledger update fails and does NOT delete instances', async function () {
     var trx = makeFakeTrx({ futureIds: [11, 12], ledgerFails: true });
 

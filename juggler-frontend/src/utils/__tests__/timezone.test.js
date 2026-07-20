@@ -8,6 +8,15 @@
 import { resolveDisplayTimezone, hydrateTaskTimezones, convertTimeForDisplay } from '../timezone';
 
 describe('resolveDisplayTimezone — configured tz beats browser (A1)', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   test('explicit override wins over everything', () => {
     expect(resolveDisplayTimezone({ override: 'Europe/Paris', userTimezone: 'America/New_York', browser: 'Asia/Tokyo' }))
       .toBe('Europe/Paris');

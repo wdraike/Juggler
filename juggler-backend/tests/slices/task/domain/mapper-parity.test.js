@@ -84,6 +84,15 @@ function makeSplitChunkRow(overrides) {
 }
 
 describe('B6 — rowToTask parity (legacy controller === pure mapper)', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   const cases = {
     'plain task (no tz)': [makeTaskRow(), null, {}],
     'plain task (with tz)': [makeTaskRow({ scheduled_at: '2026-06-10 18:00:00' }), TZ, {}],
@@ -91,7 +100,7 @@ describe('B6 — rowToTask parity (legacy controller === pure mapper)', () => {
     'recurring instance (no tz)': [makeRecurringInstanceRow(), null, {}],
     'recurring template': [makeRecurringTemplateRow(), TZ, {}],
     'split chunk': [makeSplitChunkRow(), TZ, {}],
-    'task with deadline + earliestStart': [makeTaskRow({ deadline: '2026-07-01', earliest_start_at: '2026-06-15' }), TZ, {}],
+    'task with deadline + earliestStart': [makeTaskRow({ deadline: '2020-01-01', earliest_start_at: '2026-06-15' }), TZ, {}],
     'task with location/tools/recur JSON': [makeTaskRow({ location: '["home"]', tools: '["laptop"]', recur: JSON.stringify({ type: 'weekly' }) }), null, {}],
     'task with weather constraints': [makeTaskRow({ weather_precip: 'none', weather_cloud: 'clear', weather_temp_min: 50, weather_temp_max: 80, weather_temp_unit: 'F', weather_humidity_min: 10, weather_humidity_max: 90 }), null, {}],
     'task with null task_type (defaults task)': [makeTaskRow({ task_type: null }), null, {}],
@@ -123,7 +132,7 @@ describe('B6 — taskToRow parity (legacy controller === pure mapper)', () => {
     'minimal create': { text: 'New task' },
     'full field set': {
       id: 'x1', taskType: 'task', text: 'T', dur: 45, pri: '2', project: 'P',
-      status: 'wip', section: 'S', notes: 'n', url: 'http://x', deadline: '2026-07-01',
+      status: 'wip', section: 'S', notes: 'n', url: 'http://x', deadline: '2020-01-01',
       earliestStart: '2026-06-15', location: ['home'], tools: ['laptop'], when: 'morning',
       dayReq: 'weekday', recurring: true, timeFlex: 30, split: true, splitMin: 15,
       recur: { type: 'weekly' }, sourceId: 'src', generated: true, dependsOn: ['a'],

@@ -52,7 +52,7 @@ process.env.NODE_ENV = 'test';
 // 999.1037 fix-follow-up: unconditional (not `if (!process.env.DB_NAME)`).
 // jest.config.js's setupFiles now loads .env.test (DB_NAME=juggler_test) BEFORE
 // this file's own top-level code runs, so a conditional guard here is a
-// permanent no-op (ernie BLOCK, 2026-07-01) and this file would silently run
+// permanent no-op (ernie BLOCK, 2020-01-01) and this file would silently run
 // against the SHARED juggler_test schema instead of its isolated one — exactly
 // the testbed-juggler-test-pollution class already hit once (2026-06-21).
 // Reassert unconditionally so this file's isolation always wins.
@@ -139,6 +139,8 @@ async function cleanup() {
 }
 
 beforeAll(async () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
   // 999.1409: create + migrate the isolated DB if absent (throws TEST-FR-001
   // itself when the test-bed MySQL server is unreachable).
   await ensureIsolatedDb();
@@ -171,6 +173,7 @@ beforeAll(async () => {
 }, 600000); // 999.1409: fresh-test-bed provisioning runs the full migration set (~6 min measured)
 
 afterAll(async () => {
+  jest.useRealTimers();
   if (dbAvailable) await cleanup();
   await db.destroy();
 });

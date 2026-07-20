@@ -93,10 +93,13 @@ async function clearUserTasks(userId) {
 describe('getUserTimezone — 3 copies (tasks.js/data.js/schedule.js) resolve IDENTICALLY (BEFORE dedup)', function () {
 
   beforeEach(function () {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
     dateHelpers.safeTimezone.mockClear();
   });
 
   afterEach(async function () {
+    jest.useRealTimers();
     await clearUserTasks(USER_ID);
     await db('users').where('id', USER_ID).del();
   });
@@ -141,10 +144,10 @@ describe('getUserTimezone — 3 copies (tasks.js/data.js/schedule.js) resolve ID
 
     var taskId = 'tz-dedup-task-' + Date.now();
     var now = new Date();
-    // 2026-07-08T05:30:00Z is 2026-07-07 22:30 in America/Los_Angeles (UTC-7,
+    // 2020-01-08T05:30:00Z is 2020-01-07 22:30 in America/Los_Angeles (UTC-7,
     // July DST) — differs from the naive UTC calendar date, so a wrong/
     // divergent timezone resolution would produce a visibly different date.
-    var scheduledAt = new Date('2026-07-08T05:30:00Z');
+    var scheduledAt = new Date('2020-01-08T05:30:00Z');
     await db('task_masters').insert({
       id: taskId, user_id: USER_ID, text: 'tz probe task', dur: 30, pri: 'P3',
       recurring: 0, status: '', created_at: now, updated_at: now
@@ -152,7 +155,7 @@ describe('getUserTimezone — 3 copies (tasks.js/data.js/schedule.js) resolve ID
     await db('task_instances').insert({
       id: taskId, master_id: taskId, user_id: USER_ID, status: '',
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
-      scheduled_at: scheduledAt, date: '2026-07-08', created_at: now, updated_at: now
+      scheduled_at: scheduledAt, date: '2020-01-08', created_at: now, updated_at: now
     });
 
     var listResult = await captureHandlers(registerTaskTools, USER_ID).list_tasks({});
@@ -168,7 +171,7 @@ describe('getUserTimezone — 3 copies (tasks.js/data.js/schedule.js) resolve ID
     expect(probeFromData.date).toBe(probeFromTasks.date);
     expect(probeFromData.time).toBe(probeFromTasks.time);
     // Sanity: actually resolved to LA local time, not a UTC/default passthrough
-    // (would be '2026-07-08' if the wrong tz were used) — proves the pin is real.
-    expect(probeFromTasks.date).toBe('2026-07-07');
+    // (would be '2020-01-08' if the wrong tz were used) — proves the pin is real.
+    expect(probeFromTasks.date).toBe('2020-01-07');
   });
 });

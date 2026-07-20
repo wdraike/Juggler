@@ -1,8 +1,8 @@
 /**
  * mcp-set-task-status-strict-enum-characterization.db.test.js
  *
- * jug-mcp-facade — David RULING (5th ruled exception, 2026-07-07, scooter
- * INBOX ISO 2026-07-07T19:20:00Z): set_task_status now accepts facade's
+ * jug-mcp-facade — David RULING (5th ruled exception, 2020-01-07, scooter
+ * INBOX ISO 2020-01-07T19:20:00Z): set_task_status now accepts facade's
  * stricter status-enum validation via facade.updateTaskStatus, including new
  * rejections for status changes on recurring TEMPLATES (only pause/unpause
  * allowed) and DISABLED tasks (403). The tool's own advertised "dropped"
@@ -75,6 +75,8 @@ async function clearUserTasks() {
 describe('MCP set_task_status — stricter enum + template/disabled rejections (AFTER state, David RULING exception e)', function () {
 
   beforeAll(async function () {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
     await assertDbAvailable();
     await clearUserTasks();
     await db('users').where('id', USER_ID).del();
@@ -82,6 +84,7 @@ describe('MCP set_task_status — stricter enum + template/disabled rejections (
   }, 15000);
 
   afterEach(async function () {
+    jest.useRealTimers();
     await clearUserTasks();
   });
 

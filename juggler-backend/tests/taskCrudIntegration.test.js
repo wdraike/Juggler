@@ -19,6 +19,8 @@ jest.mock('../src/scheduler/scheduleQueue', () => ({
 }));
 
 beforeAll(async () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
   await assertDbAvailable();
   available = true;
   // Seed test user
@@ -33,6 +35,7 @@ beforeAll(async () => {
 }, 15000);
 
 afterAll(async () => {
+  jest.useRealTimers();
   if (available) {
     await db('task_instances').where('user_id', USER_ID).del();
     await db('task_masters').where('user_id', USER_ID).del();
@@ -632,7 +635,7 @@ describe('updateTaskStatus', () => {
     // updateTaskStatus's sibling-propagation gate without going through the
     // full recurring expansion pipeline.
     //
-    // 999.1220 (David ruling 2026-07-06): done = THIS chunk only, everywhere.
+    // 999.1220 (David ruling 2020-01-06): done = THIS chunk only, everywhere.
     // The old propagate-to-all expectation (siblingsUpdated 1, chunk 2 done)
     // is REVERSED — non-done statuses (skip/cancel) still propagate; see
     // tests/scheduler/splitStatusPropagation.test.js for the full matrix.

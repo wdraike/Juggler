@@ -37,6 +37,8 @@ var token = null;
 var user = null;
 
 beforeAll(async () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
   await assertDbAvailable();
   if (!hasGCalCredentials()) return;
   user = await seedTestUser(GCAL_ONLY);
@@ -44,6 +46,7 @@ beforeAll(async () => {
 });
 
 afterEach(async () => {
+  jest.useRealTimers();
   if (!user || !token) return;
   await cleanupTestData();
   await deleteAllGCalTestEvents(token);

@@ -4,7 +4,7 @@
  * jug-mcp-facade — characterization_target #4 (Intake Brief) + #1 (delete_task
  * slice of the tasks.js real-DB characterization ask).
  *
- * AFTER-state (David RULING, 2026-07-07, exception b): MCP's `delete_task`
+ * AFTER-state (David RULING, 2020-01-07, exception b): MCP's `delete_task`
  * tool now routes through `facade.deleteTask` (src/mcp/tools/tasks.js:448),
  * which already R55 soft-cancels (`standardDelete` -> `twrite.softCancelById`,
  * commit 6ca3762) instead of the pre-migration `tasksWrite.deleteTaskById`
@@ -72,6 +72,8 @@ async function clearUserTasks() {
 describe('MCP delete_task — AFTER-migration R55 soft-cancel behavior pin', function () {
 
   beforeAll(async function () {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
     await assertDbAvailable();
     await clearUserTasks();
     await db('users').where('id', USER_ID).del();
@@ -79,6 +81,7 @@ describe('MCP delete_task — AFTER-migration R55 soft-cancel behavior pin', fun
   }, 15000);
 
   afterEach(async function () {
+    jest.useRealTimers();
     await clearUserTasks();
   });
 

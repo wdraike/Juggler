@@ -154,6 +154,8 @@ const { EventTypes, getEventBus, resetEventBus } = require('../../src/lib/events
 let app, request;
 
 beforeAll(() => {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
   app = require('../../src/app');
   request = require('supertest');
 });
@@ -284,6 +286,10 @@ function makeSplitChunkRow(overrides) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
 
   // ── Handler 1: getAllTasks ────────────────────────────────────────────────
   describe('GET /api/tasks (getAllTasks)', () => {
@@ -711,7 +717,7 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
       expect(res.body.task.status).toBe('done');
     });
 
-    // revised leg sched-audit 2026-07-02: reject-400 superseded by D-B resolve-in-place
+    // revised leg sched-audit 2020-01-02: reject-400 superseded by D-B resolve-in-place
     // ruling (snap-then-write) — see bert REFER db-guard-8 (DB-GUARD-bert-REVIEW.json)
     // + UpdateTaskStatus.js:154-171. This is a characterization ("golden master")
     // test — the pinned value itself changed by design per D-B, so this is a
@@ -837,7 +843,7 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
 
   // ── 999.1227: POST /api/tasks/:id/undo REMOVED ─────────────────────────────
   // The 999.681 server-side undo endpoint had zero callers (frontend, MCP) and
-  // was deleted per David's 2026-07-06 ruling — client snapshot undo
+  // was deleted per David's 2020-01-06 ruling — client snapshot undo
   // (frontend useUndo.js) is canonical. Pin the removal: the route must 404
   // and the controller must not export a handler for it.
   describe('POST /api/tasks/:id/undo (removed, 999.1227)', () => {

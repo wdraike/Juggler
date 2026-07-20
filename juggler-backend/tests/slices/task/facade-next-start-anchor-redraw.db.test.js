@@ -1,7 +1,7 @@
 /**
  * facade-next-start-anchor-redraw.db.test.js
  *
- * 999.1110 (David 2026-07-04) / R5 ruling (2026-07-19) — "Next Cycle Starts"
+ * 999.1110 (David 2020-01-04) / R5 ruling (2020-01-19) — "Next Cycle Starts"
  * anchor edit, real controller->facade->recurCleanup->DB path.
  *
  * Closes the gap: rolling/pattern recurring masters had no UI/API path to
@@ -131,6 +131,8 @@ async function seedInstance(tmplId, instId, overrides) {
 
 describe('facade.updateTask -> recurCleanup "Next Cycle Starts" anchor redraw (999.1110 / R5)', () => {
   beforeAll(async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
     await assertDbAvailable();
     var existing = await db('users').where('id', USER_ID).first();
     if (!existing) {
@@ -150,6 +152,7 @@ describe('facade.updateTask -> recurCleanup "Next Cycle Starts" anchor redraw (9
   });
 
   afterEach(async () => {
+    jest.useRealTimers();
     await db('task_instances').where('user_id', USER_ID).del();
     await db('task_masters').where('user_id', USER_ID).del();
   });
@@ -190,18 +193,18 @@ describe('facade.updateTask -> recurCleanup "Next Cycle Starts" anchor redraw (9
       status: '', date: '2030-01-12', occurrence_ordinal: 4, scheduled_at: null
     });
 
-    // 2026-07-22 is a Wednesday; the master's pattern is Mondays-only ->
-    // the backend must SNAP to 2026-07-27 (next Monday), never persist the
+    // 2020-01-22 is a Wednesday; the master's pattern is Mondays-only ->
+    // the backend must SNAP to 2020-01-27 (next Monday), never persist the
     // raw Wednesday (999.1110 "do not accept an arbitrary date").
-    var req = mockReq({ params: { id: tmplId }, body: { nextStart: '2026-07-22' } });
+    var req = mockReq({ params: { id: tmplId }, body: { nextStart: '2020-01-22' } });
     var res = mockRes();
     await controller.updateTask(req, res);
 
     expect(res.statusCode).toBe(200);
-    expect(res._json.task.nextStart).toBe('2026-07-27');
+    expect(res._json.task.nextStart).toBe('2020-01-27');
 
     var master = await db('task_masters').where('id', tmplId).first();
-    expect(String(master.next_start).slice(0, 10)).toBe('2026-07-27');
+    expect(String(master.next_start).slice(0, 10)).toBe('2020-01-27');
 
     var remainingIds = (await db('task_instances').where('master_id', tmplId).pluck('id')).sort();
     expect(remainingIds).toEqual([doneId, skipId].sort());
@@ -231,22 +234,22 @@ describe('facade.updateTask -> recurCleanup "Next Cycle Starts" anchor redraw (9
 
     await seedMaster(tmplId, {
       recur: JSON.stringify({ type: 'rolling', every: 7, unit: 'days' }),
-      recur_start: null, next_start: '2026-07-01'
+      recur_start: null, next_start: '2020-01-01'
     });
     await seedInstance(tmplId, pendingFutureId, {
       status: '', date: '2030-01-05',
       scheduled_at: new Date('2030-01-05T14:00:00Z')
     });
 
-    var req = mockReq({ params: { id: tmplId }, body: { nextStart: '2026-07-22' } }); // arbitrary Wednesday
+    var req = mockReq({ params: { id: tmplId }, body: { nextStart: '2020-01-22' } }); // arbitrary Wednesday
     var res = mockRes();
     await controller.updateTask(req, res);
 
     expect(res.statusCode).toBe(200);
-    expect(res._json.task.nextStart).toBe('2026-07-22');
+    expect(res._json.task.nextStart).toBe('2020-01-22');
 
     var master = await db('task_masters').where('id', tmplId).first();
-    expect(String(master.next_start).slice(0, 10)).toBe('2026-07-22');
+    expect(String(master.next_start).slice(0, 10)).toBe('2020-01-22');
 
     var remaining = await db('task_instances').where('master_id', tmplId).pluck('id');
     expect(remaining).toEqual([]);

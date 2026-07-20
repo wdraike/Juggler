@@ -111,11 +111,14 @@ Object.keys(ADAPTERS).forEach(function (name) {
 
   describe('TaskRepositoryPort contract — ' + name, function () {
     beforeAll(async function () {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
       await A.available();   // fail-loud if the Knex DB is down (TEST-FR-001)
       await A.beforeAll();
     }, 20000);
 
     afterAll(async function () {
+      jest.useRealTimers();
       await A.afterAll();
     }, 20000);
 

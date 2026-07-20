@@ -219,6 +219,8 @@ var OTHER = 'knexrepo-user-B';
 
 describe('KnexTaskRepository — DB-backed characterization (test-bed @3407)', function () {
   beforeAll(async function () {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
     await assertDbAvailable();
     for (var u of [USER, OTHER]) {
       await knex('task_instances').where('user_id', u).del();
@@ -232,6 +234,7 @@ describe('KnexTaskRepository — DB-backed characterization (test-bed @3407)', f
   }, 20000);
 
   afterAll(async function () {
+    jest.useRealTimers();
     for (var u of [USER, OTHER]) {
       await knex('task_instances').where('user_id', u).del();
       await knex('task_masters').where('user_id', u).del();

@@ -1,8 +1,8 @@
 /**
  * mcp-delete-task-provider-origin-block-characterization.db.test.js
  *
- * jug-mcp-facade — David RULING (4th ruled exception, 2026-07-07, scooter
- * INBOX ISO 2026-07-07T19:20:00Z): extends the settled D-08 provider-origin
+ * jug-mcp-facade — David RULING (4th ruled exception, 2020-01-07, scooter
+ * INBOX ISO 2020-01-07T19:20:00Z): extends the settled D-08 provider-origin
  * delete block to MCP. delete_task now 403s
  * (code: PROVIDER_ORIGIN_DELETE_BLOCKED) on a calendar-synced task that
  * originated from an external provider (Google/Outlook/Apple) — matching the
@@ -85,6 +85,8 @@ async function seedTaskWithLedger(taskId, ledgerOverrides) {
 describe('MCP delete_task — provider-origin delete block (AFTER state, David RULING exception d)', function () {
 
   beforeAll(async function () {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
     await assertDbAvailable();
     await clearUserTasks();
     await db('users').where('id', USER_ID).del();
@@ -92,6 +94,7 @@ describe('MCP delete_task — provider-origin delete block (AFTER state, David R
   }, 15000);
 
   afterEach(async function () {
+    jest.useRealTimers();
     await clearUserTasks();
   });
 

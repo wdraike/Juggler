@@ -82,6 +82,15 @@ function rowFor(forecast, fetchedAt, expiresAt) {
 // ── Port conformance ─────────────────────────────────────────────────────────
 
 describe('KnexWeatherCacheRepository — port conformance', function () {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   test('implements every WEATHER_CACHE_REPOSITORY_PORT_METHODS member', function () {
     var repo = new KnexWeatherCacheRepository({ db: makeKnexStub().db, redis: makeRedisStub() });
     WeatherCacheRepositoryPort.WEATHER_CACHE_REPOSITORY_PORT_METHODS.forEach(function (m) {

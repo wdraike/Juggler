@@ -34,6 +34,15 @@ var USER = 'sched-rerun-user';
 
 // ── AC1 — UpdateConfig: template_defaults / template_overrides must fire scheduleAfter ─────
 describe('AC1: UpdateConfig — template_defaults / template_overrides missing from SCHED_KEYS [BUG-1 / 999.464]', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   /**
    * VALID_KEYS includes 'template_defaults' and 'template_overrides' (UserConfig.js:39).
    * SCHED_KEYS (UpdateConfig.js:47) does NOT include either. Therefore executing

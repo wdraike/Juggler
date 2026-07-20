@@ -11,6 +11,8 @@ var { assertDbAvailable } = require('./helpers/requireDB');
 var available = false;
 
 beforeAll(async () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
   await assertDbAvailable();
   available = await testDb.isAvailable();
   if (!available) {
@@ -22,6 +24,7 @@ beforeAll(async () => {
 }, 15000);
 
 afterAll(async () => {
+  jest.useRealTimers();
   if (available) await testDb.cleanup();
   await testDb.destroy();
 });

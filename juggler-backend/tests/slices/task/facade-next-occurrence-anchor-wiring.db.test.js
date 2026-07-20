@@ -28,7 +28,7 @@
  * duplicate of this file); flagged as a residual WARN in TEST-CATALOG.md rather
  * than authored, to keep this leg's added test surface proportional.
  *
- * REWRITTEN (juggler-anchor-column-cleanup W5, 2026-07-11): `next_occurrence_anchor`
+ * REWRITTEN (juggler-anchor-column-cleanup W5, 2020-01-11): `next_occurrence_anchor`
  * (and `rolling_anchor`) have been dropped from task_masters — both
  * applyRollingAnchor branches (isRollingMaster / isPatternRecurMaster) now write
  * the single unified `next_start` column. Assertions retargeted; the former
@@ -127,6 +127,8 @@ async function seedWeeklyMasterAndInstance(tmplId, instId, instanceDate, schedul
 describe('facade.updateTaskStatus -> applyRollingAnchor isPatternRecurMaster wiring (999.1091 C1)', () => {
 
   beforeAll(async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
     await assertDbAvailable();
     var existing = await db('users').where('id', USER_ID).first();
     if (!existing) {
@@ -142,6 +144,7 @@ describe('facade.updateTaskStatus -> applyRollingAnchor isPatternRecurMaster wir
   });
 
   afterEach(async () => {
+    jest.useRealTimers();
     await db('task_instances').where('user_id', USER_ID).del();
     await db('task_masters').where('user_id', USER_ID).del();
   });
@@ -155,8 +158,8 @@ describe('facade.updateTaskStatus -> applyRollingAnchor isPatternRecurMaster wir
   test('marking a weekly (non-rolling) recurring instance done WRITES next_start via the real controller->facade->applyRollingAnchor path', async () => {
     var tmplId = 'noa-wiring-tmpl-' + Date.now();
     var instId = tmplId + '-ri1';
-    var instanceDate = '2026-07-08'; // Wednesday
-    var scheduledAt = new Date('2026-07-08T10:00:00Z');
+    var instanceDate = '2020-01-08'; // Wednesday
+    var scheduledAt = new Date('2020-01-08T10:00:00Z');
 
     await seedWeeklyMasterAndInstance(tmplId, instId, instanceDate, scheduledAt);
 
@@ -174,14 +177,14 @@ describe('facade.updateTaskStatus -> applyRollingAnchor isPatternRecurMaster wir
     // real applyRollingAnchor branch read the master, computed via
     // computeNextOccurrenceAnchor, and persisted the result — not just that the
     // request didn't crash.
-    expect(String(master.next_start).slice(0, 10)).toBe('2026-07-15');
+    expect(String(master.next_start).slice(0, 10)).toBe('2020-01-15');
   });
 
   test('marking a weekly (non-rolling) recurring instance skip advances the anchor the same as done', async () => {
     var tmplId = 'noa-wiring-tmpl2-' + Date.now();
     var instId = tmplId + '-ri1';
-    var instanceDate = '2026-07-08';
-    var scheduledAt = new Date('2026-07-08T10:00:00Z');
+    var instanceDate = '2020-01-08';
+    var scheduledAt = new Date('2020-01-08T10:00:00Z');
 
     await seedWeeklyMasterAndInstance(tmplId, instId, instanceDate, scheduledAt);
 
@@ -191,14 +194,14 @@ describe('facade.updateTaskStatus -> applyRollingAnchor isPatternRecurMaster wir
 
     expect(res.statusCode).toBe(200);
     var master = await db('task_masters').where('id', tmplId).first();
-    expect(String(master.next_start).slice(0, 10)).toBe('2026-07-15');
+    expect(String(master.next_start).slice(0, 10)).toBe('2020-01-15');
   });
 
   test('marking a weekly (non-rolling) recurring instance cancel does NOT write next_start', async () => {
     var tmplId = 'noa-wiring-tmpl3-' + Date.now();
     var instId = tmplId + '-ri1';
-    var instanceDate = '2026-07-08';
-    var scheduledAt = new Date('2026-07-08T10:00:00Z');
+    var instanceDate = '2020-01-08';
+    var scheduledAt = new Date('2020-01-08T10:00:00Z');
 
     await seedWeeklyMasterAndInstance(tmplId, instId, instanceDate, scheduledAt);
 

@@ -48,6 +48,8 @@ function createDeps(r, trigger, events, extra) {
 
 describe('W5 use-cases — DB-backed (KnexTaskRepository, test-bed @3407)', function () {
   beforeAll(async function () {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
     await assertDbAvailable();
     await knex('task_instances').where('user_id', USER).del();
     await knex('task_masters').where('user_id', USER).del();
@@ -59,6 +61,7 @@ describe('W5 use-cases — DB-backed (KnexTaskRepository, test-bed @3407)', func
   });
 
   afterAll(async function () {
+    jest.useRealTimers();
     await knex('task_instances').where('user_id', USER).del();
     await knex('task_masters').where('user_id', USER).del();
     await knex('cal_sync_ledger').where('user_id', USER).del();

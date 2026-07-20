@@ -21,7 +21,7 @@
  * a tagged fn.now() must NEVER appear (repo write path); here, it MUST appear
  * (out-of-P1-scope collaborator sites). Together they lock the scope boundary.
  *
- * RETARGETED (juggler-anchor-column-cleanup W5, 2026-07-11): `rolling_anchor` /
+ * RETARGETED (juggler-anchor-column-cleanup W5, 2020-01-11): `rolling_anchor` /
  * `next_occurrence_anchor` dropped from task_masters; applyRollingAnchor's
  * `.update()` call now writes `next_start` (the single unified anchor column)
  * instead of `rolling_anchor` — same call site, same fn.now()-on-updated_at
@@ -116,6 +116,8 @@ const VALID_TOKEN = 'valid-test-token';
 let app, request;
 
 beforeAll(async () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
   app = require('../../src/app');
   request = require('supertest');
 });
@@ -127,6 +129,10 @@ beforeEach(() => {
 });
 
 describe('FIX-4.2 PIN — synced_at / next_start write fn.now() (legacy, out of P1 scope)', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   test('reactivateDoneFrozen writes synced_at = fn.now() raw (NOT new Date()) on reopen', async () => {
     // done → '' (reopen) drives reactivateDoneFrozen (facade L424-428):
     //   cal_sync_ledger.update({ status:'active', synced_at: getDb().fn.now() })

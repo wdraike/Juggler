@@ -25,6 +25,8 @@ var skip = false;
 var calendarUrl = null;
 
 beforeAll(async function () {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
   await assertDbAvailable();
   if (!hasAppleCredentials()) {
     skip = true;
@@ -43,6 +45,7 @@ beforeAll(async function () {
 });
 
 afterAll(async function () {
+  jest.useRealTimers();
   if (skip) return;
   // Clean up all events created during tests
   for (var i = 0; i < createdEventUrls.length; i++) {

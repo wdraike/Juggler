@@ -12,7 +12,7 @@
 var db = require('../src/db');
 var tasksWrite = require('../src/lib/tasks-write');
 var { assertDbAvailable } = require('./helpers/requireDB');
-// telly fix (leg sched-audit 2026-07-03): knexfile `test` uses dateStrings:true —
+// telly fix (leg sched-audit 2020-01-03): knexfile `test` uses dateStrings:true —
 // scheduled_at reads back as a tz-less string; use the project's UTC-safe reparse
 // helper rather than a bare `new Date()` (the documented juggler dateStrings/
 // new-Date misparse trap).
@@ -38,6 +38,8 @@ jest.mock('../src/lib/sse-emitter', () => ({
 }));
 
 beforeAll(async () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
   await assertDbAvailable();
 
   // Cleanup any leftover state from prior runs
@@ -63,6 +65,7 @@ beforeAll(async () => {
 }, 15000);
 
 afterAll(async () => {
+  jest.useRealTimers();
   await db('cal_sync_ledger').where('user_id', USER_ID).del();
   await db('task_instances').where('user_id', USER_ID).del();
   await db('task_masters').where('user_id', USER_ID).del();
@@ -225,7 +228,7 @@ describe('status transition: wip → done', () => {
     expect(row.completed_at).toBeTruthy();
   });
 
-  // revised leg sched-audit 2026-07-02: reject-400 superseded by D-B resolve-in-place
+  // revised leg sched-audit 2020-01-02: reject-400 superseded by D-B resolve-in-place
   // ruling (snap-then-write) — see bert REFER db-guard-9 (DB-GUARD-bert-REVIEW.json)
   // + UpdateTaskStatus.js:154-171. A terminal write on an unscheduled task now
   // SUCCEEDS (200) with scheduled_at snapped to ~now, instead of being rejected.
@@ -284,7 +287,7 @@ describe('status transition: skip', () => {
     expect(row.status).toBe('skip');
   });
 
-  // revised leg sched-audit 2026-07-02: reject-400 superseded by D-B resolve-in-place
+  // revised leg sched-audit 2020-01-02: reject-400 superseded by D-B resolve-in-place
   // ruling (snap-then-write) — see bert REFER db-guard-9 (DB-GUARD-bert-REVIEW.json)
   // + UpdateTaskStatus.js:154-171.
   test('skip on unscheduled task → 200, scheduled_at snapped to ~now (was: 400 SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS)', async () => {
@@ -719,7 +722,7 @@ describe('terminal-status edge cases', () => {
     expect(row.status).toBe('cancel');
   });
 
-  // revised leg sched-audit 2026-07-02: reject-400 superseded by D-B resolve-in-place
+  // revised leg sched-audit 2020-01-02: reject-400 superseded by D-B resolve-in-place
   // ruling (snap-then-write) — see bert REFER db-guard-9 (DB-GUARD-bert-REVIEW.json)
   // + UpdateTaskStatus.js:154-171.
   test('cancel on unscheduled task → 200, scheduled_at snapped to ~now (was: 400 SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS)', async () => {

@@ -267,6 +267,15 @@ function nonSchedFacadeResult(key, value) {
 
 // ── D-1: handler delegates to facade.updateConfig exactly once ─────────────────
 describe('D-1: handler delegates to facade.updateConfig (correct call + args)', function () {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
 
   test('D-1a: facade.updateConfig called EXACTLY ONCE for a schedule-affecting key', async function () {
     var value = { morning: { start: 480 } };

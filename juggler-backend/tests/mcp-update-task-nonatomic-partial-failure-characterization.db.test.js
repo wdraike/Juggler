@@ -1,8 +1,8 @@
 /**
  * mcp-update-task-nonatomic-partial-failure-characterization.db.test.js
  *
- * 999.1570 (SUPERSEDES ernie E3 / David ruling 2026-07-07, scooter INBOX ISO
- * 2026-07-07T19:40:00Z): update_task used to issue TWO independent,
+ * 999.1570 (SUPERSEDES ernie E3 / David ruling 2020-01-07, scooter INBOX ISO
+ * 2020-01-07T19:40:00Z): update_task used to issue TWO independent,
  * separately-committed facade calls when both non-status fields AND a
  * `status` field were present in the same call — facade.updateTask
  * (non-status fields) ran FIRST and committed, THEN facade.updateTaskStatus
@@ -68,6 +68,8 @@ async function clearUserTasks() {
 describe('MCP update_task — composed one-transaction update+status (999.1570 fix, was ACCEPTED tradeoff ernie E3)', function () {
 
   beforeAll(async function () {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
     await assertDbAvailable();
     await clearUserTasks();
     await db('users').where('id', USER_ID).del();
@@ -75,6 +77,7 @@ describe('MCP update_task — composed one-transaction update+status (999.1570 f
   }, 15000);
 
   afterEach(async function () {
+    jest.useRealTimers();
     await clearUserTasks();
   });
 
@@ -144,13 +147,13 @@ describe('MCP update_task — composed one-transaction update+status (999.1570 f
     expect(result.isError).toBeFalsy();
     var instRow = await db('task_instances').where('id', taskId).first();
     expect(instRow.status).toBe('done');
-    // EXACT instant: 2026-07-01 3:00pm America/New_York = 19:00 UTC.
+    // EXACT instant: 2020-01-01 3:00pm America/New_York = 19:00 UTC.
     // Discriminating: a lost step-1 write yields a snap-to-now (July 14+)
     // instant instead. Compare the RAW stored string — dateStrings:true hands
     // back a tz-less string and new Date() would re-parse it as LOCAL (the
     // repo's documented +4h misparse trap).
     expect(instRow.scheduled_at).not.toBeNull();
-    expect(String(instRow.scheduled_at).slice(0, 19)).toBe('2026-07-01 19:00:00');
+    expect(String(instRow.scheduled_at).slice(0, 19)).toBe('2020-01-01 19:00:00');
   });
 
   test('NESTED TRANSACTION (999.1570): UpdateTask complex-path (time-only edit) runs its own repo.runInTransaction as a SAVEPOINT inside the composed transaction', async function () {
@@ -175,7 +178,7 @@ describe('MCP update_task — composed one-transaction update+status (999.1570 f
     await db('task_instances').insert({
       id: taskId, master_id: taskId, user_id: USER_ID, status: '',
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
-      scheduled_at: new Date('2026-07-01T19:00:00Z'),
+      scheduled_at: new Date('2020-01-01T19:00:00Z'),
       created_at: now, updated_at: now
     });
 
@@ -185,11 +188,11 @@ describe('MCP update_task — composed one-transaction update+status (999.1570 f
     expect(result.isError).toBeFalsy();
     var instRow = await db('task_instances').where('id', taskId).first();
     expect(instRow.status).toBe('done');
-    // EXACT instant: existing date 2026-07-01, new time 4:00 PM
+    // EXACT instant: existing date 2020-01-01, new time 4:00 PM
     // America/New_York = 20:00 UTC — proof the complex path's nested
     // transaction (savepoint) committed the time change, not just the
     // status half. Raw-string compare (dateStrings +4h misparse trap).
-    expect(String(instRow.scheduled_at).slice(0, 19)).toBe('2026-07-01 20:00:00');
+    expect(String(instRow.scheduled_at).slice(0, 19)).toBe('2020-01-01 20:00:00');
   });
 
   test('TRX-THREADED ANCHOR (999.1570 harrison BLOCK-1): template-field edit + done on a rolling recurring instance completes in one call — anchor write joins the composed transaction instead of deadlocking on the base pool', async function () {
@@ -206,13 +209,13 @@ describe('MCP update_task — composed one-transaction update+status (999.1570 f
       id: masterId, user_id: USER_ID, text: 'rolling anchor trx test', notes: 'original notes',
       dur: 30, pri: 'P3', recurring: 1, status: '',
       recur: JSON.stringify({ type: 'rolling', interval: 7 }),
-      next_start: '2026-07-10', recur_start: '2026-01-01',
+      next_start: '2020-01-10', recur_start: '2026-01-01',
       tz: 'America/New_York', created_at: now, updated_at: now
     });
     await db('task_instances').insert({
       id: instId, master_id: masterId, user_id: USER_ID, status: '',
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
-      date: '2026-07-10', scheduled_at: new Date('2026-07-10T14:00:00Z'),
+      date: '2020-01-10', scheduled_at: new Date('2020-01-10T14:00:00Z'),
       created_at: now, updated_at: now
     });
 
@@ -227,7 +230,7 @@ describe('MCP update_task — composed one-transaction update+status (999.1570 f
     var instRow = await db('task_instances').where('id', instId).first();
     expect(instRow.status).toBe('done');
     // done anchors to the COMPLETION day (today in the user's tz), which is
-    // >= the stale 2026-07-10 anchor — so next_start must have advanced.
+    // >= the stale 2020-01-10 anchor — so next_start must have advanced.
     var todayKey = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit'
     }).format(new Date());
@@ -244,7 +247,7 @@ describe('MCP update_task — composed one-transaction update+status (999.1570 f
     await db('task_instances').insert({
       id: taskId, master_id: taskId, user_id: USER_ID, status: '',
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
-      scheduled_at: new Date('2026-08-01T15:00:00Z'),
+      scheduled_at: new Date('2099-12-01T15:00:00Z'),
       created_at: now, updated_at: now
     });
 

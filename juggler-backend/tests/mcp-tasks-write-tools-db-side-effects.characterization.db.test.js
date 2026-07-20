@@ -61,6 +61,8 @@ async function clearUserTasks() {
 describe('MCP tasks.js write tools — real-DB side effects (BEFORE facade migration)', function () {
 
   beforeAll(async function () {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
     await assertDbAvailable();
     await clearUserTasks();
     await db('users').where('id', USER_ID).del();
@@ -71,6 +73,7 @@ describe('MCP tasks.js write tools — real-DB side effects (BEFORE facade migra
   }, 15000);
 
   afterEach(async function () {
+    jest.useRealTimers();
     await clearUserTasks();
   });
 

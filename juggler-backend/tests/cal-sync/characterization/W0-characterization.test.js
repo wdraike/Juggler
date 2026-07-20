@@ -33,6 +33,15 @@
 var msftAdapter = require('../../../src/lib/cal-adapters/msft.adapter');
 
 describe('C2a: buildMsftEventBody — task.url included as "Link: …" in body.content', function () {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   var YEAR = 2026;
   var TZ = 'America/New_York';
 
@@ -239,7 +248,7 @@ describe('C1: Apple repush guard — miss_count >= 1 is required before re-creat
   // (caused by the adapter, not the user) changes the hash. This defeats the
   // miss_count/repush safety guard at cal-sync.controller.js:743-761 (fires
   // when userHash(task) !== ledger.last_user_hash && miss_count >= 1), which
-  // caused real data loss: 8 tasks hard-deleted 2026-07-11 (BUG-999.1549).
+  // caused real data loss: 8 tasks hard-deleted 2020-01-11 (BUG-999.1549).
   //
   // RED on current code: task.marker is still hashed, so this FAILS until
   // the `task.marker ? 'marker' : ''` line is removed from userHash.

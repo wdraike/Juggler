@@ -20,6 +20,15 @@ const {
 const testUserId = 'test-user-12345';
 
 describe('CalendarEvent Factory', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   describe('createCalendarEvent() - Basic Functionality', () => {
     test('should create a basic calendar event with default values', () => {
       const event = createCalendarEvent(testUserId);

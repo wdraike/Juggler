@@ -4,7 +4,7 @@
  * Traceability: juggler-recur-lifecycle-redesign SPEC.md FR-6 (Soft-delete
  * master) / AC7.
  *
- * CORRECTED 2026-07-09 (SPEC.md FR-6/AC7 "SUPERSEDED, second correction"):
+ * CORRECTED 2020-01-09 (SPEC.md FR-6/AC7 "SUPERSEDED, second correction"):
  * this file's original two RED assertions demanded the WRONG target shape
  * (`status='disabled'` + `disabled_at`/`disabled_reason` on the master, and
  * hard-delete of non-terminal instances). That was telly's own invented
@@ -96,13 +96,13 @@ async function seedSeriesWithHistory(tmplId) {
     {
       id: doneId, master_id: tmplId, user_id: USER_ID, status: 'done',
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
-      date: '2026-07-01', scheduled_at: new Date('2026-07-01T10:00:00Z'),
+      date: '2020-01-01', scheduled_at: new Date('2020-01-01T10:00:00Z'),
       completed_at: now, created_at: now, updated_at: now
     },
     {
       id: openId, master_id: tmplId, user_id: USER_ID, status: '',
       occurrence_ordinal: 2, split_ordinal: 1, split_total: 1, dur: 30,
-      date: '2026-07-10', scheduled_at: new Date('2026-07-10T10:00:00Z'),
+      date: '2020-01-10', scheduled_at: new Date('2020-01-10T10:00:00Z'),
       created_at: now, updated_at: now
     }
   ]);
@@ -112,6 +112,8 @@ async function seedSeriesWithHistory(tmplId) {
 describe('FR-6/AC7 — series delete soft-CANCELS the master + soft-cancels open instances (never hard-deletes) + keeps done text', function () {
 
   beforeAll(async function () {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
     await assertDbAvailable();
     await clearUserTasks();
     await db('users').where('id', USER_ID).del();
@@ -119,6 +121,7 @@ describe('FR-6/AC7 — series delete soft-CANCELS the master + soft-cancels open
   }, 15000);
 
   afterEach(async function () {
+    jest.useRealTimers();
     await clearUserTasks();
   });
 

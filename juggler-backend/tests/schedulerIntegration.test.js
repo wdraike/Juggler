@@ -33,6 +33,8 @@ var DB_USER = process.env.DB_USER || process.env.TEST_DB_USER || 'root';
 var DB_PASS = process.env.DB_PASSWORD || process.env.TEST_DB_PASSWORD || 'rootpass';
 
 beforeAll(async function() {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
   // TEST-FR-001: assertDbAvailable() throws (fail-loud) if the DB is unreachable.
   // It does NOT set a flag — it propagates the error to Jest, which marks the suite
   // as failed and prevents any test body from running (and passing with 0 assertions).
@@ -87,6 +89,7 @@ beforeAll(async function() {
 }, 30000);
 
 afterAll(async function() {
+  jest.useRealTimers();
   if (knex) {
     try { await knex.destroy(); } catch (e) {}
   }

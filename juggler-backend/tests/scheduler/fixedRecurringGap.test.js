@@ -85,10 +85,13 @@ async function seedMaster(fields) {
  */
 describe('TS-301: fixed+recurring blocked at UI and backend', () => {
   beforeAll(async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
     await setupTestDB();
   });
 
   afterAll(async () => {
+    jest.useRealTimers();
     await teardownTestDB();
   });
 

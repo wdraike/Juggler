@@ -88,6 +88,8 @@ async function clearUserTasks() {
 describe('DeleteTask.execute scope="instance" — CURRENT (pre-migration) behavior pin', function () {
 
   beforeAll(async function () {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
     await assertDbAvailable();
     await clearUserTasks();
     await db('users').where('id', USER_ID).del();
@@ -95,6 +97,7 @@ describe('DeleteTask.execute scope="instance" — CURRENT (pre-migration) behavi
   }, 15000);
 
   afterEach(async function () {
+    jest.useRealTimers();
     await clearUserTasks();
   });
 

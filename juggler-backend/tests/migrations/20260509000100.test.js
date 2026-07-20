@@ -66,6 +66,8 @@ async function insertHistoryRow(userId, ageDays) {
 }
 
 beforeAll(async () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
   if (!await isDbAvailable()) return;
   await cleanup();
   await seedUser(USER_A);
@@ -73,6 +75,7 @@ beforeAll(async () => {
 });
 
 afterEach(async () => {
+  jest.useRealTimers();
   if (!await isDbAvailable()) return;
   // Wipe history for both test users between tests
   await db('sync_history').whereIn('user_id', [USER_A, USER_B]).del();

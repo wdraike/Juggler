@@ -174,6 +174,8 @@ describe('GOLDEN-MASTER CORE — frozen literal snapshot (S8)', () => {
 
   let result;
   beforeAll(function() {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
     var statuses = {};
     FIXTURE_TASKS.forEach(function(t) { statuses[t.id] = ''; });
     result = unifiedSchedule(FIXTURE_TASKS, statuses, TODAY, NOW_MINS, CFG);
@@ -760,6 +762,7 @@ describe('S5 — delta-write-count: only changed tasks are written (GREEN — W2
   }, 15000);
 
   afterAll(async () => {
+    jest.useRealTimers();
     // Cleanup this describe's rows only. Do NOT call testDb.destroy() here —
     // the singleton connection is shared with C-IDEM integration and other describes
     // in this file. Destroying it mid-suite closes the connection before sibling

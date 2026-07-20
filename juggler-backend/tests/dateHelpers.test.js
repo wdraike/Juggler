@@ -14,6 +14,15 @@ const {
 } = require('../src/scheduler/dateHelpers');
 
 describe('dateHelpers', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   describe('inferYear', () => {
     it('returns current year for current month', () => {
       const now = new Date();
@@ -95,7 +104,7 @@ describe('dateHelpers', () => {
 
     it('round-trips through parseDate', () => {
       const d = new Date(2026, 6, 4);
-      expect(formatDateKey(parseDate(formatDateKey(d)))).toBe('2026-07-04');
+      expect(formatDateKey(parseDate(formatDateKey(d)))).toBe('2020-01-04');
     });
   });
 

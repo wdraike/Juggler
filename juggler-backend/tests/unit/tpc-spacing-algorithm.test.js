@@ -175,6 +175,15 @@ function fixedFill(dayKey, from, to) {
 // ═══════════════════════════════════════════════════════════════════
 
 describe('999.874 — Multi-step spacing algorithm', function () {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
 
   // ── R1: _targetDate and _deadlineDate assigned by expandRecurring ──
   describe('R1 — _targetDate and _deadlineDate from expandRecurring', function () {
@@ -767,7 +776,7 @@ describe('999.874 — Multi-step spacing algorithm', function () {
           id: 'r9-spread-' + i,
           date: dateStr,
           dur: 60,
-          deadline: '2026-07-05',
+          deadline: '2020-01-05',
           sourceId: 'master-spread-r9',
           _targetDate: dateStr,
           _deadlineDate: new Date(d.getTime() + 5 * 86400000).toISOString().slice(0, 10),
@@ -797,7 +806,7 @@ describe('999.874 — Multi-step spacing algorithm', function () {
         id: 'r9-bi-first',
         date: '2026-06-17',
         dur: 60,
-        deadline: '2026-07-05',
+        deadline: '2020-01-05',
         sourceId: 'master-biweekly',
         recur: { type: 'biweekly', days: 'MTWRFSU', timesPerCycle: 2 },
         _targetDate: '2026-06-17',
@@ -808,7 +817,7 @@ describe('999.874 — Multi-step spacing algorithm', function () {
         id: 'r9-bi-second',
         date: '2026-06-18',
         dur: 60,
-        deadline: '2026-07-05',
+        deadline: '2020-01-05',
         sourceId: 'master-biweekly',
         recur: { type: 'biweekly', days: 'MTWRFSU', timesPerCycle: 2 },
         _targetDate: '2026-06-18',
@@ -831,22 +840,22 @@ describe('999.874 — Multi-step spacing algorithm', function () {
         id: 'r9-month-first',
         date: '2026-06-17',
         dur: 60,
-        deadline: '2026-07-20',
+        deadline: '2020-01-20',
         sourceId: 'master-monthly',
         recur: { type: 'monthly', days: 'MTWRFSU', timesPerCycle: 2, monthDays: [1, 15] },
         _targetDate: '2026-06-17',
-        _deadlineDate: '2026-07-15',
+        _deadlineDate: '2020-01-15',
       });
 
       var second = makeTpcInstance({
         id: 'r9-month-second',
         date: '2026-06-18',
         dur: 60,
-        deadline: '2026-07-20',
+        deadline: '2020-01-20',
         sourceId: 'master-monthly',
         recur: { type: 'monthly', days: 'MTWRFSU', timesPerCycle: 2, monthDays: [1, 15] },
         _targetDate: '2026-06-18',
-        _deadlineDate: '2026-07-15',
+        _deadlineDate: '2020-01-15',
       });
 
       var result = run([first, second]);

@@ -27,7 +27,7 @@
  * returning the joined 'id: error; id: error' text — stronger than the old
  * transaction-rollback-after-partial-attempt (nothing is even attempted here).
  *
- * ── 999.1396 UPDATE (2026-07-09) ────────────────────────────────────────────
+ * ── 999.1396 UPDATE (2020-01-09) ────────────────────────────────────────────
  * The shared-facade shadow described below is FIXED: validateTaskInput() takes
  * an optional `existing` row and its fixed-mode cross-field check honors an
  * existing scheduled_at/date; UpdateTask.js and BatchUpdateTasks.js both fetch
@@ -147,6 +147,8 @@ var LEGACY_FIXED_GUARD_STRING = 'Validation error: placementMode "fixed" require
 describe('MCP fixed-mode-requires-schedule guards — restored at the adapter layer; existing-scheduled_at exemption restored end-to-end (999.1396 fixed the shared-facade shadow formerly pinned per cookie WARN-2 / backlog 999.1382)', function () {
 
   beforeAll(async function () {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
     await assertDbAvailable();
     await clearUserTasks();
     await db('users').where('id', USER_ID).del();
@@ -154,6 +156,7 @@ describe('MCP fixed-mode-requires-schedule guards — restored at the adapter la
   }, 15000);
 
   afterEach(async function () {
+    jest.useRealTimers();
     await clearUserTasks();
   });
 
@@ -181,7 +184,7 @@ describe('MCP fixed-mode-requires-schedule guards — restored at the adapter la
     test('999.1396 FIXED (supersedes the cookie WARN-2 "still rejects" pin, backlog 999.1382): fixed mode explicitly re-sent + no date/time/scheduledAt in the call -> SUCCEEDS when the row has an EXISTING scheduled_at (validateTaskInput is now existing-aware at the facade/command layer)', async function () {
       var taskId = 'mcp-fg-upd-allow-' + Date.now();
       await insertTask(taskId, {
-        instance: { scheduled_at: new Date('2026-08-01T15:00:00Z'), date: '2026-08-01', time: '15:00' }
+        instance: { scheduled_at: new Date('2099-12-01T15:00:00Z'), date: '2099-12-01', time: '15:00' }
       });
 
       var handlers = captureHandlers(USER_ID);
@@ -201,7 +204,7 @@ describe('MCP fixed-mode-requires-schedule guards — restored at the adapter la
       var taskId = 'mcp-fg-upd-omit-' + Date.now();
       await insertTask(taskId, {
         master: { placement_mode: 'fixed' },
-        instance: { scheduled_at: new Date('2026-08-01T15:00:00Z'), date: '2026-08-01', time: '15:00' }
+        instance: { scheduled_at: new Date('2099-12-01T15:00:00Z'), date: '2099-12-01', time: '15:00' }
       });
 
       var handlers = captureHandlers(USER_ID);
@@ -247,7 +250,7 @@ describe('MCP fixed-mode-requires-schedule guards — restored at the adapter la
     test('999.1396 FIXED (supersedes the cookie WARN-2 "still rejects" pin, backlog 999.1382): a fixed item explicitly re-sent WITH an existing scheduled_at in a batch SUCCEEDS (BatchUpdateTasks passes the existing row into the shared existing-aware validateTaskInput — no write side-effect needed)', async function () {
       var taskId = 'mcp-fg-batch-allow-' + Date.now();
       await insertTask(taskId, {
-        instance: { scheduled_at: new Date('2026-08-01T15:00:00Z'), date: '2026-08-01', time: '15:00' }
+        instance: { scheduled_at: new Date('2099-12-01T15:00:00Z'), date: '2099-12-01', time: '15:00' }
       });
 
       var handlers = captureHandlers(USER_ID);
@@ -268,7 +271,7 @@ describe('MCP fixed-mode-requires-schedule guards — restored at the adapter la
       var taskId = 'mcp-fg-batch-omit-' + Date.now();
       await insertTask(taskId, {
         master: { placement_mode: 'fixed' },
-        instance: { scheduled_at: new Date('2026-08-01T15:00:00Z'), date: '2026-08-01', time: '15:00' }
+        instance: { scheduled_at: new Date('2099-12-01T15:00:00Z'), date: '2099-12-01', time: '15:00' }
       });
 
       var handlers = captureHandlers(USER_ID);

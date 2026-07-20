@@ -41,6 +41,8 @@ var deleteFromDbTaskId = null;
 var ingestedEventId = null;
 
 beforeAll(async () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
   await assertDbAvailable();
   if (!hasGCalCredentials()) return;
   user = await seedTestUser({
@@ -60,6 +62,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  jest.useRealTimers();
   if (!user) return;
   if (token) await deleteAllGCalTestEvents(token);
   await destroyTestUser();

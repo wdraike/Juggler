@@ -34,6 +34,15 @@ import { buildServerClock, getNowInTimezone } from '../../../utils/timezone';
 // AC3: offset clock shape — given serverEpochMs, clock.now() ≈ serverEpochMs
 // ---------------------------------------------------------------------------
 describe('AC3 (999.809): serverClock offset shape', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
 
   test('AC3-offset-shape: clock.now() is close to serverEpochMs (within 50 ms of execution delta)', () => {
     const serverEpochMs = Date.now() + 2000; // server is 2 s ahead of client

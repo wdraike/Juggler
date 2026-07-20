@@ -100,6 +100,8 @@ async function seedOneOffTerminalTask(id, dateKey, status) {
 describe('FR-2/AC3 — reopen date gate (blocks stale reactivation) vs undo (unaffected)', function () {
 
   beforeAll(async function () {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
     await assertDbAvailable();
     await clearUserTasks();
     await db('users').where('id', USER_ID).del();
@@ -107,6 +109,7 @@ describe('FR-2/AC3 — reopen date gate (blocks stale reactivation) vs undo (una
   }, 15000);
 
   afterEach(async function () {
+    jest.useRealTimers();
     await clearUserTasks();
   });
 

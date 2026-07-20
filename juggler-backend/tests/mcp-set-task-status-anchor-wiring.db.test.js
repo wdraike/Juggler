@@ -21,7 +21,7 @@
  *     skip   → next_start = next Wednesday
  *     cancel → next_start stays null (no write)
  *
- * REWRITTEN (juggler-anchor-column-cleanup W5, 2026-07-11): `rolling_anchor` /
+ * REWRITTEN (juggler-anchor-column-cleanup W5, 2020-01-11): `rolling_anchor` /
  * `next_occurrence_anchor` dropped from task_masters; both branches now write
  * the single unified `next_start` column. Seed/assertions retargeted; the
  * former "other branch must NOT have fired" cross-checks are dropped — with
@@ -127,6 +127,8 @@ async function seedWeeklyMasterAndInstance(tmplId, instId, instanceDate, schedul
 describe('MCP set_task_status anchor wiring (999.1100)', function () {
 
   beforeAll(async function () {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
     await assertDbAvailable();
     var existing = await db('users').where('id', USER_ID).first();
     if (!existing) {
@@ -142,6 +144,7 @@ describe('MCP set_task_status anchor wiring (999.1100)', function () {
   });
 
   afterEach(async function () {
+    jest.useRealTimers();
     await db('task_instances').where('user_id', USER_ID).del();
     await db('task_masters').where('user_id', USER_ID).del();
   });
@@ -157,8 +160,8 @@ describe('MCP set_task_status anchor wiring (999.1100)', function () {
   test('rolling master: done writes next_start = today (completion date)', async function () {
     var tmplId = 'mcp-roll-tmpl-' + Date.now();
     var instId = tmplId + '-ri1';
-    var instanceDate = '2026-07-08';
-    var scheduledAt = new Date('2026-07-08T10:00:00Z');
+    var instanceDate = '2020-01-08';
+    var scheduledAt = new Date('2020-01-08T10:00:00Z');
 
     await seedRollingMasterAndInstance(tmplId, instId, instanceDate, scheduledAt);
 
@@ -176,8 +179,8 @@ describe('MCP set_task_status anchor wiring (999.1100)', function () {
   test('rolling master: skip writes next_start = instance date', async function () {
     var tmplId = 'mcp-roll-tmpl2-' + Date.now();
     var instId = tmplId + '-ri1';
-    var instanceDate = '2026-07-08';
-    var scheduledAt = new Date('2026-07-08T10:00:00Z');
+    var instanceDate = '2020-01-08';
+    var scheduledAt = new Date('2020-01-08T10:00:00Z');
 
     await seedRollingMasterAndInstance(tmplId, instId, instanceDate, scheduledAt);
 
@@ -187,14 +190,14 @@ describe('MCP set_task_status anchor wiring (999.1100)', function () {
     expect(result.isError).toBeFalsy();
     var master = await db('task_masters').where('id', tmplId).first();
     // skip → computeRollingAnchor anchors to instanceDate
-    expect(String(master.next_start).slice(0, 10)).toBe('2026-07-08');
+    expect(String(master.next_start).slice(0, 10)).toBe('2020-01-08');
   });
 
   test('rolling master: cancel does NOT write next_start', async function () {
     var tmplId = 'mcp-roll-tmpl3-' + Date.now();
     var instId = tmplId + '-ri1';
-    var instanceDate = '2026-07-08';
-    var scheduledAt = new Date('2026-07-08T10:00:00Z');
+    var instanceDate = '2020-01-08';
+    var scheduledAt = new Date('2020-01-08T10:00:00Z');
 
     await seedRollingMasterAndInstance(tmplId, instId, instanceDate, scheduledAt);
 
@@ -211,8 +214,8 @@ describe('MCP set_task_status anchor wiring (999.1100)', function () {
   test('pattern-recur master: done writes next_start = next Wednesday', async function () {
     var tmplId = 'mcp-wk-tmpl-' + Date.now();
     var instId = tmplId + '-ri1';
-    var instanceDate = '2026-07-08'; // Wednesday
-    var scheduledAt = new Date('2026-07-08T10:00:00Z');
+    var instanceDate = '2020-01-08'; // Wednesday
+    var scheduledAt = new Date('2020-01-08T10:00:00Z');
 
     await seedWeeklyMasterAndInstance(tmplId, instId, instanceDate, scheduledAt);
 
@@ -222,15 +225,15 @@ describe('MCP set_task_status anchor wiring (999.1100)', function () {
     expect(result.isError).toBeFalsy();
     var master = await db('task_masters').where('id', tmplId).first();
     expect(master).toBeTruthy();
-    // next_start must advance to the next Wednesday (2026-07-15)
-    expect(String(master.next_start).slice(0, 10)).toBe('2026-07-15');
+    // next_start must advance to the next Wednesday (2020-01-15)
+    expect(String(master.next_start).slice(0, 10)).toBe('2020-01-15');
   });
 
   test('pattern-recur master: skip advances next_start the same as done', async function () {
     var tmplId = 'mcp-wk-tmpl2-' + Date.now();
     var instId = tmplId + '-ri1';
-    var instanceDate = '2026-07-08';
-    var scheduledAt = new Date('2026-07-08T10:00:00Z');
+    var instanceDate = '2020-01-08';
+    var scheduledAt = new Date('2020-01-08T10:00:00Z');
 
     await seedWeeklyMasterAndInstance(tmplId, instId, instanceDate, scheduledAt);
 
@@ -239,14 +242,14 @@ describe('MCP set_task_status anchor wiring (999.1100)', function () {
 
     expect(result.isError).toBeFalsy();
     var master = await db('task_masters').where('id', tmplId).first();
-    expect(String(master.next_start).slice(0, 10)).toBe('2026-07-15');
+    expect(String(master.next_start).slice(0, 10)).toBe('2020-01-15');
   });
 
   test('pattern-recur master: cancel does NOT write next_start', async function () {
     var tmplId = 'mcp-wk-tmpl3-' + Date.now();
     var instId = tmplId + '-ri1';
-    var instanceDate = '2026-07-08';
-    var scheduledAt = new Date('2026-07-08T10:00:00Z');
+    var instanceDate = '2020-01-08';
+    var scheduledAt = new Date('2020-01-08T10:00:00Z');
 
     await seedWeeklyMasterAndInstance(tmplId, instId, instanceDate, scheduledAt);
 

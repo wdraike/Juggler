@@ -90,7 +90,7 @@ async function seedSeries(tmplId) {
   await db('task_instances').insert({
     id: instId, master_id: tmplId, user_id: USER_ID, status: '',
     occurrence_ordinal: 1, split_ordinal: 1, split_total: 1, dur: 30,
-    date: '2026-07-10', scheduled_at: new Date('2026-07-10T10:00:00Z'),
+    date: '2020-01-10', scheduled_at: new Date('2020-01-10T10:00:00Z'),
     created_at: now, updated_at: now
   });
   return instId;
@@ -106,6 +106,8 @@ async function lockWithCalendarOrigin(instId) {
 describe('FR-6 — cal_locked instance blocks/warns series delete', function () {
 
   beforeAll(async function () {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
     await assertDbAvailable();
     await clearUserTasks();
     await db('users').where('id', USER_ID).del();
@@ -113,6 +115,7 @@ describe('FR-6 — cal_locked instance blocks/warns series delete', function () 
   }, 15000);
 
   afterEach(async function () {
+    jest.useRealTimers();
     await clearUserTasks();
   });
 

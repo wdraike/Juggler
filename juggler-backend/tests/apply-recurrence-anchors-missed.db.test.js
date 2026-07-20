@@ -7,7 +7,7 @@
  * anchor fields: rolling_anchor and next_occurrence_anchor).
  *
  * Before 999.1098 the status gate was hand-copied at three call sites as
- * ['done','skip'] — drifted from the BINDING 2026-07-06 ruling (resolves
+ * ['done','skip'] — drifted from the BINDING 2020-01-06 ruling (resolves
  * 999.844): cancelled AND missed are BOTH terminal, and 'missed' reanchors to
  * the instance date like skip (999.1411; pinned at the compute level by
  * rollingAnchor.test.js and schedulerScenarios.test.js). The compute functions
@@ -19,7 +19,7 @@
  * (same harness shape); this file pins the 'missed' branch plus the
  * LOAD-BEARING negative space of the gate ('cancel'/'pause' must not advance).
  *
- * REWRITTEN (juggler-anchor-column-cleanup W5, 2026-07-11): `rolling_anchor` /
+ * REWRITTEN (juggler-anchor-column-cleanup W5, 2020-01-11): `rolling_anchor` /
  * `next_occurrence_anchor` dropped from task_masters; both branches now write
  * the single unified `next_start` column. Seed/assertions retargeted.
  */
@@ -81,9 +81,11 @@ describe('ANCHOR_PROJECTION_STATUSES gate contract (999.1098 — single source)'
   });
 });
 
-describe('batch write path — missed reanchors (ruling 2026-07-06 / 999.844, wired by 999.1098)', function () {
+describe('batch write path — missed reanchors (ruling 2020-01-06 / 999.844, wired by 999.1098)', function () {
 
   beforeAll(async function () {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
     await assertDbAvailable();
     var existing = await db('users').where('id', USER_ID).first();
     if (!existing) {
@@ -95,6 +97,7 @@ describe('batch write path — missed reanchors (ruling 2026-07-06 / 999.844, wi
   });
 
   afterEach(async function () {
+    jest.useRealTimers();
     await db('task_instances').where('user_id', USER_ID).del();
     await db('task_masters').where('user_id', USER_ID).del();
   });
@@ -108,9 +111,9 @@ describe('batch write path — missed reanchors (ruling 2026-07-06 / 999.844, wi
   test('missed on a rolling-master instance reanchors next_start to the INSTANCE date (not today)', async function () {
     var tmplId = 'anchor-miss-roll-' + Date.now();
     var instId = tmplId + '-ri1';
-    var instanceDate = '2026-07-01';
+    var instanceDate = '2020-01-01';
     await seedMasterAndInstance({ type: 'rolling', window: 7 }, tmplId, instId,
-      instanceDate, new Date('2026-07-01T10:00:00Z'));
+      instanceDate, new Date('2020-01-01T10:00:00Z'));
 
     var handlers = captureHandlers(USER_ID);
     var result = await handlers.batch_update_tasks({ updates: [{ id: instId, status: 'missed' }] });
@@ -129,26 +132,26 @@ describe('batch write path — missed reanchors (ruling 2026-07-06 / 999.844, wi
   test('missed on a weekly (pattern-recur) instance advances next_start to the next pattern date', async function () {
     var tmplId = 'anchor-miss-wk-' + Date.now();
     var instId = tmplId + '-ri1';
-    var instanceDate = '2026-07-08'; // a Wednesday
+    var instanceDate = '2020-01-08'; // a Wednesday
     await seedMasterAndInstance({ type: 'weekly', days: 'W' }, tmplId, instId,
-      instanceDate, new Date('2026-07-08T10:00:00Z'));
+      instanceDate, new Date('2020-01-08T10:00:00Z'));
 
     var handlers = captureHandlers(USER_ID);
     var result = await handlers.batch_update_tasks({ updates: [{ id: instId, status: 'missed' }] });
     expect(result.isError).toBeFalsy();
 
     var master = await db('task_masters').where('id', tmplId).first();
-    // next Wednesday after 2026-07-08 is 2026-07-15 (same advance as done/skip —
+    // next Wednesday after 2020-01-08 is 2020-01-15 (same advance as done/skip —
     // computeNextOccurrenceAnchor treats any projecting terminal the same).
     expect(master.next_start).not.toBeNull();
-    expect(String(master.next_start).slice(0, 10)).toBe('2026-07-15');
+    expect(String(master.next_start).slice(0, 10)).toBe('2020-01-15');
   });
 
   test('cancel on a rolling-master instance does NOT write any anchor (characterization — unchanged)', async function () {
     var tmplId = 'anchor-cancel-roll-' + Date.now();
     var instId = tmplId + '-ri1';
     await seedMasterAndInstance({ type: 'rolling', window: 7 }, tmplId, instId,
-      '2026-07-01', new Date('2026-07-01T10:00:00Z'));
+      '2020-01-01', new Date('2020-01-01T10:00:00Z'));
 
     var handlers = captureHandlers(USER_ID);
     var result = await handlers.batch_update_tasks({ updates: [{ id: instId, status: 'cancel' }] });

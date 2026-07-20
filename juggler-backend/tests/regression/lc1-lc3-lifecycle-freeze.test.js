@@ -112,6 +112,8 @@ var TIME_FLEX_MINUTES   = 120;
 var available = false;
 
 beforeAll(async () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
   await assertDbAvailable();
   try { await db.raw('SELECT 1'); available = true; } catch (e) {
     console.warn('[lc1-lc3] Test DB not available:', e.message);
@@ -135,6 +137,7 @@ beforeAll(async () => {
 }, 20000);
 
 afterAll(async () => {
+  jest.useRealTimers();
   if (available) {
     await cleanupUser(USER_LC1_LC2);
     await cleanupUser(USER_LC3);
