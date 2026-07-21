@@ -11,6 +11,7 @@
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import apiClient from '../../services/apiClient';
+import SkeletonRows from '../common/SkeletonRows';
 import { formatMinsAmPm, formatMinsCompact } from '../../utils/timezone';
 
 var GRID_START = 6;
@@ -477,7 +478,13 @@ export default function SchedulerStepper() {
   }, [start]);
 
   if (loading) {
-    return <div style={{ padding: 40, color: '#aab', background: '#0d1b2a', height: '100vh' }}>Starting stepper session…</div>;
+    // 999.2148: skeleton rows per brand Loading & Busy-State Standard
+    // (rule 7 — admin/debug surfaces not exempt); bare text dropped.
+    return (
+      <div style={{ padding: 40, background: '#0d1b2a', height: '100vh' }}>
+        <SkeletonRows rows={6} label="Starting stepper session…" theme={{ bg: '#0d1b2a' }} />
+      </div>
+    );
   }
   if (error) {
     return (

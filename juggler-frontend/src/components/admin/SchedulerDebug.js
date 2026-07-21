@@ -268,9 +268,18 @@ export default function SchedulerDebug() {
         <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: '#C8942A' }}>Scheduler Debug</h1>
         <button onClick={runDebug} disabled={loading} style={{
           background: '#1e3a5f', color: '#E8E0D0', border: '1px solid #2a4a7a', borderRadius: 4,
-          padding: '6px 16px', fontSize: 12, cursor: loading ? 'wait' : 'pointer'
+          padding: '6px 16px', fontSize: 12, cursor: loading ? 'wait' : 'pointer',
+          // 999.2148: reserve busy-state width (no reflow on label swap) and
+          // show the sanctioned in-button spinner instead of a bare text swap.
+          minWidth: 140, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6
         }}>
-          {loading ? 'Running...' : 'Re-run Scheduler'}
+          {loading && <span aria-hidden="true" style={{
+            width: '1em', height: '1em', flexShrink: 0, display: 'inline-block',
+            border: '2px solid currentColor', borderTopColor: 'transparent',
+            borderRadius: '50%', animation: 'sched-debug-spin 0.8s linear infinite'
+          }} />}
+          {loading ? 'Running…' : 'Re-run Scheduler'}
+          {loading && <style>{'@keyframes sched-debug-spin { to { transform: rotate(360deg); } }'}</style>}
         </button>
         <a href="/" style={{ color: '#667', fontSize: 12, textDecoration: 'none' }}>{'\u2190'} Back to app</a>
       </div>
