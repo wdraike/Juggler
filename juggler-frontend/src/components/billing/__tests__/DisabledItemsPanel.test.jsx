@@ -43,13 +43,17 @@ describe('DisabledItemsPanel', () => {
     jest.clearAllMocks();
   });
 
-  it('shows a loading indicator while /tasks/disabled is pending', () => {
+  it('shows skeleton rows (sr-only status, no spinner) while /tasks/disabled is pending', () => {
     apiClient.get.mockReturnValue(new Promise(() => {}));
 
     renderPanel();
 
     expect(apiClient.get).toHaveBeenCalledWith('/tasks/disabled');
-    expect(screen.getByText(/Loading disabled items/)).toBeInTheDocument();
+    // 999.2121: skeleton rows per brand Loading & Busy-State Standard —
+    // the loading message survives only as a screen-reader status line.
+    expect(screen.getAllByTestId('skeleton-row').length).toBeGreaterThanOrEqual(3);
+    expect(screen.getByRole('status')).toHaveTextContent(/loading disabled items/i);
+    expect(screen.getByRole('status')).toHaveStyle({ position: 'absolute' });
   });
 
   it('shows the empty state when there are no disabled items', async () => {

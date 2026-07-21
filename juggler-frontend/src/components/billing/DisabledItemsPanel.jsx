@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import apiClient from '../../services/apiClient';
 import ConfirmDialog from '../features/ConfirmDialog';
-import Loading from '../common/Loading';
+import SkeletonRows from '../common/SkeletonRows';
 
 // Human copy for plan-limit keys (999.1233 — never show raw config keys to
 // users). Unknown keys fall back to the old derived form so the message still
@@ -124,7 +124,8 @@ export default function DisabledItemsPanel({ theme, onClose, onRefreshTasks, sho
         {/* Content */}
         <div style={{ padding: '12px 20px', overflowY: 'auto', flex: 1 }}>
           {loading ? (
-            <Loading label="Loading disabled items…" style={{ color: theme.textMuted, padding: 20 }} />
+            // 999.2121: skeleton rows per brand Loading & Busy-State Standard
+            <SkeletonRows rows={4} label="Loading disabled items…" theme={theme} style={{ padding: '8px 0' }} />
           ) : items.length === 0 ? (
             <div style={{ textAlign: 'center', color: theme.textMuted, padding: 20, fontSize: 13 }}>No disabled items</div>
           ) : (
