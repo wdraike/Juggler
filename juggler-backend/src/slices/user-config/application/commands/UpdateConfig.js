@@ -15,6 +15,9 @@
  *      ref-validated against the STORED schedule_templates (a repo.getConfigRow
  *      read) — see domain/logic/scheduleTemplateValidation. Invalid → 400 with
  *      `details`. Runs BEFORE upsert; zero DB writes on failure.
+ *   3c. system-template delete protection (999.2146, NEW): a schedule_templates
+ *      write that drops a system:true id present in the STORED value → 400
+ *      naming the id(s). Renaming (same id) is allowed; Reset is unaffected.
  *   4. upsert: repo.getConfigRow probe → update (config_value + updated_at new Date())
  *      or insert (no updated_at — column default). Relocated to repo.upsertConfig
  *      which encapsulates the existing?update:insert + P1 new Date().
@@ -112,6 +115,34 @@ UpdateConfig.prototype.execute = async function execute(input) {
     var scheduleTemplatesCheck = scheduleTemplateValidation.validateScheduleTemplates(value);
     if (!scheduleTemplatesCheck.valid) {
       return { status: 400, body: { error: 'Invalid schedule_templates', details: scheduleTemplatesCheck.errors } };
+    }
+
+    // 999.2146 — system-template delete protection: a system:true template
+    // in the STORED value must still be present (by id) in the incoming
+    // value. Renaming (same id, new name/blocks) is allowed; dropping the id
+    // outright is not. Reset (ResetScheduleTemplates) is unaffected — it
+    // writes the defaults trio directly via repo.upsertConfig, never through
+    // this guard. Matches the FE tab's existing UI guard (delete button
+    // hidden for system templates, UnifiedTemplateTab.jsx:266/274/381) —
+    // this closes the direct-API bypass of that guard.
+    var storedTemplatesForDeleteGuardRow = await this.repo.getConfigRow(userId, 'schedule_templates');
+    var storedTemplatesForDeleteGuard = storedTemplatesForDeleteGuardRow && storedTemplatesForDeleteGuardRow.config_value != null
+      ? UserConfig.parseConfigValue(storedTemplatesForDeleteGuardRow.config_value)
+      : null;
+    if (storedTemplatesForDeleteGuard && typeof storedTemplatesForDeleteGuard === 'object') {
+      var missingSystemIds = Object.keys(storedTemplatesForDeleteGuard).filter(function (id) {
+        var stored = storedTemplatesForDeleteGuard[id];
+        return stored && stored.system === true && !Object.prototype.hasOwnProperty.call(value, id);
+      });
+      if (missingSystemIds.length > 0) {
+        return {
+          status: 400,
+          body: {
+            error: 'Cannot delete system template(s): ' + missingSystemIds.join(', '),
+            details: missingSystemIds
+          }
+        };
+      }
     }
   } else if (key === 'template_defaults' || key === 'template_overrides') {
     var storedTemplatesRow = await this.repo.getConfigRow(userId, 'schedule_templates');

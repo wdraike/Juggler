@@ -30,7 +30,20 @@ module.exports = {
     }
   },
   moduleNameMapper: {
-    '^uuid$': '<rootDir>/tests/helpers/uuid-mock.js'
+    '^uuid$': '<rootDir>/tests/helpers/uuid-mock.js',
+    // 999.2146 — juggler-shared is a workspace-linked local package
+    // ("file:../shared"); in a lane worktree, node_modules/juggler-shared is
+    // a symlink chain that lands back in the MAIN tree's shared/ (the lane's
+    // top-level node_modules symlink, from scripts/patriots/lane-worktree.sh,
+    // points at the main service tree wholesale — a nested relative symlink
+    // inside it resolves relative to ITS OWN location, i.e. the main tree,
+    // not the lane). Without this override, editing shared/scheduler/*.js in
+    // a lane silently tests the UNMODIFIED main-tree copy — a false-green
+    // trap. Path-based (matches juggler-frontend/package.json's existing
+    // identical mapper), so it is correct in the main tree too (rootDir/../
+    // shared IS the same directory node_modules/juggler-shared points to
+    // there — this is a no-op there, not a behavior change).
+    '^juggler-shared/(.*)$': '<rootDir>/../shared/$1.js'
   },
   globalSetup: '<rootDir>/tests/helpers/jest.globalSetup.js',
   // 999.1037: load .env.test before ANY test file's own top-level requires run

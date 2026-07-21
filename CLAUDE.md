@@ -85,6 +85,76 @@ in the CLI wrapper, not `knexfile.js` (which the running app imports and must ne
 | `juggler-backend/docs/TASK-PROPERTIES.md` | All task fields |
 | `juggler-backend/docs/TASK-STATE-MATRIX.md` | Valid state transitions |
 
+## Schedule-Template Storage (999.2146)
+
+**Canonical trio** (the schedule-template config a user edits via Settings → Templates):
+`schedule_templates` (templateId → `{name, icon, system, blocks[], locOverrides}`),
+`template_defaults` (Mon..Sun → templateId), `template_overrides` (YYYY-MM-DD →
+templateId, for one-off date exceptions). Write validation, self-heal-on-read, the
+reset endpoint, and system-template delete protection all live in
+`juggler-backend/src/slices/user-config/`:
+`domain/logic/scheduleTemplateValidation.js` (shape + ref validators),
+`domain/defaultTemplates.js` (server-side default/fallback builders),
+`application/queries/GetConfig.js` (self-heal), `application/commands/UpdateConfig.js`
+(write validation, incl. the 999.2146 system:true delete guard — dropping a `system:true`
+template's id from an incoming `schedule_templates` write is a 400; renaming, same id, is
+fine), `application/commands/ResetScheduleTemplates.js` (`POST /config/templates/reset`
+restores the two system templates, `weekday`/`weekend`).
+
+**Legacy keys** (`time_blocks`, `loc_schedules`, `loc_schedule_defaults`,
+`loc_schedule_overrides` — still in `UserConfig.VALID_KEYS`, still writable via
+`PUT /config/:key`) are **derived, not user-edited**, since 999.2145: the Templates tab
+(`UnifiedTemplateTab.jsx`) writes only the canonical trio; `useConfig.js`'s
+`updateScheduleTemplates`/`updateTemplateDefaults`/`updateTemplateOverrides` re-derive and
+persist the legacy keys as a byproduct on every edit (`deriveTimeBlocks`/
+`deriveLocSchedules`). The three DIRECT legacy writers (`updateLocSchedules`/
+`updateLocScheduleDefaults`/`updateLocScheduleOverrides`) were DELETED in 999.2146 (zero
+remaining callers); `updateTimeBlocks` survives — `AppLayout.jsx`'s AI-ops handler
+(`set_weekly`/`set_block_loc`/`set_blocks`/`clone_blocks`) edits the raw per-weekday
+`time_blocks` map directly and does not map cleanly onto templateId-keyed edits.
+
+**IMPORTANT — the legacy keys are NOT dead for the scheduler.** The Settings UI
+(`initFromConfig`) re-derives `timeBlocks`/`locSchedules` fresh from the canonical trio on
+every load, ignoring the raw DB rows entirely — but the BACKEND SCHEDULER does not:
+`loadSchedulerConfig.js`'s `assembleSchedulerCfg` reads `cfg.timeBlocks`/`cfg.locSchedules`
+straight off the legacy `time_blocks`/`loc_schedules` rows, with no re-derivation step of
+its own, and `unifiedScheduleV2.js` (the real placement path, not just display) consumes
+both directly. **Resolution order actually used today:**
+1. `getBlocksForDate` (`shared/scheduler/timeBlockHelpers.js`) — a `template_overrides`-style
+   date match (read via the legacy-named `cfg.locScheduleOverrides` field, kept
+   content-identical by the frontend's dual-write) → that template's blocks.
+2. Else: the raw legacy per-weekday `time_blocks` map (`blocksMap[dayName]`) — this is
+   where `template_defaults` actually takes effect today, ONLY because the frontend
+   pre-resolves `template_defaults` into `time_blocks` on every save. The scheduler never
+   reads `cfg.templateDefaults` directly (it isn't even assembled into scheduler cfg).
+3. `resolveLocationId` (`shared/scheduler/locationHelpers.js`) mirrors this for per-minute
+   location: `cfg.locSchedules[templateId].hours` (date-override or
+   `cfg.locScheduleDefaults[dayName]`), else the block's own `.loc`, else `"home"`.
+
+**Unknown-ref fallback (SUB-207a):** an override date resolving to a templateId absent from
+`schedule_templates` (a dangling ref — legacy pre-existing bad rows, or a since-deleted
+non-system custom template; system templates can't be deleted, see above) falls through to
+the day-of-week blocks rather than a zero-capacity day, and logs a `console.warn` naming the
+date + dangling id (999.2146; the write-side guards only prevent *new* dangling refs, not
+ones already in the DB or created by deleting a non-system template later).
+
+**Repair migration:** `20260721120000_rebuild_stale_legacy_schedule_config.js`
+one-time-rebuilds (not deletes — see its header for the evidence trail) `time_blocks`/
+`loc_schedules` from the canonical trio for every user whose stored `schedule_templates`
+passes validation, clearing the dev-DB-evidenced split-brain (a `loc_schedules` row from
+the pre-2145 Custom-lump tab, stale next to an intact `schedule_templates`). Idempotent;
+skips users with a missing/invalid `schedule_templates`; leaves
+`loc_schedule_defaults`/`loc_schedule_overrides` untouched (independently load-bearing and
+already dual-written on every edit, so they don't accumulate the same one-time staleness).
+
+**Known follow-up (not fixed by 999.2146 — flagged, not improvised):** wiring
+`template_defaults`/`template_overrides` directly into the scheduler's assembled cfg (so
+`getBlocksForDate` consults them instead of relying on the frontend's legacy-key
+dual-write side channel) would make the legacy keys genuinely dead and let a future
+migration delete rather than rebuild them. Deferred — it touches the scheduler's primary
+placement path (`unifiedScheduleV2.js`) and needs its own TDD + golden-master pass, not a
+drive-by inside a "storage" ticket.
+
 ## Calendar Sync
 GCal, MSFT, and Apple (CalDAV) sync are implemented. Known remaining issues: DB contention on simultaneous syncs, split task part sync.
 

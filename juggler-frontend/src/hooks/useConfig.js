@@ -273,20 +273,21 @@ export default function useConfig(onSaveError) {
     saveConfig('time_blocks', val);
   }, [saveConfig]);
 
-  var updateLocSchedules = useCallback(function(val) {
-    setLocSchedules(val);
-    saveConfig('loc_schedules', val);
-  }, [saveConfig]);
-
-  var updateLocScheduleDefaults = useCallback(function(val) {
-    setLocScheduleDefaults(val);
-    saveConfig('loc_schedule_defaults', val);
-  }, [saveConfig]);
-
-  var updateLocScheduleOverrides = useCallback(function(val) {
-    setLocScheduleOverrides(val);
-    saveConfig('loc_schedule_overrides', val);
-  }, [saveConfig]);
+  // 999.2146 — updateLocSchedules/updateLocScheduleDefaults/
+  // updateLocScheduleOverrides (direct legacy-key writers) DELETED: zero
+  // consumers repo-wide (grep across juggler-frontend/src, excluding
+  // __tests__ and this file's own definition/export). The Templates tab
+  // (UnifiedTemplateTab.jsx) already migrated off this pathway in 999.2145 —
+  // its own header comment says as much ("the function itself stays in
+  // useConfig.js, global de-legacy is 999.2146"). The DERIVED legacy state
+  // (setLocSchedules/setLocScheduleDefaults/setLocScheduleOverrides +
+  // deriveTimeBlocks/deriveLocSchedules) stays: updateScheduleTemplates/
+  // updateTemplateDefaults/updateTemplateOverrides below still persist the
+  // re-derived legacy config keys directly via saveConfig() so the
+  // scheduler's legacy-key readers (loadSchedulerConfig.js assembleSchedulerCfg
+  // reads cfg.timeBlocks/cfg.locSchedules straight off the DB row, with no
+  // re-derivation step of its own) stay in sync — that mechanism is
+  // unaffected by this deletion.
 
   var updateHourLocationOverrides = useCallback(function(val) {
     setHourLocationOverrides(val);
@@ -438,8 +439,7 @@ export default function useConfig(onSaveError) {
     setScheduleTemplates, setTemplateDefaults, setTemplateOverrides,
     initFromConfig,
     updateToolMatrix, updateTimeBlocks,
-    updateLocSchedules, updateLocScheduleDefaults,
-    updateLocScheduleOverrides, updateHourLocationOverrides,
+    updateHourLocationOverrides,
     updatePreferences, updateLocations, updateTools,
     updateScheduleTemplates, updateTemplateDefaults, updateTemplateOverrides,
     applyScheduleTemplatesResponse,

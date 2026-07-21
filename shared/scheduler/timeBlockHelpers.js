@@ -12,6 +12,16 @@ function cloneBlocks(blocks) {
   });
 }
 
+// 999.2146 harrison finding 2: getBlocksForDate is called PER-RENDER by
+// CalendarGrid.jsx/HorizontalTimeline.jsx (through this shared module) as
+// well as once per scheduler run per date — an un-deduped warn for a
+// dangling override ref would fire on every render/date, flooding logs.
+// Module-level, keyed by templateId only (not date) — "warn once per
+// dangling id per process" is the requested granularity; a Set survives for
+// the life of the process/module instance (matches the "log warning", not
+// "log every occurrence", intent of SUB-207a).
+var _warnedDanglingTemplateIds = new Set();
+
 function getBlocksForDate(dateStr, blocksMap, cfg) {
   var d = parseDate(dateStr);
   if (!d) return blocksMap.Mon || [];
@@ -20,8 +30,26 @@ function getBlocksForDate(dateStr, blocksMap, cfg) {
     if (cfg.locScheduleOverrides && cfg.locScheduleOverrides[dateStr]) {
       templateId = cfg.locScheduleOverrides[dateStr];
     }
-    if (templateId && cfg.scheduleTemplates[templateId]) {
-      return cfg.scheduleTemplates[templateId].blocks || [];
+    if (templateId) {
+      if (cfg.scheduleTemplates[templateId]) {
+        return cfg.scheduleTemplates[templateId].blocks || [];
+      }
+      // SUB-207a: a dated override referencing a templateId that no longer
+      // exists in scheduleTemplates (a dangling ref — a pre-existing bad row
+      // from before the 999.2144 write-side guard, or a since-deleted
+      // non-system custom template; system templates cannot be deleted,
+      // 999.2146) must NOT produce a zero-capacity day — fall through to the
+      // day-of-week blocksMap below, same as "no override for this date".
+      // Warn (once per dangling id) so it's visible in logs instead of
+      // silently degrading placement.
+      if (!_warnedDanglingTemplateIds.has(templateId)) {
+        _warnedDanglingTemplateIds.add(templateId);
+        console.warn(
+          '[timeBlockHelpers.getBlocksForDate] override for ' + dateStr +
+          ' references unknown templateId "' + templateId +
+          '" — falling back to day-of-week blocks (SUB-207a)'
+        );
+      }
     }
   }
   var dayName = DAY_NAMES[d.getDay()];

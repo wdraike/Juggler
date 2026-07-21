@@ -10,8 +10,8 @@
  * key, which `initFromConfig` discards in favor of canonical `scheduleTemplates`
  * on the next load — edits silently vanished. All writes in this file go
  * through `updateScheduleTemplates`/`updateTemplateDefaults` (never
- * `updateLocSchedules` — that pathway is deleted from this tab; the function
- * itself stays in useConfig.js, global de-legacy is 999.2146).
+ * `updateLocSchedules` — that pathway is deleted from this tab AND from
+ * useConfig.js itself, 999.2146: zero remaining consumers repo-wide).
  */
 import React, { useState } from 'react';
 import HelpIcon from '../HelpIcon';

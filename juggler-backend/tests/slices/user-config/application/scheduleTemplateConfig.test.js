@@ -80,6 +80,72 @@ describe('UpdateConfig — schedule_templates shape validation (999.2144)', () =
   });
 });
 
+// ── UpdateConfig — system-template delete protection (999.2146) ─────────────
+// FE tab already hides the delete button for system:true templates
+// (UnifiedTemplateTab.jsx:266/274/381) — this closes the API bypass: a
+// direct PUT /config/schedule_templates that omits a system:true id must be
+// rejected, same as any other invalid write (400, not persisted). Renaming
+// (same id, new name/blocks) stays allowed — only id ABSENCE is blocked.
+// Reset (ResetScheduleTemplates) is unaffected: it writes the defaults trio
+// directly via repo.upsertConfig, never through this guard.
+describe('UpdateConfig — system-template delete protection (999.2146)', () => {
+  test('dropping a system:true id (weekend) from the incoming value -> 400, NOT persisted', async () => {
+    var repo = seedTemplatesRepo(); // VALID_TEMPLATES: weekday + weekend, both system:true
+    var writeCount = 0; var orig = repo.upsertConfig.bind(repo);
+    repo.upsertConfig = function () { writeCount++; return orig.apply(repo, arguments); };
+    var value = { weekday: VALID_TEMPLATES.weekday }; // weekend dropped
+    var res = await new App.UpdateConfig({ repo: repo, cache: fakeCache() })
+      .execute({ userId: USER, key: 'schedule_templates', value: value });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('weekend');
+    expect(res.body.details).toContain('weekend');
+    expect(writeCount).toBe(0);
+  });
+
+  test('renaming a system:true template (same id, new name) -> 200', async () => {
+    var repo = seedTemplatesRepo();
+    var value = {
+      weekday: Object.assign({}, VALID_TEMPLATES.weekday, { name: 'Work Week' }),
+      weekend: VALID_TEMPLATES.weekend
+    };
+    var res = await new App.UpdateConfig({ repo: repo, cache: fakeCache() })
+      .execute({ userId: USER, key: 'schedule_templates', value: value });
+    expect(res.status).toBe(200);
+    var row = await repo.getConfigRow(USER, 'schedule_templates');
+    expect(JSON.parse(row.config_value).weekday.name).toBe('Work Week');
+  });
+
+  test('dropping a NON-system id is allowed (only system ids are protected)', async () => {
+    var withCustom = Object.assign({}, VALID_TEMPLATES, {
+      custom1: { name: 'Custom', system: false, blocks: [{ id: 'x', tag: 'biz', name: 'Biz', start: 480, end: 600, loc: 'work' }] }
+    });
+    var repo = new InMemoryConfigRepository({
+      config: [{ user_id: USER, config_key: 'schedule_templates', config_value: JSON.stringify(withCustom) }]
+    });
+    var value = { weekday: VALID_TEMPLATES.weekday, weekend: VALID_TEMPLATES.weekend }; // custom1 dropped
+    var res = await new App.UpdateConfig({ repo: repo, cache: fakeCache() })
+      .execute({ userId: USER, key: 'schedule_templates', value: value });
+    expect(res.status).toBe(200);
+  });
+
+  test('no prior schedule_templates row (first-ever write) -> 200, nothing to protect', async () => {
+    var repo = new InMemoryConfigRepository();
+    var res = await new App.UpdateConfig({ repo: repo, cache: fakeCache() })
+      .execute({ userId: USER, key: 'schedule_templates', value: VALID_TEMPLATES });
+    expect(res.status).toBe(200);
+  });
+
+  test('dropping BOTH system ids -> 400 naming both', async () => {
+    var repo = seedTemplatesRepo();
+    var value = { extra: { name: 'Extra', blocks: [{ id: 'x', tag: 'biz', name: 'Biz', start: 480, end: 600, loc: 'work' }] } };
+    var res = await new App.UpdateConfig({ repo: repo, cache: fakeCache() })
+      .execute({ userId: USER, key: 'schedule_templates', value: value });
+    expect(res.status).toBe(400);
+    expect(res.body.details).toEqual(expect.arrayContaining(['weekday', 'weekend']));
+    expect(res.body.details.length).toBe(2);
+  });
+});
+
 describe('UpdateConfig — template_defaults ref validation against STORED schedule_templates (999.2144)', () => {
   test('unknown templateId ref -> 400, NOT persisted', async () => {
     var repo = seedTemplatesRepo();
