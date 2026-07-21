@@ -31,7 +31,7 @@ const MOCK_TASKS = [
 ];
 
 describe('DependencyView Component', () => {
-  test('renders dependency graph with tasks that have dependencies', () => {
+  test('renders dependency graph with tasks that have dependencies', async () => {
     render(
       <DependencyView
         allTasks={MOCK_TASKS}
@@ -48,9 +48,9 @@ describe('DependencyView Component', () => {
       />
     );
 
-    // The DependencyView component is complex and requires ELK layout engine
-    // For now, let's test that it renders without crashing and shows the toolbar
-    expect(screen.getByText(/tasks with dependencies/)).toBeInTheDocument();
+    // The async ELK layout window now renders a skeleton (999.2122) —
+    // await the laid-out toolbar instead of asserting synchronously.
+    expect(await screen.findByText(/\d+ tasks with dependencies/)).toBeInTheDocument();
     expect(screen.getByText('−')).toBeInTheDocument(); // Zoom out button
     expect(screen.getByText('+')).toBeInTheDocument(); // Zoom in button
     expect(screen.getByText('100%')).toBeInTheDocument(); // Zoom level

@@ -12,6 +12,7 @@ import { getTaskIcon } from '../../utils/taskIcon';
 import { getTaskDeps, topoSortTasks } from '../../scheduler/dependencyHelpers';
 import { PRI_COLORS } from '../../state/constants';
 import { isTerminalStatus } from '../../shared/task-status';
+import SkeletonRows from '../common/SkeletonRows';
 
 var STATUS_ICONS = { done: '\u2705', wip: '\u{1F7E1}', cancel: '\u274C', skip: '\u23ED\uFE0F', other: '\u27A1\uFE0F', '': '\u26AA' };
 var ARROW_COLORS = ['#2E4A7A', '#4338CA', '#2D6A4F', '#8B2635', '#D97706', '#9E6B3B', '#0D9488'];
@@ -510,6 +511,18 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
         if (node.y + NODE_H > maxY) maxY = node.y + NODE_H;
       });
       setLayout({ positions: positions, width: maxX + 20, height: maxY + 20 });
+    }).catch(function(err) {
+      // 999.2122: a layout failure must clear the pending gate (skeleton would
+      // otherwise show forever) — fall back loudly. On a RE-layout failure keep
+      // the previously good graph instead of blanking it (harrison INFO).
+      console.error('[DependencyView] ELK layout failed', err);
+      if (!cancelled) {
+        setLayout(function(prev) {
+          return Object.keys(prev.positions).length
+            ? prev
+            : { positions: {}, width: 0, height: 0, failed: true };
+        });
+      }
     });
 
     return function() { cancelled = true; };
@@ -648,6 +661,16 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
         {projectFilter
           ? 'No tasks in project "' + projectFilter + '"'
           : 'No tasks with dependencies. Use the project filter to view a project\'s tasks.'}
+      </div>
+    );
+  }
+
+  // 999.2122: async ELK layout window used to render a silently EMPTY graph.
+  // Skeleton rows per brand Loading & Busy-State Standard until positions land.
+  if (treeIds.length === 0 && !layout.failed) {
+    return (
+      <div style={{ flex: 1, padding: 16 }}>
+        <SkeletonRows rows={5} label="Laying out dependencies…" theme={theme} />
       </div>
     );
   }
