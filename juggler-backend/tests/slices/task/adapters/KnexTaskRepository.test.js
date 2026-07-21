@@ -222,8 +222,8 @@ var OTHER = 'knexrepo-user-B';
 
 describe('KnexTaskRepository — DB-backed characterization (test-bed @3407)', function () {
   beforeAll(async function () {
-    // setSystemTime WITHOUT useFakeTimers — avoids hangs in async/retry code
-    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
+    // Date-only fake timers (999.2157): Date frozen, every timer API real — no hangs
+    installDateOnlyFakeTimers(new Date('2026-01-15T12:00:00Z'));
     await assertDbAvailable();
     for (var u of [USER, OTHER]) {
       await knex('task_instances').where('user_id', u).del();

@@ -274,7 +274,7 @@ ProviderSim.prototype._dispatch = function (pid, method, args) {
       // check) without any real wait — this is the FIRST network call in
       // Phase 1, so every later `Date.now()` read in sync() sees the advanced
       // time. Any scenario can opt in via script.advanceClockMs.
-      if (script.advanceClockMs) jest.setSystemTime(new Date(FIXED_NOW.getTime() + script.advanceClockMs));
+      if (script.advanceClockMs) installDateOnlyFakeTimers(new Date(FIXED_NOW.getTime() + script.advanceClockMs));
       return Promise.resolve('tok-' + pid);
 
     case 'listEvents':

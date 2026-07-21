@@ -36,8 +36,8 @@ var DB_USER = process.env.DB_USER || process.env.TEST_DB_USER || 'root';
 var DB_PASS = process.env.DB_PASSWORD || process.env.TEST_DB_PASSWORD || 'rootpass';
 
 beforeAll(async function() {
-  // setSystemTime WITHOUT useFakeTimers — avoids hangs in async/retry code
-  jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
+  // Date-only fake timers (999.2157): Date frozen, every timer API real — no hangs
+  installDateOnlyFakeTimers(new Date('2026-01-15T12:00:00Z'));
   // TEST-FR-001: assertDbAvailable() throws (fail-loud) if the DB is unreachable.
   // It does NOT set a flag — it propagates the error to Jest, which marks the suite
   // as failed and prevents any test body from running (and passing with 0 assertions).

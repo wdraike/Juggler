@@ -87,8 +87,8 @@ describe('ANCHOR_PROJECTION_STATUSES gate contract (999.1098 — single source)'
 describe('batch write path — missed reanchors (ruling 2020-01-06 / 999.844, wired by 999.1098)', function () {
 
   beforeAll(async function () {
-    // setSystemTime WITHOUT useFakeTimers — avoids hangs in async/retry code
-    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
+    // Date-only fake timers (999.2157): Date frozen, every timer API real — no hangs
+    installDateOnlyFakeTimers(new Date('2026-01-15T12:00:00Z'));
     await assertDbAvailable();
     var existing = await db('users').where('id', USER_ID).first();
     if (!existing) {

@@ -115,8 +115,12 @@ var TIME_FLEX_MINUTES   = 120;
 var available = false;
 
 beforeAll(async () => {
-  // setSystemTime WITHOUT useFakeTimers — avoids hangs in async/retry code
-  jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
+  // Date-only fake timers (999.2157): Date frozen, every timer API real — no hangs.
+  // Frozen mid-July, NOT Jan-15: the LC-1/LC-2 premise is a PAST placed instance
+  // (PLACED_SLOT_UTC = 2026-06-14), so "now" must be after it. The a2dd4aaf-era
+  // Jan-15 freeze only looked green because bare setSystemTime no-opped and the
+  // suite ran on real (July) time. Same repair as the b886de24 exemplar.
+  installDateOnlyFakeTimers(new Date('2026-07-15T12:00:00Z'));
   await assertDbAvailable();
   try { await db.raw('SELECT 1'); available = true; } catch (e) {
     console.warn('[lc1-lc3] Test DB not available:', e.message);

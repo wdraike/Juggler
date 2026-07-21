@@ -142,8 +142,8 @@ async function cleanup() {
 }
 
 beforeAll(async () => {
-  // setSystemTime WITHOUT useFakeTimers — avoids hangs in async/retry code
-  jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
+  // Date-only fake timers (999.2157): Date frozen, every timer API real — no hangs
+  installDateOnlyFakeTimers(new Date('2026-01-15T12:00:00Z'));
   // 999.1409: create + migrate the isolated DB if absent (throws TEST-FR-001
   // itself when the test-bed MySQL server is unreachable).
   await ensureIsolatedDb();

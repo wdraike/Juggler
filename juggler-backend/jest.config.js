@@ -46,6 +46,7 @@ module.exports = {
   // per-suite runWithActor wrapping (see juggler/CLAUDE.md Approved Fallbacks).
   setupFilesAfterEnv: [
     '<rootDir>/tests/helpers/armAuditTestActor.js',
+    '<rootDir>/tests/helpers/dateOnlyFakeTimers.js',
     '<rootDir>/test-helpers/afterEachFile.js',
   ],
   forceExit: true,

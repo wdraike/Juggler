@@ -21,8 +21,8 @@ const testUserId = 'test-user-12345';
 
 describe('CalendarEvent Factory', () => {
   beforeEach(() => {
-    // setSystemTime WITHOUT useFakeTimers — avoids hangs in async/retry code
-    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
+    // Date-only fake timers (999.2157): Date frozen, every timer API real — no hangs
+    installDateOnlyFakeTimers(new Date('2026-01-15T12:00:00Z'));
   });
 
   afterEach(() => {

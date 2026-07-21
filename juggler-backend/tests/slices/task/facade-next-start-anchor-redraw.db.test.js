@@ -134,8 +134,8 @@ async function seedInstance(tmplId, instId, overrides) {
 
 describe('facade.updateTask -> recurCleanup "Next Cycle Starts" anchor redraw (999.1110 / R5)', () => {
   beforeAll(async () => {
-    // setSystemTime WITHOUT useFakeTimers — avoids hangs in async/retry code
-    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
+    // Date-only fake timers (999.2157): Date frozen, every timer API real — no hangs
+    installDateOnlyFakeTimers(new Date('2026-01-15T12:00:00Z'));
     await assertDbAvailable();
     var existing = await db('users').where('id', USER_ID).first();
     if (!existing) {

@@ -64,8 +64,8 @@ async function clearUserTasks() {
 describe('MCP tasks.js write tools — real-DB side effects (BEFORE facade migration)', function () {
 
   beforeAll(async function () {
-    // setSystemTime WITHOUT useFakeTimers — avoids hangs in async/retry code
-    jest.setSystemTime(new Date('2026-01-15T12:00:00Z'));
+    // Date-only fake timers (999.2157): Date frozen, every timer API real — no hangs
+    installDateOnlyFakeTimers(new Date('2026-01-15T12:00:00Z'));
     await assertDbAvailable();
     await clearUserTasks();
     await db('users').where('id', USER_ID).del();
