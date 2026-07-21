@@ -61,6 +61,45 @@ function buildSegments(hours, startMin, endMin) {
   return segs;
 }
 
+/** 510 -> '8:30 AM', 720 -> '12:00 PM' (999.2167 text-first labels). */
+function fmtTime(mins) {
+  var h = Math.floor(mins / 60) % 24, m = mins % 60;
+  var ampm = h < 12 ? 'AM' : 'PM';
+  var h12 = h % 12 === 0 ? 12 : h % 12;
+  return h12 + ':' + (m < 10 ? '0' : '') + m + ' ' + ampm;
+}
+
+/** 360 -> '6a', 720 -> '12p' — compact axis tick labels. */
+function fmtTickShort(mins) {
+  var h = Math.floor(mins / 60) % 24;
+  var h12 = h % 12 === 0 ? 12 : h % 12;
+  return h12 + (h < 12 ? 'a' : 'p');
+}
+
+function blockAt(blocks, minute) {
+  for (var i = 0; i < (blocks || []).length; i++) {
+    if (minute >= blocks[i].start && minute < blocks[i].end) return blocks[i];
+  }
+  return null;
+}
+
+/**
+ * 999.2167 'Day at a glance': merge 15-min slots into spans where BOTH the
+ * containing block and the effective location are constant — plain-text rows
+ * that double as a legend with zero color dependence (WCAG 1.4.1).
+ */
+function buildGlanceRows(blocks, hours, startMin, endMin) {
+  var rows = [];
+  for (var m = startMin; m < endMin; m += 15) {
+    var b = blockAt(blocks, m);
+    var key = (b ? b.id || b.name : '') + '|' + (hours[m] || 'unset');
+    var last = rows[rows.length - 1];
+    if (last && last.key === key && last.end === m) { last.end = m + 15; }
+    else { rows.push({ key: key, start: m, end: m + 15, block: b, loc: hours[m] || 'unset' }); }
+  }
+  return rows;
+}
+
 function ScheduleTemplateBar({ hours, locations, theme, onCommit, blocks, onBlocksChange }) {
   var [activeLoc, setActiveLoc] = useState(locations[0]?.id || null);
   var barRef = React.useRef(null);
@@ -111,9 +150,10 @@ function ScheduleTemplateBar({ hours, locations, theme, onCommit, blocks, onBloc
     var touch = e.touches[0];
     var minute = slotAt(touch.clientX);
     dragRef.current = { startMinute: minute, lastMinute: minute, loc: activeLoc };
+    setHoverMin(minute); // 999.2167: touch drives the readout too (harrison WARN)
     commitPaint(minute, minute, activeLoc);
-    function onTouchMove(ev) { var drag = dragRef.current; if (!drag) return; var t = ev.touches[0]; var m = slotAt(t.clientX); if (m !== drag.lastMinute) { drag.lastMinute = m; commitPaint(drag.startMinute, m, drag.loc); } }
-    function onTouchEnd() { dragRef.current = null; document.removeEventListener('touchmove', onTouchMove); document.removeEventListener('touchend', onTouchEnd); }
+    function onTouchMove(ev) { var drag = dragRef.current; if (!drag) return; var t = ev.touches[0]; var m = slotAt(t.clientX); if (m !== drag.lastMinute) { drag.lastMinute = m; setHoverMin(m); commitPaint(drag.startMinute, m, drag.loc); } }
+    function onTouchEnd() { dragRef.current = null; setHoverMin(null); document.removeEventListener('touchmove', onTouchMove); document.removeEventListener('touchend', onTouchEnd); }
     document.addEventListener('touchmove', onTouchMove, { passive: false }); document.addEventListener('touchend', onTouchEnd);
   }
 
@@ -134,15 +174,97 @@ function ScheduleTemplateBar({ hours, locations, theme, onCommit, blocks, onBloc
     document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
   }
 
+  // 999.2167: hover/touch readout — the text decode of "what is at this time".
+  var [hoverMin, setHoverMin] = useState(null);
+  function onHoverMove(e) { setHoverMin(slotAt(e.clientX)); }
+  function onHoverLeave() { setHoverMin(null); }
+
+  var locName = function(id) { var l = locMap[id]; return l ? ((l.icon ? l.icon + ' ' : '') + l.name) : (id === 'unset' ? 'no location' : id); };
+  var blockLabel = function(b) { return b ? ((b.icon ? b.icon + ' ' : '') + (b.name || b.tag || 'Block')) : 'Free'; };
+
+  var hoverBlock = hoverMin != null ? blockAt(blocks, hoverMin) : null;
+  var hoverLoc = hoverMin != null ? (hours[hoverMin] || 'unset') : null;
+  var glanceRows = React.useMemo(function() { return buildGlanceRows(blocks, hours, startMin, endMin); }, [blocks, hours, startMin, endMin]);
+  var laneLabelStyle = { fontSize: 10, color: theme.textMuted, width: 62, flexShrink: 0, textAlign: 'right', paddingRight: 8, textTransform: 'uppercase', letterSpacing: '0.05em' };
+
   return (
     <div>
-      <div style={{ display: 'flex', gap: 4, marginBottom: 6, flexWrap: 'wrap' }}>
-        {locations.map(function(l) { return (<button key={l.id} onClick={function() { setActiveLoc(l.id); }} style={{ padding: '2px 8px', borderRadius: 10, fontSize: 11, cursor: 'pointer', border: '1px solid ' + (activeLoc === l.id ? theme.accent : theme.border), background: activeLoc === l.id ? theme.accent + '20' : 'transparent', color: activeLoc === l.id ? theme.accent : theme.textMuted, fontFamily: 'inherit' }}>{l.icon} {l.name}</button>); })}
+      {/* Paint tool (999.2167 item 4): titled, with instruction + tint swatches */}
+      <div style={{ fontSize: 12, fontWeight: 600, color: theme.text, marginBottom: 2 }}>Paint locations</div>
+      <div style={{ fontSize: 11, color: theme.textMuted, marginBottom: 6 }}>
+        Pick a location, then click or drag across the Location lane to paint it.
       </div>
-      <div ref={barRef} data-testid="schedule-template-bar" onMouseDown={onMouseDown} onTouchStart={onTouchStart} style={{ position: 'relative', height: 40, background: theme.bgTertiary, borderRadius: 6, cursor: activeLoc ? 'pointer' : 'default', overflow: 'hidden', userSelect: 'none' }}>
-        {segments.map(function(s, i) { return (<div key={i} style={{ position: 'absolute', left: pct(s.start) + '%', width: pct(s.end) - pct(s.start) + '%', top: 0, bottom: 0, background: LOC_TINT[s.loc] || theme.border, opacity: s.loc === 'unset' ? 0.15 : 0.4 }} />); })}
-        {blocks.map(function(b, i) { return (<div key={i} data-testid="template-block" style={{ position: 'absolute', left: pct(b.start) + '%', width: pct(b.end) - pct(b.start) + '%', top: 0, bottom: 0, border: '2px solid ' + (b.color || theme.accent), borderRadius: 4, boxSizing: 'border-box', pointerEvents: 'none' }}><div style={{ position: 'absolute', left: -3, top: 0, bottom: 0, width: 6, cursor: 'ew-resize', pointerEvents: 'auto' }} onMouseDown={function(e) { onBlockEdgeDown(e, i, 'start'); }} /><div style={{ position: 'absolute', right: -3, top: 0, bottom: 0, width: 6, cursor: 'ew-resize', pointerEvents: 'auto' }} onMouseDown={function(e) { onBlockEdgeDown(e, i, 'end'); }} /></div>); })}
-        {hourTicks.map(function(h) { return (<div key={h} style={{ position: 'absolute', left: pct(h) + '%', top: 0, bottom: 0, borderLeft: '1px solid ' + theme.border, opacity: 0.3 }} />); })}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
+        {locations.map(function(l) { return (<button key={l.id} onClick={function() { setActiveLoc(l.id); }} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 8px', borderRadius: 10, fontSize: 11, cursor: 'pointer', border: '1px solid ' + (activeLoc === l.id ? theme.accent : theme.border), background: activeLoc === l.id ? theme.accent + '20' : 'transparent', color: activeLoc === l.id ? theme.accent : theme.textMuted, fontFamily: 'inherit' }}><span data-testid="loc-chip-swatch" aria-hidden="true" style={{ width: 9, height: 9, borderRadius: 2, background: LOC_TINT[l.id] || theme.border, display: 'inline-block' }} />{l.icon} {l.name}</button>); })}
+      </div>
+
+      {/* Blocks lane (999.2167 item 2): named segments, tag color demoted to a thin cap */}
+      <div style={{ display: 'flex', alignItems: 'stretch', marginBottom: 2 }}>
+        <div style={laneLabelStyle}>Blocks</div>
+        <div style={{ position: 'relative', height: 26, flex: 1 }}>
+          {blocks.map(function(b, i) {
+            var w = pct(b.end) - pct(b.start);
+            return (
+              <div key={i} data-testid="template-block" role="img" aria-label={blockLabel(b) + ' block, ' + fmtTime(b.start) + ' to ' + fmtTime(b.end)} style={{ position: 'absolute', left: pct(b.start) + '%', width: w + '%', top: 0, bottom: 0, background: theme.bgTertiary, border: '1px solid ' + theme.border, borderRadius: 4, boxSizing: 'border-box', pointerEvents: 'none' }}>
+                {/* NO overflow:hidden here — it would clip (and de-hit-test) the
+                    -3px edge handles below, shrinking the resize grab target
+                    (harrison WARN); the name label self-clips via ellipsis. */}
+                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: b.color || theme.accent, borderRadius: '3px 3px 0 0' }} />
+                {w > 7 && (<div style={{ position: 'absolute', left: 4, right: 4, top: 6, fontSize: 10, color: theme.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{blockLabel(b)}</div>)}
+                <div style={{ position: 'absolute', left: -3, top: 0, bottom: 0, width: 6, cursor: 'ew-resize', pointerEvents: 'auto' }} onMouseDown={function(e) { onBlockEdgeDown(e, i, 'start'); }} />
+                <div style={{ position: 'absolute', right: -3, top: 0, bottom: 0, width: 6, cursor: 'ew-resize', pointerEvents: 'auto' }} onMouseDown={function(e) { onBlockEdgeDown(e, i, 'end'); }} />
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Location lane: the paint surface — mechanics and testid unchanged */}
+      <div style={{ display: 'flex', alignItems: 'stretch' }}>
+        <div style={laneLabelStyle}>Locations</div>
+        <div ref={barRef} data-testid="schedule-template-bar" onMouseDown={onMouseDown} onTouchStart={onTouchStart} onMouseMove={onHoverMove} onMouseLeave={onHoverLeave} style={{ position: 'relative', height: 30, background: theme.bgTertiary, borderRadius: 6, cursor: activeLoc ? 'pointer' : 'default', overflow: 'hidden', userSelect: 'none', flex: 1 }}>
+          {segments.map(function(s, i) {
+            var w = pct(s.end) - pct(s.start);
+            return (
+              <div key={i} data-testid="location-segment" role="img" aria-label={(s.loc === 'unset' ? 'No location' : locName(s.loc)) + ' from ' + fmtTime(s.start) + ' to ' + fmtTime(s.end)} style={{ position: 'absolute', left: pct(s.start) + '%', width: w + '%', top: 0, bottom: 0, background: LOC_TINT[s.loc] || theme.border, opacity: s.loc === 'unset' ? 0.15 : 0.4 }} />
+            );
+          })}
+          {/* Labels in a separate full-opacity layer — inside the tinted segment
+              they would inherit its 0.4 opacity and wash out. */}
+          {segments.map(function(s, i) {
+            var w = pct(s.end) - pct(s.start);
+            if (w <= 9 || s.loc === 'unset') return null;
+            return (<span key={'lbl-' + i} aria-hidden="true" style={{ position: 'absolute', left: 'calc(' + pct(s.start) + '% + 4px)', top: 8, fontSize: 10, color: theme.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: w - 2 + '%', pointerEvents: 'none' }}>{locName(s.loc)}</span>);
+          })}
+          {hourTicks.map(function(h) { return (<div key={h} style={{ position: 'absolute', left: pct(h) + '%', top: 0, bottom: 0, borderLeft: '1px solid ' + theme.border, opacity: 0.3, pointerEvents: 'none' }} />); })}
+        </div>
+      </div>
+
+      {/* Labeled hour axis (999.2167 item 2c) */}
+      <div style={{ display: 'flex', alignItems: 'stretch', marginTop: 2 }}>
+        <div style={laneLabelStyle} />
+        <div data-testid="template-hour-axis" style={{ position: 'relative', height: 13, flex: 1 }}>
+          {hourTicks.map(function(h) { return (<span key={h} style={{ position: 'absolute', left: pct(h) + '%', transform: 'translateX(-50%)', fontSize: 9, color: theme.textMuted }}>{fmtTickShort(h)}</span>); })}
+        </div>
+      </div>
+
+      {/* Hover/touch readout (999.2167 item 1) */}
+      <div data-testid="template-readout" role="status" style={{ fontSize: 11, color: theme.textSecondary, minHeight: 16, marginTop: 4 }}>
+        {hoverMin != null
+          ? fmtTime(hoverMin) + ' — ' + (hoverBlock ? blockLabel(hoverBlock) + ' block' : 'Free') + ' — at ' + (hoverLoc === 'unset' ? 'no location' : locName(hoverLoc))
+          : 'Hover or touch the lanes to read the schedule at a time.'}
+      </div>
+
+      {/* Day at a glance (999.2167 item 3): text-first legend, zero color dependence */}
+      <div data-testid="day-glance" style={{ marginTop: 8 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: theme.text, marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Day at a glance</div>
+        {glanceRows.map(function(r, i) {
+          return (
+            <div key={i} style={{ fontSize: 11, color: theme.textSecondary, padding: '1px 0' }}>
+              {fmtTime(r.start)}&ndash;{fmtTime(r.end)} &mdash; {blockLabel(r.block)}{r.block ? '' : ' time'} &mdash; at {r.loc === 'unset' ? 'no location' : locName(r.loc)}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

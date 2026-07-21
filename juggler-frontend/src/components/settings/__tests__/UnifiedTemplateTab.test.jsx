@@ -77,7 +77,7 @@ function makeConfig(overrides) {
 /** Fix the schedule bar's layout so clientX maps 1:1 onto (minute - startMin). */
 function mockBarRect(startMin, endMin) {
   var totalMin = endMin - startMin;
-  jest.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({
+  jest.spyOn(window.Element.prototype, 'getBoundingClientRect').mockReturnValue({
     left: 0, right: totalMin, width: totalMin, top: 0, bottom: 40, height: 40, x: 0, y: 0, toJSON: function () {},
   });
 }
@@ -366,4 +366,78 @@ describe('UnifiedTemplateTab', () => {
       expect(showToast).toHaveBeenCalledWith('Failed to reset templates', 'error');
     });
   });
+
+  // 999.2167 — legibility redesign (David creative review 2026-07-21): the bar
+  // previously stacked two color encodings on one unlabeled strip (WCAG 1.4.1
+  // color-only fail). These pin the text-first additions; paint/drag mechanics
+  // and the schedule-template-bar / template-block contracts stay unchanged.
+  describe('legibility redesign (999.2167)', () => {
+    function renderTab() {
+      return render(<UnifiedTemplateTab config={makeConfig()} theme={theme} darkMode={false} isMobile={false} />);
+    }
+
+    it('renders a labeled hour axis (6a / 12p style ticks)', () => {
+      const { getByTestId } = renderTab();
+      const axis = getByTestId('template-hour-axis');
+      expect(axis.textContent).toMatch(/6a/i);
+      expect(axis.textContent).toMatch(/12p/i);
+    });
+
+    it('block segments carry visible icon+name labels and time-range aria-labels', () => {
+      renderTab();
+      const blocks = screen.getAllByTestId('template-block');
+      expect(blocks.length).toBe(2);
+      expect(blocks[0].textContent).toMatch(/Morning/);
+      expect(blocks[1].textContent).toMatch(/Biz/);
+      expect(blocks[1].getAttribute('aria-label')).toMatch(/Biz/);
+      expect(blocks[1].getAttribute('aria-label')).toMatch(/8:00 AM/);
+      expect(blocks[1].getAttribute('aria-label')).toMatch(/12:00 PM/);
+    });
+
+    it('location lane segments are aria-labeled with location and time range', () => {
+      const { container } = renderTab();
+      const segs = container.querySelectorAll('[data-testid="location-segment"]');
+      expect(segs.length).toBeGreaterThanOrEqual(2);
+      const labels = Array.from(segs).map((s) => s.getAttribute('aria-label') || '');
+      expect(labels.some((l) => /Work/.test(l) && /8:00 AM/.test(l))).toBe(true);
+    });
+
+    it('hovering the location lane shows the time — block — location readout', () => {
+      mockBarRect(300, 780);
+      const { container, getByTestId } = renderTab();
+      const bar = container.querySelector('[data-testid="schedule-template-bar"]');
+      // clientX maps 1:1 onto minute-startMin (mockBarRect): 210 -> minute 510 = 8:30 AM
+      fireEvent.mouseMove(bar, { clientX: 210 });
+      const readout = getByTestId('template-readout');
+      expect(readout.textContent).toMatch(/8:30 AM/);
+      expect(readout.textContent).toMatch(/Biz/);
+      expect(readout.textContent).toMatch(/Work/);
+    });
+
+    it('Day at a glance lists merged block-and-location spans as plain text', () => {
+      const { getByTestId } = renderTab();
+      const glance = getByTestId('day-glance');
+      expect(glance.textContent).toMatch(/6:00 AM[^A-Za-z]*8:00 AM/);
+      expect(glance.textContent).toMatch(/Morning/);
+      expect(glance.textContent).toMatch(/Home/);
+      expect(glance.textContent).toMatch(/Biz/);
+      expect(glance.textContent).toMatch(/Work/);
+    });
+
+    it('touch paint drives the readout too (harrison WARN on 999.2167)', () => {
+      mockBarRect(300, 780);
+      const { container, getByTestId } = renderTab();
+      const bar = container.querySelector('[data-testid="schedule-template-bar"]');
+      fireEvent.touchStart(bar, { touches: [{ clientX: 210 }] }); // minute 510 = 8:30 AM
+      expect(getByTestId('template-readout').textContent).toMatch(/8:30 AM/);
+    });
+
+    it('paint tool has a title, an instruction, and tint swatches on the location chips', () => {
+      const { container } = renderTab();
+      expect(screen.getByText(/Paint locations/i)).toBeInTheDocument();
+      expect(screen.getByText(/drag/i)).toBeInTheDocument();
+      expect(container.querySelectorAll('[data-testid="loc-chip-swatch"]').length).toBe(3);
+    });
+  });
+
 });
