@@ -43,9 +43,39 @@ function resolveLocationId(dateStr, hourOrMin, cfg, blocks) {
   var hour = hourOrMin < 24 ? hourOrMin : Math.floor(hourOrMin / 60);
   var minute = hourOrMin < 24 ? hourOrMin * 60 : hourOrMin;
   var minSlot = Math.floor(minute / 15) * 15;
+  // 999.2164 (David rulings 2026-07-21, RULINGS-2026-07-21.md): the per-date
+  // per-hour user paint is the MOST specific signal and stays on top
+  // (refinement ruling); then the CANONICAL template trio — chosen template's
+  // locOverrides[minSlot] -> containing canonical block's .loc — then the
+  // legacy chain below. Template choice mirrors getBlocksForDate's tiers:
+  // templateOverrides[date] -> legacy locScheduleOverrides[date] ->
+  // templateDefaults[day], each only when the id resolves (dangling refs
+  // fall through). Pre-fix only the legacy loc_schedules hour-map was read,
+  // so canonical-only writers (reset endpoint, MCP/API) left locations stale.
   var hourOv = cfg.hourLocationOverrides;
   if (hourOv && hourOv[dateStr] && hourOv[dateStr][hour] !== undefined) {
     return hourOv[dateStr][hour];
+  }
+  if (cfg.scheduleTemplates) {
+    var ctid = null;
+    if (cfg.templateOverrides && cfg.templateOverrides[dateStr] && cfg.scheduleTemplates[cfg.templateOverrides[dateStr]]) {
+      ctid = cfg.templateOverrides[dateStr];
+    } else if (cfg.locScheduleOverrides && cfg.locScheduleOverrides[dateStr] && cfg.scheduleTemplates[cfg.locScheduleOverrides[dateStr]]) {
+      ctid = cfg.locScheduleOverrides[dateStr];
+    } else if (cfg.templateDefaults) {
+      var cd = parseDate(dateStr);
+      if (cd) {
+        var cdn = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][cd.getDay()];
+        var candidate = cfg.templateDefaults[cdn];
+        if (candidate && cfg.scheduleTemplates[candidate]) ctid = candidate;
+      }
+    }
+    if (ctid) {
+      var ctpl = cfg.scheduleTemplates[ctid];
+      if (ctpl.locOverrides && ctpl.locOverrides[minSlot] !== undefined) return ctpl.locOverrides[minSlot];
+      var cblock = getBlockAtMinute(ctpl.blocks || [], minute);
+      if (cblock && cblock.loc) return cblock.loc;
+    }
   }
   var templateId = null;
   if (cfg.locScheduleOverrides && cfg.locScheduleOverrides[dateStr]) {

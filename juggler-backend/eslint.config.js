@@ -79,4 +79,33 @@ module.exports = [
       }],
     },
   },
+  // 999.2164: tests were previously never linted directly (root-only hook
+  // detection); the vinatieri nearest-config hook (999.2168) now lints staged
+  // test files against THIS config — give them node + jest globals so
+  // legitimate test code doesn't no-undef.
+  {
+    files: ['tests/**/*.js', 'test-helpers/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'commonjs',
+      globals: {
+        console: 'readonly', process: 'readonly', Buffer: 'readonly',
+        __dirname: 'readonly', require: 'readonly', module: 'readonly',
+        exports: 'readonly', setTimeout: 'readonly', setInterval: 'readonly',
+        clearTimeout: 'readonly', clearInterval: 'readonly',
+        setImmediate: 'readonly', clearImmediate: 'readonly',
+        fetch: 'readonly', URL: 'readonly', URLSearchParams: 'readonly',
+        global: 'readonly',
+        describe: 'readonly', it: 'readonly', test: 'readonly',
+        expect: 'readonly', beforeEach: 'readonly', afterEach: 'readonly',
+        beforeAll: 'readonly', afterAll: 'readonly', jest: 'readonly',
+      },
+    },
+  },
+  // CommonJS node config files — recommended rules (no `files` restriction)
+  // would no-undef their require/module when the vinatieri staged-file hook
+  // lints them directly (same self-ignore as juggler-frontend, 999.2168).
+  {
+    ignores: ['eslint.config.js', 'eslint.boundaries.config.js'],
+  },
 ];
