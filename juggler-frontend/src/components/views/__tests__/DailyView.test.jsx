@@ -30,10 +30,12 @@ jest.mock('../../../scheduler/dateHelpers', () => ({
   parseDate: (str) => new Date(str)
 }));
 
-jest.mock('../../../scheduler/timeBlockHelpers', () => ({
-  getBlocksForDate: () => [],
-  parseWhen: () => []
-}));
+// 999.2165: use the REAL timeBlockHelpers (pure shared module) — the previous
+// `getBlocksForDate: () => []` stub made the block wiring untestable and hid
+// the 2-arg call bug this ticket fixes. mockSchedCfg carries timeBlocks: {}
+// so pre-existing tests still resolve to [] blocks, unchanged.
+jest.mock('../../../scheduler/timeBlockHelpers', () =>
+  jest.requireActual('../../../scheduler/timeBlockHelpers'));
 
 jest.mock('../../../scheduler/locationHelpers', () => ({
   resolveLocationId: () => 'home',
@@ -87,6 +89,9 @@ const mockTasks = [
 
 const mockStatuses = {};
 const mockSchedCfg = {
+  // 999.2165: DailyView now passes schedCfg.timeBlocks as the blocksMap arg —
+  // the real schedCfg (AppLayout <- useConfig) always carries it.
+  timeBlocks: {},
   locScheduleDefaults: {},
   locScheduleOverrides: {},
   scheduleTemplates: {
@@ -482,4 +487,42 @@ describe('DailyView — 999.2034 split chunks coalesce into one display block', 
     var cards = screen.getAllByText('Apply for Jobs');
     expect(cards).toHaveLength(1);
   });
+});
+// 999.2165 — DailyView used to call getBlocksForDate(dateKey, schedCfg) (2 args:
+// blocksMap=schedCfg, cfg=undefined), so blocks were ALWAYS [] and neither the
+// time-block accent bands nor block-aware hour locations ever rendered, and
+// canonical template day-assignments (999.2161) never reached DailyView.
+test('renders time-block accent bands from a canonical template day assignment (999.2165)', () => {
+  const cfg = {
+    timeBlocks: {},
+    locScheduleDefaults: {},
+    locScheduleOverrides: {},
+    scheduleTemplates: {
+      weekday: { blocks: [{ id: 'b1', tag: 'biz', name: 'Biz', start: 540, end: 720, loc: 'work' }] }
+    },
+    templateDefaults: { Mon: 'weekday' }
+  };
+  const { getAllByTestId } = render(
+    <DailyView
+      selectedDate={new Date('2026-06-15')} // a Monday
+      selectedDateKey="2026-06-15"
+      dayPlacements={{}}
+      allTasks={[]}
+      statuses={{}}
+      onStatusChange={() => {}}
+      onDelete={() => {}}
+      onExpand={() => {}}
+      gridZoom={100}
+      darkMode={false}
+      schedCfg={cfg}
+      nowMins={960}
+      onGridDrop={() => {}}
+      blockedTaskIds={[]}
+      onZoomChange={() => {}}
+      isMobile={false}
+      onMarkerDrag={() => {}}
+      weatherByDate={{}}
+    />
+  );
+  expect(getAllByTestId('day-block-band').length).toBe(1);
 });

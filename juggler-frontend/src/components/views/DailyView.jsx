@@ -165,7 +165,11 @@ export default function DailyView({
   }, [selectedDateKey, hourHeight]);
 
   var blocks = useMemo(function () {
-    return getBlocksForDate(selectedDateKey, schedCfg) || [];
+    // 999.2165: was getBlocksForDate(selectedDateKey, schedCfg) — 2 args, so
+    // blocksMap=schedCfg (no Mon..Sun keys) and cfg=undefined: blocks were
+    // ALWAYS [] and canonical template day-assignments (999.2161) never
+    // reached DailyView. Signature matches CalendarGrid.jsx:209.
+    return getBlocksForDate(selectedDateKey, schedCfg.timeBlocks, schedCfg) || [];
   }, [selectedDateKey, schedCfg]);
 
   // Pre-compute location per hour
@@ -507,7 +511,7 @@ export default function DailyView({
             var h = ((b.end - b.start) / 60) * hourHeight;
             if (top < 0 || top >= gridHeight) return null;
             return (
-              <div key={'blk-' + i} style={{
+              <div key={'blk-' + i} data-testid="day-block-band" style={{
                 position: 'absolute', top: top, left: 0, width: 3, height: h,
                 background: (b.color || '#4338CA') + '60',
                 borderRadius: '0 2px 2px 0',
