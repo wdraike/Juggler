@@ -24,6 +24,34 @@
  * Every `|| null` / `|| 'F'` / `|| undefined` below is preserved verbatim from the
  * legacy handler. No new fallback is introduced.
  *
+ * ── EXCEPTION — SELF-HEAL (999.2144, APPROVED FALLBACK) ─────────────────────
+ * schedule_templates/template_defaults/template_overrides are the one exception:
+ * UpdateConfig used to guard only key-name + 100KB size, so a corrupt or missing
+ * shape could reach this read path (dev-DB evidence: schedule_templates.weekday
+ * .blocks collapsed to a loc-less block, locOverrides wiped) and would previously
+ * be served AS-IS via `|| null`. This is a David-approved, DOCUMENTED fallback
+ * (2026-07-21, noted in juggler/CLAUDE.md "Approved Fallbacks"): when
+ * schedule_templates is missing or fails validateScheduleTemplates, the WHOLE
+ * trio is healed to the server-side defaults (domain/defaultTemplates) — the
+ * healed values are BOTH served in this response AND persisted (repo.upsertConfig
+ * + cache.invalidateConfig), so the corruption is fixed once, not masked on every
+ * read. template_defaults/template_overrides are additionally healed
+ * INDEPENDENTLY (only the one that fails its own validator, when schedule_templates
+ * itself is valid) — see the self-heal block below.
+ *
+ * ── HARDENING (999.2144 harrison+law review) ─────────────────────────────────
+ * FINDING 1 (BLOCK, fixed): an independent template_defaults heal must reference
+ * ids the user ACTUALLY has — defaultTemplates.buildFallbackTemplateDefaults()
+ * (not the literal 'weekday'/'weekend' default) guarantees the healed value
+ * itself passes validateTemplateDefaults(healed, knownTemplateIds), so a custom-id
+ * schedule_templates (e.g. {work, light}) converges instead of re-healing forever.
+ * FINDING 2 (WARN, fixed): the trio-heal writes run inside ONE repo.runInTransaction
+ * (no partial-trio persist on a mid-heal failure) and the whole heal-persist step
+ * is best-effort — a persist failure is logged (this.logger, optional injected dep)
+ * and swallowed, never thrown, so a DB hiccup during self-heal cannot turn a
+ * routine GET (previously always 200) into a 500. The healed value is still
+ * served this response regardless; an unpersisted heal simply retries next read.
+ *
  * @typedef {Object} GetConfigDeps
  * @property {import('../../domain/ports/ConfigRepositoryPort')} repo
  * @property {{get: Function, set: Function}} cache  the lib-cache CachePort
@@ -35,6 +63,8 @@
 'use strict';
 
 var UserConfig = require('../../domain/entities/UserConfig');
+var scheduleTemplateValidation = require('../../domain/logic/scheduleTemplateValidation');
+var defaultTemplates = require('../../domain/defaultTemplates');
 
 /** @param {GetConfigDeps} deps */
 function GetConfig(deps) {
@@ -44,6 +74,10 @@ function GetConfig(deps) {
   this.repo = deps.repo;
   this.cache = deps.cache;
   this._parseFloat = deps.parseFloat || parseFloat;
+  // Optional — self-heal persistence failures are logged, never thrown (999.2144
+  // harrison FINDING 2). Defaults to a no-op so existing callers/tests that don't
+  // inject a logger are unaffected.
+  this.logger = deps.logger || { warn: function () {}, error: function () {} };
 }
 
 /**
@@ -82,6 +116,76 @@ GetConfig.prototype.execute = async function execute(input) {
     config[row.config_key] = UserConfig.parseConfigValue(row.config_value);
   });
 
+  // ── SELF-HEAL: schedule-template config integrity (999.2144) ──────────────
+  // See the class doc "EXCEPTION — SELF-HEAL" note above for the approval.
+  var healedKeys = [];
+  var effectiveScheduleTemplates;
+  var effectiveTemplateDefaults;
+  var effectiveTemplateOverrides;
+
+  var scheduleTemplatesCheck = scheduleTemplateValidation.validateScheduleTemplates(config.schedule_templates);
+  if (config.schedule_templates === undefined || !scheduleTemplatesCheck.valid) {
+    // schedule_templates itself is missing/corrupt — heal the WHOLE trio: any
+    // template_defaults/overrides referencing the now-replaced templates are
+    // no longer meaningful either.
+    effectiveScheduleTemplates = defaultTemplates.buildDefaultScheduleTemplates();
+    effectiveTemplateDefaults = defaultTemplates.buildDefaultTemplateDefaults();
+    effectiveTemplateOverrides = defaultTemplates.buildDefaultTemplateOverrides();
+    healedKeys.push('schedule_templates', 'template_defaults', 'template_overrides');
+  } else {
+    effectiveScheduleTemplates = config.schedule_templates;
+    var knownTemplateIds = Object.keys(effectiveScheduleTemplates);
+
+    var templateDefaultsCheck = scheduleTemplateValidation.validateTemplateDefaults(config.template_defaults, knownTemplateIds);
+    if (config.template_defaults === undefined || !templateDefaultsCheck.valid) {
+      // 999.2144 harrison FINDING 1 (law-confirmed): buildDefaultTemplateDefaults()
+      // always references 'weekday'/'weekend'. For a user with CUSTOM template ids
+      // (no 'weekday'/'weekend' present — a fully valid schedule_templates shape),
+      // healing to that literal default would ITSELF fail validateTemplateDefaults
+      // against knownTemplateIds on the very next read — re-heal, re-persist,
+      // forever (write-per-read, cache permanently defeated). Use the fallback
+      // builder instead, which is guaranteed to reference ids the user actually has.
+      effectiveTemplateDefaults = defaultTemplates.buildFallbackTemplateDefaults(knownTemplateIds);
+      healedKeys.push('template_defaults');
+    } else {
+      effectiveTemplateDefaults = config.template_defaults;
+    }
+
+    var templateOverridesCheck = scheduleTemplateValidation.validateTemplateOverrides(config.template_overrides, knownTemplateIds);
+    if (config.template_overrides === undefined || !templateOverridesCheck.valid) {
+      effectiveTemplateOverrides = defaultTemplates.buildDefaultTemplateOverrides();
+      healedKeys.push('template_overrides');
+    } else {
+      effectiveTemplateOverrides = config.template_overrides;
+    }
+  }
+
+  if (healedKeys.length > 0) {
+    var repo = this.repo;
+    var logger = this.logger;
+    var healedValues = {
+      schedule_templates: effectiveScheduleTemplates,
+      template_defaults: effectiveTemplateDefaults,
+      template_overrides: effectiveTemplateOverrides
+    };
+    // 999.2144 harrison FINDING 2: the heal writes are (a) wrapped in ONE
+    // transaction so a mid-heal failure never persists a PARTIAL trio, and
+    // (b) best-effort — a persist failure is logged and swallowed rather than
+    // thrown, so a DB hiccup during a routine GET's self-heal cannot turn a
+    // previously-always-200 read into a 500. The healed value is still served
+    // THIS response either way; an unpersisted heal simply retries next read.
+    try {
+      await repo.runInTransaction(function (trxRepo) {
+        return Promise.all(healedKeys.map(function (k) {
+          return trxRepo.upsertConfig(userId, k, JSON.stringify(healedValues[k]));
+        }));
+      });
+      await this.cache.invalidateConfig(userId);
+    } catch (err) {
+      logger.warn('[user-config.GetConfig] schedule-template self-heal persist failed (serving healed value unpersisted): ' + err.message);
+    }
+  }
+
   var result = {
     locations: locations.map(function (l) {
       return {
@@ -105,9 +209,9 @@ GetConfig.prototype.execute = async function execute(input) {
     hourLocationOverrides: config.hour_location_overrides || null,
     preferences: config.preferences || null,
     tempUnitPref: config.temp_unit_pref || 'F',
-    scheduleTemplates: config.schedule_templates || null,
-    templateDefaults: config.template_defaults || null,
-    templateOverrides: config.template_overrides || null,
+    scheduleTemplates: effectiveScheduleTemplates,
+    templateDefaults: effectiveTemplateDefaults,
+    templateOverrides: effectiveTemplateOverrides,
     calSyncSettings: config.cal_sync_settings || null,
     userTimezone: userTimezone || null
   };

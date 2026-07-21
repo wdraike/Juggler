@@ -71,6 +71,27 @@ async function updateConfig(req, res) {
 }
 
 /**
+ * POST /api/config/templates/reset — restore the schedule-template trio
+ * (schedule_templates/template_defaults/template_overrides) to the
+ * server-side defaults SSOT (999.2144; contract the 999.2145 frontend Reset
+ * button calls — keep the response shape stable).
+ */
+async function resetScheduleTemplates(req, res) {
+  try {
+    const result = await facade.resetScheduleTemplates({ userId: req.user.id });
+    sendEnvelope(res, result);
+
+    // Same post-response reschedule ordering as updateConfig (fire AFTER res.json).
+    if (result.scheduleAfter) {
+      enqueueScheduleRun(result.scheduleAfter.userId, result.scheduleAfter.source);
+    }
+  } catch (error) {
+    logger.error('Reset schedule templates error:', error);
+    res.status(500).json({ error: 'Failed to reset schedule templates' });
+  }
+}
+
+/**
  * PATCH /api/config/timezone — correct the auto-detected users.timezone (999.1447).
  * Distinct from PUT /api/config/:key: users.timezone lives on the `users` table,
  * not `user_config` — never route it through updateConfig/VALID_KEYS.
@@ -196,6 +217,7 @@ async function replaceTools(req, res) {
 module.exports = {
   getAllConfig,
   updateConfig,
+  resetScheduleTemplates,
   updateTimezone,
   getProjects,
   createProject,

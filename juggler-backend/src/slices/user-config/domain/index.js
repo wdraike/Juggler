@@ -25,5 +25,8 @@ module.exports = {
   // Pure decision logic (relocated, byte-identical to the legacy middleware)
   featureGate: require('./logic/featureGate'),
   entityLimit: require('./logic/entityLimit'),
-  entitlement: require('./logic/entitlement')
+  entitlement: require('./logic/entitlement'),
+  // Schedule-template shape validators + the server-side defaults SSOT (999.2144)
+  scheduleTemplateValidation: require('./logic/scheduleTemplateValidation'),
+  defaultTemplates: require('./defaultTemplates')
 };

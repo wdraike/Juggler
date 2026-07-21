@@ -23,7 +23,8 @@
 // ── Mock the facade so we can control what use-case result is returned ─────────
 jest.mock('../../../../src/slices/user-config/facade', () => ({
   replaceLocations: jest.fn(),
-  importData: jest.fn()
+  importData: jest.fn(),
+  resetScheduleTemplates: jest.fn()
 }));
 
 // ── Mock scheduleQueue so we can assert enqueueScheduleRun call counts ─────────
@@ -157,6 +158,39 @@ describe('BUG-2: config.controller replaceLocations — controller-fire (exactly
     expect(res._status).toBe(200);
     expect(enqueueScheduleRun).toHaveBeenCalledTimes(1);
     expect(enqueueScheduleRun).toHaveBeenCalledWith(USER_ID, 'locations:replaced');
+  });
+});
+
+// ── 999.2144: config.controller.js resetScheduleTemplates handler ────────────
+
+describe('999.2144: config.controller resetScheduleTemplates — controller-fire', () => {
+  test('CF-RST-1: success path — enqueueScheduleRun called exactly once with correct args', async () => {
+    facade.resetScheduleTemplates.mockResolvedValueOnce({
+      status: 200,
+      body: { scheduleTemplates: { weekday: {} }, templateDefaults: {}, templateOverrides: {} },
+      scheduleAfter: { userId: USER_ID, source: 'config:templates_reset' }
+    });
+
+    const req = fakeReq();
+    const res = fakeRes();
+
+    await configCtrl.resetScheduleTemplates(req, res);
+
+    expect(res._status).toBe(200);
+    expect(enqueueScheduleRun).toHaveBeenCalledTimes(1);
+    expect(enqueueScheduleRun).toHaveBeenCalledWith(USER_ID, 'config:templates_reset');
+  });
+
+  test('CF-RST-2: facade throws — 500, enqueueScheduleRun NOT called', async () => {
+    facade.resetScheduleTemplates.mockRejectedValueOnce(new Error('DB exploded'));
+
+    const req = fakeReq();
+    const res = fakeRes();
+
+    await configCtrl.resetScheduleTemplates(req, res);
+
+    expect(res._status).toBe(500);
+    expect(enqueueScheduleRun).toHaveBeenCalledTimes(0);
   });
 });
 

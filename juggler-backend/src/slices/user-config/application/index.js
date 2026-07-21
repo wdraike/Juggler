@@ -17,6 +17,7 @@
  *   config.controller getLocations       → queries/GetLocations
  *   config.controller getTools           → queries/GetTools
  *   config.controller updateConfig       → commands/UpdateConfig
+ *   config.controller resetScheduleTemplates → commands/ResetScheduleTemplates (999.2144)
  *   config.controller createProject      → commands/CreateProject
  *   config.controller updateProject      → commands/UpdateProject
  *   config.controller deleteProject      → commands/DeleteProject
@@ -57,6 +58,7 @@ module.exports = {
   GetFeatureEventsReport: require('./queries/GetFeatureEventsReport'),
   // commands
   UpdateConfig: require('./commands/UpdateConfig'),
+  ResetScheduleTemplates: require('./commands/ResetScheduleTemplates'),
   CreateProject: require('./commands/CreateProject'),
   UpdateProject: require('./commands/UpdateProject'),
   DeleteProject: require('./commands/DeleteProject'),

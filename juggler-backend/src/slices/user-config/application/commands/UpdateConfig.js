@@ -10,6 +10,11 @@
  *   2. validKeys guard: !UserConfig.isValidKey(key) → 400 (the relocated validKeys
  *      array lives on UserConfig.VALID_KEYS, W2).
  *   3. size guard: JSON.stringify(value).length > 102400 → 400.
+ *   3b. schedule-template trio shape validation (999.2144, NEW): schedule_templates
+ *      is shape-validated; template_defaults/template_overrides are shape- AND
+ *      ref-validated against the STORED schedule_templates (a repo.getConfigRow
+ *      read) — see domain/logic/scheduleTemplateValidation. Invalid → 400 with
+ *      `details`. Runs BEFORE upsert; zero DB writes on failure.
  *   4. upsert: repo.getConfigRow probe → update (config_value + updated_at new Date())
  *      or insert (no updated_at — column default). Relocated to repo.upsertConfig
  *      which encapsulates the existing?update:insert + P1 new Date().
@@ -42,6 +47,8 @@
 'use strict';
 
 var UserConfig = require('../../domain/entities/UserConfig');
+var scheduleTemplateValidation = require('../../domain/logic/scheduleTemplateValidation');
+var defaultTemplates = require('../../domain/defaultTemplates');
 
 // Schedule-affecting keys — verbatim from config.controller.js:180-184,
 // extended to include template_defaults and template_overrides (GAP-1 / 999.464):
@@ -90,6 +97,45 @@ UpdateConfig.prototype.execute = async function execute(input) {
   var serialized = JSON.stringify(value);
   if (serialized.length > 102400) {
     return { status: 400, body: { error: 'Config value too large (max 100KB)' } };
+  }
+
+  // 3b. schedule-template trio shape validation (999.2144) — NEW, runs BEFORE
+  // upsert. Previously only the key name + size were guarded, so any JSON
+  // shape landed in schedule_templates/template_defaults/template_overrides
+  // (dev-DB evidence: schedule_templates.weekday.blocks collapsed to
+  // [{start:0,end:540,tag:'custom',name:'Custom'}] — no `loc` — locOverrides
+  // wiped, accepted+persisted without complaint). template_defaults/overrides
+  // are additionally ref-checked against the user's STORED schedule_templates
+  // (a fresh repo read) — an unknown templateId is rejected the same as a
+  // shape violation.
+  if (key === 'schedule_templates') {
+    var scheduleTemplatesCheck = scheduleTemplateValidation.validateScheduleTemplates(value);
+    if (!scheduleTemplatesCheck.valid) {
+      return { status: 400, body: { error: 'Invalid schedule_templates', details: scheduleTemplatesCheck.errors } };
+    }
+  } else if (key === 'template_defaults' || key === 'template_overrides') {
+    var storedTemplatesRow = await this.repo.getConfigRow(userId, 'schedule_templates');
+    var storedTemplates = storedTemplatesRow && storedTemplatesRow.config_value != null
+      ? UserConfig.parseConfigValue(storedTemplatesRow.config_value)
+      : null;
+    var storedTemplatesCheck = scheduleTemplateValidation.validateScheduleTemplates(storedTemplates);
+    // 999.2144 FINDING 3 (law-reviewed INFO, applied): when no valid schedule_templates
+    // row exists yet, treat the CANONICAL DEFAULT ids as known rather than an empty
+    // set. This is exactly what GetConfig's self-heal would persist as schedule_templates
+    // on the next read (see GetConfig.js "heal the WHOLE trio" branch), so a
+    // template_defaults/overrides write referencing 'weekday'/'weekend' before the
+    // user has ever GET'd their config is not spuriously rejected. Still a CLOSED
+    // set — an id outside both the stored templates and the canonical defaults is
+    // rejected exactly as before.
+    var knownTemplateIds = storedTemplatesCheck.valid
+      ? Object.keys(storedTemplates)
+      : Object.keys(defaultTemplates.buildDefaultScheduleTemplates());
+    var refCheck = key === 'template_defaults'
+      ? scheduleTemplateValidation.validateTemplateDefaults(value, knownTemplateIds)
+      : scheduleTemplateValidation.validateTemplateOverrides(value, knownTemplateIds);
+    if (!refCheck.valid) {
+      return { status: 400, body: { error: 'Invalid ' + key, details: refCheck.errors } };
+    }
   }
 
   // 4. upsert (handler L121-134) — existing?update:insert relocated to the repo.

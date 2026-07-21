@@ -174,10 +174,11 @@ describe('UpdateConfig (== updateConfig, H1-5..H1-10)', () => {
 
   test('schedule_templates orphan when-tag scan flags tasks with dropped tags', async () => {
     // task uses when='gym' but the new template defines only 'office' → orphaned.
+    // 999.2144: value must satisfy validateScheduleTemplates (name + a well-shaped block).
     var repo = new InMemoryConfigRepository({
       tasks: [{ user_id: USER, id: 'tk1', text: 'Lift', status: '', when: 'gym' }]
     });
-    var value = { weekday: { blocks: [{ tag: 'office' }] } };
+    var value = { weekday: { name: 'Weekday', blocks: [{ start: 480, end: 720, loc: 'work', tag: 'office', name: 'Office' }] } };
     var res = await new App.UpdateConfig({ repo: repo, cache: fakeCache(), enqueueScheduleRun: function () {} })
       .execute({ userId: USER, key: 'schedule_templates', value: value });
     expect(res.status).toBe(200);
@@ -190,7 +191,7 @@ describe('UpdateConfig (== updateConfig, H1-5..H1-10)', () => {
     var repo = new InMemoryConfigRepository({
       tasks: [{ user_id: USER, id: 'tk1', text: 'Work', status: '', when: 'office' }]
     });
-    var value = { weekday: { blocks: [{ tag: 'office' }] } };
+    var value = { weekday: { name: 'Weekday', blocks: [{ start: 480, end: 720, loc: 'work', tag: 'office', name: 'Office' }] } };
     var res = await new App.UpdateConfig({ repo: repo, cache: fakeCache(), enqueueScheduleRun: function () {} })
       .execute({ userId: USER, key: 'schedule_templates', value: value });
     expect(res.body.warnings).toHaveLength(0);
@@ -200,11 +201,25 @@ describe('UpdateConfig (== updateConfig, H1-5..H1-10)', () => {
   // template_defaults and template_overrides are VALID_KEYS that drive scheduling
   // but are OMITTED from SCHED_KEYS — so editing them does NOT return a
   // scheduleAfter directive. These two tests FAIL on pre-fix code (RED).
+  // 999.2144: template_defaults/template_overrides are now ref-checked against the
+  // user's STORED schedule_templates — seed a valid one first ('work'/'light' ids).
+
+  function seedWorkLightTemplatesRepo() {
+    return new InMemoryConfigRepository({
+      config: [{
+        user_id: USER, config_key: 'schedule_templates',
+        config_value: JSON.stringify({
+          work: { name: 'Work', blocks: [{ start: 480, end: 720, loc: 'work', tag: 'biz', name: 'Biz' }] },
+          light: { name: 'Light', blocks: [{ start: 480, end: 600, loc: 'home', tag: 'biz', name: 'Biz' }] }
+        })
+      }]
+    });
+  }
 
   test('BUG-1 RED: template_defaults write returns a scheduleAfter directive', async () => {
     // This FAILS on current code because 'template_defaults' is absent from SCHED_KEYS.
-    var value = { monday: 'work', friday: 'light' };
-    var res = await new App.UpdateConfig({ repo: new InMemoryConfigRepository(), cache: fakeCache(), enqueueScheduleRun: function () {} })
+    var value = { Mon: 'work', Tue: 'work', Wed: 'work', Thu: 'work', Fri: 'light', Sat: 'light', Sun: 'light' };
+    var res = await new App.UpdateConfig({ repo: seedWorkLightTemplatesRepo(), cache: fakeCache(), enqueueScheduleRun: function () {} })
       .execute({ userId: USER, key: 'template_defaults', value: value });
     expect(res.status).toBe(200);
     expect(res.scheduleAfter).toEqual({ userId: USER, source: 'config:template_defaults' });
@@ -213,7 +228,7 @@ describe('UpdateConfig (== updateConfig, H1-5..H1-10)', () => {
   test('BUG-1 RED: template_overrides write returns a scheduleAfter directive', async () => {
     // This FAILS on current code because 'template_overrides' is absent from SCHED_KEYS.
     var value = { '2026-06-14': 'light' };
-    var res = await new App.UpdateConfig({ repo: new InMemoryConfigRepository(), cache: fakeCache(), enqueueScheduleRun: function () {} })
+    var res = await new App.UpdateConfig({ repo: seedWorkLightTemplatesRepo(), cache: fakeCache(), enqueueScheduleRun: function () {} })
       .execute({ userId: USER, key: 'template_overrides', value: value });
     expect(res.status).toBe(200);
     expect(res.scheduleAfter).toEqual({ userId: USER, source: 'config:template_overrides' });
@@ -224,7 +239,7 @@ describe('UpdateConfig (== updateConfig, H1-5..H1-10)', () => {
   //        (b) a non-sched valid key does NOT trigger scheduleAfter.
 
   test('GUARD: schedule_templates (existing SCHED_KEY) still returns scheduleAfter', async () => {
-    var value = { weekday: { blocks: [] } };
+    var value = { weekday: { name: 'Weekday', blocks: [] } };
     var res = await new App.UpdateConfig({ repo: new InMemoryConfigRepository(), cache: fakeCache(), enqueueScheduleRun: function () {} })
       .execute({ userId: USER, key: 'schedule_templates', value: value });
     expect(res.scheduleAfter).toEqual({ userId: USER, source: 'config:schedule_templates' });

@@ -52,18 +52,32 @@ describe('AC1: UpdateConfig — template_defaults / template_overrides missing f
    *
    * Expected (after fix): scheduleAfter === { userId, source: 'config:<key>' }
    * Current (pre-fix):    scheduleAfter === undefined   ← RED
+   *
+   * 999.2144: template_defaults/template_overrides are now shape- AND ref-validated
+   * against the user's STORED schedule_templates — seed a valid 'weekday' template
+   * first so these values pass validation and exercise the SCHED_KEYS behavior alone.
    */
+  function seedWeekdayTemplateRepo() {
+    return new InMemoryConfigRepository({
+      config: [{
+        user_id: USER, config_key: 'schedule_templates',
+        config_value: JSON.stringify({ weekday: { name: 'Weekday', blocks: [{ start: 480, end: 720, loc: 'home', tag: 'biz', name: 'Biz' }] } })
+      }]
+    });
+  }
+
   test('AC1a: template_defaults MUST return a scheduleAfter directive (currently absent — RED)', async () => {
-    var uc = new App.UpdateConfig({ repo: new InMemoryConfigRepository(), cache: fakeCache() });
-    var res = await uc.execute({ userId: USER, key: 'template_defaults', value: { default: 'weekday' } });
+    var uc = new App.UpdateConfig({ repo: seedWeekdayTemplateRepo(), cache: fakeCache() });
+    var value = { Mon: 'weekday', Tue: 'weekday', Wed: 'weekday', Thu: 'weekday', Fri: 'weekday', Sat: 'weekday', Sun: 'weekday' };
+    var res = await uc.execute({ userId: USER, key: 'template_defaults', value: value });
     // After the fix this must pass. Pre-fix: scheduleAfter is undefined → test FAILS.
     expect(res.status).toBe(200);
     expect(res.scheduleAfter).toEqual({ userId: USER, source: 'config:template_defaults' });
   });
 
   test('AC1b: template_overrides MUST return a scheduleAfter directive (currently absent — RED)', async () => {
-    var uc = new App.UpdateConfig({ repo: new InMemoryConfigRepository(), cache: fakeCache() });
-    var res = await uc.execute({ userId: USER, key: 'template_overrides', value: { '2026-06-14': 'weekend' } });
+    var uc = new App.UpdateConfig({ repo: seedWeekdayTemplateRepo(), cache: fakeCache() });
+    var res = await uc.execute({ userId: USER, key: 'template_overrides', value: { '2026-06-14': 'weekday' } });
     // After the fix this must pass. Pre-fix: scheduleAfter is undefined → test FAILS.
     expect(res.status).toBe(200);
     expect(res.scheduleAfter).toEqual({ userId: USER, source: 'config:template_overrides' });
@@ -74,7 +88,10 @@ describe('AC1: UpdateConfig — template_defaults / template_overrides missing f
     var uc = new App.UpdateConfig({ repo: new InMemoryConfigRepository(), cache: fakeCache() });
     for (var key of ['time_blocks', 'loc_schedules', 'loc_schedule_defaults', 'loc_schedule_overrides',
                      'hour_location_overrides', 'tool_matrix', 'preferences', 'schedule_templates']) {
-      var res = await uc.execute({ userId: USER, key: key, value: {} });
+      // 999.2144: schedule_templates now requires a valid non-empty shape; the other
+      // SCHED_KEYS are untouched by the new validators, so {} still applies to them.
+      var value = key === 'schedule_templates' ? { weekday: { name: 'Weekday', blocks: [] } } : {};
+      var res = await uc.execute({ userId: USER, key: key, value: value });
       expect(res.scheduleAfter).toEqual({ userId: USER, source: 'config:' + key });
     }
   });

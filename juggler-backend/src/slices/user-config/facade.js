@@ -389,12 +389,13 @@ var checkAndIncrement = require('./adapters/KnexPlanUsageRepository').checkAndIn
 // ─────────────────────────────────────────────────────────────────────────────
 
 // config.controller handlers
-var _getConfig = new app.GetConfig({ repo: _repo, cache: cache });
+var _getConfig = new app.GetConfig({ repo: _repo, cache: cache, logger: logger }); // 999.2144 self-heal persist-failure logging
 var _getProjects = new app.GetProjects({ repo: _repo });
 var _listProjects = new app.ListProjects({ repo: _repo });
 var _getLocations = new app.GetLocations({ repo: _repo });
 var _getTools = new app.GetTools({ repo: _repo });
 var _updateConfig = new app.UpdateConfig({ repo: _repo, cache: cache });
+var _resetScheduleTemplates = new app.ResetScheduleTemplates({ repo: _repo, cache: cache }); // 999.2144
 var _updateUserTimezone = new app.UpdateUserTimezone({ userRepository: _userRepo }); // 999.1447
 var _createProject = new app.CreateProject({ repo: _repo, cache: cache });
 var _updateProject = new app.UpdateProject({ repo: _repo, cache: cache, renameTasks: renameTasks });
@@ -500,6 +501,7 @@ function listProjects(input) { return _listProjects.execute(input); }
 function getLocations(input) { return _getLocations.execute(input); }
 function getTools(input) { return _getTools.execute(input); }
 function updateConfig(input) { return _updateConfig.execute(input); }
+function resetScheduleTemplates(input) { return _resetScheduleTemplates.execute(input); } // 999.2144
 function updateTimezone(input) { return _updateUserTimezone.execute(input); } // 999.1447
 function createProject(input) { return _createProject.execute(input); }
 function updateProject(input) { return _updateProject.execute(input); }
@@ -685,6 +687,7 @@ module.exports = {
   getLocations: getLocations,
   getTools: getTools,
   updateConfig: updateConfig,
+  resetScheduleTemplates: resetScheduleTemplates,
   updateTimezone: updateTimezone,
   createProject: createProject,
   updateProject: updateProject,
