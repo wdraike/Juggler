@@ -54,18 +54,41 @@ function GoldRule() {
 export default function LoginPage() {
   var { login } = useAuth();
   var [loginError, setLoginError] = React.useState(null);
+  // 999.2123: busy state between click and the Google OAuth redirect —
+  // in-button spinner + disabled per brand Loading & Busy-State Standard.
+  var [signingIn, setSigningIn] = React.useState(false);
   // 999.1237 — mandated marketing-page tab title: "Sign In — StriveRS by Raike & Sons"
   useDocumentTitle('Sign In', { marketing: true });
 
   function handleLogin() {
+    if (signingIn) return; // 999.2123: double-click guard while OAuth start is in flight
     setLoginError(null);
+    setSigningIn(true);
     // FIX(ernie F-2): login() is async — attach .catch so a PKCE generation failure
     // (e.g. crypto.subtle unavailable on a non-secure origin) surfaces as a visible
     // error message rather than an unhandled rejection and a silently dead button.
     login().catch(function(err) {
       console.error('[LoginPage] Sign-in failed:', err);
+      setSigningIn(false);
       setLoginError('Sign-in could not be started. Please ensure you are using a secure connection (HTTPS) and try again.');
     });
+  }
+
+  // Shared in-button spinner (999.2123) — inherits currentColor, fixed 1em box
+  // so the button doesn't resize; spins via the rs-signin-spin keyframe in the
+  // page's <style> block (disabled under prefers-reduced-motion with the rest).
+  function signInLabel(text) {
+    if (!signingIn) return <span>{text}</span>;
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+        <span data-testid="signin-spinner" aria-hidden="true" style={{
+          width: '1em', height: '1em', flexShrink: 0, display: 'inline-block',
+          border: '2px solid currentColor', borderTopColor: 'transparent',
+          borderRadius: '50%', animation: 'rs-signin-spin 0.8s linear infinite'
+        }} />
+        <span>Signing in…</span>
+      </span>
+    );
   }
 
   return (
@@ -90,6 +113,7 @@ export default function LoginPage() {
            semi-transparent ("washed out") for up to ~1.2s after load (0.6s
            duration + staggered delays, fill-mode both). Honor reduced-motion:
            render at full contrast immediately, no fade. */
+        @keyframes rs-signin-spin { to { transform: rotate(360deg); } }
         @media (prefers-reduced-motion: reduce) {
           .rs-login, .rs-login * { animation: none !important; transition: none !important; }
         }
@@ -108,12 +132,16 @@ export default function LoginPage() {
         padding: '16px 20px',
         display: 'flex', alignItems: 'center', gap: 12,
       }}>
-        <button onClick={handleLogin} style={{
+        <button onClick={handleLogin} disabled={signingIn} style={{
           background: '#C8942A', border: '1.5px solid #C8942A', borderRadius: 2,
           padding: '8px 20px', fontSize: 13, color: '#1A2B4A', fontWeight: 700,
-          letterSpacing: '0.08em', textTransform: 'uppercase', cursor: 'pointer',
+          letterSpacing: '0.08em', textTransform: 'uppercase',
+          cursor: signingIn ? 'wait' : 'pointer', opacity: signingIn ? 0.75 : 1,
+          // harrison WARN (999.2123): reserve the busy-state width so the
+          // 'Sign In' -> spinner+'Signing in…' swap can't reflow the header.
+          minWidth: 170, display: 'inline-flex', justifyContent: 'center',
           fontFamily: "'Inter', sans-serif"
-        }}>Sign In</button>
+        }}>{signInLabel('Sign In')}</button>
       </div>
 
       {/* Content */}
@@ -574,16 +602,19 @@ export default function LoginPage() {
             Free to use. Sign in with Google and put your StriveRS to work.
           </p>
           <div style={{ display: 'inline-block' }}>
-            <button onClick={handleLogin} style={{
+            <button onClick={handleLogin} disabled={signingIn} style={{
               display: 'inline-flex', alignItems: 'center', gap: 8,
               background: '#C8942A', borderRadius: 2, padding: '12px 28px',
               fontSize: 14, color: '#1A2B4A', fontWeight: 700,
               letterSpacing: '0.08em', textTransform: 'uppercase',
               fontFamily: "'Inter', sans-serif",
-              border: '1.5px solid #C8942A', cursor: 'pointer'
+              border: '1.5px solid #C8942A',
+              cursor: signingIn ? 'wait' : 'pointer', opacity: signingIn ? 0.75 : 1,
+              // harrison WARN (999.2123): stable geometry across the label swap.
+              minWidth: 220, justifyContent: 'center'
             }}>
-              <span>Sign In</span>
-              <span style={{ fontSize: 16 }}>&#x2197;</span>
+              {signInLabel('Sign In')}
+              {!signingIn && <span style={{ fontSize: 16 }}>&#x2197;</span>}
             </button>
           </div>
           {loginError && (
