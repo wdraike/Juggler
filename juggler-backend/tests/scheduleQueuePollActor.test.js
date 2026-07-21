@@ -46,7 +46,20 @@ jest.mock('../src/db', () => {
       whereRaw: function () { return builder; },
       orderBy: function () { return builder; },
       limit: function () { return builder; },
-      select: function () { return Promise.resolve(state.pendingRows.slice()); },
+      // 999.2093: select() must stay CHAINABLE (the two-step sweep chains
+      // wheres after select('id')); the builder is thenable and resolves by
+      // the recorded columns when awaited.
+      select: function () {
+        builder._cols = Array.prototype.slice.call(arguments);
+        return builder;
+      },
+      whereIn: function () { return builder; },
+      then: function (resolve, reject) {
+        var rows = (builder._cols && builder._cols.length === 1 && builder._cols[0] === 'id')
+          ? (state.staleClaims || []).slice()
+          : state.pendingRows.slice();
+        return Promise.resolve(rows).then(resolve, reject);
+      },
       count: function () { return Promise.resolve([{ c: 0 }]); },
       distinct: function () { return Promise.resolve([]); },
       update: function (payload) {
@@ -63,7 +76,7 @@ jest.mock('../src/db', () => {
   db.fn = { now: function () { return 'NOW()'; } };
   db.__state = state;
   db.__updates = updates;
-  db.__reset = function () { updates.length = 0; state.pendingRows = []; };
+  db.__reset = function () { updates.length = 0; state.pendingRows = []; state.staleClaims = []; };
   return db;
 });
 
@@ -82,6 +95,7 @@ beforeEach(function () {
 describe('scheduleQueue.pollOnce — audit actor on the poll tick (999.1576 inc.4a)', function () {
   test('stuck-claim sweep UPDATE is stamped with the scheduler identity', async function () {
     db.__state.pendingRows = []; // idle path → straight to the sweep
+    db.__state.staleClaims = [{ id: 11 }]; // one stale claim so the two-step sweep's UPDATE fires (999.2093)
 
     await pollOnce();
 

@@ -128,11 +128,27 @@ SchedulerQueueRepository.prototype.countDistinctPendingUsers = function countDis
 };
 
 /**
- * Clear claims older than 120s — dead-instance recovery (verbatim —
- * `pollOnce`'s stuck-claim sweep ~496-499).
+ * Clear claims older than 120s — dead-instance recovery.
+ *
+ * 999.2093: TWO-step, not one range UPDATE. The old single statement walked
+ * idx_claimed_at taking next-key (row+gap) locks, which deadlocked against
+ * concurrent point claim/release UPDATEs walking the user_id index
+ * (ER_LOCK_DEADLOCK 1213 — caught by pollOnce so it self-healed, but 10×/day
+ * of log noise under load). Step 1 is a lock-free consistent read of the
+ * stale candidate PKs; step 2 locks ONLY those PKs. The staleness predicate
+ * is REPEATED in the UPDATE so a row re-claimed between the steps (fresh
+ * claimed_at) is left untouched — identical to the old statement for the
+ * re-claim/release race; a row newly aging INTO staleness between the steps
+ * defers one poll tick (benign — the sweep is periodic best-effort).
  */
-SchedulerQueueRepository.prototype.sweepStuckClaims = function sweepStuckClaims(db) {
+SchedulerQueueRepository.prototype.sweepStuckClaims = async function sweepStuckClaims(db) {
+  var stale = await db('schedule_queue')
+    .select('id')
+    .whereNotNull('claimed_by')
+    .whereRaw('claimed_at < DATE_SUB(NOW(), INTERVAL 120 SECOND)');
+  if (!stale || stale.length === 0) return 0;
   return db('schedule_queue')
+    .whereIn('id', stale.map(function (r) { return r.id; }))
     .whereNotNull('claimed_by')
     .whereRaw('claimed_at < DATE_SUB(NOW(), INTERVAL 120 SECOND)')
     .update(stampUpdate({ claimed_by: null, claimed_at: null }));
