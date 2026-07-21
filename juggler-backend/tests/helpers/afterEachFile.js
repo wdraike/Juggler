@@ -52,6 +52,30 @@ function stopLoop() {
   }
 }
 
+// 999.2159: awaitable barrier over in-flight schedule runs. Lazy require +
+// feature-detect for the same reasons as stopLoop; swallow everything —
+// teardown must never redden a green suite. Resolves immediately when the
+// module is absent/mocked or nothing is in flight.
+function drainRuns() {
+  try {
+    var scheduleQueue = require('../src/scheduler/scheduleQueue');
+    if (scheduleQueue && typeof scheduleQueue._drainForTests === 'function') {
+      return scheduleQueue._drainForTests(15000).then(function (r) {
+        // harrison INFO (999.2159): a capped drain means a wedged run may still
+        // be mutating the DB — without this line the resulting flake in the
+        // NEXT test has zero explanation in the output.
+        if (r && r.timedOut) {
+          console.warn('[afterEachFile] schedule-run drain hit its 15s cap — '
+            + r.drained + ' run(s) may still be live; later flakes in this file may be its wake');
+        }
+      }).catch(function () {});
+    }
+  } catch (e) {
+    /* no-op: module not present, mocked away, or reset */
+  }
+  return Promise.resolve();
+}
+
 // ---------------------------------------------------------------------------
 // Per-test-FILE DB isolation (cross-suite row-pollution fix).
 //
@@ -217,16 +241,21 @@ async function truncateVolatileTables() {
 }
 
 if (typeof afterEach === 'function') {
+  // 999.2159: AWAIT in-flight schedule runs BEFORE stopping loops/resetting
+  // state. _resetForTests clears the tracking maps but cannot cancel a live
+  // claimAndRun — a leaked run kept mutating the DB into the next test
+  // (rollingRecurrence FK/404/hook-timeout flake trio). Bounded at 15s so a
+  // wedged run cannot hang teardown; hook timeout is set above the cap.
   afterEach(function () {
-    stopLoop();
-  });
+    return drainRuns().then(stopLoop);
+  }, 20000);
 }
 
 if (typeof afterAll === 'function') {
-  // First afterAll: stop background loops.
+  // First afterAll: drain in-flight runs, then stop background loops.
   afterAll(function () {
-    stopLoop();
-  });
+    return drainRuns().then(stopLoop);
+  }, 20000);
 
   // Second afterAll: truncate volatile data so the next FILE starts clean.
   // Registered after stopLoop's afterAll so it runs after it (jest runs

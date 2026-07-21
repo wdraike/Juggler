@@ -112,6 +112,10 @@ var _heartbeats = new Set();
 // ── State ──
 var _lastEnqueueTime = new Map();       // user_id → timestamp
 var _running = new Map();             // user_id → promise (single-flight within instance)
+// 999.2159: every fire-and-forget processUser launched from enqueueScheduleRun,
+// tracked from CALL time (a run sleeping in processUser's lock-retry loop is not
+// yet in _running, so _running alone under-counts). _drainForTests awaits both.
+var _inflight = new Set();            // outer processUser promises
 var _lastPollTime = 0;
 var _lastError = null;                // { timestamp, message } — last scheduler error, for health checks
 var _rateWindows = new Map();         // user_id → array of enqueue timestamps (within the rate-limit window) (999.591)
@@ -227,7 +231,9 @@ async function enqueueScheduleRun(userId, source, options) {
   // cloud-tasks mode when the task was successfully enqueued — the push-handler
   // will run it (avoids a redundant in-process run racing the push).
   if (shouldRun && !dispatchedCloudTasks) {
-    processUser(userId);
+    var _p = processUser(userId);
+    _inflight.add(_p);
+    _p.then(function () { _inflight.delete(_p); }, function () { _inflight.delete(_p); });
   }
 
   logger.info('[SCHED-QUEUE] enqueued for ' + userId + ' source=' + (source || 'unknown')
@@ -557,11 +563,43 @@ function _resetForTests() {
   _queueBackend = undefined; // drop any stale cross-suite cached backend
   _lastEnqueueTime.clear();
   _running.clear();
+  _inflight.clear();
   _rateWindows.clear();
   _lastError = null;
   _lastPollTime = 0;
   _clock = new MysqlClockAdapter();
   _now = _defaultNow;
+}
+
+/**
+ * 999.2159 — awaitable barrier over every in-flight schedule run (test seam).
+ *
+ * _resetForTests clears the tracking maps but CANNOT cancel a promise: an
+ * in-flight claimAndRun kept mutating task_instances/users into the next
+ * test/describe/file (rollingRecurrence flake trio: FK violation on a
+ * clearAll'd users row, 404 on a re-fabricated instance, 5s beforeAll hook
+ * timeouts waiting on locks a leaked run held). The per-file jest teardown
+ * (test-helpers/afterEachFile.js) awaits this BEFORE resetting, so no run
+ * outlives its test. Bounded by timeoutMs — a genuinely wedged run must not
+ * hang teardown forever; timedOut:true is the caller's signal that state may
+ * still be dirty.
+ */
+function _drainForTests(timeoutMs) {
+  var pending = Array.from(_inflight).concat(Array.from(_running.values()));
+  if (pending.length === 0) return Promise.resolve({ drained: 0, timedOut: false });
+  var settled = Promise.allSettled(pending).then(function () {
+    return { drained: pending.length, timedOut: false };
+  });
+  var timer;
+  var cap = new Promise(function (resolve) {
+    timer = setTimeout(function () {
+      resolve({ drained: pending.length, timedOut: true });
+    }, timeoutMs || 15000);
+  });
+  return Promise.race([settled, cap]).then(function (r) {
+    clearTimeout(timer);
+    return r;
+  });
 }
 
 // ── Constants ──
@@ -619,6 +657,7 @@ module.exports = {
   // short-circuit issues zero diagnostic queries when the queue is empty.
   pollOnce,
   _resetForTests,
+  _drainForTests,
   getPollLoopState,
   getLastError,
   // Internal exports for tests
