@@ -7,6 +7,7 @@ import React from 'react';
 import './theme/typography.css';
 import AuthProvider, { useAuth } from './components/auth/AuthProvider';
 import LoginPage from './components/auth/LoginPage';
+import AuthBootstrapScreen from './components/auth/AuthBootstrapScreen';
 import AppLayout from './components/layout/AppLayout';
 import ErrorBoundary from './components/ErrorBoundary';
 import UpgradePrompt from './components/billing/UpgradePrompt';
@@ -133,20 +134,9 @@ function AppContent() {
   }
 
   if (loading) {
-    return (
-      <div style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: '#1A2B4A',
-        color: '#E8E0D0',
-        fontFamily: "'Inter', system-ui, sans-serif",
-        fontSize: 14
-      }}>
-        Loading...
-      </div>
-    );
+    // 999.2120: sanctioned full-page auth-bootstrap case, brand-compliant
+    // treatment (gold bar + role=status in aria-busy region), not bare text.
+    return <AuthBootstrapScreen message="Loading…" />;
   }
 
   if (!user) {
