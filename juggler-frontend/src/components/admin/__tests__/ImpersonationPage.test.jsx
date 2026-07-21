@@ -37,3 +37,13 @@ it('renders user list and log sections', async () => {
   });
   expect(screen.getByText('start_impersonation')).toBeInTheDocument();
 });
+
+it('shows skeleton rows (sr-only status) while users load — 999.2147', () => {
+  impersonationService.getImpersonationTargets.mockReturnValueOnce(new Promise(() => {}));
+  impersonationService.getImpersonationLog.mockReturnValueOnce(new Promise(() => {}));
+
+  render(<ImpersonationPage darkMode={true} />);
+
+  expect(screen.getAllByTestId('skeleton-row').length).toBeGreaterThanOrEqual(3);
+  expect(screen.getByRole('status')).toHaveTextContent(/loading users/i);
+});

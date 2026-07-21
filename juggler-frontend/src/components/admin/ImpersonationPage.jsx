@@ -5,7 +5,7 @@ import {
   startImpersonation,
   isImpersonating
 } from '../../services/impersonationService';
-import Loading from '../common/Loading';
+import SkeletonRows from '../common/SkeletonRows';
 
 export default function ImpersonationPage({ darkMode }) {
   const [search, setSearch] = useState('');
@@ -130,7 +130,8 @@ export default function ImpersonationPage({ darkMode }) {
           }}
         />
 
-        {usersLoading && <Loading label="Loading users…" style={{ justifyContent: 'flex-start', color: darkMode ? '#8899BB' : '#888' }} />}
+        {/* 999.2147: skeleton rows per brand Loading & Busy-State Standard */}
+        {usersLoading && <SkeletonRows rows={5} rowHeight={52} label="Loading users…" theme={{ bg: darkMode ? '#1A2B4A' : '#f5f5f5' }} />}
         {usersError && <div style={{ color: '#FF8080' }}>Error: {usersError}</div>}
         {!usersLoading && users.length === 0 && !usersError && (
           <div style={{ color: darkMode ? '#8899BB' : '#888' }}>No users found.</div>
