@@ -80,7 +80,7 @@ export default function SettingsPanel({ onClose, darkMode, config, allProjectNam
           {tab === 'projects' && <ProjectsTab config={config} theme={theme} darkMode={darkMode} isMobile={isMobile} allProjectNames={allProjectNames} allTasks={allTasks || []} onRenameProject={onRenameProject} />}
           {tab === 'preferences' && <PreferencesTab config={config} theme={theme} />}
           {tab === 'notifications' && <NotificationsTab theme={theme} showToast={showToast} />}
-          {tab === 'templates' && <UnifiedTemplateTab config={config} theme={theme} showToast={showToast} allTasks={allTasks} />}
+          {tab === 'templates' && <UnifiedTemplateTab config={config} theme={theme} darkMode={darkMode} isMobile={isMobile} showToast={showToast} allTasks={allTasks} />}
         </div>
       </div>
     </div>

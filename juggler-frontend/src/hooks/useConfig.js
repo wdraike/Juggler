@@ -338,6 +338,35 @@ export default function useConfig(onSaveError) {
     saveConfig('loc_schedule_overrides', ovr);
   }, [saveConfig]);
 
+  // 999.2145 — apply an ALREADY-PERSISTED schedule-template trio (e.g. the
+  // response body of POST /config/templates/reset) into local state WITHOUT
+  // re-saving it (the caller's own request already wrote it server-side).
+  // Re-derives the legacy timeBlocks/locSchedules/locScheduleDefaults/
+  // locScheduleOverrides too — CalendarGrid/HorizontalTimeline still read the
+  // legacy shape directly (full de-legacy is tracked separately, 999.2146), so
+  // skipping this would leave the actual scheduling grid stale after a reset
+  // even though the Templates tab shows the restored defaults.
+  // law review (999.2145): shape-guard the WHOLE trio before applying ANY of
+  // it — a partial/malformed body must not write undefined into some state
+  // slots while deriving from others (the derive functions would then throw
+  // on the undefined slot, after already having mutated the rest). The
+  // caller's try/catch + showToast handles the error surface; this just
+  // never partially applies.
+  var applyScheduleTemplatesResponse = useCallback(function(data) {
+    var isPlainObj = function(v) { return v !== null && typeof v === 'object' && !Array.isArray(v); };
+    var tmpls = data && data.scheduleTemplates;
+    var tDefs = data && data.templateDefaults;
+    var tOvr = data && data.templateOverrides;
+    if (!isPlainObj(tmpls) || !isPlainObj(tDefs) || !isPlainObj(tOvr)) return;
+    setScheduleTemplates(tmpls);
+    setTemplateDefaults(tDefs);
+    setTemplateOverrides(tOvr);
+    setTimeBlocks(deriveTimeBlocks(tmpls, tDefs));
+    setLocSchedules(deriveLocSchedules(tmpls));
+    setLocScheduleDefaults(tDefs);
+    setLocScheduleOverrides(tOvr);
+  }, []);
+
   var updateCalSyncSettings = useCallback(function(val) {
     setCalSyncSettings(val);
     saveConfig('cal_sync_settings', val);
@@ -413,6 +442,7 @@ export default function useConfig(onSaveError) {
     updateLocScheduleOverrides, updateHourLocationOverrides,
     updatePreferences, updateLocations, updateTools,
     updateScheduleTemplates, updateTemplateDefaults, updateTemplateOverrides,
+    applyScheduleTemplatesResponse,
     updateCalSyncSettings, updateTempUnitPref, updateUserTimezone
   };
 }
