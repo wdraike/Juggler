@@ -22,37 +22,69 @@ function cloneBlocks(blocks) {
 // "log every occurrence", intent of SUB-207a).
 var _warnedDanglingTemplateIds = new Set();
 
+// Look up a templateId in scheduleTemplates. Known id -> its blocks (`[]` is
+// a legitimate zero-capacity-day answer, TS-207 — NOT the same as "unknown").
+// Unknown/dangling id -> warn once per id per process (SUB-207a) and return
+// null so the caller falls through to the NEXT resolution tier instead of a
+// spuriously empty day.
+function _resolveTemplateBlocks(templateId, scheduleTemplates, dateStr, contextLabel) {
+  if (!templateId) return null;
+  if (scheduleTemplates[templateId]) {
+    return scheduleTemplates[templateId].blocks || [];
+  }
+  if (!_warnedDanglingTemplateIds.has(templateId)) {
+    _warnedDanglingTemplateIds.add(templateId);
+    console.warn(
+      '[timeBlockHelpers.getBlocksForDate] ' + contextLabel + ' for ' + dateStr +
+      ' references unknown templateId "' + templateId +
+      '" — falling back (SUB-207a)'
+    );
+  }
+  return null;
+}
+
+// Resolution order (999.2161; juggler CLAUDE.md "Schedule-Template Storage" +
+// TS-207/208, docs/TEST-SPECS-USER-CONFIG-TEMPLATE-TASK.md):
+//   1. cfg.templateOverrides[dateStr]     — canonical date-specific override
+//      (999.2146 trio member #2; previously never assembled into scheduler
+//      cfg at all, 999.2161).
+//   2. cfg.locScheduleOverrides[dateStr]  — legacy override field, kept for
+//      back-compat with any writer that only dual-writes the legacy key
+//      (pre-existing behavior, unchanged).
+//   3. cfg.templateDefaults[dayName]      — canonical day-of-week assignment
+//      (999.2146 trio member #1; previously the scheduler only ever saw this
+//      indirectly, via the frontend pre-resolving it into the legacy
+//      `time_blocks` row on every Templates-tab save).
+//   4. blocksMap[dayName]                 — legacy per-weekday time_blocks
+//      map (unchanged final fallback).
+// Each tier's dangling-id case falls through to the NEXT tier (not straight
+// to blocksMap) so an unknown canonical ref never masks a still-valid legacy
+// value at a lower tier.
 function getBlocksForDate(dateStr, blocksMap, cfg) {
   var d = parseDate(dateStr);
   if (!d) return blocksMap.Mon || [];
+  var dayName = DAY_NAMES[d.getDay()];
+
   if (cfg && cfg.scheduleTemplates) {
-    var templateId = null;
-    if (cfg.locScheduleOverrides && cfg.locScheduleOverrides[dateStr]) {
-      templateId = cfg.locScheduleOverrides[dateStr];
+    if (cfg.templateOverrides && cfg.templateOverrides[dateStr]) {
+      var fromOverride = _resolveTemplateBlocks(
+        cfg.templateOverrides[dateStr], cfg.scheduleTemplates, dateStr, 'template_overrides override'
+      );
+      if (fromOverride) return fromOverride;
     }
-    if (templateId) {
-      if (cfg.scheduleTemplates[templateId]) {
-        return cfg.scheduleTemplates[templateId].blocks || [];
-      }
-      // SUB-207a: a dated override referencing a templateId that no longer
-      // exists in scheduleTemplates (a dangling ref — a pre-existing bad row
-      // from before the 999.2144 write-side guard, or a since-deleted
-      // non-system custom template; system templates cannot be deleted,
-      // 999.2146) must NOT produce a zero-capacity day — fall through to the
-      // day-of-week blocksMap below, same as "no override for this date".
-      // Warn (once per dangling id) so it's visible in logs instead of
-      // silently degrading placement.
-      if (!_warnedDanglingTemplateIds.has(templateId)) {
-        _warnedDanglingTemplateIds.add(templateId);
-        console.warn(
-          '[timeBlockHelpers.getBlocksForDate] override for ' + dateStr +
-          ' references unknown templateId "' + templateId +
-          '" — falling back to day-of-week blocks (SUB-207a)'
-        );
-      }
+    if (cfg.locScheduleOverrides && cfg.locScheduleOverrides[dateStr]) {
+      var fromLegacyOverride = _resolveTemplateBlocks(
+        cfg.locScheduleOverrides[dateStr], cfg.scheduleTemplates, dateStr, 'override'
+      );
+      if (fromLegacyOverride) return fromLegacyOverride;
+    }
+    if (cfg.templateDefaults && cfg.templateDefaults[dayName]) {
+      var fromDefault = _resolveTemplateBlocks(
+        cfg.templateDefaults[dayName], cfg.scheduleTemplates, dateStr, 'template_defaults default'
+      );
+      if (fromDefault) return fromDefault;
     }
   }
-  var dayName = DAY_NAMES[d.getDay()];
   return blocksMap[dayName] || [];
 }
 

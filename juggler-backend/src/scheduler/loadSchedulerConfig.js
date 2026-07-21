@@ -81,6 +81,21 @@ function assembleSchedulerCfg(config, locations) {
     locScheduleOverrides: config.loc_schedule_overrides || {},
     hourLocationOverrides: config.hour_location_overrides || {},
     scheduleTemplates: config.schedule_templates || null,
+    // 999.2161: the canonical trio's other two members (999.2146) — day
+    // assignment (`template_defaults`, Mon..Sun -> templateId) and
+    // date-specific exceptions (`template_overrides`, YYYY-MM-DD ->
+    // templateId). Previously assembled cfg carried scheduleTemplates but
+    // NOT these two, so getBlocksForDate could only resolve a templateId via
+    // the legacy locScheduleOverrides field (kept content-identical to
+    // templateOverrides by the frontend's dual-write) and never consulted
+    // templateDefaults at all — day-assignment edits only reached the
+    // scheduler via the frontend pre-resolving them into the legacy
+    // time_blocks row on every save. Same absence-default pattern as
+    // scheduleTemplates above (`|| null`, not `|| {}` — getBlocksForDate
+    // treats a present-but-empty map as "no override/default for this
+    // key", identical to absent).
+    templateDefaults: config.template_defaults || null,
+    templateOverrides: config.template_overrides || null,
     preferences: config.preferences || {},
     splitDefault: config.preferences ? config.preferences.splitDefault : undefined,
     splitMinDefault: config.preferences ? config.preferences.splitMinDefault : undefined,

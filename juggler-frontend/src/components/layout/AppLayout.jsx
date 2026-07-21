@@ -345,8 +345,16 @@ export default function AppLayout() {
     schedFloor: config.schedFloor,
     schedCeiling: config.schedCeiling,
     scheduleTemplates: config.scheduleTemplates,
+    // 999.2161 — mirror the backend's assembleSchedulerCfg: pass the OTHER
+    // two canonical-trio members (999.2146) alongside scheduleTemplates, so
+    // CalendarGrid/HorizontalTimeline's getBlocksForDate call (same shared
+    // helper the backend scheduler now consults) resolves blocks with the
+    // identical precedence the backend uses, instead of only ever seeing
+    // the legacy-key-derived preview.
+    templateDefaults: config.templateDefaults,
+    templateOverrides: config.templateOverrides,
     temperatureUnit: config.tempUnitPref || 'F'
-  }), [config.timeBlocks, config.locSchedules, config.locScheduleDefaults, config.locScheduleOverrides, config.hourLocationOverrides, config.toolMatrix, config.splitDefault, config.splitMinDefault, config.schedFloor, config.schedCeiling, config.scheduleTemplates, config.tempUnitPref]);
+  }), [config.timeBlocks, config.locSchedules, config.locScheduleDefaults, config.locScheduleOverrides, config.hourLocationOverrides, config.toolMatrix, config.splitDefault, config.splitMinDefault, config.schedFloor, config.schedCeiling, config.scheduleTemplates, config.templateDefaults, config.templateOverrides, config.tempUnitPref]);
 
   // Now minutes (ET) — update every minute
   var [nowMins, setNowMins] = useState(() => {

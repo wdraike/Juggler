@@ -185,6 +185,125 @@ describe('timeBlockHelpers', () => {
     });
   });
 
+  // 999.2161 — getBlocksForDate wires the OTHER two canonical-trio members
+  // (999.2146) into its resolution: cfg.templateOverrides (date -> templateId)
+  // and cfg.templateDefaults (day-of-week -> templateId). Full precedence
+  // (per juggler CLAUDE.md "Schedule-Template Storage" + TS-207/208 specs,
+  // docs/TEST-SPECS-USER-CONFIG-TEMPLATE-TASK.md):
+  //   1. cfg.templateOverrides[dateStr]           (canonical, date-specific)
+  //   2. cfg.locScheduleOverrides[dateStr]         (legacy back-compat)
+  //   3. cfg.templateDefaults[dayName]             (canonical, day-of-week)
+  //   4. blocksMap[dayName]                        (legacy time_blocks)
+  // Each tier: unknown templateId -> warn (SUB-207a) + fall through to the
+  // NEXT tier (not straight to blocksMap) — same "dangling ref" semantics
+  // 999.2146 already gave locScheduleOverrides.
+  describe('getBlocksForDate — cfg.templateDefaults/cfg.templateOverrides resolution (999.2161)', () => {
+    var TEMPLATES = {
+      office: { name: 'Office', blocks: [{ id: 'o1', tag: 'biz', name: 'Office', start: 480, end: 720, loc: 'work' }] },
+      holiday: { name: 'Holiday', blocks: [] }
+    };
+    var LEGACY_MON_BLOCKS = [{ id: 'mon1', tag: 'morning', name: 'Morning', start: 360, end: 480 }];
+    // 2026-07-20 is a Monday.
+    var DATE = '2026-07-20';
+
+    it('cfg.templateOverrides[date] -> known templateId wins over EVERYTHING else', () => {
+      var cfg = {
+        scheduleTemplates: TEMPLATES,
+        templateOverrides: { '2026-07-20': 'office' },
+        locScheduleOverrides: { '2026-07-20': 'holiday' }, // legacy says something else
+        templateDefaults: { Mon: 'holiday' } // canonical default also says something else
+      };
+      var blocks = getBlocksForDate(DATE, { Mon: LEGACY_MON_BLOCKS }, cfg);
+      expect(blocks).toBe(TEMPLATES.office.blocks);
+    });
+
+    it('TS-207: templateOverrides -> a KNOWN template with an EMPTY blocks array returns [] (zero-capacity day, not a fallthrough)', () => {
+      var cfg = {
+        scheduleTemplates: TEMPLATES,
+        templateOverrides: { '2026-07-20': 'holiday' }
+      };
+      var blocks = getBlocksForDate(DATE, { Mon: LEGACY_MON_BLOCKS }, cfg);
+      expect(blocks).toEqual([]);
+    });
+
+    it('no templateOverrides for this date -> falls through to (legacy) locScheduleOverrides, which still wins over templateDefaults', () => {
+      var cfg = {
+        scheduleTemplates: TEMPLATES,
+        templateOverrides: {}, // present but no entry for this date
+        locScheduleOverrides: { '2026-07-20': 'office' },
+        templateDefaults: { Mon: 'holiday' }
+      };
+      var blocks = getBlocksForDate(DATE, { Mon: LEGACY_MON_BLOCKS }, cfg);
+      expect(blocks).toBe(TEMPLATES.office.blocks);
+    });
+
+    it('no override anywhere (canonical or legacy) -> cfg.templateDefaults[dayName] wins over legacy blocksMap', () => {
+      var cfg = {
+        scheduleTemplates: TEMPLATES,
+        templateDefaults: { Mon: 'office' }
+      };
+      var blocks = getBlocksForDate(DATE, { Mon: LEGACY_MON_BLOCKS }, cfg);
+      expect(blocks).toBe(TEMPLATES.office.blocks);
+    });
+
+    it('no canonical/legacy override or default present at all -> byte-identical to today: legacy blocksMap[dayName]', () => {
+      var cfg = { scheduleTemplates: TEMPLATES };
+      var blocks = getBlocksForDate(DATE, { Mon: LEGACY_MON_BLOCKS }, cfg);
+      expect(blocks).toBe(LEGACY_MON_BLOCKS);
+    });
+
+    it('cfg.templateOverrides[date] -> UNKNOWN templateId warns + falls through to locScheduleOverrides (not straight to blocksMap)', () => {
+      var warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        var cfg = {
+          scheduleTemplates: TEMPLATES,
+          templateOverrides: { '2026-07-20': 'ghost-override-2161' },
+          locScheduleOverrides: { '2026-07-20': 'office' }
+        };
+        var blocks = getBlocksForDate(DATE, { Mon: LEGACY_MON_BLOCKS }, cfg);
+        expect(blocks).toBe(TEMPLATES.office.blocks);
+        expect(warnSpy).toHaveBeenCalled();
+        var msg = warnSpy.mock.calls[0].join(' ');
+        expect(msg).toContain('ghost-override-2161');
+        expect(msg).toContain('2026-07-20');
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('cfg.templateDefaults[dayName] -> UNKNOWN templateId warns + falls through to legacy blocksMap[dayName]', () => {
+      var warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        var cfg = {
+          scheduleTemplates: TEMPLATES,
+          templateDefaults: { Mon: 'ghost-default-2161' }
+        };
+        var blocks = getBlocksForDate(DATE, { Mon: LEGACY_MON_BLOCKS }, cfg);
+        expect(blocks).toBe(LEGACY_MON_BLOCKS);
+        expect(warnSpy).toHaveBeenCalled();
+        var msg = warnSpy.mock.calls[0].join(' ');
+        expect(msg).toContain('ghost-default-2161');
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('absent cfg.templateDefaults/cfg.templateOverrides entirely (undefined, not just empty) -> byte-identical to pre-999.2161 behavior', () => {
+      // Mirrors every pre-existing scheduler test fixture in this repo today
+      // (none set templateDefaults/templateOverrides) — this is the
+      // regression pin for "(d) absent canonical maps -> behavior identical".
+      var cfg = {
+        scheduleTemplates: TEMPLATES,
+        locScheduleOverrides: { '2026-07-20': 'office' }
+      };
+      var blocks = getBlocksForDate(DATE, { Mon: LEGACY_MON_BLOCKS }, cfg);
+      expect(blocks).toBe(TEMPLATES.office.blocks);
+
+      var cfg2 = { scheduleTemplates: TEMPLATES };
+      expect(getBlocksForDate(DATE, { Mon: LEGACY_MON_BLOCKS }, cfg2)).toBe(LEGACY_MON_BLOCKS);
+    });
+  });
+
   describe('cloneBlocks', () => {
     it('creates new objects with unique ids', () => {
       const cloned = cloneBlocks(SAMPLE_BLOCKS);

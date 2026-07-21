@@ -95,4 +95,31 @@ describe('loadSchedulerConfig (999.1187)', function() {
     expect(cfg.toolMatrix).toEqual({ home: [] });
     expect(cfg.toolMatrix).not.toBe(constants.DEFAULT_TOOL_MATRIX);
   });
+
+  // 999.2161 — assembleSchedulerCfg previously assembled scheduleTemplates
+  // (:83) but never the OTHER two members of the canonical trio
+  // (999.2146): template_defaults (day-of-week -> templateId) and
+  // template_overrides (date -> templateId). Without these, getBlocksForDate
+  // could never resolve a templateId from the canonical source — only from
+  // the legacy locScheduleOverrides/time_blocks side channel the frontend
+  // dual-writes on every Templates-tab edit.
+  describe('999.2161: template_defaults/template_overrides wired into cfg', function() {
+    var TEMPLATE_DEFAULTS = { Mon: 'weekday', Tue: 'weekday', Sat: 'weekend', Sun: 'weekend' };
+    var TEMPLATE_OVERRIDES = { '2026-07-04': 'holiday' };
+
+    test('present rows flow into cfg.templateDefaults/cfg.templateOverrides', function() {
+      var cfg = assembleSchedulerCfg(parseUserConfigRows([
+        row('template_defaults', TEMPLATE_DEFAULTS),
+        row('template_overrides', TEMPLATE_OVERRIDES)
+      ]), []);
+      expect(cfg.templateDefaults).toEqual(TEMPLATE_DEFAULTS);
+      expect(cfg.templateOverrides).toEqual(TEMPLATE_OVERRIDES);
+    });
+
+    test('absent rows -> null (same absence-default convention as scheduleTemplates)', function() {
+      var cfg = assembleSchedulerCfg({}, []);
+      expect(cfg.templateDefaults).toBeNull();
+      expect(cfg.templateOverrides).toBeNull();
+    });
+  });
 });
