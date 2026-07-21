@@ -367,7 +367,7 @@ describe('WhenSection mode matrix — with calendar task', () => {
           expect(labelEl.style.opacity).toBe('0.4');
         }
         // mode selector buttons must be keyboard-locked (tabIndex=-1)
-        var anytimeBtn = screen.getByTitle(/No time restriction/);
+        const anytimeBtn = screen.getByTitle(/No time restriction/);
         expect(anytimeBtn).toHaveAttribute('tabIndex', '-1');
       } else {
         // non-fixed: label present and fully opaque
@@ -375,7 +375,7 @@ describe('WhenSection mode matrix — with calendar task', () => {
           expect(labelEl.style.opacity).toBe('1');
         }
         // mode selector wrapper must NOT lock pointer events
-        var anytimeBtn = screen.getByTitle(/No time restriction/);
+        const anytimeBtn = screen.getByTitle(/No time restriction/);
         expect(anytimeBtn.closest('div')).not.toHaveStyle({ pointerEvents: 'none' });
       }
     });

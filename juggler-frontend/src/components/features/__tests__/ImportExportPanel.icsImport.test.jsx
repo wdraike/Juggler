@@ -26,7 +26,7 @@ jest.setTimeout(30000);
 
 jest.mock('../../../services/apiClient');
 
-import apiClient from '../../../services/apiClient';
+
 import ImportExportPanel from '../ImportExportPanel';
 
 // Minimal valid single-VEVENT .ics — DTSTART/DTEND both timed (not all-day) so

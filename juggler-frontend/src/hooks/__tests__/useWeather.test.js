@@ -5,7 +5,7 @@
  * visibilitychange when the tab becomes visible after > 55 min idle.
  */
 
-import React from 'react';
+
 import { renderHook, act } from '@testing-library/react';
 import useWeather from '../useWeather';
 

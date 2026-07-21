@@ -7,7 +7,7 @@
 import React from 'react';
 import { render, act } from '@testing-library/react';
 import AuthProvider, { useAuth } from '../AuthProvider';
-import apiClient, { setAccessToken, clearAccessToken } from '../../../services/apiClient';
+import apiClient from '../../../services/apiClient';
 
 // Mock the auth service and API client
 jest.mock('../../../services/apiClient');
