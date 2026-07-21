@@ -9,7 +9,7 @@ import HeaderBar from './HeaderBar';
 import WeekStrip from './WeekStrip';
 import NavigationBar from './NavigationBar';
 import ToastNotification, { useToast } from './ToastNotification';
-import Loading from '../common/Loading';
+import TaskBoardSkeleton from './TaskBoardSkeleton';
 import useTaskState from '../../hooks/useTaskState';
 import useConfig from '../../hooks/useConfig';
 import useUndo from '../../hooks/useUndo';
@@ -785,11 +785,9 @@ export default function AppLayout() {
   }, [allTasks, statuses, config, pushUndo, dispatchPersist, showToast, addTasks, retryAddTasks]);
 
   if (loading) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: theme.bg, color: theme.textMuted, fontFamily: "'Inter', system-ui", fontSize: 14 }}>
-        <Loading label="Loading tasks…" />
-      </div>
-    );
+    // 999.2119: layout-matching skeleton per brand Loading & Busy-State
+    // Standard — full-page spinner gate deprecated for content regions.
+    return <TaskBoardSkeleton theme={theme} isMobile={isMobile} />;
   }
 
   var isToday = selectedDateKey === getNowInTimezone(userTimezone, serverClock).todayKey;
