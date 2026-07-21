@@ -3,7 +3,7 @@
 <!-- One fact per line. Injected as CONTEXT: lines in session brief. -->
 <!-- Keep facts to stable, non-obvious domain rules and architecture decisions. -->
 
-Task & calendar management app — React (port 3003), Express (port 5002), MySQL, MCP server (juggler-mcp/)
+Task & calendar management app — React (port 3003), Express (port 5002), MySQL, MCP served by juggler-backend over Streamable HTTP at /api/mcp (canonical) + /mcp (legacy alias)
 Scheduler: schedule most-constrained → least-constrained; never reverse this; bugs cascade and corrupt all task data
 Scheduler entry point: juggler-backend/src/scheduler/unifiedScheduleV2.js
 Task type terms: one-off (standalone), chain member (linked dependency), recurring instance (one occurrence), split chunk (piece split across time)

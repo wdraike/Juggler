@@ -52,7 +52,6 @@ function buildFileIndex() {
     ...listFiles(path.join(JUGGLER_ROOT, 'juggler-backend', 'tests')),
     ...listFiles(path.join(JUGGLER_ROOT, 'juggler-backend', 'scripts')),
     ...listFiles(path.join(JUGGLER_ROOT, 'juggler-frontend', 'src')),
-    ...listFiles(path.join(JUGGLER_ROOT, 'juggler-mcp')),
   ].sort();
 }
 
@@ -118,7 +117,7 @@ function resolveTestsCell(cell, fileIndex) {
 
     // Normalize to a juggler/-relative path.
     let rel;
-    if (ref.startsWith('juggler-backend/') || ref.startsWith('juggler-frontend/') || ref.startsWith('juggler-mcp/')) {
+    if (ref.startsWith('juggler-backend/') || ref.startsWith('juggler-frontend/')) {
       rel = ref;
     } else if (ref.startsWith('tests/') || ref.startsWith('scripts/')) {
       rel = 'juggler-backend/' + ref;

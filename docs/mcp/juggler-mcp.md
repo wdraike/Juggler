@@ -2,7 +2,7 @@
 type: mcp
 service: juggler
 status: active
-last_updated: 2026-05-19
+last_updated: 2026-07-21
 tags:
   - type/mcp
   - service/juggler
@@ -12,122 +12,59 @@ tags:
   - scheduler
 ---
 
-# MCP Server — Juggler
+# MCP Server — Juggler (Streamable HTTP)
 
-**Last Updated:** 2026-05-18  
-**Location:** `juggler/juggler-mcp/index.js`  
-**Configuration:** `.mcp.json` in project root or `.claude/settings.json`
+**Last Updated:** 2026-07-21
+**Location:** `juggler-backend/src/mcp/` (`server.js`, `tools/*`, `transport.js`, `api-key-auth.js`)
 
----
+> **History:** this doc previously described the `juggler-mcp/` standalone stdio
+> client package. That package was **deleted in 999.2158 (2026-07-21)** — it
+> called the REST API (which accepts JWKS-verified JWTs only), so MCP API keys
+> 401'd on every tool call, and its tool definitions duplicated the backend
+> MCP's. MCP is now served exclusively by `juggler-backend` over Streamable HTTP.
 
-## Purpose
+## Endpoints
 
-Exposes Juggler scheduler capabilities to Claude Code. Create/list/update tasks, manage projects, query schedule — all via natural language.
+| Path | Status |
+|------|--------|
+| `POST /api/mcp` | Canonical (path-consistent with resume-optimizer's `/api/mcp`) |
+| `POST /mcp` | Legacy alias — the prod claude.ai StriveRS connector is registered at `strivers.raikegroup.com/mcp`; keep until that registration is repointed |
 
-## Available Tools
+Both paths are served by the same handlers (`src/app.js` mounts → `src/mcp/transport.js`)
+with the same rate limit. `GET`/`DELETE` return 405 (stateless mode — one
+`McpServer` per POST, no session tracking, Cloud Run safe).
+Parity + auth contract tests: `juggler-backend/tests/mcp-api-alias-parity.test.js`.
 
-| Tool | Args | Description | Example |
-|------|------|-------------|---------|
-| `list_tasks` | status, project, date, limit | List tasks with filters | `list_tasks(status="pending", limit=10)` |
-| `create_task` | text, project, pri, dur, when, dependsOn, scheduledAt, deadline | Create a task with full scheduling options | `create_task(text="Write tests", project="auth", pri=2, dur=60)` |
-| `update_task` | id, text, status, pri, dur, project | Update existing task | `update_task(id="abc123", status="completed")` |
-| `delete_task` | id | Delete task by ID | `delete_task(id="abc123")` |
-| `add_dependency` | taskId, dependsOnId | Add task dependency | `add_dependency(taskId="A", dependsOnId="B")` |
-| `remove_dependency` | taskId, dependsOnId | Remove task dependency | `remove_dependency(taskId="A", dependsOnId="B")` |
-| `list_projects` | — | List all projects | `list_projects()` |
-| `create_project` | name, color | Create new project | `create_project(name="Q3 Goals", color="blue")` |
-| `update_project` | name, color | Update project | `update_project(name="Q3 Goals", color="green")` |
-| `delete_project` | name | Delete project | `delete_project(name="Old Project")` |
-| `get_schedule` | date, project | Get scheduled tasks for date | `get_schedule(date="5/18")` |
-| `update_schedule` | taskId, date, time | Update task schedule | `update_schedule(taskId="abc", date="5/19", time="2:00 PM")` |
+## Auth — two doors (ruling 2026-07-21)
 
-## Configuration
+1. **OAuth access-JWT** — exclusively for claude.ai remote connectors
+   (30-day single-use refresh-token rotation keeps them live between uses).
+2. **auth-service `mcp` API key** — the sole path for local clients
+   (Claude Code, Claude Desktop via `mcp-remote`, scripts). Validated fresh on
+   every call — auth-service introspection + payment-service entitlement
+   (`src/mcp/api-key-auth.js`), fail-closed, no caching.
 
-### Required Environment Variables
+Mint a key via auth-service's Account Security → API Keys UI (type `mcp`), then:
 
 ```bash
-JUGGLER_API_URL=http://localhost:5002
-JUGGLER_TOKEN=<jwt-token>
+# Claude Code
+claude mcp add --transport http strivers http://localhost:5002/api/mcp \
+  --header "Authorization: Bearer <key>"
 ```
 
-### Get Token
+## Tools
 
-Mint an MCP API key via auth-service's AccountSecurityPage UI (log in, then
-Account Security → API Keys → create a key of type `mcp`) and use it as
-`JUGGLER_TOKEN` — no browser localStorage scraping required.
+Tool definitions live in `juggler-backend/src/mcp/tools/` (tasks, schedule,
+config, data) and register in `src/mcp/server.js` — one registry serves every
+transport and client, so the tool surface cannot drift between clients.
 
-### settings.json Entry
+## Dev smoke
 
-```json
-{
-  "mcpServers": {
-    "juggler": {
-      "command": "node",
-      "args": ["juggler-mcp/index.js"],
-      "env": {
-        "JUGGLER_API_URL": "http://localhost:5002",
-        "JUGGLER_TOKEN": "eyJhbGc..."
-      }
-    }
-  }
-}
+Backend must be running (`node dev.js` → port 5002):
+
+```bash
+curl -s -X POST http://localhost:5002/api/mcp \
+  -H "Authorization: Bearer <key>" -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}'
 ```
-
-## Usage Examples
-
-### Create a Task with Deadline
-
-```
-Create a task "Deploy to staging" with priority 1, duration 2 hours, deadline 2026-05-20
-```
-
-**Claude calls:**
-```javascript
-create_task({
-  text: "Deploy to staging",
-  pri: 1,
-  dur: 120,
-  deadline: "2026-05-20"
-})
-```
-
-### List Pending Tasks for Project
-
-```
-Show me pending tasks for the auth project
-```
-
-**Claude calls:**
-```javascript
-list_tasks({ status: "pending", project: "auth", limit: 20 })
-```
-
-### Add Dependency
-
-```
-Make task B depend on task A completing first
-```
-
-**Claude calls:**
-```javascript
-add_dependency({ taskId: "B", dependsOnId: "A" })
-```
-
-## Troubleshooting
-
-| Issue | Cause | Fix |
-|-------|-------|-----|
-| `No JUGGLER_TOKEN set` | Token not in env or file | Set `JUGGLER_TOKEN` env var or create `~/.juggler-mcp-token` |
-| `API 401` | Key expired or revoked | Mint a new MCP API key via auth-service's AccountSecurityPage UI |
-| `API 404` | Wrong JUGGLER_API_URL | Verify backend is running on correct port |
-| Tool not found | MCP not in settings.json | Add config to `.claude/settings.json` or project `.mcp.json` |
-
-## Related Documentation
-
-- [[juggler-project-brief]] — Juggler service overview
-- [[juggler-api-reference]] — API endpoints this MCP wraps
-- [[juggler-architecture-overview]] — Scheduler architecture
-
----
-
-**Maintainer:** @W. David Raike

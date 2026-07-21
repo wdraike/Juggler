@@ -284,10 +284,16 @@ createOAuthProxyRoutes(app, { mcpEndpoint: '/mcp' });
 // (MCP API-key introspection + entitlement checks).
 app.get('/.well-known/service-jwks.json', getServiceJWKSHandler());
 
-// MCP Streamable HTTP (stateless, own rate limit)
-app.post('/mcp', mcpLimiter, mcpTransport.handlePost);
-app.get('/mcp', mcpTransport.handleMethodNotAllowed);
-app.delete('/mcp', mcpTransport.handleMethodNotAllowed);
+// MCP Streamable HTTP (stateless, own rate limit).
+// Served at BOTH paths (999.2158): /api/mcp is canonical (path-consistent with
+// resume-optimizer's /api/mcp); /mcp is the legacy alias the prod claude.ai
+// StriveRS connector is registered at — removing it would force a connector
+// re-add + OAuth re-auth, so it stays until that registration is repointed.
+for (const mcpPath of ['/mcp', '/api/mcp']) {
+  app.post(mcpPath, mcpLimiter, mcpTransport.handlePost);
+  app.get(mcpPath, mcpTransport.handleMethodNotAllowed);
+  app.delete(mcpPath, mcpTransport.handleMethodNotAllowed);
+}
 
 // Minimal auth profile endpoint (auth handled by auth-service, but frontend needs /auth/me)
 const { authenticateJWT } = require('./middleware/jwt-auth');

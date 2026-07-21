@@ -1,7 +1,7 @@
 # Juggler — Claude Instructions
 
 ## Stack
-React (port 3002) | Node.js/Express (port 5002) | MySQL + Knex.js | MCP server (`juggler-mcp/`)
+React (port 3002) | Node.js/Express (port 5002) | MySQL + Knex.js | MCP served by `juggler-backend` (Streamable HTTP, `/api/mcp` + `/mcp`)
 
 ## Port Configuration
 - **Local Dev:** `DB_PORT=3308` (Docker MySQL, see `dev-bed/`)
@@ -115,9 +115,9 @@ provisions this for you; the manual copy is only needed for direct `jest` runs.)
 See R15 for AI feature requirements (natural-language commands, emoji/icon suggestions, bulk project creation).
 
 ## MCP Server
-`juggler-mcp/` exposes juggler tasks to external MCP clients (e.g. ClimbRS). Changes here affect the ClimbRS integration.
+MCP is served by `juggler-backend` over Streamable HTTP — `POST /api/mcp` (canonical, path-consistent with resume-optimizer) and `POST /mcp` (legacy alias; the prod claude.ai StriveRS connector is registered there — keep until that registration is repointed). Two auth doors (999.2158 ruling): OAuth access-JWTs exclusively for claude.ai remote connectors; auth-service `mcp` API keys for local clients (Claude Code / Desktop / scripts). Server + tools: `juggler-backend/src/mcp/`; contract tests: `juggler-backend/tests/mcp-api-alias-parity.test.js`.
 
-**SDK version policy (999.1118):** `juggler-backend` and `juggler-mcp` are separate packages — juggler-mcp is a lightweight stdio client, juggler-backend is the full HTTP server. Both depend on `@modelcontextprotocol/sdk`. Keep both on the **same `^1.x` range** (currently `^1.27.1`) to prevent the version-drift class of bugs where SDK behavior differs between the two packages. When upgrading the SDK, bump both package.json files in the same commit.
+The former `juggler-mcp/` standalone stdio client was DELETED (999.2158, 2026-07-21): it called the REST API, which accepts JWKS-verified JWTs only, so MCP API keys 401'd on every tool call, and its tool surface duplicated the backend MCP's. The 999.1118 two-package SDK version policy died with it — `@modelcontextprotocol/sdk` now lives in juggler-backend alone.
 
 ## Approved Fallbacks
 

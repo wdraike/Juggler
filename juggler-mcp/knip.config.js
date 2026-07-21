@@ -1,8 +1,0 @@
-// knip.config.js
-module.exports = {
-  "$schema": "https://unpkg.com/knip@5/schema.json",
-  "entry": ["index.js"],
-  "project": ["index.js", "src/**/*.js!"],
-  "ignore": ["coverage/**", "node_modules/**"],
-  "ignoreDependencies": []
-};

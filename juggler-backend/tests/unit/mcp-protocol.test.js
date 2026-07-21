@@ -2,12 +2,13 @@
  * MCP Protocol-Level Tests — 999.559
  *
  * Covers three areas beyond the existing tool-registration tests:
- *   1. Error handling: backend-down (fetch rejects), invalid params, non-ok API responses.
+ *   1. Transport error handling and auth (src/mcp/transport.js).
  *   2. Per-client authorization: user A cannot read user B's config via MCP tools.
  *   3. All 20 tools are registered (cross-reference with R17.1).
  *
- * These tests exercise the juggler-mcp/index.js (stdio client) and the
- * src/mcp/transport.js (streamable HTTP server) code paths.
+ * These tests exercise the src/mcp/transport.js (streamable HTTP server)
+ * code paths. The former section 1 (999.559a, stdio-client protocol tests)
+ * was removed with the juggler-mcp package deletion (999.2158).
  */
 
 'use strict';
@@ -280,169 +281,6 @@ jest.mock('../../src/db', function () {
 
   reset();
   return db;
-});
-
-// SDK paths resolved from the SIBLING juggler-mcp package (own node_modules) so
-// the doMock keys match what juggler-mcp/index.js actually require()s. A bare
-// jest.mock('@modelcontextprotocol/sdk/...') resolves from juggler-backend — a
-// DIFFERENT absolute path — and would never intercept.
-//
-// @modelcontextprotocol/sdk's package.json exports map has always kept
-// McpServer and StdioServerTransport in separate subpath files (server/mcp.js
-// and server/stdio.js — the bare '.../server' index only ever exports Server;
-// confirmed identical in both 1.27.1 and 1.29.0). juggler-mcp/index.js
-// requires each subpath explicitly, so each mock must target its OWN resolved
-// path — they are DIFFERENT files.
-var MCP_DIR = path.resolve(__dirname, '../../../juggler-mcp');
-var SDK_MCP_PATH = require.resolve('@modelcontextprotocol/sdk/server/mcp.js', { paths: [MCP_DIR] });
-var SDK_STDIO_PATH = require.resolve('@modelcontextprotocol/sdk/server/stdio.js', { paths: [MCP_DIR] });
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 1. juggler-mcp/index.js — stdio client protocol tests
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('999.559a — juggler-mcp stdio client: error handling', function () {
-  var ORIGINAL_FETCH;
-  // Shared map the doMock'd McpServer records handlers into.
-  var capturedHandlers = {};
-
-  beforeAll(function () {
-    ORIGINAL_FETCH = global.fetch;
-  });
-
-  afterAll(function () {
-    global.fetch = ORIGINAL_FETCH;
-  });
-
-  beforeEach(function () {
-    // Set up env so the module doesn't bail on auth
-    process.env.JUGGLER_TOKEN = 'test-token-abc';
-    process.env.JUGGLER_API_URL = 'http://test-backend:5002';
-    jest.resetModules();
-
-    // Reset captured handlers, then mock the SDK at the path juggler-mcp resolves.
-    Object.keys(capturedHandlers).forEach(function (k) { delete capturedHandlers[k]; });
-
-    jest.doMock(SDK_MCP_PATH, function () {
-      return {
-        McpServer: jest.fn(function () {
-          return {
-            tool: function (name, _desc, _schema, handler) {
-              // The real SDK McpServer.tool() wraps the handler: a thrown error
-              // is converted to { content: [{ type:'text', text: error.message }],
-              // isError: true } (see @modelcontextprotocol/sdk mcp.js createToolError).
-              // juggler-mcp's raw tool handlers throw on apiCall failure and rely on
-              // that SDK wrapping, so the mock must replicate it for the captured
-              // handler to faithfully reproduce production behaviour.
-              capturedHandlers[name] = async function (args, extra) {
-                try {
-                  return await handler(args, extra);
-                } catch (error) {
-                  return {
-                    content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }],
-                    isError: true
-                  };
-                }
-              };
-            },
-            connect: jest.fn(function () { return Promise.resolve(); })
-          };
-        })
-      };
-    });
-    jest.doMock(SDK_STDIO_PATH, function () {
-      return { StdioServerTransport: function () { return {}; } };
-    });
-  });
-
-  afterEach(function () {
-    delete process.env.JUGGLER_TOKEN;
-    delete process.env.JUGGLER_API_URL;
-  });
-
-  function loadMcpModule() {
-    jest.isolateModules(function () {
-      try {
-        require('../../../juggler-mcp/index');
-      } catch (e) {
-        // Tools register on import regardless of token state; ignore exit/throw.
-      }
-    });
-  }
-
-  test('apiCall throws descriptive error when backend is unreachable (fetch rejects)', async function () {
-    global.fetch = jest.fn().mockRejectedValue(new Error('connect ECONNREFUSED 127.0.0.1:5002'));
-
-    loadMcpModule();
-
-    var handler = capturedHandlers['list_tasks'];
-    expect(handler).toBeDefined();
-
-    var result = await handler({});
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toMatch(/ECONNREFUSED|not authenticated|error/i);
-  });
-
-  test('apiCall throws descriptive error on non-ok API response (e.g. 500)', async function () {
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: false,
-      status: 500,
-      text: function () { return Promise.resolve('Internal Server Error'); }
-    });
-
-    loadMcpModule();
-
-    var handler = capturedHandlers['list_tasks'];
-    expect(handler).toBeDefined();
-
-    var result = await handler({});
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toMatch(/500|error/i);
-  });
-
-  test('apiCall throws on 403 forbidden response', async function () {
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: false,
-      status: 403,
-      text: function () { return Promise.resolve('{"error":"Forbidden"}'); }
-    });
-
-    loadMcpModule();
-
-    var handler = capturedHandlers['list_tasks'];
-    expect(handler).toBeDefined();
-
-    var result = await handler({});
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toMatch(/403|forbidden/i);
-  });
-
-  test('create_task with missing required text returns validation error', async function () {
-    // The juggler-mcp/index.js create_task doesn't validate text client-side;
-    // it sends to the backend which validates. Here we verify the happy-path
-    // handler returns a non-error result with content.
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      text: function () { return Promise.resolve('{"task":{"id":"abc","text":"test"}}'); }
-    });
-
-    loadMcpModule();
-
-    var handler = capturedHandlers['create_task'];
-    expect(handler).toBeDefined();
-
-    var result = await handler({ text: 'Test task' });
-    expect(result.isError).toBeFalsy();
-    expect(result.content[0].text).toBeDefined();
-  });
-
-  test('no token causes early exit with AUTH_INSTRUCTIONS message', function () {
-    delete process.env.JUGGLER_TOKEN;
-
-    // The module checks token at import time and logs AUTH_INSTRUCTIONS
-    // but still registers tools. Verify the token is null.
-    expect(process.env.JUGGLER_TOKEN).toBeUndefined();
-  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
