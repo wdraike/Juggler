@@ -56,6 +56,16 @@ it('expands Recurrence sub-section when collapse.when_recurrence is true', () =>
   expect(screen.getByText(/Daily/)).toBeInTheDocument();
 });
 
+it('interval recurrence surfaces the fixed-schedule explainer (999.2187 Layer 2)', () => {
+  // interval was mistaken for rolling (the Haircut mess); it must state its
+  // miss-behavior plainly the way the rolling block does.
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+    recurring={true} recurType="interval" recurEvery={6} recurUnit="weeks" recurStart="2026-07-22"
+  />);
+  expect(screen.getByText(/Fixed schedule/)).toBeInTheDocument();
+});
+
 // --- placementMode prop tests (D-24 through D-26) ---
 
 it('non-recurring task shows three-button mode selector (Anytime, Time window, Time blocks)', () => {
@@ -246,11 +256,11 @@ it('clicking "Flexible quota" when already in flex-mode does not change recurTpc
 
 // --- Task 3: Rolling recurrence mode UI ---
 
-it('recurrence select has "Rolling (repeats after completion)" option', () => {
+it('recurrence select has "Rolling — repeats after I finish" option', () => {
   render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
     collapse={{ when_recurrence: true, when_constraints: false }}
   />);
-  expect(screen.getByRole('option', { name: 'Rolling (repeats after completion)' })).toBeInTheDocument();
+  expect(screen.getByRole('option', { name: 'Rolling — repeats after I finish' })).toBeInTheDocument();
 });
 
 it('rolling mode shows interval input', () => {

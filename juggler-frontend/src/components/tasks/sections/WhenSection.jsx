@@ -609,8 +609,8 @@ export default function WhenSection(props) {
               <option value="weekly">Weekly</option>
               <option value="biweekly">Every 2 weeks</option>
               <option value="monthly">Monthly (pick days)</option>
-              <option value="interval">Every N (days/wks/mo/yr)</option>
-              <option value="rolling">Rolling (repeats after completion)</option>
+              <option value="interval">Every N — fixed schedule</option>
+              <option value="rolling">Rolling — repeats after I finish</option>
             </select>
           </label>
 
@@ -731,6 +731,20 @@ export default function WhenSection(props) {
                   <option value="years">year(s)</option>
                 </select>
               </div>
+              {/* 999.2187 Layer 2: interval is a FIXED schedule — state the miss-behavior
+                  plainly (mirrors the rolling block's explainer) so it isn't mistaken for
+                  rolling, the confusion that seeded the "Haircut" mess. */}
+              <div style={{ fontSize: 11, color: TH.textMuted, marginTop: 2 }}>
+                Fixed schedule — a new one lands every {recurEvery || 1} {recurUnit || 'weeks'} from the start date whether or not you finished the last. Want it to wait until you finish? Use <strong>Rolling</strong>.
+              </div>
+              {recurStart && recurEvery && recurUnit && (function() {
+                var every = parseInt(recurEvery, 10) || 1;
+                return (
+                  <div style={{ fontSize: 11, color: TH.textMuted, marginTop: 2 }}>
+                    Next: <span style={{ color: TH.text }}>{formatAnchorDate(recurStart)} · {formatAnchorDate(addIntervalToDate(recurStart, every, recurUnit))} · {formatAnchorDate(addIntervalToDate(recurStart, every * 2, recurUnit))}</span>
+                  </div>
+                );
+              })()}
             </label>
           )}
 
