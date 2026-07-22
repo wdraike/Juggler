@@ -300,6 +300,35 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, _cfg) {
     // After the placement_mode enum redesign, all_day mode is carried in
     // placement_mode directly — never in the when column.
     if (pm === PLACEMENT_MODES.ALL_DAY) return;
+
+    // 999.2193: reset the DB-seeded unplaced reason/detail before THIS run's own
+    // attribution passes run. rowToTask (taskMappers.js) pre-seeds _unplacedReason/
+    // _unplacedDetail straight from the persisted task_instances.unplaced_reason/
+    // _detail columns (needed by read-only consumers that never call buildItems —
+    // deriveSchedulePlacements.js, schedulerSession.js — to display the last-known
+    // reason without running the engine). But applyPlacementFailReason's "a reason
+    // already set upstream is never clobbered" guard (below, and in every same-run
+    // attribution branch: weather/spacing/tpc_budget/partial_split/missed/
+    // sched_collision/dep_blocked) can't distinguish "set upstream THIS run" from
+    // "inherited from a prior run's persisted write" — so a stale reason from
+    // before a blocking constraint changed (e.g. location config fixed) was never
+    // recomputed, and the scheduler kept re-persisting the same stale string on
+    // every run even though the DB write happened (updated_at moved) with a fresh,
+    // different, currently-true reason available. Clearing here — AFTER the skip
+    // guards above (so terminal/zero-dur/TBD/all-day tasks that never enter
+    // placement keep their persisted display value untouched) and BEFORE every
+    // same-run reason-setter in this function and the caller (weather, spacing,
+    // tpc_budget, partial_split, missed, sched_collision, and dep_blocked via
+    // findEarliestSlot) — means those
+    // same-run assignments still win untouched (this item, from here on, has never
+    // had a reason set YET this run), while a task that fails placement for a NEW
+    // reason, or now succeeds, gets that fresh truth written instead of the stale
+    // one. Scoped to the scheduler's own placement-item construction only — the
+    // taskMappers.js rowToTask seed itself is untouched, so any consumer reading
+    // task rows WITHOUT running the engine still sees the last persisted reason.
+    t._unplacedReason = null;
+    t._unplacedDetail = null;
+
     var when = t.when || '';
     // Phase 15: Removed legacy 'allday'/'fixed' strip logic — only placement_mode is used now.
     // BUG2 (W2, leg sched-anchor-split-bugs) FIX: past ANYTIME recurring instances

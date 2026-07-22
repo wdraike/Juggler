@@ -26,7 +26,6 @@ process.env.NODE_ENV = 'test';
 
 const unifiedSchedule = require('../../../src/scheduler/unifiedScheduleV2');
 const { DEFAULT_TIME_BLOCKS, DEFAULT_TOOL_MATRIX } = require('../../../src/scheduler/constants');
-const timeBlockHelpers = require('../../../../shared/scheduler/timeBlockHelpers');
 const { REASON_CODES } = require('../../../../shared/scheduler/reasonCodes');
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -456,5 +455,82 @@ describe('AC2.7 — R11.16: every unplaced item carries non-null _unplacedReason
     expect(item._unplacedReason).not.toBeNull();
     expect(item._unplacedDetail).toBeDefined();
     expect(item._unplacedDetail).not.toBeNull();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 999.2193 — a DB-seeded stale _unplacedReason/_unplacedDetail (rowToTask carries
+// task_instances.unplaced_reason/_detail straight onto the task object — see
+// taskMappers.js:623) must be REFRESHED by this run's own computation, never left
+// sticky. Reproduces the real bug: a recurring instance whose stored reason was
+// 'location_mismatch' from a run BEFORE its location config was fixed kept
+// re-persisting that stale string forever, because applyPlacementFailReason's
+// "a reason already set upstream is never clobbered" guard (AC2.5-c above) can't
+// tell "set upstream THIS run" apart from "inherited from a prior run's DB write".
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('999.2193 — stale DB-seeded _unplacedReason is refreshed every run, not sticky', () => {
+
+  test('999.2193-a: stale location_mismatch is overwritten with THIS run\'s real no_slot reason (still unplaced, different cause)', () => {
+    // Reliable capacity-exhaustion fixture (matches placementDiagnostics.test.js
+    // RED-AC1.2-d — a datePinned blocker is NOT reliable, see that test's own
+    // "SETUP FIX" comment): a single 30-min time block on Saturday, a P0
+    // generated blocker that fills the only slot, and a lower-priority P3
+    // generated target with no location/tool constraint of its own — so the
+    // ONLY reason it can fail this run is capacity. Pre-seed the target with a
+    // stale reason from a PRIOR run (simulating rowToTask's DB-column seed)
+    // that no longer matches reality.
+    // SELF-MUTATION: remove the buildItems reset (unifiedScheduleV2.js ~304) →
+    //   applyPlacementFailReason's guard sees the stale 'location_mismatch' as
+    //   already-set and returns early → item._unplacedReason stays
+    //   'location_mismatch' instead of refreshing to 'no_slot' → FAILS.
+    var TINY_BLOCKS = {
+      Sat: [{ id: 'tiny', tag: 'morning', name: 'Tiny', start: 480, end: 510, color: '#F59E0B', loc: 'home' }]
+    };
+    var cfg = makeCfg({ timeBlocks: TINY_BLOCKS });
+    var blocker = makeTask({
+      id: 'wr-blocker', location: [], tools: [], dur: 30, pri: 'P0',
+      generated: true, date: TODAY, deadline: TODAY
+    });
+    var target = makeTask({
+      id: 'wr-target', location: [], tools: [], dur: 30, pri: 'P3',
+      generated: true, date: TODAY, deadline: TODAY,
+      _unplacedReason: 'location_mismatch',
+      _unplacedDetail: 'Needs location home; resolved location is work'
+    });
+    var result = run([blocker, target], cfg);
+    var item = findUnplaced(result, 'wr-target');
+    if (!item) {
+      throw new Error('scenario setup failed: wr-target was placed despite the blocker — capacity fixture needs revisiting, cannot exercise the refresh path');
+    }
+    expect(item._unplacedReason).toBe(REASON_CODES.NO_SLOT);
+    expect(item._unplacedReason).not.toBe('location_mismatch');
+    expect(item._unplacedDetail).not.toBe('Needs location home; resolved location is work');
+  });
+
+  test('999.2193-b: stale location_mismatch is cleared to null when the task successfully places this run', () => {
+    // No blocker, no location/tool constraint — this task places cleanly today.
+    // Pre-seed a stale reason exactly as rowToTask would from an old DB row.
+    // SELF-MUTATION: remove the buildItems reset → task._unplacedReason (the
+    //   SAME object reference buildItems wraps as item.task) stays
+    //   'location_mismatch' even though the task placed successfully → FAILS.
+    var task = makeTask({
+      id: 'wr-placeable', location: [], tools: [],
+      date: TODAY, deadline: TODAY, earliestStart: TODAY,
+      _unplacedReason: 'location_mismatch',
+      _unplacedDetail: 'Needs location home; resolved location is work'
+    });
+    var result = run([task], makeCfg());
+    var item = findUnplaced(result, 'wr-placeable');
+    expect(item).toBeUndefined(); // placed — must not appear in result.unplaced
+
+    var placedOnToday = (result.dayPlacements[TODAY] || []).some(function(p) {
+      return p.task && p.task.id === 'wr-placeable';
+    });
+    expect(placedOnToday).toBe(true);
+
+    // task is the SAME object buildItems wrapped (task: t) — mutations are visible here.
+    expect(task._unplacedReason).toBeNull();
+    expect(task._unplacedDetail).toBeNull();
   });
 });
