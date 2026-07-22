@@ -8,9 +8,12 @@ import AuthBootstrapScreen from '../AuthBootstrapScreen';
 
 describe('AuthBootstrapScreen', () => {
   it('renders an aria-busy region with a polite role=status message', () => {
-    render(<AuthBootstrapScreen />);
-    expect(screen.getByTestId('auth-bootstrap')).toHaveAttribute('aria-busy', 'true');
-    expect(screen.getByRole('status')).toHaveTextContent(/loading/i);
+    const { container } = render(<AuthBootstrapScreen />);
+    const busyRegion = screen.getByTestId('auth-bootstrap');
+    expect(busyRegion).toHaveAttribute('aria-busy', 'true');
+    const statusRegion = screen.getByRole('status');
+    expect(statusRegion).toHaveTextContent(/loading/i);
+    expect(busyRegion.contains(statusRegion)).toBe(false);
   });
 
   it('accepts a custom message', () => {

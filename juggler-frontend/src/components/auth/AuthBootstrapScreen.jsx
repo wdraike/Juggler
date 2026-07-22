@@ -12,6 +12,7 @@ import React from 'react';
 export default function AuthBootstrapScreen({ message }) {
   var msg = message || 'Loading…';
   return (
+    <>
     <div
       data-testid="auth-bootstrap"
       aria-busy="true"
@@ -36,12 +37,26 @@ export default function AuthBootstrapScreen({ message }) {
           background: '#C8942A', borderRadius: 2
         }} />
       </div>
-      <div role="status" style={{ color: '#E8E0D0', fontSize: 14 }}>{msg}</div>
       <style>{
         '@keyframes auth-boot-slide { 0% { left: -40%; } 100% { left: 100%; } }' +
         '.auth-boot-fill { animation: auth-boot-slide 1.4s ease-in-out infinite; }' +
         '@media (prefers-reduced-motion: reduce) { .auth-boot-fill { animation: none; left: 30%; } }'
       }</style>
     </div>
+    <div
+      role="status"
+      style={{
+        position: 'absolute',
+        top: 'calc(50% + 20px)',
+        left: '50%',
+        transform: 'translate(-50%, -50%)',
+        color: '#E8E0D0',
+        fontSize: 14,
+        fontFamily: "'Inter', system-ui, sans-serif"
+      }}
+    >
+      {msg}
+    </div>
+    </>
   );
 }
