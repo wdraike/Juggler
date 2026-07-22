@@ -31,6 +31,7 @@ export default function TaskBoardSkeleton({ theme, isMobile }) {
   };
 
   return (
+    <>
     <div
       data-testid="board-skeleton"
       aria-busy="true"
@@ -59,12 +60,6 @@ export default function TaskBoardSkeleton({ theme, isMobile }) {
           );
         })}
       </div>
-      <span role="status" style={{
-        position: 'absolute', width: 1, height: 1, overflow: 'hidden',
-        clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap'
-      }}>
-        Loading tasks…
-      </span>
       <style>{
         '.board-skel::after {' +
         "  content: '';" +
@@ -77,5 +72,14 @@ export default function TaskBoardSkeleton({ theme, isMobile }) {
         '@media (prefers-reduced-motion: reduce) { .board-skel::after { animation: none; } }'
       }</style>
     </div>
+    {/* 999.2163: role=status is a SIBLING of the aria-busy region, not nested
+        inside it — AT may defer announcements inside a busy region. */}
+    <span role="status" style={{
+      position: 'absolute', width: 1, height: 1, overflow: 'hidden',
+      clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap'
+    }}>
+      Loading tasks…
+    </span>
+    </>
   );
 }
