@@ -464,6 +464,12 @@ async function updateInstancesWhere(dbOrTrx, userId, applyWhere, changes) {
  * next expand pass regenerates the future per the new cadence; survivors keep
  * their occurrence_ordinal (only the dropped rows' ordinals are vacated).
  *
+ * 999.2187 exception (David ruling 2026-07-22): a pending instance dated BEFORE
+ * the master's recur_start is ALSO dropped — recurStart is the hard floor (guard
+ * #1), so such a row is an out-of-window orphan, not overdue history. Keeps every
+ * anchor-edit path consistent with the single-task recur_start edit. Terminal
+ * (done/skip/cancel) rows and masters without a recur_start are untouched.
+ *
  * Future not-started instances are HARD-DELETED (David 2026-06-24): future
  * instances are "pencil, not pen" — deletable on refabrication. They are never
  * marked done (no future-done except same-date now-or-earlier), so an untouched
@@ -481,7 +487,29 @@ async function resetRecurringInstances(dbOrTrx, userId, masterId, logTag) {
       this.whereNull('scheduled_at').orWhere('scheduled_at', '>=', dbOrTrx.fn.now());
     })
     .pluck('id');
-  if (futureIds.length === 0) return 0;
+
+  // 999.2187 guard #2 (David ruling 2026-07-22): recurStart is the hard floor
+  // (guard #1, shared/scheduler/expandRecurring.js). A pending (status='') instance
+  // dated BEFORE the master's recur_start is an out-of-window orphan — not R53
+  // overdue history but the "Haircut" strand a forward anchor edit (Next Cycle
+  // Starts / batch) used to leave behind. Drop these too so every anchor-edit path
+  // matches the single-task recur_start edit. Terminal rows are status!='' →
+  // untouched; masters without a recur_start are unaffected (R53 past pending kept).
+  var master = await dbOrTrx('task_masters')
+    .where({ id: masterId, user_id: userId })
+    .first('recur_start');
+  var preStartIds = [];
+  if (master && master.recur_start) {
+    preStartIds = await dbOrTrx('task_instances')
+      .where({ master_id: masterId, user_id: userId, status: '' })
+      .whereNotNull('date')
+      .where('date', '<', master.recur_start)
+      .pluck('id');
+  }
+  var ids = preStartIds.length
+    ? Array.from(new Set(futureIds.concat(preStartIds)))
+    : futureIds;
+  if (ids.length === 0) return 0;
   // 999.1218: NO catch here — a cal_sync_ledger cleanup failure must abort
   // the hard-delete below. Cal-lock is ledger-only (an active ledger row is
   // the task's edit-lock), so swallowing this error and deleting anyway left
@@ -490,14 +518,14 @@ async function resetRecurringInstances(dbOrTrx, userId, masterId, logTag) {
   // inside their write transaction, so the rejection rolls the edit back.
   await dbOrTrx('cal_sync_ledger')
     .where('user_id', userId)
-    .whereIn('task_id', futureIds)
+    .whereIn('task_id', ids)
     .where('status', 'active')
     .update({ status: 'deleted_local', task_id: null, synced_at: dbOrTrx.fn.now() });
   await deleteInstancesWhere(dbOrTrx, userId, function(q) {
-    return q.whereIn('id', futureIds);
+    return q.whereIn('id', ids);
   });
-  if (logTag) logger.info(logTag + ': hard-deleted ' + futureIds.length + ' future pending instances for ' + masterId);
-  return futureIds.length;
+  if (logTag) logger.info(logTag + ': hard-deleted ' + ids.length + ' pending instances (incl ' + preStartIds.length + ' pre-recurStart) for ' + masterId);
+  return ids.length;
 }
 
 /**

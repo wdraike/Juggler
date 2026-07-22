@@ -739,6 +739,18 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
       if (r.type === 'rolling') return; // handled by rolling section above
       var anchor = getAnchor(src, startDate);
       if (cursor < anchor) return;
+      // 999.2187 (Layer-1 invariant): recurStart is a hard floor. next_start only
+      // ever advances forward (never-backwards guards in computeRollingAnchor /
+      // computeNextOccurrenceAnchor), so a next_start BEFORE recurStart is a corrupt
+      // edge state. For the pattern types handled here, the reachable trigger is a
+      // manual "Next Cycle Starts" edit that sets next_start earlier than recurStart
+      // with no cross-check (rolling masters return above and are floored by their
+      // own forward-projection gate). Since getAnchor prefers next_start, the gate
+      // above alone would then fabricate occurrences dated before recurStart (the
+      // "Haircut" pre-recurStart phantom). Never emit before recurStart, whatever
+      // getAnchor resolved to.
+      var recurStartFloor = parseAnchor(src.recurStart);
+      if (recurStartFloor && cursor < recurStartFloor) return;
       if (src.recurEnd) {
         var he = parseAnchor(src.recurEnd);
         if (he && cursor > he) return;

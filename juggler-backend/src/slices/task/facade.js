@@ -256,6 +256,15 @@ async function recurCleanup(ctx) {
       // direct template edit. Done/skip/cancel/missed instances are never
       // touched (resetRecurringInstances only targets status='' rows).
       await twrite.resetRecurringInstances(trx, userId, existing.source_id, '[RECUR] anchor edit redraw via instance (Next Cycle Starts)');
+    } else if (templateUpdate.recur_start !== undefined) {
+      // 999.2187 guard #2 (harrison WARN): a recur_start-only edit made via an
+      // instance row (editing the start date from the task card, which is an
+      // instance view) also moves the anchor. Route it through
+      // resetRecurringInstances so its pre-recurStart orphan drop fires here too,
+      // matching the recurring_template branch's inline pattern-window delete —
+      // this was the gap that let the "Haircut" strand survive a via-instance
+      // start-date edit. Terminal rows untouched (reset only targets status='').
+      await twrite.resetRecurringInstances(trx, userId, existing.source_id, '[RECUR] recur_start edit redraw via instance');
     }
 
     if (Object.keys(instanceUpdate).length > 0) {

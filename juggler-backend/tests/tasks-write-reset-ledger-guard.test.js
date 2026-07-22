@@ -12,6 +12,7 @@
  * old `.catch(function(err){ logger.error(...) })` silent-swallow.
  */
 
+/* global installDateOnlyFakeTimers */
 var twrite = require('../src/lib/tasks-write');
 
 /**
@@ -30,7 +31,13 @@ function makeFakeTrx(opts) {
       where: function () { return c; },
       whereIn: function () { return c; },
       whereNull: function () { return c; },
+      whereNotNull: function () { return c; },
       orWhere: function () { return c; },
+      // 999.2187 guard #2: resetRecurringInstances now also looks up the master's
+      // recur_start (.first) to drop pre-recurStart pending orphans. Default null
+      // recur_start => that block is a no-op, so these ledger-guard scenarios are
+      // unchanged (futureIds path only). A test can pass opts.master to exercise it.
+      first: function () { return Promise.resolve(opts.master || null); },
       pluck: function () { return Promise.resolve(opts.futureIds); },
       update: function () {
         if (table === 'cal_sync_ledger') {

@@ -326,6 +326,33 @@ describe('expandRecurring', () => {
     });
   });
 
+  // 999.2187 (Layer-1 recurStart floor): next_start only ever ADVANCES forward
+  // (never-backwards guards in computeRollingAnchor / computeNextOccurrenceAnchor),
+  // so a next_start landing BEFORE recurStart is a corrupt edge state — for pattern
+  // types, a manual "Next Cycle Starts" edit that sets next_start earlier than
+  // recurStart with no cross-check. The gate was `cursor < getAnchor` and getAnchor
+  // prefers next_start, so it then fabricated occurrences dated BEFORE recurStart
+  // (the "Haircut" pre-recurStart phantom). recurStart is a hard floor: no
+  // occurrence may ever be dated before it, whatever next_start says.
+  describe('recurStart is a hard floor even when nextStart precedes it (999.2187)', () => {
+    test('interval: floors at recurStart but preserves the full on/after cadence', () => {
+      const src = makeSource({
+        id: 'hc-floor', taskType: 'recurring_template', text: 'Haircut',
+        date: '2026-07-12',
+        recurStart: '2026-07-22',
+        nextStart: '2026-07-12', // corrupt: anchor sits BEFORE recurStart
+        recur: { type: 'interval', every: 3, unit: 'days' }
+      });
+      const result = expandRecurring([src], new Date(2026, 6, 12), new Date(2026, 6, 31));
+      const dates = result.map(t => t.date);
+      // every-3-days from the 7/12 anchor within 7/12..7/31 would be
+      // 7/15,7/18,7/21,7/24,7/27,7/30 — the floor drops the pre-recurStart three
+      // (7/15/18/21) and keeps the full on/after-recurStart cadence intact (pinned
+      // exactly so an over-suppression regression that also dropped 7/27/7/30 fails).
+      expect(dates).toEqual(['2026-07-24', '2026-07-27', '2026-07-30']);
+    });
+  });
+
   // jug-weekly-recur-reshow (999.1372, Leg-B of SCHEDULER-SPEC IF.2 "Submit Weekly
   // UI Claim ×N unplaced"): a flexible-TPC master (timesPerCycle < selectedDayCount)
   // with a same-cycle 'done' instance on an EARLIER day still gets a fresh occurrence
@@ -862,7 +889,7 @@ describe('expandRecurring', () => {
       };
       // Three terminal-dedup synthetic rows as runSchedule would build them
       // from ISO-format DB `date` values (normalized via isoToDateKey).
-      const dedupRows = ['2026-04-22', '2026-04-24', '2026-04-26'].map(function(iso, i) {
+      const dedupRows = ['2026-04-22', '2026-04-24', '2026-04-26'].map(function(iso) {
         return {
           id: '_dedup_ex_' + iso,
           sourceId: 'ex',
