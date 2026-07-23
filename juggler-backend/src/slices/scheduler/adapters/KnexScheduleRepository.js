@@ -302,6 +302,15 @@ KnexScheduleRepository.prototype.insertTasksBatch = function insertTasksBatch(ro
 };
 
 /**
+ * Insert rows directly into task_instances (no task_masters row).
+ * Used by non-recurring split chunk expansion (999.2540).
+ */
+KnexScheduleRepository.prototype.insertInstancesOnly = async function insertInstancesOnly(rows) {
+  if (!rows || rows.length === 0) return;
+  await this.db('task_instances').insert(rows);
+};
+
+/**
  * Batch drift-fix UPDATEs into CASE-WHEN expressions (999.1019), chunked at
  * `this.chunkSize` (200 — the same chunk constant `writeChanged` uses). This
  * is a SEPARATE write path from `writeChanged` — it only ever touches

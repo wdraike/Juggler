@@ -197,6 +197,19 @@ RunScheduleCommand.prototype.insertTasksBatch = function insertTasksBatch(trx, r
 };
 
 /**
+ * Insert rows directly into task_instances (no task_masters row created).
+ * Used by the non-recurring split chunk expansion (999.2540) to persist
+ * split chunk rows that reference an EXISTING master — insertTasksBatch
+ * would try to create a new master row (duplicate PK) for task_type='task'.
+ * @param {Function} trx caller's transaction handle (T-TX).
+ * @param {Array<Object>} rows DB-shape task_instances rows.
+ * @returns {Promise<void>}
+ */
+RunScheduleCommand.prototype.insertInstancesOnly = function insertInstancesOnly(trx, rows) {
+  return this._repo(trx).insertInstancesOnly(rows);
+};
+
+/**
  * Batch drift-fix UPDATEs for split_ordinal/split_total/dur (delegates to the
  * repository's applySplitDriftFix) — the recurring-split-chunk reconcile
  * pass's DRIFT_CHUNK loop (runSchedule.js ~1307-1328). JUG-SCHEDULER-LEGACY-

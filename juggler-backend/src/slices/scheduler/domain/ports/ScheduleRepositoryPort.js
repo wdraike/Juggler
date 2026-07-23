@@ -174,6 +174,16 @@ ScheduleRepositoryPort.prototype.insertTasksBatch = function insertTasksBatch(_r
 };
 
 /**
+ * Insert rows directly into task_instances (no task_masters row).
+ * Used by non-recurring split chunk expansion (999.2540).
+ * @param {Array<Object>} rows DB-shape task_instances rows.
+ * @returns {Promise<void>}
+ */
+ScheduleRepositoryPort.prototype.insertInstancesOnly = function insertInstancesOnly(_rows) {
+  throw new Error('ScheduleRepositoryPort.insertInstancesOnly not implemented');
+};
+
+/**
  * Read `users.timezone` for `userId` (legacy `deriveSchedulePlacements.js`
  * ~66). H7 (999.1532).
  * @param {string} userId tenant scope.
@@ -194,6 +204,7 @@ var SCHEDULE_REPOSITORY_PORT_METHODS = Object.freeze([
   'getUserConfigRows',
   'getLocations',
   'insertTasksBatch',
+  'insertInstancesOnly',
   'applySplitDriftFix',
   'getUserTimezone'
 ]);

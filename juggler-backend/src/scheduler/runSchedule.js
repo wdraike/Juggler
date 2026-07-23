@@ -623,6 +623,14 @@ function placementMatchesDbRow(dbUpdate, rawRow) {
     if (Number(dbUpdate.dur) !== Number(rawRow.dur)) return false;
   }
 
+  // 999.2540: split_ordinal/split_total (only when the dbUpdate writes them).
+  if (Object.prototype.hasOwnProperty.call(dbUpdate, 'split_ordinal')) {
+    if (Number(dbUpdate.split_ordinal) !== Number(rawRow.split_ordinal)) return false;
+  }
+  if (Object.prototype.hasOwnProperty.call(dbUpdate, 'split_total')) {
+    if (Number(dbUpdate.split_total) !== Number(rawRow.split_total)) return false;
+  }
+
   // NOTE: slack_mins is intentionally NOT compared here. The legacy batched
   // persist (runSchedule.js:1714-1773) silently drops slack_mins from the CASE
   // update even when dbUpdate carries it. Comparing slack_mins here would cause
@@ -1780,11 +1788,202 @@ async function runScheduleAndPersist(userId, _retries, options) {
   ledger.setRawRows(taskRows);
 
   // Extract the first placement per task from dayPlacements. Phase 1 ensures
-  // every split chunk has its own unique row ID, so each task.id maps to
-  // exactly one placement. No multi-placement-per-task-id split-master
-  // handling needed (that was v1-only behavior).
+  // every RECURRING split chunk has its own unique row ID, so each task.id maps
+  // to exactly one placement. However, NON-RECURRING split tasks use inline
+  // expansion (placeSplitInline in unifiedScheduleV2), which produces multiple
+  // chunk placements all sharing the same task.id (the master's id). Without
+  // the expansion below, placementByTaskId would only keep the first chunk and
+  // silently lose the rest — the 999.2540 bug.
   var placementByTaskId = {};
   var dayPlacements = result.dayPlacements;
+
+  // 999.2540: Expand non-recurring split chunk placements into separate
+  // task_instances rows. placeSplitInline produces N chunks for a non-recurring
+  // split task, all sharing the master's task.id. Chunk 1 updates the existing
+  // master row; chunks 2..N need new rows inserted before the persist loop
+  // writes their placements. Each chunk gets:
+  //   id = "<masterId>-<ordinal>"  (ordinal 2..N; chunk 1 keeps the master id)
+  //   split_ordinal, split_total, dur set per the placed chunk
+  // This mirrors Phase 1's recurring split chunk pattern (line ~1517).
+  var nonRecurringSplitInserts = [];
+  var nonRecurringSplitByMasterId = {};
+  Object.keys(dayPlacements).forEach(function(dateKey) {
+    var placements = dayPlacements[dateKey];
+    if (!placements) return;
+    placements.forEach(function(p) {
+      if (!p.task || !p.task.id) return;
+      // Only non-recurring split tasks with split=true produce inline chunks
+      // sharing one task.id. Recurring splits already have unique chunk IDs
+      // from Phase 1; non-split tasks have exactly one placement.
+      var orig = taskById[p.task.id];
+      if (!orig) return;
+      if (orig.taskType === 'recurring_instance') return; // Phase 1 handles these
+      if (!orig.split && !(p.task.split)) return; // not a split task
+      // Collect all chunks for this master id
+      if (!nonRecurringSplitByMasterId[p.task.id]) {
+        nonRecurringSplitByMasterId[p.task.id] = [];
+      }
+      nonRecurringSplitByMasterId[p.task.id].push({
+        dateKey: dateKey, start: p.start, dur: p.dur, task: p.task
+      });
+    });
+  });
+  Object.keys(nonRecurringSplitByMasterId).forEach(function(masterId) {
+    var chunks = nonRecurringSplitByMasterId[masterId];
+    if (chunks.length <= 1) return; // single chunk — no expansion needed
+    var orig = taskById[masterId];
+    if (!orig) return;
+    // Sort by dateKey then start to get deterministic ordinal assignment
+    chunks.sort(function(a, b) {
+      return (a.dateKey + String(a.start).padStart(5, '0'))
+        .localeCompare(b.dateKey + String(b.start).padStart(5, '0'));
+    });
+    var splitTotal = chunks.length;
+    // Chunk 1 keeps the master id; chunks 2..N get "<masterId>-<ordinal>"
+    for (var ci = 1; ci < chunks.length; ci++) {
+      var chunkId = masterId + '-' + (ci + 1);
+      var chunk = chunks[ci];
+      var chunkDate = chunk.dateKey;
+      var chunkDay = null;
+      var parsedChunkDate = parseDate(chunkDate);
+      if (parsedChunkDate) chunkDay = DAY_NAMES[parsedChunkDate.getDay()];
+      var chunkScheduledAt = localToUtc(chunkDate, formatMinutesToTime(chunk.start), TIMEZONE);
+      nonRecurringSplitInserts.push({
+        id: chunkId,
+        user_id: userId,
+        task_type: 'task',
+        source_id: masterId,
+        occurrence_ordinal: null,
+        split_ordinal: ci + 1,
+        split_total: splitTotal,
+        split_group: splitTotal > 1 ? masterId : null,
+        dur: chunk.dur,
+        generated: 0,
+        scheduled_at: chunkScheduledAt || null,
+        date: chunkDate,
+        day: chunkDay,
+        time: formatMinutesToTimeDb(chunk.start) || null,
+        unscheduled: null,
+        status: '',
+        implied_deadline: null,
+        earliest_start: null,
+        created_at: _runScheduleCommand.clockNow(),
+        updated_at: _runScheduleCommand.clockNow()
+      });
+      // Register the chunk's placement under its own ID so the persist loop
+      // writes the correct scheduled_at/date/time/dur for this row.
+      placementByTaskId[chunkId] = { dateKey: chunkDate, start: chunk.start, dur: chunk.dur };
+      // Also register in taskById so the persist loop can find the "original"
+      // for this chunk. Build a minimal task object mirroring the master.
+      var chunkOrig = Object.assign({}, orig, {
+        id: chunkId,
+        dur: chunk.dur,
+        splitOrdinal: ci + 1,
+        splitTotal: splitTotal,
+        taskType: 'task',
+        recurring: false,
+        _preReconDate: null,
+        _preReconTime: null,
+      });
+      taskById[chunkId] = chunkOrig;
+      // Register in rawRowById so placementMatchesDbRow can compare (new row = all nulls → will differ → write fires)
+      ledger.recordPhase1Inserts([{
+        id: chunkId,
+        user_id: userId,
+        task_type: 'task',
+        source_id: masterId,
+        split_ordinal: ci + 1,
+        split_total: splitTotal,
+        split_group: splitTotal > 1 ? masterId : null,
+        dur: chunk.dur,
+        generated: 0,
+        scheduled_at: null,
+        date: null,
+        day: null,
+        time: null,
+        unscheduled: null,
+        status: '',
+        implied_deadline: null,
+        earliest_start: null,
+        created_at: _runScheduleCommand.clockNow().toISOString(),
+        updated_at: _runScheduleCommand.clockNow().toISOString()
+      }], _runScheduleCommand.clockNow().toISOString());
+    }
+    // Fix the first chunk's placement to carry the correct split_total
+    // and the first chunk's dur (not the master's full dur).
+    if (placementByTaskId[masterId]) {
+      placementByTaskId[masterId].dur = chunks[0].dur;
+    }
+  });
+
+  // Insert non-recurring split chunk rows before the persist loop
+  if (nonRecurringSplitInserts.length > 0) {
+    // Defensive dedup: skip IDs already in DB
+    var existingCheck = await _taskProvider.findExistingInstanceIds(trx,
+      nonRecurringSplitInserts.map(function(r) { return r.id; }));
+    if (existingCheck.length > 0) {
+      var existingSet = {};
+      existingCheck.forEach(function(r) { existingSet[r.id] = true; });
+      nonRecurringSplitInserts = nonRecurringSplitInserts.filter(function(r) { return !existingSet[r.id]; });
+    }
+    if (nonRecurringSplitInserts.length > 0) {
+      // 999.2540: Use insertInstancesOnly — insertTasksBatch would create a
+      // duplicate task_masters row (PK collision) for task_type='task'.
+      await _runScheduleCommand.insertInstancesOnly(trx, nonRecurringSplitInserts);
+      logger.info('[SCHED] non-recurring split: inserted ' + nonRecurringSplitInserts.length + ' chunk rows');
+    }
+  }
+
+  // 999.2540: Clean up stale non-recurring split chunk rows. A prior run may
+  // have created chunk rows (masterId-2, masterId-3, ...) that are no longer
+  // produced this run (different schedule, shorter task, etc.). Delete any
+  // existing chunk rows for these masters that aren't in this run's chunk set.
+  var nonRecurringSplitChunkIdsToKeep = {};
+  Object.keys(nonRecurringSplitByMasterId).forEach(function(masterId) {
+    var chunks = nonRecurringSplitByMasterId[masterId];
+    if (chunks.length <= 1) {
+      // Only one chunk this run — any existing chunk rows (masterId-2, etc.)
+      // are stale. Mark them for deletion.
+      nonRecurringSplitChunkIdsToKeep[masterId] = {};
+      return;
+    }
+    var keep = {};
+    for (var ci = 1; ci < chunks.length; ci++) {
+      keep[masterId + '-' + (ci + 1)] = true;
+    }
+    nonRecurringSplitChunkIdsToKeep[masterId] = keep;
+  });
+  // Query for existing chunk rows (source_id = masterId, split_ordinal > 1)
+  // and delete any that aren't in the keep set. Only for masters that had
+  // non-recurring split expansion this run.
+  var staleChunkMasterIds = Object.keys(nonRecurringSplitChunkIdsToKeep);
+  if (staleChunkMasterIds.length > 0) {
+    var existingChunkRows = await _taskProvider.findExistingInstanceIds(trx,
+      staleChunkMasterIds.flatMap(function(mid) {
+        // Check common ordinal patterns: mid-2 through mid-20
+        var ids = [];
+        for (var oi = 2; oi <= 20; oi++) ids.push(mid + '-' + oi);
+        return ids;
+      }));
+    var staleIdsToDelete = [];
+    existingChunkRows.forEach(function(r) {
+      // r.id is like "masterId-N" — extract the masterId and check keep set
+      var match = String(r.id).match(/^(.+)-(\d+)$/);
+      if (!match) return;
+      var mid = match[1];
+      var keep = nonRecurringSplitChunkIdsToKeep[mid];
+      if (!keep) return; // not a master we're tracking
+      if (!keep[r.id]) {
+        staleIdsToDelete.push(r.id);
+      }
+    });
+    if (staleIdsToDelete.length > 0) {
+      await _runScheduleCommand.deleteTasksWhere(trx, userId, function(q) {
+        return q.whereIn('id', staleIdsToDelete);
+      });
+      logger.info('[SCHED] non-recurring split: deleted ' + staleIdsToDelete.length + ' stale chunk row(s)');
+    }
+  }
 
   // 999.1568 (David ruling 2026-07-12 part 2): defense-in-depth collision
   // guard — resolve BEFORE placementByTaskId/pendingUpdates are derived from
@@ -1960,6 +2159,13 @@ async function runScheduleAndPersist(userId, _retries, options) {
       unscheduled: null,
       updated_at: _runScheduleCommand.clockNow()
     };
+    // 999.2540: write split_ordinal/split_total for non-recurring split chunks
+    // so the master row (chunk 1) carries the correct split metadata. Chunks
+    // 2+ were already inserted with correct values; chunk 1 needs the UPDATE.
+    if (original.split && !original.recurring) {
+      dbUpdate.split_ordinal = original.splitOrdinal || 1;
+      dbUpdate.split_total = original.splitTotal || 1;
+    }
     // Don't overwrite instance.dur when time_remaining drives the effective
     // placement duration. The instance.dur represents the user-set total chunk
     // size; time_remaining is a separate "how much is left" value. Writing

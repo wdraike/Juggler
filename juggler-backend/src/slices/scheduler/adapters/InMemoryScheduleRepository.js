@@ -143,6 +143,20 @@ InMemoryScheduleRepository.prototype.insertTasksBatch = async function insertTas
 };
 
 /**
+ * Insert rows directly into task_instances (no task_masters row).
+ * Used by non-recurring split chunk expansion (999.2540).
+ */
+InMemoryScheduleRepository.prototype.insertInstancesOnly = async function insertInstancesOnly(rows) {
+  if (!rows || rows.length === 0) return;
+  var self = this;
+  rows.forEach(function (r) {
+    if (!r.user_id) throw new Error('[InMemoryScheduleRepository] insertInstancesOnly: row missing user_id');
+    self._rows[r.id] = Object.assign({}, r);
+    self.writes.push({ id: r.id, dbUpdate: r, inserted: true });
+  });
+};
+
+/**
  * Batch drift-fix over the in-memory store — mirrors KnexScheduleRepository's
  * applySplitDriftFix (999.1019 / 999.1532). Only `split_ordinal`/`split_total`/
  * `dur`/`updated_at` are touched; `unscheduled`/`unplaced_reason`/
