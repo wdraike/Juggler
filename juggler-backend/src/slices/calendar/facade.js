@@ -159,7 +159,7 @@ async function getGcalStatus(user) {
       var expiryStr = String(user.gcal_token_expiry);
       var expiry = new Date(expiryStr.endsWith('Z') ? expiryStr : expiryStr + 'Z');
       if (expiry.getTime() < Date.now()) {
-        connected = true;
+        tokenExpired = true;
       }
     }
   }
