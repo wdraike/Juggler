@@ -48,6 +48,9 @@
 
 var assertDeps = require('../_assertDeps');
 var { getNowInTimezone } = require('juggler-shared/scheduler/getNowInTimezone');
+// 999.2343: parseDbUtc pins mysql2 dateStrings:true (tz-less) DB timestamps to
+// UTC — a bare new Date() would parse them as server-local (the misparse trap).
+var { parseDbUtc } = require('juggler-shared/scheduler/dateHelpers');
 // 999.1098: the anchor-projection status gate is single-sourced in
 // lib/rolling-anchor.js — do NOT inline a status list here (the hand-copied
 // ['done','skip'] gates drifted from the 2026-07-06 'missed is terminal,
@@ -196,9 +199,24 @@ UpdateTaskStatus.prototype.execute = async function execute(input) {
 
   if (status === 'done' && !isIngested) {
     var completedAt = body.completedAt;
-    if (completedAt && completedAt !== 'now' && completedAt !== 'scheduled') {
+    if (completedAt === 'scheduled') {
+      // 999.2343: user attests they did it in its fixed slot — the completion
+      // record reflects that scheduled time, not the API-call time. Pass the DB
+      // value straight through: mysql2 `dateStrings:true` hands back a tz-less
+      // UTC string, and re-parsing it through `new Date()` would shift it by the
+      // process's local offset (the documented tz-less-parse trap). Only the
+      // contradictory future-slot case caps to now.
+      var schedDate = parseDbUtc(existing.scheduled_at);
+      if (schedDate) {
+        update.completed_at = schedDate > new Date() ? new Date() : schedDate;
+      }
+    } else if (completedAt && completedAt !== 'now') {
       var customDate = new Date(completedAt);
-      update.scheduled_at = customDate > new Date() ? new Date() : customDate;
+      var effectiveDone = customDate > new Date() ? new Date() : customDate;
+      update.scheduled_at = effectiveDone;
+      // 999.2343: completed_at must reflect the attested completion time, not the
+      // wall-clock time the API call happened to land.
+      update.completed_at = effectiveDone;
     }
     // Future-done: snap scheduled_at to now so the user can mark a future
     // task as done without leaving a stale future placement.
@@ -237,7 +255,10 @@ UpdateTaskStatus.prototype.execute = async function execute(input) {
     await this.reactivateDoneFrozen({ id: id, userId: userId });
   }
 
-  if ((status === 'cancel' || status === 'skip') && isFutureScheduled && !isIngested) {
+  // 999.2343: cancelling FREEZES the planned slot — a cancel is a status change,
+  // not a reschedule, so the calendar keeps showing where the task was planned.
+  // Only `skip` snaps a future placement to now (unchanged).
+  if (status === 'skip' && isFutureScheduled && !isIngested) {
     update.scheduled_at = new Date();
   }
 
