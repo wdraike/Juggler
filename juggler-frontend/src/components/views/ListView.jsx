@@ -10,6 +10,7 @@ import { getTheme } from '../../theme/colors';
 import { isTerminalStatus } from '../../shared/task-status';
 import { formatDayHeader } from '../../utils/timezone';
 import { parseDate, formatDateKey } from '../../scheduler/dateHelpers';
+import { matchesDateFilter } from '../../scheduler/dateFilterHelpers';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
 
 import WeatherBadge from '../features/WeatherBadge';
@@ -21,7 +22,7 @@ var DONE_RANGES = [
   { value: 'all', label: 'All' },
 ];
 
-export default function ListView({ allTasks, statuses, filter, search, projectFilter, onStatusChange, onDelete, onExpand, onCreate, darkMode, schedCfg, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isMobile, todayDate, weatherByDate }) {
+export default function ListView({ allTasks, statuses, filter, dateFilter, search, projectFilter, onStatusChange, onDelete, onExpand, onCreate, darkMode, schedCfg, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isMobile, todayDate, weatherByDate }) {
   var theme = getTheme(darkMode);
   var todayKey = todayDate ? formatDateKey(todayDate) : formatDateKey(new Date());
   var [doneRange, setDoneRange] = useState('30');
@@ -43,8 +44,10 @@ export default function ListView({ allTasks, statuses, filter, search, projectFi
       if (!search) return true;
       var s = search.toLowerCase();
       return (t.text || '').toLowerCase().includes(s) || (t.project || '').toLowerCase().includes(s);
+    }).filter(t => {
+      return matchesDateFilter(t, dateFilter, todayDate, isTerminalStatus, statuses[t.id] || '');
     });
-  }, [allTasks, statuses, filter, search, projectFilter, blockedTaskIds, unplacedIds, pastDueIds, fixedIds]);
+  }, [allTasks, statuses, filter, dateFilter, search, projectFilter, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, todayDate]);
 
   // ISO cutoff key for the selected done range (null = show all)
   var doneRangeCutoff = useMemo(() => {

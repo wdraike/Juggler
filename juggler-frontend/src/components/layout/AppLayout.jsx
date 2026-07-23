@@ -173,6 +173,7 @@ export default function AppLayout() {
       return v;
     });
     setFilter('open');
+    setDateFilter('all');
     setSearch('');
     setProjectFilter('');
   }, []);
@@ -974,7 +975,7 @@ export default function AppLayout() {
           {viewMode === 'list' && (
             <ListView
               allTasks={visibleTasks} statuses={statuses}
-              filter={filter} search={search} projectFilter={projectFilter}
+              filter={filter} dateFilter={dateFilter} search={search} projectFilter={projectFilter}
               onStatusChange={handleStatusChange} onDelete={requestDelete} onExpand={handleExpand}
               onCreate={handleCreate} darkMode={darkMode} schedCfg={schedCfg}
               blockedTaskIds={blockedTaskIds} unplacedIds={unplacedIds} pastDueIds={pastDueIds} fixedIds={fixedIds}
@@ -998,6 +999,7 @@ export default function AppLayout() {
             <DependencyView
               allTasks={visibleTasks} statuses={statuses}
               projectFilter={projectFilter} filter={filter}
+              dateFilter={dateFilter}
               search={search}
               pastDueIds={pastDueIds} fixedIds={fixedIds}
               onUpdate={handleUpdateTask} onExpand={handleExpand}

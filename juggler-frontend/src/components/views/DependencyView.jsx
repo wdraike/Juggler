@@ -10,6 +10,7 @@ import ELK from 'elkjs/lib/elk.bundled.js';
 import { getTheme } from '../../theme/colors';
 import { getTaskIcon } from '../../utils/taskIcon';
 import { getTaskDeps, topoSortTasks } from '../../scheduler/dependencyHelpers';
+import { matchesDateFilter } from '../../scheduler/dateFilterHelpers';
 import { PRI_COLORS } from '../../state/constants';
 import { isTerminalStatus } from '../../shared/task-status';
 import SkeletonRows from '../common/SkeletonRows';
@@ -258,7 +259,7 @@ function DepNode({ ct, pos, st, icon, isDone, isClosed, dateLabel, isExternal, i
   );
 }
 
-export default function DependencyView({ allTasks, statuses, projectFilter, filter, search, pastDueIds, fixedIds, onUpdate, onExpand, darkMode, isMobile }) {
+export default function DependencyView({ allTasks, statuses, projectFilter, filter, dateFilter, search, pastDueIds, fixedIds, onUpdate, onExpand, darkMode, isMobile }) {
   var theme = getTheme(darkMode);
   var bodyRef = useRef(null);
   var graphRef = useRef(null);
@@ -315,6 +316,12 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
         || (t.notes && t.notes.toLowerCase().indexOf(searchLower) >= 0);
     }
 
+    // 999.2775: date-range filter — composable with status and search.
+    var todayForFilter = new Date();
+    function matchesDate(t) {
+      return matchesDateFilter(t, dateFilter, todayForFilter, isTerminalStatus, statuses[t.id] || '');
+    }
+
     // Step 1: Start with base candidates (project or has-deps)
     var candidateTasks;
     if (projectFilter) {
@@ -331,11 +338,12 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
       candidateTasks = allTasks.filter(function(t) { return hasDeps[t.id]; });
     }
 
-    // Step 2: Apply filters (status, search) to find matching tasks
+    // Step 2: Apply filters (status, search, date) to find matching tasks
     var matchingIds = {};
     candidateTasks.forEach(function(t) {
       if (!matchesStatus(t)) return;
       if (!matchesSearch(t)) return;
+      if (!matchesDate(t)) return;
       matchingIds[t.id] = true;
     });
 
@@ -368,7 +376,7 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
     });
 
     return { tasks: topoSortTasks(visibleTasks), matchingIds: matchingIds };
-  }, [allTasks, statuses, projectFilter, filter, search]);
+  }, [allTasks, statuses, projectFilter, filter, dateFilter, search]);
 
   // Chain order and deps state
   var [chainOrder, setChainOrder] = useState(null);
