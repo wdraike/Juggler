@@ -161,6 +161,7 @@ function pickInstance(row, id, masterId, occOrdinal) {
   if (row.day !== undefined) out.day = row.day;
   if (row.time !== undefined) out.time = row.time;
   if (row.split_group !== undefined) out.split_group = row.split_group;
+  if (row.completed_at !== undefined) out.completed_at = row.completed_at;
   // instance-owns-window: persist the SOFT earliest-start floor AND the HARD
   // implied_deadline (cycle boundary) when the caller supplies them. Both columns
   // are materialized by the scheduler's expand/reconcile insert pass (runSchedule W3)

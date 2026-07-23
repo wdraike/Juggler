@@ -121,7 +121,7 @@ SchedulerTaskProvider.prototype.getRecurringDoneHistory = function getRecurringD
     .whereNotNull('date')
     .where('status', 'done')
     .select('master_id')
-    .max('date as latest_date')
+    .select(db.raw('MAX(COALESCE(completed_at, date)) as latest_date'))
     .groupBy('master_id');
 };
 
