@@ -448,6 +448,34 @@ var SchedulerWeatherProvider = require('../slices/scheduler/adapters/SchedulerWe
 var _weatherProvider = new SchedulerWeatherProvider();
 
 /**
+ * Build a weatherByDateHour map from a forecast payload ({ hourly, hourly_units }).
+ * Parses the parallel hourly arrays into { [dateKey]: { [hour]: { temp, precipProb, cloudcover, humidity } } }.
+ * Mirrors the parsing logic in SchedulerWeatherProvider.loadWeatherForHorizon verbatim.
+ * Exported for testing and for the stale-forecast refresh path (999.2355).
+ *
+ * @param {?Object} forecast  { hourly: { time: [], temperature_2m: [], ... }, hourly_units: {} }
+ * @returns {Object} weatherByDateHour map
+ */
+function buildWeatherByDateHourFromForecast(forecast) {
+  var map = {};
+  if (!forecast || !forecast.hourly || !forecast.hourly.time) return map;
+  var hourly = forecast.hourly;
+  for (var i = 0; i < hourly.time.length; i++) {
+    var dt = hourly.time[i]; // "2026-07-23T14:00"
+    var dateKey = dt.slice(0, 10);
+    var hour = parseInt(dt.slice(11, 13), 10);
+    if (!map[dateKey]) map[dateKey] = {};
+    map[dateKey][hour] = {
+      temp:       hourly.temperature_2m              ? hourly.temperature_2m[i]              : null,
+      precipProb: hourly.precipitation_probability   ? hourly.precipitation_probability[i]   : 0,
+      cloudcover: hourly.cloudcover                  ? hourly.cloudcover[i]                  : 0,
+      humidity:   hourly.relativehumidity_2m         ? hourly.relativehumidity_2m[i]         : null,
+    };
+  }
+  return map;
+}
+
+/**
  * Set a custom weather provider for testing purposes
  * @param {WeatherProviderPort} provider - Weather provider implementing WeatherProviderPort interface
  */
@@ -1700,6 +1728,37 @@ async function runScheduleAndPersist(userId, _retries, options) {
     cfg.weatherByDateHour = {};
   }
 
+  // 999.2355: Stale-forecast refresh. If weather-constrained tasks exist but
+  // today's dateKey is MISSING from weatherByDateHour, the cached forecast is
+  // stale (14-day window no longer covers today). Attempt a refresh from the
+  // weather facade (which fetches from Open-Meteo and updates the cache). If
+  // the refresh succeeds, rebuild weatherByDateHour from the fresh forecast.
+  // If the refresh fails (Open-Meteo down, no network), proceed with the stale
+  // data — weatherOk will fail-closed for today's slots (existing behavior).
+  if (hasWeatherTasks && cfg.weatherByDateHour && !cfg.weatherByDateHour[timeInfo.todayKey]) {
+    var locWithCoords = (cfg.locations || []).find(function(l) {
+      return typeof l.lat === 'number' && typeof l.lon === 'number';
+    });
+    if (locWithCoords) {
+      try {
+        var _weatherFacade = require('../slices/weather/facade');
+        var fresh = await _weatherFacade.getForecast(locWithCoords.lat, locWithCoords.lon);
+        if (fresh && fresh.hourly) {
+          var refreshed = buildWeatherByDateHourFromForecast(fresh);
+          // Merge: preserve any existing dateKeys from the stale cache, add fresh ones
+          cfg.weatherByDateHour = Object.assign({}, cfg.weatherByDateHour, refreshed);
+          logger.info('[weather] stale cache refreshed for today', {
+            todayKey: timeInfo.todayKey,
+            freshDates: Object.keys(refreshed).length
+          });
+        }
+      } catch (_refreshErr) {
+        // Refresh failed — proceed with stale data (fail-closed for today's weather tasks)
+        logger.warn('[weather] stale cache refresh failed', { error: _refreshErr.message });
+      }
+    }
+  }
+
   // 6. Run scheduler. unifiedScheduleV2 is the ONLY scheduler (999.1433
   //    removed the historical shadow wrapper — no v1, no SCHEDULER_V2 env
   //    switch). The Wave C scheduled_at-required guard runs first.
@@ -2900,6 +2959,7 @@ module.exports = {
   computeIsPastDue,
   setWeatherProvider,
   getWeatherProvider,
+  buildWeatherByDateHourFromForecast,
   // Test-only exports — pure-function seams for unit tests.
   // Never call from production code.
   _placementMatchesDbRow: config.getString('NODE_ENV') === 'test' ? placementMatchesDbRow : undefined, // 999.1473
