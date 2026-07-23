@@ -73,6 +73,8 @@ export default function useTaskState(onError) {
   const flushPromiseRef = useRef(null);
   const lastVersionRef = useRef(null);
   const loadTasksRef = useRef(null);
+  // 999.2335 — track last client-side data load time for page-focus staleness check
+  const lastLoadAtRef = useRef(0);
   // sched-audit L3 ernie WARN-2 — per-task write sequence: guards updateTask's
   // rollback from clobbering a NEWER concurrent update to the same task (e.g. two
   // rapid drags). Maps taskId -> the sequence number of the most recently
@@ -192,6 +194,7 @@ export default function useTaskState(onError) {
   // Load tasks from API — flushes any pending save first
   // so local changes aren't lost when reloading from server
   const loadTasks = useCallback(async () => {
+    lastLoadAtRef.current = Date.now();
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
@@ -623,8 +626,11 @@ export default function useTaskState(onError) {
       nudgeTimerRef.current = setTimeout(function() {
         nudgeTimerRef.current = null;
         if (document.visibilityState === 'visible') {
-          // Tab visible — fire immediately
-          apiClient.post('/schedule/nudge').catch(function(e) {
+          // Tab visible — fire nudge, then reload client data so the UI
+          // reflects any scheduler re-placement (999.2335).
+          apiClient.post('/schedule/nudge').then(function() {
+            loadTasksRef.current && loadTasksRef.current();
+          }).catch(function(e) {
             console.warn('[nudge] POST failed:', e && e.message);
           });
         } else {
@@ -637,8 +643,10 @@ export default function useTaskState(onError) {
             if (!pending) return;
             var ageMs = Date.now() - pending.deadline;
             if (ageMs <= 15 * 60 * 1000) {
-              // Within 15-minute staleness window — fire
-              apiClient.post('/schedule/nudge').catch(function(e) {
+              // Within 15-minute staleness window — fire nudge + reload
+              apiClient.post('/schedule/nudge').then(function() {
+                loadTasksRef.current && loadTasksRef.current();
+              }).catch(function(e) {
                 console.warn('[nudge] POST failed (visibility):', e && e.message);
               });
             }
@@ -835,10 +843,26 @@ export default function useTaskState(onError) {
     // recovery when no task mutations have fired (e.g. after page load with no edits).
     var periodicNudgeId = setInterval(function() {
       if (document.visibilityState !== 'visible') return;
-      apiClient.post('/schedule/nudge').catch(function(e) {
+      apiClient.post('/schedule/nudge').then(function() {
+        // 999.2335 — reload client data after periodic nudge so the UI
+        // reflects any scheduler re-placement.
+        loadTasksRef.current && loadTasksRef.current();
+      }).catch(function(e) {
         console.warn('[periodic-nudge] POST failed:', e && e.message);
       });
     }, 5 * 60 * 1000); // every 5 minutes
+
+    // 999.2335 — Refresh tasks + placements on page focus if data is stale.
+    // SSE may drop messages during the 5s reconnect gap when the tab was hidden;
+    // this ensures the UI catches up when the user returns.
+    function onFocusRefresh() {
+      if (document.visibilityState !== 'visible') return;
+      // Only reload if data is older than 30s — avoids spamming on rapid tab switches
+      if (Date.now() - lastLoadAtRef.current > 30 * 1000) {
+        loadTasksRef.current && loadTasksRef.current();
+      }
+    }
+    document.addEventListener('visibilitychange', onFocusRefresh);
 
     return function() {
       sseTornDown = true;
@@ -847,6 +871,7 @@ export default function useTaskState(onError) {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (nudgeTimerRef.current) clearTimeout(nudgeTimerRef.current);
       clearInterval(periodicNudgeId);
+      document.removeEventListener('visibilitychange', onFocusRefresh);
       nudgePendingRef.current = null;
     };
   }, [loadPlacements]);
