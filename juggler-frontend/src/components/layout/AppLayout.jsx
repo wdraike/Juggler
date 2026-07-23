@@ -164,6 +164,7 @@ export default function AppLayout() {
   // 999.103: keep the browser tab title in sync with the active view.
   useDocumentTitle(VIEW_TITLES[viewMode] || 'StriveRS');
   var [filter, setFilter] = useState(_savedUI.filter || 'open');
+  var [dateFilter, setDateFilter] = useState(_savedUI.dateFilter || 'all');
   var [search, setSearch] = useState(_savedUI.search || '');
   var [projectFilter, setProjectFilter] = useState(_savedUI.projectFilter || '');
   var setViewMode = useCallback(function(v) {
@@ -309,12 +310,13 @@ export default function AppLayout() {
       localStorage.setItem('juggler-ui-state', JSON.stringify({
         viewMode: viewMode,
         filter: filter,
+        dateFilter: dateFilter,
         search: search,
         projectFilter: projectFilter,
         selectedDate: selectedDateKey
       }));
     } catch (e) { /* quota exceeded — ignore */ }
-  }, [viewMode, filter, search, projectFilter, selectedDateKey]);
+  }, [viewMode, filter, dateFilter, search, projectFilter, selectedDateKey]);
 
   var weekStripDates = useMemo(() => {
     var start = getWeekStart(selectedDate);
@@ -847,6 +849,7 @@ export default function AppLayout() {
         <NavigationBar
           viewMode={viewMode} setViewMode={setViewMode}
           filter={filter} setFilter={setFilter}
+          dateFilter={dateFilter} setDateFilter={setDateFilter}
           search={search} setSearch={setSearch}
           darkMode={darkMode}
           projectFilter={projectFilter} setProjectFilter={setProjectFilter}
@@ -983,6 +986,7 @@ export default function AppLayout() {
             <PriorityView
               allTasks={visibleTasks} statuses={statuses}
               filter={filter} search={search} projectFilter={projectFilter}
+              dateFilter={dateFilter}
               onStatusChange={handleStatusChange} onDelete={requestDelete} onExpand={handleExpand} darkMode={darkMode}
               onPriorityDrop={handlePriorityDrop}
               blockedTaskIds={blockedTaskIds} unplacedIds={unplacedIds} pastDueIds={pastDueIds} fixedIds={fixedIds}

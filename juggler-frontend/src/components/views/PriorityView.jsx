@@ -9,10 +9,11 @@ import { PRI_COLORS } from '../../state/constants';
 import { isTerminalStatus } from '../../shared/task-status';
 import WeatherBadge from '../features/WeatherBadge';
 import { formatDateKey } from '../../scheduler/dateHelpers';
+import { matchesDateFilter } from '../../scheduler/dateFilterHelpers';
 
 var PRI_LEVELS = ['P1', 'P2', 'P3', 'P4'];
 
-export default function PriorityView({ allTasks, statuses, filter, search, projectFilter, onStatusChange, onDelete, onExpand, darkMode, onPriorityDrop, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isMobile, todayDate, weatherByDate }) {
+export default function PriorityView({ allTasks, statuses, filter, dateFilter, search, projectFilter, onStatusChange, onDelete, onExpand, darkMode, onPriorityDrop, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isMobile, todayDate, weatherByDate }) {
   var theme = getTheme(darkMode);
   var [dragOver, setDragOver] = useState(null);
   var todayKey = formatDateKey(todayDate || new Date());
@@ -59,8 +60,10 @@ export default function PriorityView({ allTasks, statuses, filter, search, proje
       if (!search) return true;
       var s = search.toLowerCase();
       return (t.text || '').toLowerCase().includes(s) || (t.project || '').toLowerCase().includes(s);
+    }).filter(t => {
+      return matchesDateFilter(t, dateFilter, todayDate, isTerminalStatus, statuses[t.id] || '');
     });
-  }, [allTasks, statuses, filter, search, projectFilter, blockedTaskIds, unplacedIds, pastDueIds, fixedIds]);
+  }, [allTasks, statuses, filter, search, projectFilter, dateFilter, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, todayDate]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>

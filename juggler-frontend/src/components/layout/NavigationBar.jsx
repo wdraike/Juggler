@@ -36,6 +36,19 @@ const FILTERS = [
   { id: 'pause', label: 'Paused', tip: 'Tasks temporarily paused' },
 ];
 
+// Date-range filters — shown as a separate dropdown alongside the status filter.
+// Composable with status filters (both apply if set). `all` = no date restriction.
+var DATE_FILTERS = [
+  { id: 'all', label: 'Any Date', tip: 'No date restriction' },
+  { id: 'today', label: 'Today', tip: 'Tasks scheduled for today' },
+  { id: 'tomorrow', label: 'Tomorrow', tip: 'Tasks scheduled for tomorrow' },
+  { id: 'thisweek', label: 'This Week', tip: 'Tasks scheduled this week (Sun\u2013Sat)' },
+  { id: 'nextweek', label: 'Next Week', tip: 'Tasks scheduled next week (Sun\u2013Sat)' },
+  { id: 'thismonth', label: 'This Month', tip: 'Tasks scheduled this calendar month' },
+  { id: 'overdue', label: 'Overdue', tip: 'Tasks with a date before today that are not done' },
+  { id: 'nodate', label: 'No Date', tip: 'Tasks with no date assigned (anytime tasks)' },
+];
+
 // Which filter controls are relevant per view
 var GRID_VIEWS = { '3day': 1, week: 1, timeline: 1 };
 var FILTER_VISIBILITY = {
@@ -150,11 +163,12 @@ function ProjectCombobox({ value, onChange, allProjectNames, theme, isMobile }) 
   );
 }
 
-export default function NavigationBar({ viewMode, setViewMode, filter, setFilter, search, setSearch, darkMode, projectFilter, setProjectFilter, allProjectNames, unplacedCount, blockedCount, pastDueCount, fixedCount, issuesCount, isMobile }) {
+export default function NavigationBar({ viewMode, setViewMode, filter, setFilter, dateFilter, setDateFilter, search, setSearch, darkMode, projectFilter, setProjectFilter, allProjectNames, unplacedCount, blockedCount, pastDueCount, fixedCount, issuesCount, isMobile }) {
   var theme = getTheme(darkMode);
   var [showFilterDropdown, setShowFilterDropdown] = useState(false);
   var filterRef = useRef(null);
   var showStatus = FILTER_VISIBILITY.showStatusFilters(viewMode);
+  var showDate = FILTER_VISIBILITY.showStatusFilters(viewMode); // date filter shown wherever status filter is
   var showProject = FILTER_VISIBILITY.showProjectFilter(viewMode);
   var showSearch = FILTER_VISIBILITY.showSearch(viewMode);
 
@@ -240,6 +254,25 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
                   </option>
                 );
               })}
+            </select>
+          )}
+
+          {showDate && (
+            <select
+              value={dateFilter || 'all'}
+              onChange={e => setDateFilter(e.target.value)}
+              title={((DATE_FILTERS.find(f => f.id === (dateFilter || 'all')) || {}).tip) || ''}
+              style={{
+                border: '1px solid ' + theme.accent, borderRadius: 2,
+                padding: '3px 8px', cursor: 'pointer',
+                background: theme.accent + '20', color: theme.accent,
+                fontSize: 11, fontFamily: "'Inter', sans-serif",
+                outline: 'none', appearance: 'auto'
+              }}
+            >
+              {DATE_FILTERS.map(f => (
+                <option key={f.id} value={f.id}>{f.label}</option>
+              ))}
             </select>
           )}
 
@@ -354,8 +387,36 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
                 );
               })}
 
-              {/* Divider — only if status filters shown above and project below */}
-              {showStatus && showProject && (
+              {/* Divider — only if status filters shown above and date/project below */}
+              {showStatus && (showDate || (showProject && allProjectNames && allProjectNames.length > 0)) && (
+                <div style={{ height: 1, background: theme.border, margin: '4px 0' }} />
+              )}
+
+              {/* Date-range filters on mobile */}
+              {showDate && (
+                <div style={{ padding: '4px 14px', fontSize: 10, fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 }}>Date</div>
+              )}
+              {showDate && DATE_FILTERS.map(function(f) {
+                var isActive = (dateFilter || 'all') === f.id;
+                return (
+                  <button key={'date-' + f.id} onClick={function() { setDateFilter(f.id); setShowFilterDropdown(false); }}
+                    style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      width: '100%', border: 'none', cursor: 'pointer',
+                      padding: '10px 14px', fontSize: 13, fontFamily: 'inherit', textAlign: 'left',
+                      background: isActive ? theme.accent + '15' : 'transparent',
+                      color: isActive ? theme.accent : theme.text,
+                      fontWeight: isActive ? 600 : 400,
+                      minHeight: 40
+                    }}>
+                    <span>{f.label}</span>
+                    {isActive && <span style={{ color: theme.accent }}>&#x2713;</span>}
+                  </button>
+                );
+              })}
+
+              {/* Divider before project filter */}
+              {showDate && showProject && allProjectNames && allProjectNames.length > 0 && (
                 <div style={{ height: 1, background: theme.border, margin: '4px 0' }} />
               )}
 
