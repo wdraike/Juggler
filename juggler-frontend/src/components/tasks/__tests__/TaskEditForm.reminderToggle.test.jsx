@@ -176,3 +176,78 @@ describe('BUG-999.1000 — reminder toggle must drive placement_mode, not dead m
     expect(payload.placementMode).toBe('anytime');
   });
 });
+
+/**
+ * 999.4671 — ◇ Reminder is the ONLY unlocked placement control on a calendar-born
+ * task: WhenSection renders the whole "Scheduling mode" group with
+ * `pointerEvents: 'none'` when `task.calLocked` is set. So the OFF direction of
+ * this toggle is the sole path back to a blocking placement for a synced event,
+ * and landing on 'anytime' there would leave the appointment's slot unreserved —
+ * exactly the double-booking the ruling is about.
+ */
+describe('999.4671 — toggling ◇ OFF restores a blocking placement on calendar-born tasks', function() {
+  // A synced appointment always carries its anchor — 'fixed' means "exact date and
+  // time", so the form's own validation refuses the mode without one.
+  var SYNCED_REMINDER_TASK = Object.assign({}, BASE_TASK, {
+    id: 'gcal_appt', marker: true, placementMode: 'reminder',
+    calLocked: true, gcalEventId: 'gcal_evt_1',
+    date: '2026-06-15', time: '1:00 PM', dur: 60
+  });
+
+  it("a calLocked task toggled OFF saves placementMode='fixed', not 'anytime'", async function() {
+    localStorage.clear();
+    var onUpdate = jest.fn().mockResolvedValue(undefined);
+    renderForm(SYNCED_REMINDER_TASK, onUpdate);
+
+    fireEvent.click(getMarkerToggle());
+
+    await act(async function() {
+      fireEvent.click(screen.getByText(/Save/));
+    });
+
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    expect(onUpdate.mock.calls[0][1].placementMode).toBe('fixed');
+  });
+
+  // The payload shape is load-bearing, not cosmetic: checkCalSyncEditGuard
+  // (taskValidation.js) 403s a placementMode write on a cal-synced task unless
+  // the body carries _allowUnfix, and it rejects ANY key outside its allowlist —
+  // so the tz/_timezone pair every other save appends would fail the request.
+  it('sends _allowUnfix and no tz stowaways, so the backend guard accepts the write', async function() {
+    localStorage.clear();
+    var onUpdate = jest.fn().mockResolvedValue(undefined);
+    renderForm(SYNCED_REMINDER_TASK, onUpdate);
+
+    fireEvent.click(getMarkerToggle());
+
+    await act(async function() {
+      fireEvent.click(screen.getByText(/Save/));
+    });
+
+    var payload = onUpdate.mock.calls[0][1];
+    expect(payload._allowUnfix).toBe(true);
+    expect(payload.tz).toBeUndefined();
+    expect(payload._timezone).toBeUndefined();
+    // Nothing outside the guard's allowlist may ride along.
+    expect(Object.keys(payload).sort()).toEqual(['_allowUnfix', 'placementMode']);
+  });
+
+  it('a calLocked task can still be turned INTO a reminder (the ruling\'s escape hatch)', async function() {
+    localStorage.clear();
+    var onUpdate = jest.fn().mockResolvedValue(undefined);
+    var syncedFixed = Object.assign({}, BASE_TASK, {
+      id: 'gcal_appt', marker: false, placementMode: 'fixed',
+      calLocked: true, gcalEventId: 'gcal_evt_1'
+    });
+    renderForm(syncedFixed, onUpdate);
+
+    fireEvent.click(getMarkerToggle());
+
+    await act(async function() {
+      fireEvent.click(screen.getByText(/Save/));
+    });
+
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    expect(onUpdate.mock.calls[0][1].placementMode).toBe('reminder');
+  });
+});

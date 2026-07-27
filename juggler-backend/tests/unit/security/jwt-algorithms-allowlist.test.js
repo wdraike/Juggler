@@ -60,6 +60,14 @@
 
 'use strict';
 
+// RSA-2048 keygen is genuinely slow (~2.4s per keypair measured locally), and the
+// AC1 describe's beforeAll generates one plus signs several tokens — over jest's
+// 5s default hook budget on a loaded machine, and marginal even solo. That made
+// this suite red the pool/pre-push gate for changes that touch nothing in its
+// require graph (`jose` + src/lib/jwt-secret). Budget, not behavior: raising it
+// leaves every assertion untouched. (Found while working 999.4671.)
+jest.setTimeout(30000);
+
 const { SignJWT, jwtVerify, generateKeyPair } = require('jose');
 
 // ── Import the REAL production helper ────────────────────────────────────────

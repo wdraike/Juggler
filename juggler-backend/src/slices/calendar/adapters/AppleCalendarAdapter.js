@@ -278,21 +278,24 @@ function applyEventToTaskFields(event, tz, currentTask) {
     // use placement_mode='all_day' exclusively (see ROADMAP 999.011).
   }
 
-  if (event.isTransparent) {
-    fields.placement_mode = PLACEMENT_MODES.REMINDER;
-  }
-
-  // 999.2030: Reset to FIXED (not ANYTIME) if no longer transparent (was REMINDER).
-  // A busy synced event must own its time slot — ANYTIME lets other tasks double-book.
-  // Must run before the date/time-change FIXED promotion so a same-sync change still wins.
-  if (!event.isTransparent && currentTask?.placement_mode === PLACEMENT_MODES.REMINDER) {
-    fields.placement_mode = PLACEMENT_MODES.FIXED;
-  }
+  // 999.4671: provider transparency (iCal TRANSP:TRANSPARENT) NEVER decides
+  // placement_mode. A synced event is a time block; only a Juggler-side change
+  // makes it a reminder. This drops BOTH the old transparent→REMINDER demotion
+  // (which turned free-marked events into dur=0 markers the scheduler would
+  // double-book) and 999.2030's REMINDER→FIXED un-flip, which existed only to undo
+  // that demotion and now would overwrite the user's own choice.
 
   // Set FIXED only when an already-anchored task's date or time actually changed.
   // A null→value transition (flexible task gaining its first computed anchor) is
   // NOT a promotion trigger — require a prior non-null anchor before comparing.
-  if (!isAllDay) {
+  // A Juggler-side REMINDER is exempt: rescheduling the event in the provider is
+  // not a request to make the reminder blocking again (999.4671).
+  // currentTask arrives from the sync controller as a rowToTask() object, whose
+  // key is camelCase `placementMode` (taskMappers.js) — the snake_case key does
+  // not exist on it. Read both: 999.2030's guard read only `placement_mode` and
+  // was therefore dead against the real caller (harrison, 999.4671).
+  var currentMode = currentTask && (currentTask.placementMode || currentTask.placement_mode);
+  if (!isAllDay && currentMode !== PLACEMENT_MODES.REMINDER) {
     var dateChanged = jd.date && currentTask?.date && jd.date !== currentTask.date;
     var timeChanged = jd.time && currentTask?.time && jd.time !== currentTask.time;
     if (dateChanged || timeChanged) {

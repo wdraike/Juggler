@@ -372,26 +372,29 @@ describe('INV-1 [MUST STAY GREEN]: genuine change-detection promotion still fire
   //
   // A1-1 through A3-2 and B-block tests already cover the flexible-task case.
 
-  describe('All three adapters — transparent event sets reminder mode', function () {
+  // 999.4671 REVERSAL: transparency no longer sets reminder mode on any adapter.
+  // Provider free/busy is not a Juggler placement decision — see
+  // tests/cal-sync/synced-event-is-timeblock-999-4671.test.js.
+  describe('All three adapters — transparent event leaves placement_mode alone', function () {
     // Anchored task with SAME date/time as the timed event so BUG-1 does not
     // interfere.  isoToJugglerDate('2026-06-15T10:00:00', 'America/New_York')
     // produces { date: '2026-06-15', time: '10:00 AM' }.
     var transparentEvent = timedEvent({ isTransparent: true });
     var anchoredMatchingTask = anchoredTask({ date: '2026-06-15', time: '10:00 AM' });
 
-    it('C4-1: GCal transparent event (anchored, matching date+time) → placement_mode=reminder', function () {
+    it('C4-1: GCal transparent event (anchored, matching date+time) → no placement_mode write', function () {
       var fields = gcalAdapter.applyEventToTaskFields(transparentEvent, TZ, anchoredMatchingTask);
-      expect(fields.placement_mode).toBe(PLACEMENT_MODES.REMINDER);
+      expect(fields.placement_mode).toBeUndefined();
     });
 
-    it('C4-2: MSFT transparent event (anchored, matching date+time) → placement_mode=reminder', function () {
+    it('C4-2: MSFT transparent event (anchored, matching date+time) → no placement_mode write', function () {
       var fields = msftAdapter.applyEventToTaskFields(transparentEvent, TZ, anchoredMatchingTask);
-      expect(fields.placement_mode).toBe(PLACEMENT_MODES.REMINDER);
+      expect(fields.placement_mode).toBeUndefined();
     });
 
-    it('C4-3: Apple transparent event (anchored, matching date+time) → placement_mode=reminder', function () {
+    it('C4-3: Apple transparent event (anchored, matching date+time) → no placement_mode write', function () {
       var fields = appleAdapter.applyEventToTaskFields(transparentEvent, TZ, anchoredMatchingTask);
-      expect(fields.placement_mode).toBe(PLACEMENT_MODES.REMINDER);
+      expect(fields.placement_mode).toBeUndefined();
     });
   });
 
@@ -428,8 +431,11 @@ describe('INV-1 [MUST STAY GREEN]: genuine change-detection promotion still fire
   // (Guards the reminder→fixed ordering that 01-adapter-gcal already pins —
   //  included here so this file is self-contained for the promotion bug leg.)
 
-  describe('GCal adapter — formerly-reminder task with date/time change gets fixed', function () {
-    it('C7-1: reminder task, event no longer transparent + date changes → fixed wins', function () {
+  // 999.4671 REVERSAL: a REMINDER is a deliberate Juggler-side choice, so moving
+  // the event in the provider reschedules it (scheduled_at still updates) without
+  // promoting it back to a blocking placement.
+  describe('GCal adapter — a Juggler REMINDER survives a provider reschedule', function () {
+    it('C7-1: reminder task, event no longer transparent + date changes → still a reminder', function () {
       var event = timedEvent({
         startDateTime: '2026-05-25T10:00:00',
         endDateTime:   '2026-05-25T11:00:00',
@@ -442,7 +448,8 @@ describe('INV-1 [MUST STAY GREEN]: genuine change-detection promotion still fire
       };
 
       var fields = gcalAdapter.applyEventToTaskFields(event, TZ, current);
-      expect(fields.placement_mode).toBe(PLACEMENT_MODES.FIXED);
+      expect(fields.placement_mode).toBeUndefined();
+      expect(fields.scheduled_at).toBeDefined();
     });
   });
 

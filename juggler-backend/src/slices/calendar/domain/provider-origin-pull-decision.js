@@ -38,7 +38,9 @@
  * directly (NOT the applied fields), so the log is fully built here.
  *
  * @param {Object} ctx
- *   @param {Object}  ctx.task            resolved task row (reads id/text/dur/status)
+ *   @param {Object}  ctx.task            resolved task row (reads id/text/dur/status,
+ *                                        and placement_mode for the 999.4671
+ *                                        reminder exemption below)
  *   @param {Object}  ctx.event           provider event (reads title/durationMinutes;
  *                                        lastModified/_etag via isEventModifiedExternally)
  *   @param {Object}  ctx.ledger          sync ledger row (reads origin/provider_event_id;
@@ -59,6 +61,7 @@
 'use strict';
 
 var { isEventModifiedExternally } = require('./event-modified-predicate');
+var { PLACEMENT_MODES } = require('../../../lib/placementModes');
 
 // Fresh object per call (never a shared constant): the caller reads it read-only,
 // but returning a new literal keeps the descriptor free of aliasing surprises and
@@ -76,12 +79,24 @@ function decideProviderOriginPull(ctx) {
   // ── Ingest-only providers: pull event changes into task. Skip terminal tasks
   // and juggler-origin tasks (MCP-created) — Juggler owns their scheduling
   // fields. UNCONDITIONAL — does NOT consult the external-edit predicate. Forces
-  // placement_mode = FIXED at the call site; emits no log. (Was the
-  // `else if (isIngestOnly(pid))` branch.)
+  // placement_mode = FIXED at the call site (except for a Juggler-side reminder —
+  // 999.4671); emits no log. (Was the `else if (isIngestOnly(pid))` branch.)
   if (ctx.isIngestOnly) {
     var isJugglerOrigin = ledger.origin === ctx.jugglerOrigin;
     if (!isJugglerOrigin && !ctx.isTaskTerminal) {
-      return { action: 'pull', forcePlacementFixed: true, logs: [] };
+      // 999.4671: the force is what keeps an ingest-only event owning its slot,
+      // but it must not overwrite a REMINDER the user chose in Juggler — that is
+      // the one placement the ruling says a sync may never take back. (Ingest now
+      // creates these tasks FIXED to begin with, so the force is a repair path,
+      // not the primary one.)
+      // ctx.task is a rowToTask() object (camelCase placementMode); raw DB rows
+      // reach this only from tests. Read both — see the adapters' matching note.
+      var currentMode = task.placementMode || task.placement_mode;
+      return {
+        action: 'pull',
+        forcePlacementFixed: currentMode !== PLACEMENT_MODES.REMINDER,
+        logs: []
+      };
     }
     return noop();
   }

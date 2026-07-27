@@ -45,8 +45,9 @@
  *
  * @param {Object} ctx
  *   @param {Object}  ctx.event               provider event (reads isAllDay/
- *                                             isTransparent/durationMinutes for the
- *                                             promotion derivations)
+ *                                             durationMinutes for the promotion
+ *                                             derivations; isTransparent is
+ *                                             deliberately ignored — 999.4671)
  *   @param {?Object} ctx.existingTask        local task already bound to this event
  *                                             via its event-id column, or null
  *                                             (resolved by the caller)
@@ -99,13 +100,19 @@ function decideIngestEvent(ctx) {
 
   // 4. Genuine new future event → promote to a task. Field derivations (the
   //    promotion decision) are pure; row assembly stays at the call site.
+  // 999.4671: a synced event is a TIME BLOCK. Provider transparency (Google
+  // "Free" / Outlook showAs=free / iCal TRANSP:TRANSPARENT) does NOT decide
+  // placement_mode — Google marks every all-day event and every Gmail-derived
+  // event (appointments, tickets) transparent by default, and mapping that to
+  // REMINDER made the task a dur=0 marker with zero scheduler occupancy, so
+  // other work was placed straight over it. Only a Juggler-side choice makes an
+  // event a reminder: the per-calendar ingest_mode here, or the user editing the
+  // task later (which no sync may overwrite — see the adapters).
   var isAllDay = !!event.isAllDay;
   var isReminder = !isAllDay && ctx.calIngestMode === 'reminder';
-  var placementMode = event.isTransparent
-    ? PLACEMENT_MODES.REMINDER
-    : (isAllDay
-      ? PLACEMENT_MODES.ALL_DAY
-      : (isReminder ? PLACEMENT_MODES.REMINDER : PLACEMENT_MODES.FIXED));
+  var placementMode = isAllDay
+    ? PLACEMENT_MODES.ALL_DAY
+    : (isReminder ? PLACEMENT_MODES.REMINDER : PLACEMENT_MODES.FIXED);
 
   return {
     action: 'promote',

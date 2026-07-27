@@ -258,7 +258,13 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   // placementMode directly so the save payload carries the authoritative field.
   var marker = placementMode === 'reminder';
   function handleMarkerChange(next) {
-    setPlacementMode(next ? 'reminder' : 'anytime');
+    // ◇ Reminder is the ONLY way to make a calendar-born task non-blocking
+    // (the scheduling-mode selector is locked for those), so turning it back OFF
+    // must restore the blocking placement a synced event is supposed to have —
+    // 'anytime' would leave the appointment's slot unreserved and re-open the
+    // 999.4671 double-booking. Juggler-created tasks still fall back to 'anytime'.
+    if (next) return setPlacementMode('reminder');
+    setPlacementMode(task && task.calLocked ? 'fixed' : 'anytime');
   }
 
   // Sync form state from task prop when it changes externally

@@ -147,20 +147,26 @@ describe('decideIngestEvent — promote (new task)', function () {
     expect(d.isReminder).toBe(false);
   });
 
-  it('14: transparent event → placement REMINDER regardless of calendar/all-day', function () {
+  // 999.4671 REVERSAL: transparency used to win the placement ternary outright.
+  // It is now ignored entirely — a synced event is a time block, and only a
+  // Juggler-side choice (calIngestMode here, or a later task edit) makes it a
+  // reminder. Google marks every all-day event and every Gmail-derived event
+  // transparent, and REMINDER means dur=0 / zero scheduler occupancy, so the old
+  // mapping let other work be scheduled straight over real appointments.
+  it('14: transparent timed event → placement FIXED (transparency ignored)', function () {
     var d = decideIngestEvent(ctx({ event: makeEvent({ isTransparent: true }) }));
     expect(d.action).toBe('promote');
-    expect(d.placementMode).toBe(PLACEMENT_MODES.REMINDER);
-    // isReminder tracks the calIngestMode reminder path, NOT transparency:
+    expect(d.placementMode).toBe(PLACEMENT_MODES.FIXED);
     expect(d.isReminder).toBe(false);
+    expect(d.dur).toBe(60);
   });
 
-  it('15: transparent WINS the placement ternary even for an all-day reminder-mode event', function () {
+  it('15: transparency does not disturb the all-day branch, even in reminder mode', function () {
     var d = decideIngestEvent(ctx({
       calIngestMode: 'reminder',
       event: makeEvent({ isTransparent: true, isAllDay: true, durationMinutes: 30 })
     }));
-    expect(d.placementMode).toBe(PLACEMENT_MODES.REMINDER);
+    expect(d.placementMode).toBe(PLACEMENT_MODES.ALL_DAY);
     expect(d.when).toBe('allday');
     expect(d.dur).toBe(0);
   });

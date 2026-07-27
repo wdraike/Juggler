@@ -1,13 +1,22 @@
 /**
  * 999.2030 — Synced events must own their time slot exclusively.
  *
- * RED test: a formerly-REMINDER task whose event becomes busy (not transparent)
- * with NO date/time change must be promoted to FIXED (blocking), not ANYTIME
- * (non-blocking). The current REMINDER→ANYTIME reset lets a busy synced event
- * become non-blocking, allowing double-booking.
+ * ORIGINAL (999.2030): a formerly-REMINDER task whose event became busy (not
+ * transparent) with no date/time change was reset to ANYTIME, which is
+ * non-blocking — other tasks could be scheduled over it. The fix promoted it to
+ * FIXED instead.
  *
- * The sole exception: reminder tasks (task_type=reminder) are non-blocking and
- * may coexist with any other task in the same window.
+ * SUPERSEDED BY 999.4671 (David ruling 2026-07-27): that un-flip only existed to
+ * repair tasks the transparency→REMINDER mapping had wrongly demoted in the first
+ * place. With transparency removed from placement entirely, a synced task is FIXED
+ * from ingest onward, and the only way it can be REMINDER is a deliberate
+ * Juggler-side change — which no sync may overwrite. The un-flip is therefore gone;
+ * re-running it would clobber the user.
+ *
+ * This file keeps the 999.2030 INVARIANT (a busy synced event ends up blocking)
+ * and re-pins it at the layer that now decides it — ingest — plus the stickiness
+ * that replaced the un-flip. Placement-mode-write coverage for all three adapters
+ * lives in tests/cal-sync/synced-event-is-timeblock-999-4671.test.js.
  */
 
 'use strict';
@@ -15,6 +24,7 @@
 var gcalAdapter  = require('../../../src/lib/cal-adapters/gcal.adapter');
 var msftAdapter  = require('../../../src/lib/cal-adapters/msft.adapter');
 var appleAdapter = require('../../../src/lib/cal-adapters/apple.adapter');
+var { decideIngestEvent } = require('../../../src/slices/calendar/domain/ingest-event-decision');
 var { PLACEMENT_MODES } = require('../../../src/lib/placementModes');
 
 var TZ = 'America/New_York';
@@ -31,44 +41,46 @@ function timedEvent(overrides) {
   }, overrides);
 }
 
-describe('999.2030: synced busy event must be FIXED (blocking), not ANYTIME', () => {
-  describe('GCal adapter — formerly-reminder task, event becomes busy, no date/time change', () => {
-    test('reminder task with matching date/time, event no longer transparent → FIXED', () => {
-      var event = timedEvent({ isTransparent: false });
-      var current = {
-        placement_mode: PLACEMENT_MODES.REMINDER,
-        date: '2026-06-15',
-        time: '10:00 AM'
-      };
-      var fields = gcalAdapter.applyEventToTaskFields(event, TZ, current);
-      // Must be FIXED (blocking) — the event is busy and has a scheduled_at.
-      expect(fields.placement_mode).toBe(PLACEMENT_MODES.FIXED);
-    });
+function ingestCtx(event) {
+  return {
+    event: event,
+    existingTask: null,
+    isPast: false,
+    isJugglerOriginBody: false,
+    orphanMatch: null,
+    calIngestMode: 'task',
+    pid: 'gcal',
+    jugglerOrigin: 'juggler'
+  };
+}
+
+describe('999.2030 invariant (via 999.4671): a synced event is blocking from ingest', () => {
+  test('busy event → FIXED', () => {
+    var d = decideIngestEvent(ingestCtx(timedEvent({ isTransparent: false })));
+    expect(d.placementMode).toBe(PLACEMENT_MODES.FIXED);
   });
 
-  describe('MSFT adapter — formerly-reminder task, event becomes busy, no date/time change', () => {
-    test('reminder task with matching date/time, event no longer transparent → FIXED', () => {
-      var event = timedEvent({ isTransparent: false, startTimezone: 'Eastern Standard Time' });
-      var current = {
-        placement_mode: PLACEMENT_MODES.REMINDER,
-        date: '2026-06-15',
-        time: '10:00 AM'
-      };
-      var fields = msftAdapter.applyEventToTaskFields(event, TZ, current);
-      expect(fields.placement_mode).toBe(PLACEMENT_MODES.FIXED);
-    });
+  test('free/transparent event → FIXED too (transparency no longer demotes)', () => {
+    var d = decideIngestEvent(ingestCtx(timedEvent({ isTransparent: true })));
+    expect(d.placementMode).toBe(PLACEMENT_MODES.FIXED);
   });
+});
 
-  describe('Apple adapter — formerly-reminder task, event becomes busy, no date/time change', () => {
-    test('reminder task with matching date/time, event no longer transparent → FIXED', () => {
-      var event = timedEvent({ isTransparent: false });
-      var current = {
-        placement_mode: PLACEMENT_MODES.REMINDER,
-        date: '2026-06-15',
-        time: '10:00 AM'
-      };
-      var fields = appleAdapter.applyEventToTaskFields(event, TZ, current);
-      expect(fields.placement_mode).toBe(PLACEMENT_MODES.FIXED);
-    });
+describe('999.4671: the REMINDER→FIXED un-flip is gone — Juggler-side choice is sticky', () => {
+  var CASES = [
+    ['GCal',  gcalAdapter,  {}],
+    ['MSFT',  msftAdapter,  { startTimezone: 'Eastern Standard Time' }],
+    ['Apple', appleAdapter, {}]
+  ];
+
+  test.each(CASES)('%s: reminder task + busy event, no date/time change → placement untouched', (name, adapter, extra) => {
+    var event = timedEvent(Object.assign({ isTransparent: false }, extra));
+    var current = {
+      placement_mode: PLACEMENT_MODES.REMINDER,
+      date: '2026-06-15',
+      time: '10:00 AM'
+    };
+    var fields = adapter.applyEventToTaskFields(event, TZ, current);
+    expect(fields.placement_mode).toBeUndefined();
   });
 });

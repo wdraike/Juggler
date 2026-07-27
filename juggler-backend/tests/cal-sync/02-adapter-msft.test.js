@@ -269,7 +269,11 @@ describeWithCreds(hasMsftCredentials, 'MSFT adapter — applyEventToTaskFields',
     var currentTask = { when: 'fixed', placement_mode: 'reminder', date: '2026-04-15', time: '10:00 AM' };
     var fields = msftAdapter.applyEventToTaskFields(event, TEST_TIMEZONE, currentTask);
 
-    expect(fields.placement_mode).toBe('anytime');
+    // 999.4671: losing transparency no longer rewrites placement at all — the
+    // reminder is the user's Juggler-side choice. (This assertion was already
+    // stale after 999.2030 flipped it to 'fixed'; it never ran because the
+    // enclosing block is creds-gated.)
+    expect(fields.placement_mode).toBeUndefined();
   });
 });
 
@@ -566,10 +570,12 @@ describe('MSFT adapter — applyEventToTaskFields REMINDER→FIXED ordering', fu
 
     var fields = msftAdapter.applyEventToTaskFields(event, 'UTC', currentTask);
 
-    // FIXED must win over the ANYTIME reset that runs first in the function.
-    expect(fields.placement_mode).toBe('fixed');
-    // Must NOT be 'anytime' — that would indicate the ordering bug
-    expect(fields.placement_mode).not.toBe('anytime');
+    // 999.4671 REVERSAL: transparency no longer creates reminders, so a synced
+    // task in REMINDER is there because the USER chose it in Juggler — and a
+    // provider-side reschedule is not a request to take that back. The move
+    // still lands (scheduled_at), the placement is left alone.
+    expect(fields.placement_mode).toBeUndefined();
+    expect(fields.scheduled_at).toBeDefined();
   });
 });
 

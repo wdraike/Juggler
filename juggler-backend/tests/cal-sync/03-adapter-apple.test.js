@@ -241,10 +241,12 @@ describe('Apple adapter — applyEventToTaskFields REMINDER→FIXED ordering', f
 
     var fields = appleAdapter.applyEventToTaskFields(event, 'UTC', currentTask);
 
-    // FIXED must win over the ANYTIME reset that runs first in the function.
-    expect(fields.placement_mode).toBe('fixed');
-    // Must NOT be 'anytime' — that would indicate the ordering bug
-    expect(fields.placement_mode).not.toBe('anytime');
+    // 999.4671 REVERSAL: transparency no longer creates reminders, so a synced
+    // task in REMINDER is there because the USER chose it in Juggler — and a
+    // provider-side reschedule is not a request to take that back. The move
+    // still lands (scheduled_at), the placement is left alone.
+    expect(fields.placement_mode).toBeUndefined();
+    expect(fields.scheduled_at).toBeDefined();
   });
 });
 

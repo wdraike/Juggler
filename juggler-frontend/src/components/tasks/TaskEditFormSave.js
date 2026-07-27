@@ -171,8 +171,19 @@ export function useTaskEditFormSave({
     if (curHMin !== snapHMin) changed.weatherHumidityMin = all.weatherHumidityMin;
     if (curHMax !== snapHMax) changed.weatherHumidityMax = all.weatherHumidityMax;
     if (Object.keys(changed).length > 0) {
-      changed.tz = all.tz;
-      changed._timezone = all._timezone;
+      // 999.4671: a calendar-born task is read-only except for a short allowlist
+      // (checkCalSyncEditGuard: status/notes/pri/_allowUnfix, plus placementMode
+      // only when the request opts in with _allowUnfix). The routine tz/_timezone
+      // stowaways are NOT on that list, so appending them 403s the whole request
+      // — including the ◇ Reminder toggle, which is the only placement control
+      // WhenSection leaves enabled on these tasks. They are also pointless here:
+      // the date/time fields they annotate are themselves blocked for cal tasks.
+      if (task && task.calLocked) {
+        if (changed.placementMode !== undefined) changed._allowUnfix = true;
+      } else {
+        changed.tz = all.tz;
+        changed._timezone = all._timezone;
+      }
     }
     return Object.keys(changed).length > 0 ? changed : null;
   }, [buildFields, text, project, pri, notes, url, when, dayReq, recurring, dur, timeRemaining, timeFlex, split, splitMin, travelBefore, travelAfter, flexWhen, date, time, deadline, earliestStart, taskLoc, taskTools, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, recurStart, recurEnd, nextStart, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
