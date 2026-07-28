@@ -3,7 +3,7 @@
  * Listens for 'subscription:required' and 'plan:limit-reached' events.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { getTheme } from '../../theme/colors';
 import apiClient from '../../services/apiClient';
 
@@ -31,31 +31,62 @@ export default function UpgradePrompt({ darkMode }) {
   var [detail, setDetail] = useState(null);
   var theme = getTheme(darkMode);
 
+  // Proactive check — gate if no subscription (402), block with a retryable
+  // error state on any other outcome (network failure, 500, malformed body,
+  // etc). Never grant access on error: a failed lookup is NOT confirmation
+  // the user has a subscription, so it must not collapse into the same
+  // branch as success (999.4733). Defined outside the effect so the error
+  // gate's Retry button can call it directly.
+  // Monotonic request sequence — mirrors the resume-optimizer sibling. Checks
+  // fire from mount, from the tab-visibility handler and from Retry, so two can
+  // be in flight at once; without this the LAST response to arrive wins
+  // regardless of age, and a stale success resolving after a fresh failure
+  // would clear the blocking error gate and unblock the app on out-of-date
+  // information.
+  var seqRef = useRef(0);
+
+  function checkSubscription() {
+    var mine = ++seqRef.current;
+    function isCurrent() { return mine === seqRef.current; }
+    // Timeout so a wedged proxy or degraded payment-service cannot leave this
+    // promise unsettled forever — an unsettled check leaves the gate in its
+    // ungated initial state, the same user-visible outcome as the original
+    // bug. ECONNABORTED rejects into the existing else branch: fails CLOSED.
+    apiClient.get('/my-plan', { timeout: 10000 }).then(function() {
+      if (!isCurrent()) return;
+      // Has subscription now — dismiss the gate
+      setShow(false);
+      setDetail(null);
+    }).catch(function(err) {
+      if (!isCurrent()) return;
+      if (err.response?.status === 402) {
+        setDetail({ type: 'subscription', product: _appId });
+        setShow(true);
+      } else {
+        setDetail({ type: 'error' });
+        setShow(true);
+      }
+    });
+  }
+
   useEffect(function() {
     function handleRequired(e) {
       setDetail({ type: 'subscription', product: e.detail?.product || _appId });
       setShow(true);
     }
     function handleLimit(e) {
-      setDetail({ type: 'limit', ...e.detail });
+      setDetail(function (prev) {
+        // Never let a limit notice displace the blocking verification-failure
+        // gate: that gate means we could not establish entitlement AT ALL,
+        // which outranks a known quota, and the limit modal is dismissible.
+        if (prev && prev.type === 'error') return prev;
+        return { type: 'limit', ...e.detail };
+      });
       setShow(true);
     }
     window.addEventListener('subscription:required', handleRequired);
     window.addEventListener('plan:limit-reached', handleLimit);
 
-    // Proactive check on mount — gate if no subscription
-    function checkSubscription() {
-      apiClient.get('/my-plan').then(function() {
-        // Has subscription now — dismiss the gate
-        setShow(false);
-        setDetail(null);
-      }).catch(function(err) {
-        if (err.response?.status === 402) {
-          setDetail({ type: 'subscription', product: _appId });
-          setShow(true);
-        }
-      });
-    }
     checkSubscription();
 
     // Re-check when user returns from another tab (may have just subscribed)
@@ -82,6 +113,15 @@ export default function UpgradePrompt({ darkMode }) {
     desc = 'You need an active subscription to use StriveRS. Start with a free trial to get full access.';
   }
 
+  // Transport/server failure verifying the plan — a FAILED lookup, not
+  // confirmation the user lacks a subscription. Fails CLOSED: blocking,
+  // non-dismissible, same as the subscription gate, but with Retry instead
+  // of "View Plans" (999.4733).
+  if (detail.type === 'error') {
+    title = "We can't verify your plan right now";
+    desc = "We couldn't reach the billing service to check your subscription. Please try again.";
+  }
+
   if (detail.type === 'limit') {
     var key = detail.limit_key || detail.feature || '';
     var msg = LIMIT_MESSAGES[key];
@@ -103,7 +143,7 @@ export default function UpgradePrompt({ darkMode }) {
       position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
       background: 'rgba(0,0,0,0.5)', zIndex: 10000,
       display: 'flex', alignItems: 'center', justifyContent: 'center'
-    }} onClick={function() { if (detail?.type !== 'subscription') setShow(false); }}>
+    }} onClick={function() { if (detail?.type !== 'subscription' && detail?.type !== 'error') setShow(false); }}>
       <div style={{
         background: theme.bgSecondary, borderRadius: 12, padding: 32,
         maxWidth: 420, width: '90%', textAlign: 'center',
@@ -124,27 +164,42 @@ export default function UpgradePrompt({ darkMode }) {
           </p>
         )}
         <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 16 }}>
-          <button
-            onClick={function() { window.open(BILLING_URL + '/plans', '_blank'); }}
-            style={{
-              padding: '10px 24px', borderRadius: 6, border: 'none',
-              background: theme.accent, color: '#fff', fontSize: 14,
-              fontWeight: 600, cursor: 'pointer'
-            }}
-          >
-            View Plans
-          </button>
-          {detail.type !== 'subscription' && (
+          {detail.type === 'error' ? (
             <button
-              onClick={function() { setShow(false); }}
+              onClick={checkSubscription}
               style={{
-                padding: '10px 24px', borderRadius: 6,
-                border: '1px solid ' + theme.border, background: 'transparent',
-                color: theme.textMuted, fontSize: 14, cursor: 'pointer'
+                padding: '10px 24px', borderRadius: 6, border: 'none',
+                background: theme.accent, color: '#fff', fontSize: 14,
+                fontWeight: 600, cursor: 'pointer'
               }}
             >
-              Not Now
+              Retry
             </button>
+          ) : (
+            <>
+              <button
+                onClick={function() { window.open(BILLING_URL + '/plans', '_blank'); }}
+                style={{
+                  padding: '10px 24px', borderRadius: 6, border: 'none',
+                  background: theme.accent, color: '#fff', fontSize: 14,
+                  fontWeight: 600, cursor: 'pointer'
+                }}
+              >
+                View Plans
+              </button>
+              {detail.type !== 'subscription' && detail.type !== 'error' && (
+                <button
+                  onClick={function() { setShow(false); }}
+                  style={{
+                    padding: '10px 24px', borderRadius: 6,
+                    border: '1px solid ' + theme.border, background: 'transparent',
+                    color: theme.textMuted, fontSize: 14, cursor: 'pointer'
+                  }}
+                >
+                  Not Now
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>

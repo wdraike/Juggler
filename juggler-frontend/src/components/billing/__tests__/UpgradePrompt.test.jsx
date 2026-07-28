@@ -9,10 +9,12 @@
  *  - "View Plans" opens the billing frontend /plans page in a new tab
  *  - a successful /my-plan re-check dismisses an already-open gate
  *  - visibilitychange re-runs the subscription check
+ *  - a non-402 /my-plan failure (transport/server) shows a BLOCKING error
+ *    state with Retry — never a silent null (999.4733)
  */
 
 import React from 'react';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import UpgradePrompt from '../UpgradePrompt';
 import apiClient from '../../../services/apiClient';
 
@@ -43,7 +45,7 @@ describe('UpgradePrompt', () => {
     const { container } = render(<UpgradePrompt darkMode={false} />);
     await flush();
 
-    expect(apiClient.get).toHaveBeenCalledWith('/my-plan');
+    expect(apiClient.get).toHaveBeenCalledWith('/my-plan', expect.objectContaining({ timeout: expect.any(Number) }));
     expect(container.firstChild).toBeNull();
   });
 
@@ -63,13 +65,90 @@ describe('UpgradePrompt', () => {
     expect(screen.getByText('Subscription Required')).toBeInTheDocument();
   });
 
-  it('does not gate when /my-plan fails with a non-402 error', async () => {
+  it('shows a BLOCKING error state (not silent null) when /my-plan fails with a non-402 server error (999.4733)', async () => {
     apiClient.get.mockRejectedValue({ response: { status: 500 } });
 
     const { container } = render(<UpgradePrompt darkMode={false} />);
-    await flush();
 
-    expect(container.firstChild).toBeNull();
+    expect(await screen.findByText("We can't verify your plan right now")).toBeInTheDocument();
+    expect(screen.getByText('Retry')).toBeInTheDocument();
+    expect(container).not.toBeEmptyDOMElement();
+  });
+
+  it('shows the same BLOCKING error state on a network/transport failure (no response object at all)', async () => {
+    apiClient.get.mockRejectedValue(new Error('Network Error'));
+
+    render(<UpgradePrompt darkMode={false} />);
+
+    expect(await screen.findByText("We can't verify your plan right now")).toBeInTheDocument();
+    expect(screen.getByText('Retry')).toBeInTheDocument();
+  });
+
+  it('error gate is non-dismissible (no "Not Now", overlay click ignored)', async () => {
+    apiClient.get.mockRejectedValue({ response: { status: 500 } });
+
+    const { container } = render(<UpgradePrompt darkMode={false} />);
+    await screen.findByText("We can't verify your plan right now");
+
+    expect(screen.queryByText('Not Now')).toBeNull();
+    fireEvent.click(container.firstChild);
+    expect(screen.getByText("We can't verify your plan right now")).toBeInTheDocument();
+  });
+
+  it('a plan:limit-reached event CANNOT displace the blocking error gate', async () => {
+    // Regression (999.4733 review): handleLimit used to overwrite `detail`
+    // unconditionally, so a background limit response arriving while the error
+    // gate was up swapped it for the DISMISSIBLE limit modal — one "Not Now"
+    // click and the app was fully unblocked on a plan we never verified.
+    apiClient.get.mockRejectedValue({ response: { status: 500 } });
+
+    render(<UpgradePrompt darkMode={false} />);
+    await screen.findByText("We can't verify your plan right now");
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('plan:limit-reached', {
+        detail: { limit_key: 'projects', limit: 3, used: 3 },
+      }));
+    });
+
+    // Still the error gate, still no escape hatch.
+    expect(screen.getByText("We can't verify your plan right now")).toBeInTheDocument();
+    expect(screen.queryByText('Not Now')).toBeNull();
+  });
+
+  it('a STALE in-flight check that resolves last cannot clear the error gate', async () => {
+    // Regression (999.4733 review): the checks were last-writer-wins, so an
+    // older request resolving after a newer failure would clear the gate and
+    // unblock the app on out-of-date information.
+    let resolveStale;
+    apiClient.get
+      .mockReturnValueOnce(new Promise((r) => { resolveStale = r; }))  // mount: hangs
+      .mockRejectedValueOnce({ response: { status: 500 } });           // visibility: fails
+
+    render(<UpgradePrompt darkMode={false} />);
+
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await screen.findByText("We can't verify your plan right now");
+
+    // The stale mount check now succeeds — it must NOT win.
+    await act(async () => { resolveStale({ data: { plan: 'pro' } }); });
+
+    expect(screen.getByText("We can't verify your plan right now")).toBeInTheDocument();
+  });
+
+  it('Retry re-runs the /my-plan check and clears the error state on success', async () => {
+    apiClient.get.mockRejectedValueOnce({ response: { status: 500 } });
+
+    render(<UpgradePrompt darkMode={false} />);
+    await screen.findByText("We can't verify your plan right now");
+
+    apiClient.get.mockResolvedValueOnce({ data: { plan: 'pro' } });
+    fireEvent.click(screen.getByText('Retry'));
+
+    await waitFor(() => expect(screen.queryByText("We can't verify your plan right now")).toBeNull());
+    expect(apiClient.get).toHaveBeenCalledTimes(2);
   });
 
   it('opens the billing /plans page in a new tab from "View Plans"', async () => {
@@ -216,6 +295,6 @@ describe('UpgradePrompt', () => {
     });
 
     expect(apiClient.get).toHaveBeenCalledTimes(2);
-    expect(apiClient.get).toHaveBeenLastCalledWith('/my-plan');
+    expect(apiClient.get).toHaveBeenLastCalledWith('/my-plan', expect.objectContaining({ timeout: expect.any(Number) }));
   });
 });
