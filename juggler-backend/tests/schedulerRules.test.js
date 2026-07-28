@@ -446,6 +446,26 @@ describe('Scheduler Rules', () => {
       var earliestStartDate = parseDateKey(dateKey(3));
       expect(placedDate >= earliestStartDate).toBe(true);
     });
+
+    // 999.4795: earliestStart beyond the default 14-day horizon must still be
+    // respected — buildDates now extends the horizon for earliestStart so
+    // indexOfDate finds it instead of returning -1 (which silently ignored
+    // the constraint and placed the task today).
+    test('tasks with earliestStart beyond 14-day horizon not placed today (999.4795)', () => {
+      var tasks = [
+        makeTask({ id: 'far_future', pri: 'P1', dur: 30, earliestStart: dateKey(20), text: 'Far future task' }),
+      ];
+      var result = run(tasks);
+
+      // Task must NOT be on today — the start-after date is 20 days out.
+      expect(isOnToday(result, 'far_future')).toBe(false);
+      if (isPlaced(result, 'far_future')) {
+        var day = placedDay(result, 'far_future');
+        var placedDate = parseDateKey(day);
+        var earliestStartDate = parseDateKey(dateKey(20));
+        expect(placedDate >= earliestStartDate).toBe(true);
+      }
+    });
   });
 
   // ─── GROUP 15: Location constraints ───

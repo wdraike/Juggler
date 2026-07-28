@@ -200,6 +200,12 @@ function buildDates(todayKey, cfg, allTasks) {
       if (d && d > endDate) { endDate = new Date(d); endDate.setDate(endDate.getDate() + 7); }
       var dd = parseDate(t.deadline);
       if (dd && dd > endDate) { endDate = new Date(dd); endDate.setDate(endDate.getDate() + 3); }
+      // 999.4795: extend horizon for earliestStart (start_after_at) so a task
+      // whose start-after date is beyond the default 14-day window is still
+      // found by indexOfDate — without this, the si > 0 guard in
+      // findEarliestSlot sees -1 and silently ignores the constraint.
+      var es = parseDate(t.earliestStart);
+      if (es && es > endDate) { endDate = new Date(es); endDate.setDate(endDate.getDate() + 3); }
     });
   }
   var cursor = new Date(base);
