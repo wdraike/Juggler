@@ -27,7 +27,13 @@ function getAuthUrl(oauth2Client, state) {
   return oauth2Client.generateAuthUrl({
     access_type: 'offline',
     prompt: 'consent',
-    scope: ['https://www.googleapis.com/auth/calendar.events'],
+    // 999.4714: calendar.events grants event CRUD but NOT calendarList
+    // enumeration — discoverCalendars needs calendar.readonly to list the
+    // user's calendars. Without it, every discovery call 403s silently.
+    scope: [
+      'https://www.googleapis.com/auth/calendar.events',
+      'https://www.googleapis.com/auth/calendar.readonly'
+    ],
     state
   });
 }

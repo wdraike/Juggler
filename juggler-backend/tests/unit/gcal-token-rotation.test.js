@@ -242,5 +242,8 @@ describe('gcal-api — getAuthUrl', () => {
     expect(url).toContain('access_type=offline');
     expect(url).toContain('prompt=consent');
     expect(url).toContain('scope=https://www.googleapis.com/auth/calendar.events');
+    // 999.4714: calendar.readonly is required for discoverCalendars to
+    // enumerate the user's calendarList — calendar.events alone 403s.
+    expect(url).toContain('https://www.googleapis.com/auth/calendar.readonly');
   });
 });
