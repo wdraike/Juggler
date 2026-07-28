@@ -727,7 +727,7 @@ function computeSlack(item, dates, dayWindows, dayBlocks, dayOcc, dayOccPrefix) 
   var earliestIdx = 0;
   if (item.earliestStartDate) {
     var si = indexOfDate(dates, item.earliestStartDate);
-    if (si > 0) earliestIdx = si;
+    if (si >= 0) earliestIdx = si;
   }
   var deadlineIdx = indexOfDate(dates, item.deadlineDate);
   if (deadlineIdx < 0) deadlineIdx = dates.length - 1;
@@ -1121,7 +1121,7 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
   var earliestIdx = 0;
   if (item.earliestStartDate) {
     var si = indexOfDate(dates, item.earliestStartDate);
-    if (si > 0) earliestIdx = si;
+    if (si >= 0) earliestIdx = si;
   }
   var latestIdx = dates.length - 1;
   if (item.deadlineDate && !(opts && opts.ignoreDeadline)) {
@@ -1625,7 +1625,7 @@ function placeSplitInline(item, remaining, splitMin, dates, dayWindows, dayBlock
 
   if (item.earliestStartDate) {
     var sai = indexOfDate(dates, item.earliestStartDate);
-    if (sai > 0) earliestIdx = sai;
+    if (sai >= 0) earliestIdx = sai;
   }
   if (item.deadlineDate) {
     var di = indexOfDate(dates, item.deadlineDate);
@@ -2607,7 +2607,16 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     var task = item.task || item;
 
     // Determine force-placement date and start minute.
+    // 999.4795: respect earliestStartDate — a force-placed task must not be
+    // placed before its start_after constraint even in the fallback path.
     var forceDate = (item.anchorDate) || (task.date ? toKey(task.date) : dates[0].key);
+    if (item.earliestStartDate) {
+      var eIdx = indexOfDate(dates, item.earliestStartDate);
+      if (eIdx >= 0) {
+        var constrainedDate = dates[eIdx].key;
+        if (forceDate < constrainedDate) forceDate = constrainedDate;
+      }
+    }
     var forceStart = item.anchorMin || null;
 
     if (forceStart == null && task.when) {
