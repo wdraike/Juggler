@@ -2120,6 +2120,17 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
         var splitMin = (item.task.splitMin != null ? item.task.splitMin : null) ||
                        (cfg && cfg.splitMinDefault) || 15;
         var splitResult = placeSplitInline(item, item.dur, splitMin, dates, dayWindows, dayBlocks, dayOcc, cfg);
+        if (splitResult.placed.length === 0) {
+          // 999.4794: split was attempted but produced zero chunks — for ANY
+          // reason (splitMin wider than every eligible window, no eligible
+          // window at all, day-of-week exclusion, grid full). Mark so the
+          // force-placement pass (which only runs on rigid/FIXED items) does
+          // NOT force-place this task outside template hours; the correct
+          // outcome is "unplaced" with a no_slot reason, not a _conflict entry.
+          // NOTE the asymmetry this leaves (999.4794 stays open for it): the
+          // same task with split:false still takes the force-placement path.
+          item._splitFailed = true;
+        }
         if (splitResult.placed.length > 0) {
           var splitPlacedFirst = splitResult.placed[0];
           splitResult.placed.forEach(function(chunk) {
@@ -2595,10 +2606,15 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   // when-block is full or in the past. Place at block start with _conflict=true.
   var rigidUnplaced = stillUnplaced.filter(function(u) {
     var task = u && u.task ? u.task : u;
+    // 999.4794: a splittable task whose split produced zero chunks (every
+    // window narrower than splitMin) must NOT be force-placed outside
+    // template hours — it stays unplaced with its no_slot reason.
+    if (u && u._splitFailed) return false;
     return task && (task.placementMode === PLACEMENT_MODES.FIXED || (u && u.isRigid));
   });
   var remainingUnplaced = stillUnplaced.filter(function(u) {
     var task = u && u.task ? u.task : u;
+    if (u && u._splitFailed) return true;
     return !(task && (task.placementMode === PLACEMENT_MODES.FIXED || (u && u.isRigid)));
   });
 
