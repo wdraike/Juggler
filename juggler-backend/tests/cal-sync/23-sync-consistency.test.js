@@ -43,7 +43,7 @@ jest.mock('../../src/lib/sync-lock', () => {
 });
 
 var {
-  db, TEST_USER_ID, isDbAvailable, seedTestUser, cleanupTestData, destroyTestUser, mockReq, mockRes
+  db, isDbAvailable, seedTestUser, cleanupTestData, destroyTestUser, mockReq, mockRes
 } = require('./helpers/test-setup');
 var { assertDbAvailable } = require('../helpers/requireDB');
 var { makeTask } = require('./helpers/test-fixtures');
@@ -180,7 +180,7 @@ describe('Concurrent sync lock: second sync gets 409', () => {
       return Promise.resolve({ acquired: false });
     });
     var _realSetTimeout = global.setTimeout;
-    global.setTimeout = function(fn, _ms) { return _realSetTimeout(fn, 0); };
+    global.setTimeout = function(fn) { return _realSetTimeout(fn, 0); };
 
     var req = mockReq(user);
     var res = mockRes();
@@ -203,12 +203,12 @@ describe('Stale lock recovery: expired lock cleared on next sync', () => {
     // Insert an expired lock (both acquired_at and expires_at are in the past).
     // acquireLock() runs: DELETE WHERE expires_at <= NOW() then INSERT — so the
     // expired row is swept atomically before the new lock is inserted.
-    await db('sync_locks').insert({
+    await db('sync_locks').insert(require('../../src/lib/audit-context').stampInsert({
       user_id: user.id,
       lock_token: 'expired-lock',
       acquired_at: new Date(Date.now() - 60000),
       expires_at: new Date(Date.now() - 30000)
-    });
+    }));
 
     jest.spyOn(gcalAdapter, 'getValidAccessToken').mockResolvedValue('mock-token');
     jest.spyOn(gcalAdapter, 'listEvents').mockResolvedValue([]);

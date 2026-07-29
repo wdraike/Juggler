@@ -107,13 +107,13 @@ function makeRes() {
 
 async function seedUser() {
   await db('users').where('id', USER_ID).del();
-  await db('users').insert({
+  await db('users').insert(require('../../../src/lib/audit-context').stampInsert({
     id: USER_ID,
     email: USER_ID + '@test.com',
     name: 'W1 Characterization User',
     created_at: db.fn.now(),
     updated_at: db.fn.now()
-  });
+  }));
 }
 
 async function cleanupTasks() {
@@ -129,22 +129,23 @@ async function cleanupTasks() {
 async function insertLocalChangeRow(updatedAt) {
   var masterId = 'w1-master-' + crypto.randomBytes(6).toString('hex');
   var instanceId = 'w1-inst-' + crypto.randomBytes(6).toString('hex');
-  await db('task_masters').insert({
+  var stamp = require('../../../src/lib/audit-context').stampInsert;
+  await db('task_masters').insert(stamp({
     id: masterId,
     user_id: USER_ID,
     text: 'W1 local-change fixture',
     dur: 30,
     created_at: db.fn.now(),
     updated_at: db.fn.now()
-  });
-  await db('task_instances').insert({
+  }));
+  await db('task_instances').insert(stamp({
     id: instanceId,
     master_id: masterId,
     user_id: USER_ID,
     scheduled_at: new Date('2026-06-01T09:00:00Z'),
     created_at: updatedAt,
     updated_at: updatedAt
-  });
+  }));
   return instanceId;
 }
 

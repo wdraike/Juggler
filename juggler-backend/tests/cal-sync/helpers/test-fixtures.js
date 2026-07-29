@@ -5,7 +5,6 @@
 
 var crypto = require('crypto');
 var { db, TEST_USER_ID, gcalApi, msftCalApi } = require('./test-setup');
-var { taskHash } = require('../../../src/controllers/cal-sync-helpers');
 var tasksWrite = require('../../../src/lib/tasks-write');
 
 // ─── Task Fixtures ───
@@ -79,7 +78,12 @@ async function makeLedgerRow(overrides) {
     miss_count: 0,
     status: 'active',
     synced_at: db.fn.now(),
-    created_at: db.fn.now()
+    created_at: db.fn.now(),
+    // 999.4845: created_by/updated_by are NOT NULL since 20260720210000; raw
+    // fixture inserts bypass the stamped repo layer, so stamp here like the
+    // armed test actor would (test-helpers/armAuditTestActor.js)
+    created_by: 'jest',
+    updated_by: 'jest'
   }, overrides);
 
   var result = await db('cal_sync_ledger').insert(row);

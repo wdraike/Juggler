@@ -89,13 +89,13 @@ function makeRes() {
 
 async function seedUser() {
   await db('users').where('id', USER_ID).del();
-  await db('users').insert({
+  await db('users').insert(require('../../../src/lib/audit-context').stampInsert({
     id: USER_ID,
     email: USER_ID + '@test.com',
     name: 'W2 Characterization User',
     created_at: db.fn.now(),
     updated_at: db.fn.now()
-  });
+  }));
 }
 
 async function cleanupHistory() {
@@ -111,7 +111,7 @@ async function cleanupHistory() {
  */
 async function insertHistoryRow(opts) {
   opts = opts || {};
-  await db('sync_history').insert({
+  await db('sync_history').insert(require('../../../src/lib/audit-context').stampInsert({
     user_id: USER_ID,
     sync_run_id: opts.sync_run_id,
     provider: opts.provider || 'gcal',
@@ -125,7 +125,7 @@ async function insertHistoryRow(opts) {
     calendar_name: opts.calendar_name || null,
     trigger_type: typeof opts.trigger_type !== 'undefined' ? opts.trigger_type : null,
     created_at: opts.created_at || db.fn.now()
-  });
+  }));
 }
 
 function makeRunId() {

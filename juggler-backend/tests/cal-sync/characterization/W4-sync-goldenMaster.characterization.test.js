@@ -160,7 +160,7 @@ var taskWriteQueue = require('../../../src/lib/task-write-queue');
 var actualFlushQueueInLock = jest.requireActual('../../../src/lib/task-write-queue').flushQueueInLock;
 
 var {
-  db, TEST_USER_ID, seedTestUser, cleanupTestData, destroyTestUser, mockReq, mockRes
+  db, TEST_USER_ID, seedTestUser, destroyTestUser, mockReq, mockRes
 } = require('../helpers/test-setup');
 var { assertDbAvailable } = require('../../helpers/requireDB');
 var { makeTask, makeLedgerRow } = require('../helpers/test-fixtures');
@@ -224,7 +224,9 @@ async function editTask(id, fields) {
 
 async function seedUserConfig(key, valueObj) {
   await db('user_config').insert({
-    user_id: TEST_USER_ID, config_key: key, config_value: JSON.stringify(valueObj)
+    user_id: TEST_USER_ID, config_key: key, config_value: JSON.stringify(valueObj),
+    // 999.4845: NOT NULL audit columns; raw insert bypasses the stamped layer
+    created_by: 'jest', updated_by: 'jest'
   });
 }
 
@@ -238,7 +240,9 @@ async function seedAppleFullSyncCalendar() {
   await db('user_calendars').insert({
     user_id: TEST_USER_ID, provider: 'apple',
     calendar_id: 'https://caldav.icloud.com/w4/calendars/home/',
-    display_name: 'Home', enabled: 1, sync_direction: 'full'
+    display_name: 'Home', enabled: 1, sync_direction: 'full',
+    // 999.4845: NOT NULL audit columns; raw insert bypasses the stamped layer
+    created_by: 'jest', updated_by: 'jest'
   });
 }
 
@@ -628,7 +632,7 @@ test('I — foreign sync lock held: 409 + sync:lock_conflict + zero DB writes (s
   await stabilizeTaskTimestamps();
   // Foreign holder with a DB-clock expiry far beyond the 8-attempt backoff (~35s).
   await db.raw(
-    'INSERT INTO sync_locks (user_id, lock_token, acquired_at, expires_at) VALUES (?, ?, NOW(), DATE_ADD(NOW(), INTERVAL 300 SECOND))',
+    'INSERT INTO sync_locks (user_id, lock_token, acquired_at, expires_at, created_by, updated_by) VALUES (?, ?, NOW(), DATE_ADD(NOW(), INTERVAL 300 SECOND), \'jest\', \'jest\')',
     [TEST_USER_ID, 'w4-foreign-lock-token']
   );
 

@@ -51,9 +51,9 @@ var H = require('./harness/syncGoldenHarness');
  *  push side effects (a plain local task is otherwise itself eligible for
  *  push and would legitimately pick up its own gcal_event_id). */
 async function seedUserConfig(key, valueObj) {
-  await db('user_config').insert({
+  await db('user_config').insert(require('../../../src/lib/audit-context').stampInsert({
     user_id: TEST_USER_ID, config_key: key, config_value: JSON.stringify(valueObj)
-  });
+  }));
 }
 
 var NO_PROVIDERS = {

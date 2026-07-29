@@ -32,7 +32,8 @@ async function seedUser(overrides) {
     created_at: new Date(),
     updated_at: new Date()
   };
-  await db('users').insert({ ...base, ...overrides });
+  // 999.4845: NOT NULL audit columns — stamp like seedTestUser does
+  await db('users').insert(require('../../src/lib/audit-context').stampInsert({ ...base, ...overrides }));
   return db('users').where('id', TEST_USER_ID).first();
 }
 

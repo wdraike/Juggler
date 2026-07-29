@@ -67,7 +67,7 @@ var mockMakeStubRegistry = function () {
     // stand-in — real ledger/task DB reads (this suite seeds neither, so both
     // resolve empty), stub adapter fetch (no network), no split-merge/Apple
     // label logic (out of scope for this suite; those fields stay empty).
-    gatherProviderSyncData: async function(user, userId, windowStart, windowEnd, tz, stats, emitProgress) {
+    gatherProviderSyncData: async function(user, userId, windowStart, windowEnd, tz, stats) {
       var connectedAdapters = getConnectedAdapters(user);
       if (connectedAdapters.length === 0) return { earlyReturn: true };
 
@@ -111,7 +111,14 @@ var mockMakeStubRegistry = function () {
     // has no dependency on the mocked adapter registry — it operates purely
     // on the buffers Phases 1-3 built and the real DB, so the real
     // implementation is used unmodified rather than a hand-rolled stand-in.
-    runSyncWritePhase: jest.requireActual('../../src/slices/calendar/facade').runSyncWritePhase
+    runSyncWritePhase: jest.requireActual('../../src/slices/calendar/facade').runSyncWritePhase,
+    // 999.4845: the controller now takes the sync lock through the facade too
+    // (acquireLock :888 / refreshLock :911 / releaseLock :1645) — real
+    // implementations, same rationale as runSyncWritePhase above (pure
+    // lib/sync-lock + real DB, no dependency on the mocked adapter registry).
+    acquireLock: jest.requireActual('../../src/slices/calendar/facade').acquireLock,
+    refreshLock: jest.requireActual('../../src/slices/calendar/facade').refreshLock,
+    releaseLock: jest.requireActual('../../src/slices/calendar/facade').releaseLock
   };
 };
 jest.mock('../../src/slices/calendar/facade', () => mockMakeStubRegistry());
@@ -140,7 +147,7 @@ async function isDbAvailable() {
 
 async function seedUser(id) {
   await db('users').where('id', id).del();
-  await db('users').insert({
+  await db('users').insert(require('../../src/lib/audit-context').stampInsert({
     id: id,
     email: id + '@test.com',
     name: 'Prune Test ' + id,
@@ -150,13 +157,13 @@ async function seedUser(id) {
     gcal_token_expiry: null,
     created_at: db.fn.now(),
     updated_at: db.fn.now()
-  });
+  }));
   return db('users').where('id', id).first();
 }
 
 async function insertHistoryRow(userId, ageDays) {
   var ts = new Date(Date.now() - ageDays * 24 * 60 * 60 * 1000);
-  var rows = await db('sync_history').insert({
+  var rows = await db('sync_history').insert(require('../../src/lib/audit-context').stampInsert({
     user_id: userId,
     sync_run_id: 'run-' + userId + '-' + ageDays,
     provider: 'gcal',
@@ -165,7 +172,7 @@ async function insertHistoryRow(userId, ageDays) {
     task_text: 'age=' + ageDays + 'd',
     event_id: null,
     created_at: ts
-  });
+  }));
   return rows[0];
 }
 
