@@ -126,8 +126,8 @@ async function ensureTestUser(userId) {
 async function insertTestMaster(masterId, userId) {
   await ensureTestUser(userId);
   await db.raw(`
-    INSERT IGNORE INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, split, created_at, updated_at)
-    VALUES (?, ?, ?, '', 'P3', 0, 0, NULL, NOW(), NOW())
+    INSERT IGNORE INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, split, created_by, updated_by, created_at, updated_at)
+    VALUES (?, ?, ?, '', 'P3', 0, 0, NULL, 'test-fixture', 'test-fixture', NOW(), NOW())
   `, [masterId, userId, 'Boolean test task']);
 }
 
@@ -179,8 +179,8 @@ describe('A) CHECK constraints on boolean columns (from migration 20260601000000
     test('accepts 0 (false)', requireDB(async () => {
       var id = uid('fw0');
       await db.raw(`
-        INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, created_at, updated_at)
-        VALUES (?, ?, 'test', '', 'P3', 0, 0, NOW(), NOW())
+        INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, created_by, updated_by, created_at, updated_at)
+        VALUES (?, ?, 'test', '', 'P3', 0, 0, 'test-fixture', 'test-fixture', NOW(), NOW())
         ON DUPLICATE KEY UPDATE flex_when = 0
       `, [id, userId]);
       var row = await db('task_masters').where('id', id).first();
@@ -191,8 +191,8 @@ describe('A) CHECK constraints on boolean columns (from migration 20260601000000
     test('accepts 1 (true)', requireDB(async () => {
       var id = uid('fw1');
       await db.raw(`
-        INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, created_at, updated_at)
-        VALUES (?, ?, 'test', '', 'P3', 1, 0, NOW(), NOW())
+        INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, created_by, updated_by, created_at, updated_at)
+        VALUES (?, ?, 'test', '', 'P3', 1, 0, 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [id, userId]);
       var row = await db('task_masters').where('id', id).first();
       expect(row.flex_when).toBe(1);
@@ -201,22 +201,22 @@ describe('A) CHECK constraints on boolean columns (from migration 20260601000000
 
     test('rejects value 2 (outside {0,1})', requireDB(async () => {
       await expect(db.raw(`
-        INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, created_at, updated_at)
-        VALUES (?, ?, 'test', '', 'P3', 2, 0, NOW(), NOW())
+        INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, created_by, updated_by, created_at, updated_at)
+        VALUES (?, ?, 'test', '', 'P3', 2, 0, 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [uid('fw2'), userId])).rejects.toThrow(CHECK_VIOLATION);
     }, isDbAvailable));
 
     test('rejects value -1 (outside {0,1})', requireDB(async () => {
       await expect(db.raw(`
-        INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, created_at, updated_at)
-        VALUES (?, ?, 'test', '', 'P3', -1, 0, NOW(), NOW())
+        INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, created_by, updated_by, created_at, updated_at)
+        VALUES (?, ?, 'test', '', 'P3', -1, 0, 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [uid('fwn1'), userId])).rejects.toThrow(CHECK_VIOLATION);
     }, isDbAvailable));
 
     test('rejects value 127 (outside {0,1})', requireDB(async () => {
       await expect(db.raw(`
-        INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, created_at, updated_at)
-        VALUES (?, ?, 'test', '', 'P3', 127, 0, NOW(), NOW())
+        INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, created_by, updated_by, created_at, updated_at)
+        VALUES (?, ?, 'test', '', 'P3', 127, 0, 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [uid('fw127'), userId])).rejects.toThrow(CHECK_VIOLATION);
     }, isDbAvailable));
   });
@@ -234,8 +234,8 @@ describe('A) CHECK constraints on boolean columns (from migration 20260601000000
     test('accepts 0 (false)', requireDB(async () => {
       var id = uid('rec0');
       await db.raw(`
-        INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, created_at, updated_at)
-        VALUES (?, ?, 'test', '', 'P3', 0, 0, NOW(), NOW())
+        INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, created_by, updated_by, created_at, updated_at)
+        VALUES (?, ?, 'test', '', 'P3', 0, 0, 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [id, userId]);
       var row = await db('task_masters').where('id', id).first();
       expect(row.recurring).toBe(0);
@@ -245,8 +245,8 @@ describe('A) CHECK constraints on boolean columns (from migration 20260601000000
     test('accepts 1 (true)', requireDB(async () => {
       var id = uid('rec1');
       await db.raw(`
-        INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, created_at, updated_at)
-        VALUES (?, ?, 'test', '', 'P3', 0, 1, NOW(), NOW())
+        INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, created_by, updated_by, created_at, updated_at)
+        VALUES (?, ?, 'test', '', 'P3', 0, 1, 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [id, userId]);
       var row = await db('task_masters').where('id', id).first();
       expect(row.recurring).toBe(1);
@@ -255,15 +255,15 @@ describe('A) CHECK constraints on boolean columns (from migration 20260601000000
 
     test('rejects value 2 (outside {0,1})', requireDB(async () => {
       await expect(db.raw(`
-        INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, created_at, updated_at)
-        VALUES (?, ?, 'test', '', 'P3', 0, 2, NOW(), NOW())
+        INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, created_by, updated_by, created_at, updated_at)
+        VALUES (?, ?, 'test', '', 'P3', 0, 2, 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [uid('rec2'), userId])).rejects.toThrow(CHECK_VIOLATION);
     }, isDbAvailable));
 
     test('rejects value -1 (outside {0,1})', requireDB(async () => {
       await expect(db.raw(`
-        INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, created_at, updated_at)
-        VALUES (?, ?, 'test', '', 'P3', 0, -1, NOW(), NOW())
+        INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, created_by, updated_by, created_at, updated_at)
+        VALUES (?, ?, 'test', '', 'P3', 0, -1, 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [uid('recn1'), userId])).rejects.toThrow(CHECK_VIOLATION);
     }, isDbAvailable));
   });
@@ -280,8 +280,8 @@ describe('A) CHECK constraints on boolean columns (from migration 20260601000000
     test('accepts NULL', requireDB(async () => {
       var id = uid('splnull');
       await db.raw(`
-        INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, split, created_at, updated_at)
-        VALUES (?, ?, 'test', '', 'P3', 0, 0, NULL, NOW(), NOW())
+        INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, split, created_by, updated_by, created_at, updated_at)
+        VALUES (?, ?, 'test', '', 'P3', 0, 0, NULL, 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [id, userId]);
       var row = await db('task_masters').where('id', id).first();
       expect(row.split).toBeNull();
@@ -291,8 +291,8 @@ describe('A) CHECK constraints on boolean columns (from migration 20260601000000
     test('accepts 0', requireDB(async () => {
       var id = uid('spl0');
       await db.raw(`
-        INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, split, created_at, updated_at)
-        VALUES (?, ?, 'test', '', 'P3', 0, 0, 0, NOW(), NOW())
+        INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, split, created_by, updated_by, created_at, updated_at)
+        VALUES (?, ?, 'test', '', 'P3', 0, 0, 0, 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [id, userId]);
       var row = await db('task_masters').where('id', id).first();
       expect(row.split).toBe(0);
@@ -302,8 +302,8 @@ describe('A) CHECK constraints on boolean columns (from migration 20260601000000
     test('accepts 1', requireDB(async () => {
       var id = uid('spl1');
       await db.raw(`
-        INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, split, created_at, updated_at)
-        VALUES (?, ?, 'test', '', 'P3', 0, 0, 1, NOW(), NOW())
+        INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, split, created_by, updated_by, created_at, updated_at)
+        VALUES (?, ?, 'test', '', 'P3', 0, 0, 1, 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [id, userId]);
       var row = await db('task_masters').where('id', id).first();
       expect(row.split).toBe(1);
@@ -312,15 +312,15 @@ describe('A) CHECK constraints on boolean columns (from migration 20260601000000
 
     test('rejects value 2 (outside {0,1,NULL})', requireDB(async () => {
       await expect(db.raw(`
-        INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, split, created_at, updated_at)
-        VALUES (?, ?, 'test', '', 'P3', 0, 0, 2, NOW(), NOW())
+        INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, split, created_by, updated_by, created_at, updated_at)
+        VALUES (?, ?, 'test', '', 'P3', 0, 0, 2, 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [uid('spl2'), userId])).rejects.toThrow(CHECK_VIOLATION);
     }, isDbAvailable));
 
     test('rejects value -1 (outside {0,1,NULL})', requireDB(async () => {
       await expect(db.raw(`
-        INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, split, created_at, updated_at)
-        VALUES (?, ?, 'test', '', 'P3', 0, 0, -1, NOW(), NOW())
+        INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, split, created_by, updated_by, created_at, updated_at)
+        VALUES (?, ?, 'test', '', 'P3', 0, 0, -1, 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [uid('spln1'), userId])).rejects.toThrow(CHECK_VIOLATION);
     }, isDbAvailable));
   });
@@ -338,8 +338,8 @@ describe('A) CHECK constraints on boolean columns (from migration 20260601000000
     test('accepts NULL', requireDB(async () => {
       var id = uid('unschnull');
       await db.raw(`
-        INSERT INTO task_instances (id, master_id, user_id, status, occurrence_ordinal, split_ordinal, split_total, unscheduled, created_at, updated_at)
-        VALUES (?, ?, ?, '', 1, 1, 1, NULL, NOW(), NOW())
+        INSERT INTO task_instances (id, master_id, user_id, status, occurrence_ordinal, split_ordinal, split_total, unscheduled, created_by, updated_by, created_at, updated_at)
+        VALUES (?, ?, ?, '', 1, 1, 1, NULL, 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [id, masterId, userId]);
       var row = await db('task_instances').where('id', id).first();
       expect(row.unscheduled).toBeNull();
@@ -349,8 +349,8 @@ describe('A) CHECK constraints on boolean columns (from migration 20260601000000
     test('accepts 0', requireDB(async () => {
       var id = uid('unsch0');
       await db.raw(`
-        INSERT INTO task_instances (id, master_id, user_id, status, occurrence_ordinal, split_ordinal, split_total, unscheduled, created_at, updated_at)
-        VALUES (?, ?, ?, '', 1, 1, 1, 0, NOW(), NOW())
+        INSERT INTO task_instances (id, master_id, user_id, status, occurrence_ordinal, split_ordinal, split_total, unscheduled, created_by, updated_by, created_at, updated_at)
+        VALUES (?, ?, ?, '', 1, 1, 1, 0, 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [id, masterId, userId]);
       var row = await db('task_instances').where('id', id).first();
       expect(row.unscheduled).toBe(0);
@@ -360,8 +360,8 @@ describe('A) CHECK constraints on boolean columns (from migration 20260601000000
     test('accepts 1', requireDB(async () => {
       var id = uid('unsch1');
       await db.raw(`
-        INSERT INTO task_instances (id, master_id, user_id, status, occurrence_ordinal, split_ordinal, split_total, unscheduled, created_at, updated_at)
-        VALUES (?, ?, ?, '', 1, 1, 1, 1, NOW(), NOW())
+        INSERT INTO task_instances (id, master_id, user_id, status, occurrence_ordinal, split_ordinal, split_total, unscheduled, created_by, updated_by, created_at, updated_at)
+        VALUES (?, ?, ?, '', 1, 1, 1, 1, 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [id, masterId, userId]);
       var row = await db('task_instances').where('id', id).first();
       expect(row.unscheduled).toBe(1);
@@ -370,15 +370,15 @@ describe('A) CHECK constraints on boolean columns (from migration 20260601000000
 
     test('rejects value 2 (outside {0,1,NULL})', requireDB(async () => {
       await expect(db.raw(`
-        INSERT INTO task_instances (id, master_id, user_id, status, occurrence_ordinal, split_ordinal, split_total, unscheduled, created_at, updated_at)
-        VALUES (?, ?, ?, '', 1, 1, 1, 2, NOW(), NOW())
+        INSERT INTO task_instances (id, master_id, user_id, status, occurrence_ordinal, split_ordinal, split_total, unscheduled, created_by, updated_by, created_at, updated_at)
+        VALUES (?, ?, ?, '', 1, 1, 1, 2, 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [uid('unsch2'), masterId, userId])).rejects.toThrow(CHECK_VIOLATION);
     }, isDbAvailable));
 
     test('rejects value -1 (outside {0,1,NULL})', requireDB(async () => {
       await expect(db.raw(`
-        INSERT INTO task_instances (id, master_id, user_id, status, occurrence_ordinal, split_ordinal, split_total, unscheduled, created_at, updated_at)
-        VALUES (?, ?, ?, '', 1, 1, 1, -1, NOW(), NOW())
+        INSERT INTO task_instances (id, master_id, user_id, status, occurrence_ordinal, split_ordinal, split_total, unscheduled, created_by, updated_by, created_at, updated_at)
+        VALUES (?, ?, ?, '', 1, 1, 1, -1, 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [uid('unschn1'), masterId, userId])).rejects.toThrow(CHECK_VIOLATION);
     }, isDbAvailable));
   });
@@ -408,8 +408,8 @@ describe('B) Boolean columns without explicit CHECK constraints — type-level v
     test('accepts 0', requireDB(async () => {
       var id = uid('gen0');
       await db.raw(`
-        INSERT INTO task_instances (id, master_id, user_id, status, occurrence_ordinal, split_ordinal, split_total, \`generated\`, created_at, updated_at)
-        VALUES (?, ?, ?, '', 1, 1, 1, 0, NOW(), NOW())
+        INSERT INTO task_instances (id, master_id, user_id, status, occurrence_ordinal, split_ordinal, split_total, \`generated\`, created_by, updated_by, created_at, updated_at)
+        VALUES (?, ?, ?, '', 1, 1, 1, 0, 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [id, masterId, userId]);
       var row = await db('task_instances').where('id', id).first();
       expect(row.generated).toBe(0);
@@ -419,8 +419,8 @@ describe('B) Boolean columns without explicit CHECK constraints — type-level v
     test('accepts 1', requireDB(async () => {
       var id = uid('gen1');
       await db.raw(`
-        INSERT INTO task_instances (id, master_id, user_id, status, occurrence_ordinal, split_ordinal, split_total, \`generated\`, created_at, updated_at)
-        VALUES (?, ?, ?, '', 1, 1, 1, 1, NOW(), NOW())
+        INSERT INTO task_instances (id, master_id, user_id, status, occurrence_ordinal, split_ordinal, split_total, \`generated\`, created_by, updated_by, created_at, updated_at)
+        VALUES (?, ?, ?, '', 1, 1, 1, 1, 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [id, masterId, userId]);
       var row = await db('task_instances').where('id', id).first();
       expect(row.generated).toBe(1);
@@ -433,8 +433,8 @@ describe('B) Boolean columns without explicit CHECK constraints — type-level v
     test('GAP — currently accepts value 2 (no CHECK constraint)', requireDB(async () => {
       var id = uid('gen2');
       await db.raw(`
-        INSERT INTO task_instances (id, master_id, user_id, status, occurrence_ordinal, split_ordinal, split_total, \`generated\`, created_at, updated_at)
-        VALUES (?, ?, ?, '', 1, 1, 1, 2, NOW(), NOW())
+        INSERT INTO task_instances (id, master_id, user_id, status, occurrence_ordinal, split_ordinal, split_total, \`generated\`, created_by, updated_by, created_at, updated_at)
+        VALUES (?, ?, ?, '', 1, 1, 1, 2, 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [id, masterId, userId]);
       var row = await db('task_instances').where('id', id).first();
       // GAP: Without a CHECK constraint, TINYINT(1) accepts 2. Documenting this.

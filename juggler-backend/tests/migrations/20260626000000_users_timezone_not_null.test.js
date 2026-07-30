@@ -21,7 +21,14 @@
 
 'use strict';
 
-jest.setTimeout(60000);
+// 999.4864: this suite drives several full migrate.latest()/migrate.down()
+// cycles against its own isolated DB (juggler_2146-sibling juggler_sweep_test);
+// observed real durations were 51-65s even before load — 60000ms was already
+// marginal and started tripping once the suite's own beforeAll/insert path
+// actually ran to completion (previously masked by an unrelated created_by
+// failure that short-circuited every test in milliseconds). Matches the
+// budget precedent of the similarly-structured 20260727120000 suite.
+jest.setTimeout(180000);
 
 var path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../.env.test') });
@@ -157,8 +164,8 @@ async function rollbackMigration() {
  */
 async function insertUserNoTimezone(id) {
   await db.raw(
-    'INSERT INTO users (id, email, created_at, updated_at) VALUES (?, ?, NOW(), NOW())',
-    [id, id + '@tz892.local']
+    'INSERT INTO users (id, email, created_by, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())',
+    [id, id + '@tz892.local', 'test-fixture', 'test-fixture']
   );
   return id;
 }
@@ -170,8 +177,8 @@ async function insertUserNoTimezone(id) {
  */
 async function insertUserNullTimezone(id) {
   return db.raw(
-    'INSERT INTO users (id, email, timezone, created_at, updated_at) VALUES (?, ?, NULL, NOW(), NOW())',
-    [id, id + '@tz892.local']
+    'INSERT INTO users (id, email, timezone, created_by, updated_by, created_at, updated_at) VALUES (?, ?, NULL, ?, ?, NOW(), NOW())',
+    [id, id + '@tz892.local', 'test-fixture', 'test-fixture']
   );
 }
 
@@ -183,8 +190,8 @@ async function insertUserNullTimezone(id) {
  */
 async function insertUserWithTimezone(id, tz) {
   await db.raw(
-    'INSERT INTO users (id, email, timezone, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())',
-    [id, id + '@tz892.local', tz]
+    'INSERT INTO users (id, email, timezone, created_by, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NOW(), NOW())',
+    [id, id + '@tz892.local', tz, 'test-fixture', 'test-fixture']
   );
 }
 

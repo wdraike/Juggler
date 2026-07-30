@@ -95,8 +95,8 @@ async function insertTestMaster(masterId, userId) {
   await ensureTestUser(userId);
   await db.raw(`
     INSERT IGNORE INTO task_masters
-      (id, user_id, text, status, pri, flex_when, recurring, split, created_at, updated_at)
-    VALUES (?, ?, 'Status constraint regression 999.865', '', 'P3', 0, 0, NULL, NOW(), NOW())
+      (id, user_id, text, status, pri, flex_when, recurring, split, created_by, updated_by, created_at, updated_at)
+    VALUES (?, ?, 'Status constraint regression 999.865', '', 'P3', 0, 0, NULL, 'test-fixture', 'test-fixture', NOW(), NOW())
   `, [masterId, userId]);
 }
 
@@ -161,8 +161,8 @@ describe('A) task_masters — ACCEPTS statuses in the widened set (999.865 regre
       var id = uid('tm-' + status);
       await db.raw(`
         INSERT INTO task_masters
-          (id, user_id, text, status, pri, flex_when, recurring, split, created_at, updated_at)
-        VALUES (?, ?, 'Regression 999.865', ?, 'P3', 0, 0, NULL, NOW(), NOW())
+          (id, user_id, text, status, pri, flex_when, recurring, split, created_by, updated_by, created_at, updated_at)
+        VALUES (?, ?, 'Regression 999.865', ?, 'P3', 0, 0, NULL, 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [id, userId, status]);
       var row = await db('task_masters').where('id', id).first();
       expect(row).toBeDefined();
@@ -180,8 +180,8 @@ describe('A) task_masters — ACCEPTS statuses in the widened set (999.865 regre
       var id = uid('tm-existing-' + (status || 'empty'));
       await db.raw(`
         INSERT INTO task_masters
-          (id, user_id, text, status, pri, flex_when, recurring, split, created_at, updated_at)
-        VALUES (?, ?, 'Pre-existing status', ?, 'P3', 0, 0, NULL, NOW(), NOW())
+          (id, user_id, text, status, pri, flex_when, recurring, split, created_by, updated_by, created_at, updated_at)
+        VALUES (?, ?, 'Pre-existing status', ?, 'P3', 0, 0, NULL, 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [id, userId, status]);
       var row = await db('task_masters').where('id', id).first();
       expect(row).toBeDefined();
@@ -210,8 +210,8 @@ describe('B) task_masters — REJECTS a bogus status value (constraint still enf
   test('rejects status="bogus_zzz" with ER_CHECK_CONSTRAINT_VIOLATED', requireDB(async () => {
     await expect(db.raw(`
       INSERT INTO task_masters
-        (id, user_id, text, status, pri, flex_when, recurring, split, created_at, updated_at)
-      VALUES (?, ?, 'Should be rejected', 'bogus_zzz', 'P3', 0, 0, NULL, NOW(), NOW())
+        (id, user_id, text, status, pri, flex_when, recurring, split, created_by, updated_by, created_at, updated_at)
+      VALUES (?, ?, 'Should be rejected', 'bogus_zzz', 'P3', 0, 0, NULL, 'test-fixture', 'test-fixture', NOW(), NOW())
     `, [uid('tm-bogus'), userId])).rejects.toThrow(CHECK_VIOLATION);
   }, isDbAvailable));
 
@@ -220,8 +220,8 @@ describe('B) task_masters — REJECTS a bogus status value (constraint still enf
     // triggers CHECK_CONSTRAINT_VIOLATED, not a data-too-long error.
     await expect(db.raw(`
       INSERT INTO task_masters
-        (id, user_id, text, status, pri, flex_when, recurring, split, created_at, updated_at)
-      VALUES (?, ?, 'Should be rejected', 'xyzzy', 'P3', 0, 0, NULL, NOW(), NOW())
+        (id, user_id, text, status, pri, flex_when, recurring, split, created_by, updated_by, created_at, updated_at)
+      VALUES (?, ?, 'Should be rejected', 'xyzzy', 'P3', 0, 0, NULL, 'test-fixture', 'test-fixture', NOW(), NOW())
     `, [uid('tm-xyzzy'), userId])).rejects.toThrow(CHECK_VIOLATION);
   }, isDbAvailable));
 });
@@ -344,8 +344,8 @@ describe('D) task_instances — ACCEPTS status="cancelled" (chk_task_instances_s
     await db.raw(`
       INSERT INTO task_instances
         (id, master_id, user_id, occurrence_ordinal, split_ordinal, split_total,
-         status, dur, created_at, updated_at)
-      VALUES (?, ?, ?, 1, 1, 1, 'cancelled', 30, NOW(), NOW())
+         status, dur, created_by, updated_by, created_at, updated_at)
+      VALUES (?, ?, ?, 1, 1, 1, 'cancelled', 30, 'test-fixture', 'test-fixture', NOW(), NOW())
     `, [instanceId, masterId, userId]);
     var row = await db('task_instances').where('id', instanceId).first();
     expect(row).toBeDefined();
@@ -376,8 +376,8 @@ describe('D) task_instances — ACCEPTS status="cancelled" (chk_task_instances_s
     await expect(db.raw(`
       INSERT INTO task_instances
         (id, master_id, user_id, occurrence_ordinal, split_ordinal, split_total,
-         status, dur, created_at, updated_at)
-      VALUES (?, ?, ?, 1, 1, 1, 'bogus_zzz', 30, NOW(), NOW())
+         status, dur, created_by, updated_by, created_at, updated_at)
+      VALUES (?, ?, ?, 1, 1, 1, 'bogus_zzz', 30, 'test-fixture', 'test-fixture', NOW(), NOW())
     `, [uid('inst-bogus'), masterId, userId])).rejects.toThrow(CHECK_VIOLATION);
   }, isDbAvailable));
 });

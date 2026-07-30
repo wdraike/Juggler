@@ -91,6 +91,8 @@ describe('migration 20260605000000_add_task_status_enum_and_timestamps', () => {
       email: 'test-status@test.com',
       name: 'Test User',
       timezone: 'America/New_York',
+      created_by: 'test-fixture',
+      updated_by: 'test-fixture',
       created_at: db.fn.now(),
       updated_at: db.fn.now()
     });
@@ -102,6 +104,8 @@ describe('migration 20260605000000_add_task_status_enum_and_timestamps', () => {
       text: 'Test task with empty status',
       status: '',
       pri: 'P3',
+      created_by: 'test-fixture',
+      updated_by: 'test-fixture',
       created_at: db.fn.now(),
       updated_at: db.fn.now()
     });
@@ -112,6 +116,8 @@ describe('migration 20260605000000_add_task_status_enum_and_timestamps', () => {
       text: 'Test task with WIP status',
       status: 'wip',
       pri: 'P3',
+      created_by: 'test-fixture',
+      updated_by: 'test-fixture',
       created_at: db.fn.now(),
       updated_at: db.fn.now()
     });
@@ -124,6 +130,8 @@ describe('migration 20260605000000_add_task_status_enum_and_timestamps', () => {
       status: 'done',
       scheduled_at: db.fn.now(),
       pri: 'P3',
+      created_by: 'test-fixture',
+      updated_by: 'test-fixture',
       created_at: db.fn.now(),
       updated_at: db.fn.now()
     });
@@ -157,6 +165,8 @@ describe('migration 20260605000000_add_task_status_enum_and_timestamps', () => {
       status: 'bogus',
       scheduled_at: db.fn.now(),
       pri: 'P3',
+      created_by: 'test-fixture',
+      updated_by: 'test-fixture',
       created_at: db.fn.now(),
       updated_at: db.fn.now()
     })).rejects.toThrow(CHECK_VIOLATION);
@@ -172,6 +182,8 @@ describe('migration 20260605000000_add_task_status_enum_and_timestamps', () => {
       status: 'done',
       // scheduled_at is NULL - should fail
       pri: 'P3',
+      created_by: 'test-fixture',
+      updated_by: 'test-fixture',
       created_at: db.fn.now(),
       updated_at: db.fn.now()
     })).rejects.toThrow(CHECK_VIOLATION);

@@ -38,6 +38,8 @@ async function seedUser(id) {
     email: id + '@test.com',
     name: 'Migration Test ' + id,
     timezone: 'America/New_York',
+    created_by: 'test-fixture',
+    updated_by: 'test-fixture',
     created_at: db.fn.now(),
     updated_at: db.fn.now()
   });
@@ -60,14 +62,25 @@ async function insertHistoryRow(userId, ageDays) {
     task_id: null,
     task_text: 'age=' + ageDays + 'd',
     event_id: null,
+    created_by: 'test-fixture',
+    updated_by: 'test-fixture',
     created_at: ts
   });
   return rows[0];
 }
 
 beforeAll(async () => {
-  // Date-only fake timers (999.2157): Date frozen, every timer API real — no hangs
-  installDateOnlyFakeTimers(new Date('2026-01-15T12:00:00Z'));
+  // Date-only fake timers (999.2157): Date frozen, every timer API real — no hangs.
+  // 999.4864: the migration's up() ages rows against MySQL's own `NOW()` (a real
+  // DB-server clock this suite cannot fake), while insertHistoryRow() derives each
+  // fixture's created_at from the FROZEN JS `now`. Freezing to a hardcoded past
+  // calendar date (previously '2026-01-15') drifts further from the real wall
+  // clock every day this suite is NOT edited, so every fixture eventually reads
+  // as far-more-than-7-days-old to MySQL regardless of its intended ageDays,
+  // silently deleting rows the test expects to survive. Freeze to the actual
+  // current time instead — this keeps within-run computations deterministic
+  // (captured once) while staying aligned with the real DB clock.
+  installDateOnlyFakeTimers(new Date());
   if (!await isDbAvailable()) return;
   await cleanup();
   await seedUser(USER_A);

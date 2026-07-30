@@ -81,6 +81,8 @@ describe('migration 20260606000000_add_missed_status_to_task_instances', () => {
       email: 'test-missed@test.com',
       name: 'Test User',
       timezone: 'America/New_York',
+      created_by: 'test-fixture',
+      updated_by: 'test-fixture',
       created_at: db.fn.now(),
       updated_at: db.fn.now()
     });
@@ -92,6 +94,8 @@ describe('migration 20260606000000_add_missed_status_to_task_instances', () => {
       text: 'Test task for missed status',
       status: '',
       pri: 'P3',
+      created_by: 'test-fixture',
+      updated_by: 'test-fixture',
       created_at: db.fn.now(),
       updated_at: db.fn.now()
     });
@@ -108,6 +112,8 @@ describe('migration 20260606000000_add_missed_status_to_task_instances', () => {
       status: 'missed',
       date: '2026-06-06',
       scheduled_at: db.fn.now(),
+      created_by: 'test-fixture',
+      updated_by: 'test-fixture',
       created_at: db.fn.now(),
       updated_at: db.fn.now()
     });
@@ -135,6 +141,8 @@ describe('migration 20260606000000_add_missed_status_to_task_instances', () => {
       status: 'missed',
       date: '2026-06-06',
       scheduled_at: db.fn.now(),
+      created_by: 'test-fixture',
+      updated_by: 'test-fixture',
       created_at: db.fn.now(),
       updated_at: db.fn.now()
     })).rejects.toThrow(CHECK_VIOLATION);

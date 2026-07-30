@@ -111,9 +111,20 @@ async function isDbAvailable() {
 // Helpers: create / drop the throwaway DB via docker exec (bypasses sandbox
 // restrictions on direct TCP to 3407 via mysql CLI inside container)
 // -----------------------------------------------------------------------
+// 999.4864: the container name is NOT always "ra-mysql-test" — the ephemeral
+// test-bed pool (test-bed/scripts/instance.sh) runs each concurrent slot as
+// its own docker compose project with container name `ra-mysql-t${SLOT_N}`
+// (docker-compose.test.yml: `ra-mysql-${SLOT:-test}`), and exports SLOT (e.g.
+// "t0") into the environment every jest subprocess inherits
+// (test-bed/scripts/run-suite.sh: `export SLOT ...`). Hardcoding "ra-mysql-test"
+// only matched the legacy fixed `make up` stack (SLOT unset) and broke under
+// every pool run with "No such container: ra-mysql-test" — mirror the same
+// `${SLOT:-test}` default the compose file itself declares.
+var MYSQL_CONTAINER = 'ra-mysql-' + (process.env.SLOT || 'test');
+
 function dockerMysql(sql) {
   execSync(
-    'docker exec ra-mysql-test mysql -uroot -prootpass -e "' + sql.replace(/"/g, '\\"') + '"',
+    'docker exec ' + MYSQL_CONTAINER + ' mysql -uroot -prootpass -e "' + sql.replace(/"/g, '\\"') + '"',
     { stdio: 'pipe' }
   );
 }
@@ -229,8 +240,8 @@ describe('BUG-999.868 — regression: CHECK constraint on dropped date_pinned co
 
     beforeAll(requireDB(async () => {
       await db.raw(`
-        INSERT IGNORE INTO users (id, email, name, timezone, created_at, updated_at)
-        VALUES (?, 'telly-868@test.invalid', 'Telly 868', 'UTC', NOW(), NOW())
+        INSERT IGNORE INTO users (id, email, name, timezone, created_by, updated_by, created_at, updated_at)
+        VALUES (?, 'telly-868@test.invalid', 'Telly 868', 'UTC', 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [TEST_USER_ID]);
     }, isDbAvailable));
 
@@ -251,8 +262,8 @@ describe('BUG-999.868 — regression: CHECK constraint on dropped date_pinned co
       var id = 'telly-868-fw-0';
       await db.raw(`
         INSERT INTO task_masters
-          (id, user_id, text, status, pri, flex_when, recurring, created_at, updated_at)
-        VALUES (?, ?, 'BUG-999.868 fw=0', '', 'P3', 0, 0, NOW(), NOW())
+          (id, user_id, text, status, pri, flex_when, recurring, created_by, updated_by, created_at, updated_at)
+        VALUES (?, ?, 'BUG-999.868 fw=0', '', 'P3', 0, 0, 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [id, TEST_USER_ID]);
       var row = await db('task_masters').where('id', id).first();
       expect(row.flex_when).toBe(0);
@@ -263,8 +274,8 @@ describe('BUG-999.868 — regression: CHECK constraint on dropped date_pinned co
       var id = 'telly-868-fw-1';
       await db.raw(`
         INSERT INTO task_masters
-          (id, user_id, text, status, pri, flex_when, recurring, created_at, updated_at)
-        VALUES (?, ?, 'BUG-999.868 fw=1', '', 'P3', 1, 0, NOW(), NOW())
+          (id, user_id, text, status, pri, flex_when, recurring, created_by, updated_by, created_at, updated_at)
+        VALUES (?, ?, 'BUG-999.868 fw=1', '', 'P3', 1, 0, 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [id, TEST_USER_ID]);
       var row = await db('task_masters').where('id', id).first();
       expect(row.flex_when).toBe(1);
@@ -274,16 +285,16 @@ describe('BUG-999.868 — regression: CHECK constraint on dropped date_pinned co
     test('A3c: task_masters.flex_when REJECTS value 2 (CHECK_CONSTRAINT_VIOLATED)', requireDB(async () => {
       await expect(db.raw(`
         INSERT INTO task_masters
-          (id, user_id, text, status, pri, flex_when, recurring, created_at, updated_at)
-        VALUES ('telly-868-fw-2', ?, 'BUG-999.868 fw=2', '', 'P3', 2, 0, NOW(), NOW())
+          (id, user_id, text, status, pri, flex_when, recurring, created_by, updated_by, created_at, updated_at)
+        VALUES ('telly-868-fw-2', ?, 'BUG-999.868 fw=2', '', 'P3', 2, 0, 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [TEST_USER_ID])).rejects.toThrow(CHECK_VIOLATION);
     }, isDbAvailable));
 
     test('A3d: task_masters.flex_when REJECTS value -1 (CHECK_CONSTRAINT_VIOLATED)', requireDB(async () => {
       await expect(db.raw(`
         INSERT INTO task_masters
-          (id, user_id, text, status, pri, flex_when, recurring, created_at, updated_at)
-        VALUES ('telly-868-fw-neg1', ?, 'BUG-999.868 fw=-1', '', 'P3', -1, 0, NOW(), NOW())
+          (id, user_id, text, status, pri, flex_when, recurring, created_by, updated_by, created_at, updated_at)
+        VALUES ('telly-868-fw-neg1', ?, 'BUG-999.868 fw=-1', '', 'P3', -1, 0, 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [TEST_USER_ID])).rejects.toThrow(CHECK_VIOLATION);
     }, isDbAvailable));
 
@@ -292,8 +303,8 @@ describe('BUG-999.868 — regression: CHECK constraint on dropped date_pinned co
       var id = 'telly-868-split-null';
       await db.raw(`
         INSERT INTO task_masters
-          (id, user_id, text, status, pri, flex_when, recurring, split, created_at, updated_at)
-        VALUES (?, ?, 'BUG-999.868 split=null', '', 'P3', 0, 0, NULL, NOW(), NOW())
+          (id, user_id, text, status, pri, flex_when, recurring, split, created_by, updated_by, created_at, updated_at)
+        VALUES (?, ?, 'BUG-999.868 split=null', '', 'P3', 0, 0, NULL, 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [id, TEST_USER_ID]);
       var row = await db('task_masters').where('id', id).first();
       expect(row.split).toBeNull();
@@ -308,15 +319,15 @@ describe('BUG-999.868 — regression: CHECK constraint on dropped date_pinned co
 
       await db.raw(`
         INSERT IGNORE INTO task_masters
-          (id, user_id, text, status, pri, flex_when, recurring, created_at, updated_at)
-        VALUES (?, ?, 'BUG-999.868 mi master', '', 'P3', 0, 0, NOW(), NOW())
+          (id, user_id, text, status, pri, flex_when, recurring, created_by, updated_by, created_at, updated_at)
+        VALUES (?, ?, 'BUG-999.868 mi master', '', 'P3', 0, 0, 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [masterId, TEST_USER_ID]);
 
       await db.raw(`
         INSERT INTO task_instances
           (id, master_id, user_id, status, occurrence_ordinal,
-           split_ordinal, split_total, unscheduled, created_at, updated_at)
-        VALUES (?, ?, ?, '', 1, 1, 1, NULL, NOW(), NOW())
+           split_ordinal, split_total, unscheduled, created_by, updated_by, created_at, updated_at)
+        VALUES (?, ?, ?, '', 1, 1, 1, NULL, 'test-fixture', 'test-fixture', NOW(), NOW())
       `, [instanceId, masterId, TEST_USER_ID]);
 
       var row = await db('task_instances').where('id', instanceId).first();

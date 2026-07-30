@@ -17,7 +17,13 @@
 
 'use strict';
 
-jest.setTimeout(60000);
+// 999.4864: beforeEach here runs a full db.migrate.latest() against the shared
+// isolated juggler_sweep_test DB on every test — the same isolated DB
+// 20260626000000 uses, whose migrate cycles were separately found to marginally
+// exceed 60000ms. A lock left by a timed-out sibling suite ("Migration table is
+// already locked") cascades into this suite too; give both the same wider
+// budget rather than let a neighboring suite's timeout redden this one.
+jest.setTimeout(180000);
 
 var path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../.env.test') });
@@ -91,8 +97,8 @@ describe('Migration 20260627000000 (implied_deadline backfill)', () => {
     await db.migrate.latest();
     // 999.1420: seed the FK-required user (idempotent — cleaned in afterEach)
     await db.raw(
-      'INSERT IGNORE INTO users (id, email, created_at, updated_at) VALUES (?, ?, NOW(), NOW())',
-      [TEST_USER_ID, TEST_USER_ID + '@impl879.local']
+      'INSERT IGNORE INTO users (id, email, created_by, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())',
+      [TEST_USER_ID, TEST_USER_ID + '@impl879.local', 'test-fixture', 'test-fixture']
     );
   });
 
@@ -117,6 +123,8 @@ describe('Migration 20260627000000 (implied_deadline backfill)', () => {
       dur: 30,
       status: '',
       // overdue field removed (sched-drop-overdue-column, M-5): stored column gone.
+      created_by: 'test-fixture',
+      updated_by: 'test-fixture'
     });
 
     // Re-run our migration up
@@ -141,6 +149,8 @@ describe('Migration 20260627000000 (implied_deadline backfill)', () => {
       dur: 30,
       status: '',
       // overdue field removed (sched-drop-overdue-column, M-5): stored column gone.
+      created_by: 'test-fixture',
+      updated_by: 'test-fixture'
     });
 
     await db.migrate.down({ name: MIGRATION_NAME });
@@ -161,6 +171,8 @@ describe('Migration 20260627000000 (implied_deadline backfill)', () => {
       dur: 30,
       status: '',
       // overdue field removed (sched-drop-overdue-column, M-5): stored column gone.
+      created_by: 'test-fixture',
+      updated_by: 'test-fixture'
     });
 
     await db.migrate.down({ name: MIGRATION_NAME });
