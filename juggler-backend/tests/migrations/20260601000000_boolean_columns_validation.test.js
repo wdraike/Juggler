@@ -114,8 +114,8 @@ function uid(prefix) {
  */
 async function ensureTestUser(userId) {
   await db.raw(`
-    INSERT IGNORE INTO users (id, email, name, timezone, created_at, updated_at)
-    VALUES (?, ?, 'Test User', 'UTC', NOW(), NOW())
+    INSERT IGNORE INTO users (id, email, name, timezone, created_by, updated_by, created_at, updated_at)
+    VALUES (?, ?, 'Test User', 'UTC', 'test-fixture', 'test-fixture', NOW(), NOW())
   `, [userId, userId + '@test.com']);
 }
 
@@ -137,13 +137,13 @@ async function cleanup() {
   var testSuffix = '%@boolean-test.com';
   try {
     await db.raw(`DELETE i FROM task_instances i JOIN task_masters m ON i.master_id = m.id JOIN users u ON m.user_id = u.id WHERE u.email LIKE ?`, [testSuffix]);
-  } catch (_e) { /* table may not have rows */ }
+  } catch { /* table may not have rows */ }
   try {
     await db.raw(`DELETE FROM task_masters WHERE user_id IN (SELECT id FROM users WHERE email LIKE ?)`, [testSuffix]);
-  } catch (_e) {}
+  } catch { /* ignore */ }
   try {
     await db.raw(`DELETE FROM users WHERE email LIKE ?`, [testSuffix]);
-  } catch (_e) {}
+  } catch { /* ignore */ }
 }
 
 beforeAll(async () => {
@@ -806,8 +806,8 @@ describe('E) tasks_v marker CASE derivation — data round-trip', () => {
     await db.raw(`
       INSERT IGNORE INTO task_instances
         (id, master_id, user_id, occurrence_ordinal, split_ordinal, split_total,
-         dur, status, created_at, updated_at)
-      VALUES (?, ?, ?, 1, 1, 1, 30, '', NOW(), NOW())
+         dur, status, created_by, updated_by, created_at, updated_at)
+      VALUES (?, ?, ?, 1, 1, 1, 30, '', 'test-fixture', 'test-fixture', NOW(), NOW())
     `, [instanceId, masterId, userId]);
     return instanceId;
   }
@@ -820,18 +820,18 @@ describe('E) tasks_v marker CASE derivation — data round-trip', () => {
     await db.raw(`
       INSERT IGNORE INTO task_masters
         (id, user_id, text, status, pri, placement_mode, flex_when, recurring,
-         created_at, updated_at)
+         created_by, updated_by, created_at, updated_at)
       VALUES (?, ?, 'Marker round-trip reminder', '', 'P3', 'reminder', 0, 0,
-              NOW(), NOW())
+              'test-fixture', 'test-fixture', NOW(), NOW())
     `, [reminderMasterId, userId]);
 
     // Insert a master with placement_mode='all_day' — marker should be 0
     await db.raw(`
       INSERT IGNORE INTO task_masters
         (id, user_id, text, status, pri, placement_mode, flex_when, recurring,
-         created_at, updated_at)
+         created_by, updated_by, created_at, updated_at)
       VALUES (?, ?, 'Marker round-trip all_day', '', 'P3', 'all_day', 0, 0,
-              NOW(), NOW())
+              'test-fixture', 'test-fixture', NOW(), NOW())
     `, [allDayMasterId, userId]);
 
     // Insert one instance per master so both appear in the tasks_v instance branch

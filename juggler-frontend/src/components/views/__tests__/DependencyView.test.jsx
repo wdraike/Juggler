@@ -50,7 +50,8 @@ describe('DependencyView Component', () => {
 
     // The async ELK layout window now renders a skeleton (999.2122) —
     // await the laid-out toolbar instead of asserting synchronously.
-    expect(await screen.findByText(/\d+ tasks with dependencies/)).toBeInTheDocument();
+    // 999.4899: widen timeout — ELK layout can take >5s under host load.
+    expect(await screen.findByText(/\d+ tasks with dependencies/, {}, { timeout: 15000 })).toBeInTheDocument();
     expect(screen.getByText('−')).toBeInTheDocument(); // Zoom out button
     expect(screen.getByText('+')).toBeInTheDocument(); // Zoom in button
     expect(screen.getByText('100%')).toBeInTheDocument(); // Zoom level

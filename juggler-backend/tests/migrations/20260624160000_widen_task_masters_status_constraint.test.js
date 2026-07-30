@@ -82,8 +82,8 @@ function uid(prefix) {
 
 async function ensureTestUser(userId) {
   await db.raw(`
-    INSERT IGNORE INTO users (id, email, name, timezone, created_at, updated_at)
-    VALUES (?, ?, 'Status Constraint Test User', 'UTC', NOW(), NOW())
+    INSERT IGNORE INTO users (id, email, name, timezone, created_by, updated_by, created_at, updated_at)
+    VALUES (?, ?, 'Status Constraint Test User', 'UTC', 'test-fixture', 'test-fixture', NOW(), NOW())
   `, [userId, userId + '@865-test.com']);
 }
 
@@ -110,17 +110,17 @@ async function cleanup() {
       'WHERE u.email LIKE ?',
       [testEmailPattern]
     );
-  } catch (_e) { /* no rows */ }
+  } catch { /* no rows */ }
   try {
     await db.raw(
       'DELETE FROM task_masters WHERE user_id IN ' +
       '(SELECT id FROM users WHERE email LIKE ?)',
       [testEmailPattern]
     );
-  } catch (_e) {}
+  } catch { /* ignore */ }
   try {
     await db.raw('DELETE FROM users WHERE email LIKE ?', [testEmailPattern]);
-  } catch (_e) {}
+  } catch { /* ignore */ }
 }
 
 beforeAll(async () => {

@@ -78,7 +78,7 @@ async function seedUserConfig(userId, key, value) {
 
 async function seedUser(userId) {
   await db.raw(
-    'INSERT IGNORE INTO users (id, email, created_at, updated_at) VALUES (?, ?, NOW(), NOW())',
+    'INSERT IGNORE INTO users (id, email, created_by, updated_by, created_at, updated_at) VALUES (?, ?, \'test-fixture\', \'test-fixture\', NOW(), NOW())',
     [userId, userId + '@w2146.local']
   );
 }
