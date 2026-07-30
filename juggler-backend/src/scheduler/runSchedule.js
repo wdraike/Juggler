@@ -2321,6 +2321,14 @@ async function runScheduleAndPersist(userId, _retries, options) {
   var cleared = 0;
   result.unplaced.forEach(function(t) {
     if (!t || !t.id) return;
+    // 999.4915: a task that holds real placements (partial split with
+    // chunks on the grid) must NOT be written back as unscheduled here —
+    // the otherUpdates pass (KnexScheduleRepository.js:218) runs AFTER
+    // the batched placement CASE writes and would null chunk 1's
+    // scheduled_at while chunks 2..n survive as separate rows. Same guard
+    // Phase 9 uses at :2714. Reached only for strictly-past-deadline
+    // non-FIXED partial splits (deadline==today early-returns at :2462).
+    if (placementByTaskId[t.id]) return;
     var original = taskById[t.id];
     if (!original) return;
     if (original.taskType === 'recurring_template') return;
