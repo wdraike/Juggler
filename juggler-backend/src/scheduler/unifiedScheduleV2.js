@@ -302,6 +302,16 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, _cfg) {
     // Markers are calendar indicators — they coexist with other placements at
     // the same minute, so dur=0 means they never consume occupancy.
     var dur = isMarker ? 0 : effectiveDuration(t);
+    // 999.4863: detect duration clamp ONCE at buildItems time so every
+    // placement path (not just the split branch) can report the loss.
+    // rawDuration is the pre-clamp value ConstraintSolver derives from;
+    // effectiveDuration applies Math.min(raw, DURATION_CAP). The split
+    // path already computes this (999.4850, line ~2167) but the non-split
+    // path (tryPlaceQueued) never sees it. Storing on the item lets both
+    // paths emit the warning without duplicating the comparison.
+    var _clampDropped = (!isMarker && dur > 0)
+      ? Math.max(0, rawDuration(t) - dur)
+      : 0;
     // Skip non-marker tasks with zero duration — they have nothing to schedule.
     // Also skip tasks with date='TBD' (user explicitly deferred placement).
     if (!isMarker && dur === 0) return;
@@ -641,6 +651,9 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, _cfg) {
       splitOrdinal: splitOrd,
       splitTotal: splitTot,
       depNames: depNames,
+      // 999.4863: pre-computed clamp loss — non-split paths read this to
+      // emit the duration_clamped warning without re-deriving rawDuration.
+      _clampDropped: _clampDropped,
       slack: null, // filled later
       // Multi-step spacing (999.874): target date and deadline from expandRecurring
       _targetDate: t._targetDate || null,
@@ -2157,18 +2170,17 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
           placedById[item.id] = { dateKey: splitPlacedFirst.dateKey, start: splitPlacedFirst.start, dur: item.dur };
           noteMasterPlacement(env, item, splitPlacedFirst.dateKey);
           queuePlacedCount += splitResult.placed.length;
-          // 999.4850: effectiveDuration clamps dur to DURATION_CAP BEFORE the
-          // split loop runs, so splitResult.remaining is measured against the
-          // CLAMPED ask and reads 0 even when the real duration exceeded it.
-          // Compute the dropped minutes ONCE, above both cases — a split can be
-          // BOTH clamped AND partially placed, and reporting only one of the two
-          // still loses time silently. rawDuration is ConstraintSolver's own
-          // pre-clamp value, so this cannot drift from the clamp it detects.
-          var origDur = rawDuration(item.task);
-          var clampDropped = origDur > item.dur ? origDur - item.dur : 0;
+          // 999.4850/999.4863: effectiveDuration clamps dur to DURATION_CAP
+          // BEFORE the split loop runs, so splitResult.remaining is measured
+          // against the CLAMPED ask and reads 0 even when the real duration
+          // exceeded it. clampDropped is pre-computed at buildItems time
+          // (item._clampDropped) so both split and non-split paths share the
+          // same detection. rawDuration is ConstraintSolver's own pre-clamp
+          // value, so this cannot drift from the clamp it detects.
+          var clampDropped = item._clampDropped || 0;
           if (clampDropped > 0) {
             warnings.push({ type: 'duration_clamped', taskId: item.id,
-              originalDur: origDur, placedDur: item.dur, dropped: clampDropped });
+              originalDur: item.dur + clampDropped, placedDur: item.dur, dropped: clampDropped });
           }
           var missingMins = splitResult.remaining + clampDropped;
           if (missingMins > 0) {
@@ -2243,6 +2255,23 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     dayPlacements[slot.dateKey].push(entry);
     placedById[item.id] = { dateKey: slot.dateKey, start: slot.start, dur: item.dur };
     noteMasterPlacement(env, item, slot.dateKey);
+
+    // 999.4863: emit duration_clamped warning on the NON-SPLIT path.
+    // The split branch (line ~2180) already does this via its own
+    // rawDuration comparison; non-split tasks placed by tryPlaceQueued
+    // were silently losing time to the 720-min cap with no warning.
+    if (item._clampDropped > 0) {
+      warnings.push({ type: 'duration_clamped', taskId: item.id,
+        originalDur: item.dur + item._clampDropped, placedDur: item.dur,
+        dropped: item._clampDropped });
+      // NEVER-MISSING visibility: attach a partial_split reason so the
+      // loss is visible even when the task is fully placed (David ruling
+      // 2026-07-30 on 999.4850: a clamped-but-placed task is deliberately
+      // NOT pushed to unplaced, so the reason is the only signal).
+      item.task._unplacedReason = REASON_CODES.PARTIAL_SPLIT;
+      item.task._unplacedDetail = 'Placed ' + item.dur + ' min; ' +
+        item._clampDropped + ' min dropped by the ' + DURATION_CAP + ' min cap';
+    }
 
     // R4 — Average spacing recalculation (999.874 sub-item 2).
     // After each flexible TPC instance is placed, recalculate the average
