@@ -119,6 +119,11 @@ function clampWindowsToBounds(windowsMap, lo, hi) {
 // effectiveDuration — MOVED to ConstraintSolver (H6 W1). Local binding preserves
 // every call site unchanged; behavior is byte-identical.
 var effectiveDuration = ConstraintSolver.effectiveDuration;
+// 999.4850: the same value BEFORE the cap, plus the cap itself — used to detect
+// duration the clamp silently dropped. Bound from ConstraintSolver rather than
+// re-derived here, so the ladder and the cap cannot drift out of sync.
+var rawDuration = ConstraintSolver.rawDuration;
+var DURATION_CAP = ConstraintSolver.DURATION_CAP;
 
 // ── Placement reason ──────────────────────────────────────────
 // Look up the display name of the when-block matching this item on a given date.
@@ -2152,15 +2157,45 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
           placedById[item.id] = { dateKey: splitPlacedFirst.dateKey, start: splitPlacedFirst.start, dur: item.dur };
           noteMasterPlacement(env, item, splitPlacedFirst.dateKey);
           queuePlacedCount += splitResult.placed.length;
-          if (splitResult.remaining > 0) {
+          // 999.4850: effectiveDuration clamps dur to DURATION_CAP BEFORE the
+          // split loop runs, so splitResult.remaining is measured against the
+          // CLAMPED ask and reads 0 even when the real duration exceeded it.
+          // Compute the dropped minutes ONCE, above both cases — a split can be
+          // BOTH clamped AND partially placed, and reporting only one of the two
+          // still loses time silently. rawDuration is ConstraintSolver's own
+          // pre-clamp value, so this cannot drift from the clamp it detects.
+          var origDur = rawDuration(item.task);
+          var clampDropped = origDur > item.dur ? origDur - item.dur : 0;
+          if (clampDropped > 0) {
+            warnings.push({ type: 'duration_clamped', taskId: item.id,
+              originalDur: origDur, placedDur: item.dur, dropped: clampDropped });
+          }
+          var missingMins = splitResult.remaining + clampDropped;
+          if (missingMins > 0) {
             // Remaining unplaced chunks are treated as partial_split for
             // diagnostic visibility — the task was partially scheduled.
             item.task._unplacedReason = REASON_CODES.PARTIAL_SPLIT;
             // R11.16 / AC2.7 — partial placements also carry a human detail.
             item.task._unplacedDetail = 'Placed ' + splitResult.placed.length +
-              ' chunk(s); ' + splitResult.remaining + ' min could not be placed';
+              ' chunk(s); ' + missingMins + ' min could not be placed' +
+              (clampDropped > 0
+                ? ' (' + clampDropped + ' of it dropped by the ' + DURATION_CAP + ' min cap)'
+                : '');
+          }
+          if (splitResult.remaining > 0) {
+            // Genuinely has unscheduled work left over — belongs in unplaced.
             unplaced.push(item);
           }
+          // 999.4850 (David ruling 2026-07-30): a task whose CLAMPED minutes were
+          // all placed is deliberately NOT pushed to unplaced, even though
+          // clampDropped > 0. runSchedule.js's Phase 8 writes
+          // { unscheduled: 1, scheduled_at: null } for a non-FIXED unplaced task
+          // with a past deadline, AFTER the placement writes, and the merge is
+          // last-write-wins — so listing a fully-placed task as unplaced can wipe
+          // its real placements from the DB. Trading "60 min silently missing"
+          // for "720 placed minutes wiped" is the worse outcome. The warning +
+          // _unplacedReason above already satisfy NEVER-MISSING visibility;
+          // membership in `unplaced` is not required for the loss to be visible.
           // Recompute slack for affected items (use first chunk's date).
           var splitSlotIdx = indexOfDate(dates, splitPlacedFirst.dateKey);
           if (splitSlotIdx >= 0) {
@@ -2610,11 +2645,18 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     // window narrower than splitMin) must NOT be force-placed outside
     // template hours — it stays unplaced with its no_slot reason.
     if (u && u._splitFailed) return false;
+    // 999.4850: a splittable task that was already placed via split chunks
+    // (including the duration-clamp partial case) must NOT be force-placed
+    // again — the force pass would duplicate the placement at block start.
+    if (u && u.id && placedById[u.id]) return false;
     return task && (task.placementMode === PLACEMENT_MODES.FIXED || (u && u.isRigid));
   });
   var remainingUnplaced = stillUnplaced.filter(function(u) {
     var task = u && u.task ? u.task : u;
     if (u && u._splitFailed) return true;
+    // 999.4850: keep already-split-placed tasks in the unplaced output
+    // (they carry a partial_split reason) but exclude from force-placement.
+    if (u && u.id && placedById[u.id]) return true;
     return !(task && (task.placementMode === PLACEMENT_MODES.FIXED || (u && u.isRigid)));
   });
 
@@ -2721,10 +2763,22 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   // because their dep chain couldn't fully land. Place them ignoring dep constraints
   // as a last resort — something is better than missing a hard deadline entirely.
   var deadlineRelaxed = stillUnplaced.filter(function(u) {
+    // 999.4850: an already-split-placed task must be excluded from THIS pass
+    // too, not just the rigid-force pass above (:2639/:2647). This pass
+    // consumes the same array (`stillUnplaced = remainingUnplaced` above), so
+    // without the guard a split task with deps and a deadline ≤ today gets its
+    // FULL clamped dur committed a second time — double-booking the grid on top
+    // of its own chunks — and, because a successful relaxed placement does not
+    // return the item to `stillUnplaced`, it also empties `result.unplaced` and
+    // destroys the partial_split visibility this ticket exists to add.
+    if (u && u.id && placedById[u.id]) return false;
     return u && u.task && u.deadlineDate && u.deadlineDate <= todayIsoKey &&
            u.dependsOn && u.dependsOn.length > 0;
   });
   stillUnplaced = stillUnplaced.filter(function(u) {
+    // Keep it in unplaced (it carries partial_split) rather than handing it to
+    // the relaxed pass.
+    if (u && u.id && placedById[u.id]) return true;
     return !(u && u.task && u.deadlineDate && u.deadlineDate <= todayIsoKey &&
              u.dependsOn && u.dependsOn.length > 0);
   });

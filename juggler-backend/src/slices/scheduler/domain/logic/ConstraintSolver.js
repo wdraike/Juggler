@@ -36,19 +36,38 @@ function normalizePri(p) {
   return Priority.normalize(p);
 }
 
+/** Upper bound effectiveDuration clamps to, in minutes (12 h). */
+var DURATION_CAP = 720;
+
+/**
+ * The UNCLAMPED duration effectiveDuration derives from — same source ladder
+ * (timeRemaining > time_remaining > dur) and same <0→30 / keep-0 normalization,
+ * without the DURATION_CAP clamp.
+ *
+ * 999.4850: exported so a caller that needs to detect "the cap silently dropped
+ * time" compares against this instead of re-inlining the ladder. An inlined copy
+ * drifts the moment the ladder or the cap changes, and the detection then fails
+ * silently — which is the exact class of bug this ticket is about.
+ * @param {Object} t task object
+ * @returns {number}
+ */
+function rawDuration(t) {
+  var rd = t.timeRemaining != null ? t.timeRemaining
+         : t.time_remaining != null ? t.time_remaining
+         : t.dur;
+  return rd > 0 ? rd : (rd === 0 ? 0 : 30);
+}
+
 /**
  * Effective working duration for a task, in minutes.
  * BYTE-IDENTICAL port of `unifiedScheduleV2.effectiveDuration`:
  *   prefer timeRemaining / time_remaining over dur; treat <0 as 30 (default),
- *   keep 0 as 0, and clamp the upper bound to 720.
+ *   keep 0 as 0, and clamp the upper bound to DURATION_CAP.
  * @param {Object} t task object
  * @returns {number}
  */
 function effectiveDuration(t) {
-  var rd = t.timeRemaining != null ? t.timeRemaining
-         : t.time_remaining != null ? t.time_remaining
-         : t.dur;
-  return Math.min(rd > 0 ? rd : (rd === 0 ? 0 : 30), 720);
+  return Math.min(rawDuration(t), DURATION_CAP);
 }
 
 /**
@@ -222,6 +241,8 @@ function compareSeverity(a, b) {
 module.exports = {
   normalizePri: normalizePri,
   effectiveDuration: effectiveDuration,
+  rawDuration: rawDuration,
+  DURATION_CAP: DURATION_CAP,
   recurringCycleDays: recurringCycleDays,
   parseDayReq: parseDayReq,
   compareItems: compareItems,
