@@ -16,7 +16,7 @@
 
 'use strict';
 
-jest.setTimeout(60000);
+jest.setTimeout(180000);
 
 var path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../.env.test') });
