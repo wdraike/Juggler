@@ -44,16 +44,14 @@ var PAST_KEY = '2026-07-01';
 var PATTERN_TYPES = ['daily', 'weekly', 'monthly', 'interval', 'biweekly'];
 var ALL_TYPES = PATTERN_TYPES.concat(['rolling']);
 
-describe('FR-3 (SPEC AC4): future-day completion guard — pattern types UNCHANGED', () => {
+describe('FR-3 (SPEC AC4): future-day completion guard — pattern types UNCHANGED without allTasks', () => {
   test.each(PATTERN_TYPES)(
-    'AC4-pattern-blocked-%s: future-dated done is still BLOCKED for recur.type=%s',
+    'AC4-pattern-blocked-%s: future-dated done is still BLOCKED for recur.type=%s (no allTasks)',
     (recurType) => {
       var task = makeRecurringInstance(recurType, FUTURE_KEY);
       var result = mirrorFutureCompletionGuard(task, TODAY);
       expect(result.blocked).toBe(true);
-      expect(result.warning).toBe(
-        'Can\'t mark a future recurring task as done — skip or cancel it instead'
-      );
+      expect(result.warning).toMatch(/future recurring task as done/);
     }
   );
 });
@@ -87,4 +85,80 @@ describe('FR-3 (SPEC AC4): same-day / past-day completion regression — unchang
       expect(result.blocked).toBe(false);
     }
   );
+});
+
+// ─── 999.4865: first-incomplete future instance carve-out ──────────────
+
+describe('999.4865: first incomplete future instance is allowed, subsequent are blocked', () => {
+  function makeSeriesInstance(id, dateKey, status, sourceId) {
+    return {
+      id: id,
+      text: 'Transfer Anna\'s Money',
+      recurring: true,
+      taskType: 'recurring_instance',
+      date: dateKey,
+      recur: { type: 'weekly' },
+      sourceId: sourceId || 'tmpl-anna',
+      status: status,
+    };
+  }
+
+  test('first incomplete future instance — ALLOWED (no earlier incomplete sibling)', () => {
+    var task = makeSeriesInstance('inst-1', FUTURE_KEY, '', 'tmpl-anna');
+    var allTasks = [
+      task,
+      makeSeriesInstance('inst-2', '2026-07-20', '', 'tmpl-anna'), // later
+    ];
+    var result = mirrorFutureCompletionGuard(task, TODAY, allTasks);
+    expect(result.blocked).toBe(false);
+  });
+
+  test('second future instance — BLOCKED when earlier incomplete sibling exists', () => {
+    var earlier = makeSeriesInstance('inst-1', '2026-07-10', '', 'tmpl-anna');
+    var task = makeSeriesInstance('inst-2', FUTURE_KEY, '', 'tmpl-anna');
+    var allTasks = [earlier, task];
+    var result = mirrorFutureCompletionGuard(task, TODAY, allTasks);
+    expect(result.blocked).toBe(true);
+    expect(result.warning).toMatch(/earlier instance/);
+  });
+
+  test('future instance — ALLOWED when earlier sibling is already done', () => {
+    var earlier = makeSeriesInstance('inst-1', '2026-07-10', 'done', 'tmpl-anna');
+    var task = makeSeriesInstance('inst-2', FUTURE_KEY, '', 'tmpl-anna');
+    var allTasks = [earlier, task];
+    var result = mirrorFutureCompletionGuard(task, TODAY, allTasks);
+    expect(result.blocked).toBe(false);
+  });
+
+  test('future instance — ALLOWED when earlier sibling is skipped', () => {
+    var earlier = makeSeriesInstance('inst-1', '2026-07-10', 'skip', 'tmpl-anna');
+    var task = makeSeriesInstance('inst-2', FUTURE_KEY, '', 'tmpl-anna');
+    var allTasks = [earlier, task];
+    var result = mirrorFutureCompletionGuard(task, TODAY, allTasks);
+    expect(result.blocked).toBe(false);
+  });
+
+  test('future instance — BLOCKED when earlier sibling is WIP (incomplete)', () => {
+    var earlier = makeSeriesInstance('inst-1', '2026-07-10', 'wip', 'tmpl-anna');
+    var task = makeSeriesInstance('inst-2', FUTURE_KEY, '', 'tmpl-anna');
+    var allTasks = [earlier, task];
+    var result = mirrorFutureCompletionGuard(task, TODAY, allTasks);
+    expect(result.blocked).toBe(true);
+  });
+
+  test('future instance — ALLOWED when earlier sibling is past-day (before today)', () => {
+    var earlier = makeSeriesInstance('inst-0', PAST_KEY, '', 'tmpl-anna');
+    var task = makeSeriesInstance('inst-1', FUTURE_KEY, '', 'tmpl-anna');
+    var allTasks = [earlier, task];
+    var result = mirrorFutureCompletionGuard(task, TODAY, allTasks);
+    expect(result.blocked).toBe(false);
+  });
+
+  test('instances from different series do not affect each other', () => {
+    var otherSeries = makeSeriesInstance('inst-x', '2026-07-10', '', 'tmpl-other');
+    var task = makeSeriesInstance('inst-1', FUTURE_KEY, '', 'tmpl-anna');
+    var allTasks = [otherSeries, task];
+    var result = mirrorFutureCompletionGuard(task, TODAY, allTasks);
+    expect(result.blocked).toBe(false);
+  });
 });

@@ -13,20 +13,45 @@ import { formatDateKey, parseDate } from '../scheduler/dateHelpers';
  * the car ahead of schedule). Same-day and past-day completion are unaffected
  * for every recur type.
  *
+ * 999.4865: the guard was too coarse — it blocked ALL future-dated pattern
+ * instances. Now it allows marking the FIRST incomplete future instance in a
+ * series as done (the next actionable one), only blocking instances BEYOND that
+ * one. This is determined by checking if any earlier incomplete sibling instance
+ * exists. The caller passes the full task list so the guard can find siblings
+ * via source_id.
+ *
  * @param {object} task - candidate task (recurring instance)
  * @param {Date} today - "today" per the caller's clock (server-corrected)
+ * @param {Array} [allTasks] - all tasks (used to find sibling instances by source_id)
  * @returns {{ blocked: boolean, warning: string|null }}
  */
-export function evaluateFutureCompletionGuard(task, today) {
+export function evaluateFutureCompletionGuard(task, today, allTasks) {
   if (task && task.recurring && task.taskType === 'recurring_instance') {
     var taskDateKey = task.date ? formatDateKey(parseDate(task.date)) : null;
     var nowDayKey = formatDateKey(today);
     var isFuture = taskDateKey && taskDateKey > nowDayKey;
     var isRolling = task.recur && task.recur.type === 'rolling';
     if (isFuture && !isRolling) {
+      // 999.4865: allow the first/next incomplete future instance in the series.
+      // Block only if an earlier incomplete sibling exists (this instance is
+      // beyond the next-actionable one).
+      if (allTasks && task.sourceId) {
+        var hasEarlierIncomplete = allTasks.some(function(t) {
+          return t && t.id !== task.id
+            && t.sourceId === task.sourceId
+            && t.taskType === 'recurring_instance'
+            && t.recurring
+            && (!t.status || t.status === '' || t.status === 'wip')
+            && t.date && formatDateKey(parseDate(t.date)) < taskDateKey
+            && formatDateKey(parseDate(t.date)) >= nowDayKey;
+        });
+        if (!hasEarlierIncomplete) {
+          return { blocked: false, warning: null };
+        }
+      }
       return {
         blocked: true,
-        warning: 'Can\'t mark a future recurring task as done — skip or cancel it instead'
+        warning: 'Can\'t mark a future recurring task as done — an earlier instance in this series is still incomplete. Complete or skip that one first.'
       };
     }
   }

@@ -429,7 +429,7 @@ export default function AppLayout() {
       // a bit early on the same calendar day. FR-3/AC4: rolling masters may
       // also complete a future-dated instance early (e.g. wash the car ahead
       // of schedule) — see evaluateFutureCompletionGuard for the full rule.
-      var guardResult = evaluateFutureCompletionGuard(task, todayRef.current);
+      var guardResult = evaluateFutureCompletionGuard(task, todayRef.current, tasks);
       if (guardResult.blocked) {
         showToast(guardResult.warning, 'warning');
         return;
