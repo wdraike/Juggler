@@ -28,7 +28,9 @@ export default function useCalSyncState(showToast, loadPlacements, config, editi
     return apiClient.post('/schedule/run').then(function(res) {
       scheduleRunInFlightRef.current = false;
       if (res.data?.dayPlacements) {
-        loadPlacements();
+        // 999.4914: pass backend warnings through to placements so the
+        // Data Issues panel can render them instead of a hardcoded [].
+        loadPlacements(res.data?.warnings);
       }
       return res;
     }).catch(function(err) {

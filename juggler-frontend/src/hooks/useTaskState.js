@@ -63,6 +63,8 @@ export default function useTaskState(onError) {
   const initialLoadDoneRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const [placements, setPlacements] = useState({ dayPlacements: {}, unplaced: [] });
+  const placementsRef = useRef(placements);
+  placementsRef.current = placements;
   const taskStateRef = useRef(taskState);
   taskStateRef.current = taskState;
   const saveTimerRef = useRef(null);
@@ -119,9 +121,15 @@ export default function useTaskState(onError) {
   // Derive placements from the already-loaded /tasks data (W3 — DB single
   // source). No /schedule/placements fetch: each task already carries its
   // server-converted LOCAL date/time, so we just regroup the current tasks.
-  const loadPlacements = useCallback(async () => {
+  // The optional `warnings` arg carries scheduler warnings from the latest
+  // POST /schedule/run response (999.4914) so they flow through to the Issues
+  // panel instead of being hardcoded to [].  When omitted (SSE handlers,
+  // config changes), the existing warnings are preserved so a task-list
+  // refresh does not wipe them.
+  const loadPlacements = useCallback(async (warnings) => {
     const tasks = (taskStateRef.current && taskStateRef.current.tasks) || [];
-    setPlacements(derivePlacements(tasks));
+    var preserved = (warnings === undefined && placementsRef.current) ? placementsRef.current.warnings : warnings;
+    setPlacements(derivePlacements(tasks, preserved));
   }, []);
 
   // Core save logic — sends only dirty fields per task to server
@@ -882,9 +890,11 @@ export default function useTaskState(onError) {
   // patches/removals, optimistic adds, etc. This makes the explicit
   // loadPlacements() calls in the SSE handlers redundant-but-harmless and
   // guarantees the grid never lags the task state even if a handler forgets
-  // to call it.
+  // to call it.  Preserve the existing warnings array so a task-list change
+  // (e.g. an SSE upsert) does not wipe scheduler warnings that are still
+  // valid (999.4914).
   useEffect(() => {
-    setPlacements(derivePlacements(taskState.tasks));
+    setPlacements(derivePlacements(taskState.tasks, placementsRef.current?.warnings));
   }, [taskState.tasks]);
 
   // Cleanup

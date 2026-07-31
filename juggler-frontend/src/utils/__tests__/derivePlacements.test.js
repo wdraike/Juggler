@@ -284,6 +284,19 @@ describe('derivePlacements — edge cases', () => {
     expect(Array.isArray(result.warnings)).toBe(true);
   });
 
+  // 999.4914 — warnings from the backend schedule run must flow through
+  // derivePlacements instead of being hardcoded to [].
+  it('forwards the warnings argument into the result (999.4914)', () => {
+    var ws = [{ type: 'fixedOverlap', taskIds: ['a', 'b'] }];
+    var result = derivePlacements([], ws);
+    expect(result.warnings).toBe(ws);
+  });
+
+  it('defaults warnings to [] when not passed (999.4914)', () => {
+    var result = derivePlacements([]);
+    expect(result.warnings).toEqual([]);
+  });
+
   it('PM time parsed correctly: 1:30 PM → 810', () => {
     const t = { id: 'pm', text: 'pm test', date: '2026-06-22', time: '1:30 PM', dur: 0 };
     const result = derivePlacements([t]);

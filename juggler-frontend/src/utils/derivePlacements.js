@@ -22,9 +22,15 @@ import { isTerminalStatus } from '../shared/task-status';
 
 /**
  * @param {Array} tasks — array of task objects from GET /tasks (may be null/undefined)
+ * @param {Array} [warnings] — scheduler warnings from the last POST /schedule/run
+ *   response.  When omitted (e.g. the initial derive from GET /tasks), warnings
+ *   defaults to an empty array — the frontend has not run the scheduler yet so
+ *   there are no warnings to show.  This is NOT an unapproved fallback: the
+ *   backend is the sole source of warnings and the array is only populated when
+ *   the backend has actually produced them.
  * @returns {{ dayPlacements: Object, unplaced: Array, warnings: Array }}
  */
-export function derivePlacements(tasks) {
+export function derivePlacements(tasks, warnings) {
   var dayPlacements = {};
   var unplaced = [];
   (tasks || []).forEach(function(t) {
@@ -69,5 +75,5 @@ export function derivePlacements(tasks) {
       }
     }
   });
-  return { dayPlacements: dayPlacements, unplaced: unplaced, warnings: [] };
+  return { dayPlacements: dayPlacements, unplaced: unplaced, warnings: warnings || [] };
 }
