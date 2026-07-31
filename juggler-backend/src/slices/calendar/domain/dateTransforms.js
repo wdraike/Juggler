@@ -98,10 +98,64 @@ function isoToJugglerDate(isoString, timezone) {
     return { date: isoString, time: null };
   }
 
+  // An offset-less T-separated datetime carries no instant — it is a WALL CLOCK
+  // already expressed in the provider's calendar timezone, i.e. in `tz`. Handing
+  // it to native `new Date()` parses it as SERVER-LOCAL (ECMA-262: date-time
+  // forms without an offset are local time), and re-formatting that into `tz`
+  // then shifts it by (server offset − tz offset).
+  //
+  // CONFIRMED SOURCE: Apple CalDAV *floating* times. RFC 5545 defines a floating
+  // time as the observer's local time, so `tz` is exactly the zone to read it in.
+  // src/lib/apple-cal-api.js emits formatICALDateTime() with no 'Z' when
+  // dtstart.zone.tzid === 'floating'; tests/apple-cal-parse.test.js pins that
+  // shape ('2026-05-15T10:00:00').
+  //
+  // NOT the MSFT pull path, despite the shape looking Graph-ish: Graph defaults
+  // to start.timeZone === 'UTC' and MicrosoftCalendarAdapter.js appends the 'Z'
+  // itself before calling here, so those strings never reach this branch. MSFT
+  // can only land here when start.timeZone is non-UTC, via the eventTz arm of
+  // MicrosoftCalendarAdapter.applyEventToTaskFields.
+  //
+  // On a UTC host (Cloud Run) the old behaviour shifted every floating Apple
+  // event by the full user offset, and applyEventToTaskFields() then read the
+  // phantom time change as a real reschedule, promoting flexible tasks to
+  // placement_mode=fixed.
+  //
+  // The wall clock is already correct for `tz`, so read the components straight
+  // through — no Date round-trip to shift them. Restricted to the T-separated
+  // form on purpose: the space-separated 'YYYY-MM-DD HH:MM:SS' MySQL shape must
+  // keep its 999.1186 UTC pinning below, and anything carrying an offset or 'Z'
+  // is a real instant that must still convert.
+  var floating = /^(\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T([01]\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?(?:\.\d+)?$/.exec(isoString);
+  if (floating) {
+    // The regex is looser than Date parsing on day-in-month: it accepts
+    // 2026-02-30 / 2026-06-31. V8 does NOT reject those — it rolls them over
+    // (2026-02-30 → 2026-03-02), which is what this function has always
+    // returned for them. Reading such a date straight through would newly
+    // surface the impossible date VERBATIM ('2026-02-30'), a behaviour change
+    // this tz fix has no business making. So: validate, and on failure fall
+    // through to the unchanged path below, which keeps the historical rollover.
+    // No provider emits these, but jugglerDateToISO() builds YYYY-MM-DD from
+    // unvalidated task fields, so the shape is reachable.
+    var fy = parseInt(floating[1], 10);
+    var fmo = parseInt(floating[2], 10);
+    var fd = parseInt(floating[3], 10);
+    var probe = new Date(Date.UTC(fy, fmo - 1, fd));
+    if (probe.getUTCFullYear() === fy && probe.getUTCMonth() === fmo - 1 && probe.getUTCDate() === fd) {
+      var fh = parseInt(floating[4], 10);
+      var fh12 = fh % 12;
+      if (fh12 === 0) fh12 = 12;
+      return {
+        date: floating[1] + '-' + floating[2] + '-' + floating[3],
+        time: fh12 + ':' + floating[5] + ' ' + (fh < 12 ? 'AM' : 'PM')
+      };
+    }
+  }
+
   // 999.1186: parse via the shared DB-timestamp normalizer. A MySQL
   // dateStrings 'YYYY-MM-DD HH:MM:SS' input is pinned to UTC instead of
   // misparsing as server-local (+4h class of bug); calendar-provider ISO
-  // strings (T-separated, offset, Z) keep native parsing unchanged.
+  // strings carrying an offset or 'Z' keep native parsing unchanged.
   var d = parseDbUtc(isoString);
   if (!d) return { date: null, time: null };
   try {
