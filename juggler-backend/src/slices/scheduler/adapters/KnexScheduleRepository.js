@@ -307,7 +307,25 @@ KnexScheduleRepository.prototype.insertTasksBatch = function insertTasksBatch(ro
  */
 KnexScheduleRepository.prototype.insertInstancesOnly = async function insertInstancesOnly(rows) {
   if (!rows || rows.length === 0) return;
-  await this.db('task_instances').insert(rows);
+  // 999.4849: normalize view-shaped rows to the task_instances physical schema.
+  // The row-build sites in runSchedule.js use source_id (matching the tasks_v
+  // view alias) and task_type (view-only UNION concept), but this raw insert
+  // bypasses pickInstance which would normally map them. Also stamp audit
+  // attribution (created_by/updated_by) — insertTasksBatch does this via
+  // stampInsert, but this path bypassed it (999.1576).
+  var normalized = rows.map(function(r) {
+    var out = Object.assign({}, r);
+    if (out.source_id !== undefined) {
+      if (out.master_id === undefined) out.master_id = out.source_id;
+      delete out.source_id;
+    }
+    if (out.task_type !== undefined) delete out.task_type;
+    if (out.occurrence_ordinal === null || out.occurrence_ordinal === undefined) {
+      out.occurrence_ordinal = 1;
+    }
+    return out;
+  }).map(stampInsert);
+  await this.db('task_instances').insert(normalized);
 };
 
 /**
