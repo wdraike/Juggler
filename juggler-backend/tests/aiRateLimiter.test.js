@@ -146,7 +146,9 @@ describe('AI rate limiter — shared RedisStore counts across instances', functi
     try {
       RedisStore = require('rate-limit-redis').RedisStore;
     } catch (e) {
-      console.warn('rate-limit-redis not installed — skipping');
+      // Name the reason — a bare "skipping" hides an install/resolution problem
+      // behind what reads like a deliberate skip.
+      console.warn('rate-limit-redis not installed — skipping: ' + e.message);
       return;
     }
 
@@ -299,6 +301,29 @@ describe('AI rate limiter — HTTP 429 on 3rd request in window', function() {
     }; });
 
     jest.doMock('../src/lib/redis', function() { return { getClient: jest.fn().mockReturnValue(null), invalidateTasks: jest.fn().mockResolvedValue(), invalidateConfig: jest.fn().mockResolvedValue(), get: jest.fn().mockResolvedValue(null), set: jest.fn().mockResolvedValue(), del: jest.fn().mockResolvedValue() }; });
+
+    // feature-gate reaches a REAL database (src/middleware/feature-gate.js:27-28
+    // pulls in the user-config facade, which does not go through the '../src/db'
+    // mock above), so ai.routes' requireFeature + checkUsageLimit wrote
+    // feature_events / plan_usage rows for the synthetic x-test-user-id used
+    // below. Those users are never INSERTed, so every write died on
+    // ER_NO_REFERENCED_ROW_2 against users(id) and POST /api/ai/command answered
+    // 500 — the rate-limit assertions never even ran (999.5064).
+    //
+    // This suite is deliberately DB-free and its subject is the RATE LIMITER,
+    // not entitlements — plan-features.middleware is already stubbed a few lines
+    // up for exactly this reason. Stub the gate the same way rather than seeding
+    // users, which would drag a DB dependency into a mocked suite.
+    jest.doMock('../src/middleware/feature-gate', function() {
+      var pass = function() { return function(req, res, next) { next(); }; };
+      return {
+        requireFeature: pass,
+        requireFeatureIncludes: pass,
+        checkUsageLimit: pass,
+        decrementUsage: jest.fn().mockResolvedValue(),
+        cleanupExpiredUsage: jest.fn().mockResolvedValue()
+      };
+    });
 
     jest.doMock('../src/scheduler/scheduleQueue', function() { return { enqueueScheduleRun: jest.fn(), stopPollLoop: jest.fn() }; });
     jest.doMock('../src/lib/sse-emitter', function() { return { emit: jest.fn(), addClient: jest.fn() }; });

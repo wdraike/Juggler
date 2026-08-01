@@ -19,6 +19,29 @@
  */
 'use strict';
 var path = require('path');
+
+// Pin the clock zone BEFORE anything constructs a Date (999.5065).
+//
+// The cal-sync golden masters were recorded on a dev machine in
+// America/New_York and encode that offset literally: W4's golden holds
+// date "2026-06-02" / time "12:00 AM", while the SAME instant renders as
+// "2026-06-01" / "8:00 PM" under UTC. CI runs UTC, so those suites could
+// never match the golden there — they failed only in CI Nightly (the one gate
+// that runs tests/cal-sync at all; run-suite.sh's IGNORE list keeps them out
+// of the pool and pre-push) and passed on every developer's machine.
+// Reproduced exactly by running the suite locally with TZ=UTC.
+//
+// Pinning makes the dependency EXPLICIT and the suites deterministic on any
+// host. It does not paper over a product bug: the sync layer formatting event
+// times in the SERVER's zone rather than the task owner's is a real question,
+// but characterization tests exist to freeze current behaviour, not to change
+// it — that belongs in its own ticket, not in a CI-recovery fix.
+// An explicit shell TZ still wins, so a deliberate `TZ=UTC jest` run can still
+// probe the other zone.
+if (!process.env.TZ) {
+  process.env.TZ = 'America/New_York';
+}
+
 require('dotenv').config({ path: path.join(__dirname, '../../.env.test') });
 
 // 999.1444: scrub AI-call env after the .env.test load so NO jest process can
