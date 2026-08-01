@@ -6,7 +6,7 @@ jest.mock('../../src/scheduler/scheduleQueue', () => ({ enqueueScheduleRun: jest
 jest.mock('../../src/lib/sse-emitter', () => ({ emit: jest.fn() }));
 
 var {
-  db, TEST_USER_ID, isDbAvailable, seedTestUser, cleanupTestData, destroyTestUser, mockReq, mockRes
+  db, isDbAvailable, seedTestUser, cleanupTestData, destroyTestUser, mockReq, mockRes
 } = require('./helpers/test-setup');
 var { assertDbAvailable } = require('../helpers/requireDB');
 var { makeTask, makeLedgerRow } = require('./helpers/test-fixtures');
@@ -14,7 +14,15 @@ var { sync } = require('../../src/controllers/cal-sync.controller');
 var gcalAdapter = require('../../src/lib/cal-adapters/gcal.adapter');
 var msftAdapter = require('../../src/lib/cal-adapters/msft.adapter');
 
+// 999.5070: gcal_refresh_token must be set EXPLICITLY. buildTestUser defaults it
+// to process.env.TEST_GCAL_REFRESH_TOKEN, which only exists in the gitignored
+// tests/.env.test — so on a dev box the seeded user was GCal-connected, and in
+// CI it was not: getConnectedAdapters returned [], gatherProviderSyncData
+// early-returned, updateEvent was never called, the 410 path never ran, and
+// BF-3 saw the ledger still 'active'. A fake value is enough — every network
+// entry point below is spied.
 var GCAL_ONLY = {
+  gcal_refresh_token: 'mock-gcal-token',
   msft_cal_refresh_token: null, apple_cal_username: null,
   apple_cal_password: null, apple_cal_server_url: null, apple_cal_calendar_url: null
 };
@@ -47,7 +55,7 @@ describe('BF-3: 410 on PATCH transitions ledger to deleted_remote', () => {
       when: 'morning'
     });
 
-    var ledgerRow = await makeLedgerRow({
+    await makeLedgerRow({
       user_id: user.id,
       task_id: task.id,
       provider: 'gcal',
@@ -107,7 +115,7 @@ describe('MSFT 503 on listEvents: existing ledger rows unchanged', () => {
       when: 'morning'
     });
 
-    var ledgerRow = await makeLedgerRow({
+    await makeLedgerRow({
       user_id: user.id,
       task_id: task.id,
       provider: 'msft',
