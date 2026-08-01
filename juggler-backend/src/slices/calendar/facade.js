@@ -1187,9 +1187,18 @@ async function gatherProviderSyncData(user, userId, windowStart, windowEnd, tz, 
   // 999.488/489: signature is (userId, queryBuilder) — the legacy
   // (db, userId, queryBuilder) shape put getDb() in the userId slot →
   // ER_NO_TABLES_USED ((select *) subquery on cal_sync_ledger/tasks_v).
+  // 999.5074: ORDER BY is load-bearing, not cosmetic. This result IS allTasks,
+  // which becomes pushQueue verbatim in the controller — so without it the
+  // order events are created on the calendar, and the order cal_sync_ledger
+  // rows are inserted (hence their auto-increment ids), is whatever MySQL
+  // happens to return. It matched insert order on the dev boxes and the other
+  // order in CI, where W4 case N's golden master caught it as a pure swap.
+  // Earliest-first is also the natural push order; `id` breaks ties.
   var allTaskRows = await fetchTasksWithEventIds(userId, function(q) {
     q.whereNotNull('scheduled_at')
-      .where(function() { this.whereNull('unscheduled').orWhere('unscheduled', 0); });
+      .where(function() { this.whereNull('unscheduled').orWhere('unscheduled', 0); })
+      .orderBy('scheduled_at', 'asc')
+      .orderBy('id', 'asc');
   });
 
   var allTasks = allTaskRows.map(function(r) {

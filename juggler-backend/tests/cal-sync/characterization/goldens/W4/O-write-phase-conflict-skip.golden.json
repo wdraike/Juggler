@@ -56,18 +56,18 @@
             "token": "tok-gcal",
             "tasks": [
               {
-                "id": "w4o-del",
-                "text": "W4 w4o-del",
-                "date": "2026-06-18",
-                "time": "11:00 AM",
-                "dur": 30,
-                "status": ""
-              },
-              {
                 "id": "w4o-edit",
                 "text": "W4 w4o-edit",
                 "date": "2026-06-17",
                 "time": "10:00 AM",
+                "dur": 30,
+                "status": ""
+              },
+              {
+                "id": "w4o-del",
+                "text": "W4 w4o-del",
+                "date": "2026-06-18",
+                "time": "11:00 AM",
                 "dur": 30,
                 "status": ""
               }
@@ -177,7 +177,7 @@
             "event_status": "pending",
             "event_summary": "W4 w4o-del",
             "event_url": null,
-            "id": "<N1>",
+            "id": "<N2>",
             "last_modified_at": "2026-06-16 12:00:02.000000",
             "last_pulled_hash": "f6a960d9de6422dd4e2f8ba929d2c22b7ab5933bbf15a6e4aea525e60aac0125",
             "last_pushed_at": "<TS>",
@@ -210,7 +210,7 @@
             "event_status": "pending",
             "event_summary": "W4 w4o-edit",
             "event_url": null,
-            "id": "<N2>",
+            "id": "<N1>",
             "last_modified_at": "2026-06-16 12:00:02.000000",
             "last_pulled_hash": "c9a2908495e90c61d17476cf38fd919ec3dfcb861734b8575b097942f129cdf7",
             "last_pushed_at": "<TS>",
@@ -294,13 +294,13 @@
       "summary": [
         {
           "type": "pin",
-          "text": "W4 w4o-del",
+          "text": "W4 w4o-edit",
           "message": "Pinned to new time (moved in Google Calendar)",
           "hasIssue": false
         },
         {
           "type": "pin",
-          "text": "W4 w4o-edit",
+          "text": "W4 w4o-del",
           "message": "Pinned to new time (moved in Google Calendar)",
           "hasIssue": false
         }
@@ -501,11 +501,11 @@
             "key": "<L1>",
             "changes": {
               "event_end": [
-                "2026-06-18T15:30:00.000Z",
+                "2026-06-17T14:30:00.000Z",
                 "2026-06-17T16:30:00.000Z"
               ],
               "event_start": [
-                "2026-06-18T15:00:00.000Z",
+                "2026-06-17T14:00:00.000Z",
                 "2026-06-17T16:00:00.000Z"
               ],
               "last_modified_at": [
@@ -518,11 +518,11 @@
             "key": "<L2>",
             "changes": {
               "event_end": [
-                "2026-06-17T14:30:00.000Z",
+                "2026-06-18T15:30:00.000Z",
                 "2026-06-17T16:30:00.000Z"
               ],
               "event_start": [
-                "2026-06-17T14:00:00.000Z",
+                "2026-06-18T15:00:00.000Z",
                 "2026-06-17T16:00:00.000Z"
               ],
               "last_modified_at": [
