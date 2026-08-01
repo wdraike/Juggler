@@ -104,6 +104,15 @@ module.exports = [
       'dist/**',
       'coverage/**',
       'test-results/**',
+      // Vendored BUILD OUTPUT, copied verbatim from
+      // bug-reporter-service/shared/widget/dist/ — not ours to style. The
+      // 'dist/**' entry above does not cover it because it is vendored into
+      // src/, not a dist dir. 999.5068's ESM re-vendor brought in three
+      // `import React` lines the new JSX transform makes unused, which the
+      // no-unused-imports rule reports as ERRORS — that took CI Gate red the
+      // first time a juggler change put this frontend back in the changed set
+      // (run 30715460120). Fix the generator, never these copies.
+      'src/vendor/**',
       // The config itself is a CommonJS node file — js.configs.recommended
       // (no `files` restriction) would otherwise flag its require/module as
       // no-undef when linted directly (e.g. by the vinatieri staged-file hook).
