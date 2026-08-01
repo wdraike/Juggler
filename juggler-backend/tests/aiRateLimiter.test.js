@@ -331,7 +331,25 @@ describe('AI rate limiter — HTTP 429 on 3rd request in window', function() {
     jest.doMock('../src/lib/task-write-queue', function() { return { isLocked: jest.fn().mockResolvedValue(false), enqueueWrite: jest.fn().mockResolvedValue(), flushQueue: jest.fn().mockResolvedValue(), flushQueueInLock: jest.fn().mockResolvedValue(), splitFields: jest.fn(function(f) { return { schedulingFields: {}, nonSchedulingFields: f }; }), NON_SCHEDULING_FIELDS: [] }; });
     jest.doMock('../src/middleware/entity-limits', function() { return { checkProjectLimit: function(q,r,n){n();}, checkLocationLimit: function(q,r,n){n();}, checkScheduleTemplateLimit: function(q,r,n){n();}, checkTaskOrRecurringLimit: function(q,r,n){n();}, checkBatchTaskLimits: function(q,r,n){n();}, checkToolLimit: function(q,r,n){n();}, countActiveTasks: jest.fn().mockResolvedValue(0), countRecurringTemplates: jest.fn().mockResolvedValue(0), countProjects: jest.fn().mockResolvedValue(0), countLocations: jest.fn().mockResolvedValue(0), countScheduleTemplates: jest.fn().mockResolvedValue(0) }; });
     jest.doMock('../src/middleware/validate', function() { return { validate: function() { return function(q,r,n){n();}; } }; });
+    // Mock the FACADE, which is the seam ai.controller actually uses
+    // (ai.controller.js:16 requires ../slices/ai-enrichment/facade and calls
+    // generate/checkQuota/commitQuota). Mocking gemini-tracked-call alone was
+    // the WRONG seam: GeminiAIAdapter.generate returns {} and never reaches
+    // trackedGeminiCall when isConfigured() is false, and isConfigured() needs
+    // GEMINI_API_KEY. So on a dev machine that exports that key the mock was
+    // reached and the test passed, while CI — which has no key — got {},
+    // failed the controller's shape check, and answered 500
+    // "Unexpected Gemini response structure" (999.5064). The suite's subject is
+    // the RATE LIMITER; it must not depend on ambient AI credentials either way.
     jest.doMock('../src/slices/ai-enrichment/adapters/gemini-tracked-call', function() { return { trackedGeminiCall: jest.fn().mockResolvedValue({ text: JSON.stringify({ ops: [], msg: 'Done.' }) }) }; });
+    jest.doMock('../src/slices/ai-enrichment/facade', function() {
+      return {
+        AI_DAILY_LIMIT: 50,
+        generate: jest.fn().mockResolvedValue({ text: JSON.stringify({ ops: [], msg: 'Done.' }) }),
+        checkQuota: jest.fn().mockResolvedValue({ allowed: true, used: 0, limit: 50 }),
+        commitQuota: jest.fn().mockResolvedValue(undefined),
+      };
+    });
     jest.doMock('../src/slices/ai-enrichment/adapters/ai-usage-queue.service', function() { return { enqueue: jest.fn() }; });
 
     // Mock the logger module so that logger.info / logger.error calls in
