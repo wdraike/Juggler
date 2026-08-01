@@ -366,6 +366,20 @@ describe('AI rate limiter — HTTP 429 on 3rd request in window', function() {
     jest.unmock('ioredis');
   });
 
+  // This suite mocks the logger to a noop, so when the endpoint answers 500 the
+  // reason is swallowed entirely — CI Gate run 30706713971 reported only
+  // "Expected: 200 / Received: 500" with no cause anywhere in the log, and the
+  // suite passes when run on its own, so there is nothing to reproduce locally.
+  // Carry the response body into the failure message; a 500 should say WHY.
+  function expectStatus(res, want, label) {
+    if (res.status !== want) {
+      throw new Error(
+        label + ': expected HTTP ' + want + ', got ' + res.status +
+        ' — body: ' + JSON.stringify(res.body)
+      );
+    }
+  }
+
   test('returns 429 with exact rate-limit error message on 3rd request within 60s', async function() {
     var supertest = require('supertest');
     var userId = 'rl-user-3rd-test-' + Date.now(); // unique user to avoid bleed from other tests
@@ -383,10 +397,10 @@ describe('AI rate limiter — HTTP 429 on 3rd request in window', function() {
     // trips the rate limiter → 429. (Prior `toBe(500)` was a mechanical test-rot
     // collapse — commit 1a132cc — contradicting the mocked-success setup.)
     var res1 = await fireRequest();
-    expect(res1.status).toBe(200);
+    expectStatus(res1, 200, 'first in-window request');
 
     var res2 = await fireRequest();
-    expect(res2.status).toBe(200);
+    expectStatus(res2, 200, 'second in-window request');
 
     var res3 = await fireRequest();
     expect(res3.status).toBe(429);
@@ -415,7 +429,7 @@ describe('AI rate limiter — HTTP 429 on 3rd request in window', function() {
     // User B should still succeed on first request (200 — mocked Gemini success;
     // prior `toBe(500)` was the same test-rot collapse).
     var resB1 = await fireAs(userB);
-    expect(resB1.status).toBe(200);
+    expectStatus(resB1, 200, 'user B first request (per-user isolation)');
   });
 
   test('unauthenticated request is rejected by JWT middleware before reaching rate limiter', async function() {
