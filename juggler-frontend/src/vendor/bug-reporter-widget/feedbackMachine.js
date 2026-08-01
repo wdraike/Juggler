@@ -201,7 +201,7 @@ function transition(state, event) {
   }
 }
 
-module.exports = {
+export {
   STEPS,
   SUBJECT_MIN,
   DESCRIPTION_MIN,

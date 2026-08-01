@@ -1,39 +1,7 @@
-var __create = Object.create;
-var __defProp = Object.defineProperty;
-var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-var __getOwnPropNames = Object.getOwnPropertyNames;
-var __getProtoOf = Object.getPrototypeOf;
-var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __export = (target, all) => {
-  for (var name in all)
-    __defProp(target, name, { get: all[name], enumerable: true });
-};
-var __copyProps = (to, from, except, desc) => {
-  if (from && typeof from === "object" || typeof from === "function") {
-    for (let key of __getOwnPropNames(from))
-      if (!__hasOwnProp.call(to, key) && key !== except)
-        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-  }
-  return to;
-};
-var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
-  // If the importer is in node compatibility mode or this is not an ESM
-  // file that has been converted to a CommonJS file using a Babel-
-  // compatible transform (i.e. "__esModule" has not been set), then set
-  // "default" to the CommonJS "module.exports" for node compatibility.
-  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
-  mod
-));
-var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
-var stdin_exports = {};
-__export(stdin_exports, {
-  default: () => AnnotationCanvas
-});
-module.exports = __toCommonJS(stdin_exports);
-var import_jsx_runtime = require("react/jsx-runtime");
-var import_react = __toESM(require("react"));
-var import_react_konva = require("react-konva");
-var import_widget = require("./widget.css");
+import { jsx, jsxs } from "react/jsx-runtime";
+import React, { useState, useRef, useEffect } from "react";
+import { Stage, Layer, Image as KonvaImage, Line, Arrow, Text, Rect } from "react-konva";
+import "./widget.css";
 const TOOLS = [
   { value: "pen", label: "Draw", icon: "\u270F\uFE0F" },
   { value: "arrow", label: "Arrow", icon: "\u27A1\uFE0F" },
@@ -42,20 +10,20 @@ const TOOLS = [
 ];
 const COLORS = ["#FF0000", "#00FF00", "#0000FF", "#FFFF00", "#FF00FF", "#000000"];
 function AnnotationCanvas({ screenshot, onComplete, onCancel }) {
-  const [image, setImage] = (0, import_react.useState)(null);
-  const [confirmClear, setConfirmClear] = (0, import_react.useState)(false);
-  const [tool, setTool] = (0, import_react.useState)("pen");
-  const [lines, setLines] = (0, import_react.useState)([]);
-  const [arrows, setArrows] = (0, import_react.useState)([]);
-  const [texts, setTexts] = (0, import_react.useState)([]);
-  const [blurs, setBlurs] = (0, import_react.useState)([]);
-  const [isDrawing, setIsDrawing] = (0, import_react.useState)(false);
-  const [color, setColor] = (0, import_react.useState)("#FF0000");
-  const [lineWidth, setLineWidth] = (0, import_react.useState)(3);
-  const [canvasSize, setCanvasSize] = (0, import_react.useState)({ width: 800, height: 600 });
-  const stageRef = (0, import_react.useRef)(null);
-  const containerRef = (0, import_react.useRef)(null);
-  (0, import_react.useEffect)(() => {
+  const [image, setImage] = useState(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [tool, setTool] = useState("pen");
+  const [lines, setLines] = useState([]);
+  const [arrows, setArrows] = useState([]);
+  const [texts, setTexts] = useState([]);
+  const [blurs, setBlurs] = useState([]);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [color, setColor] = useState("#FF0000");
+  const [lineWidth, setLineWidth] = useState(3);
+  const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 });
+  const stageRef = useRef(null);
+  const containerRef = useRef(null);
+  useEffect(() => {
     const img = new window.Image();
     img.src = screenshot;
     img.onload = () => {
@@ -130,11 +98,11 @@ function AnnotationCanvas({ screenshot, onComplete, onCancel }) {
     onComplete(stageRef.current.toDataURL({ pixelRatio: 2 }));
   }
   if (!image) {
-    return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "brfw-hint", children: "Loading image\u2026" });
+    return /* @__PURE__ */ jsx("p", { className: "brfw-hint", children: "Loading image\u2026" });
   }
-  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { ref: containerRef, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "brfw-canvas-toolbar", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "brfw-canvas-group", role: "group", "aria-label": "Drawing tool", children: TOOLS.map((t) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+  return /* @__PURE__ */ jsxs("div", { ref: containerRef, children: [
+    /* @__PURE__ */ jsxs("div", { className: "brfw-canvas-toolbar", children: [
+      /* @__PURE__ */ jsx("div", { className: "brfw-canvas-group", role: "group", "aria-label": "Drawing tool", children: TOOLS.map((t) => /* @__PURE__ */ jsx(
         "button",
         {
           type: "button",
@@ -147,7 +115,7 @@ function AnnotationCanvas({ screenshot, onComplete, onCancel }) {
         },
         t.value
       )) }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "brfw-canvas-group", role: "group", "aria-label": "Marker color", children: COLORS.map((c) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+      /* @__PURE__ */ jsx("div", { className: "brfw-canvas-group", role: "group", "aria-label": "Marker color", children: COLORS.map((c) => /* @__PURE__ */ jsx(
         "button",
         {
           type: "button",
@@ -159,9 +127,9 @@ function AnnotationCanvas({ screenshot, onComplete, onCancel }) {
         },
         c
       )) }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "brfw-canvas-group", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("label", { className: "brfw-canvas-label", htmlFor: "brfw-line-width", children: "Width" }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+      /* @__PURE__ */ jsxs("div", { className: "brfw-canvas-group", children: [
+        /* @__PURE__ */ jsx("label", { className: "brfw-canvas-label", htmlFor: "brfw-line-width", children: "Width" }),
+        /* @__PURE__ */ jsx(
           "input",
           {
             id: "brfw-line-width",
@@ -173,20 +141,20 @@ function AnnotationCanvas({ screenshot, onComplete, onCancel }) {
             onChange: (e) => setLineWidth(parseInt(e.target.value, 10))
           }
         ),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "brfw-canvas-label", children: lineWidth })
+        /* @__PURE__ */ jsx("span", { className: "brfw-canvas-label", children: lineWidth })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "brfw-canvas-group brfw-canvas-group--end", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "brfw-button", onClick: handleUndo, "aria-label": "Undo", children: "\u21A9" }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "brfw-button", onClick: () => setConfirmClear(true), "aria-label": "Clear all annotations", children: "\u2715" })
+      /* @__PURE__ */ jsxs("div", { className: "brfw-canvas-group brfw-canvas-group--end", children: [
+        /* @__PURE__ */ jsx("button", { type: "button", className: "brfw-button", onClick: handleUndo, "aria-label": "Undo", children: "\u21A9" }),
+        /* @__PURE__ */ jsx("button", { type: "button", className: "brfw-button", onClick: () => setConfirmClear(true), "aria-label": "Clear all annotations", children: "\u2715" })
       ] })
     ] }),
-    confirmClear && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "brfw-footer brfw-confirm-discard", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Clear all annotations? This cannot be undone." }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "brfw-button", onClick: () => setConfirmClear(false), children: "Keep" }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "brfw-button brfw-button--danger", onClick: doClear, children: "Clear" })
+    confirmClear && /* @__PURE__ */ jsxs("div", { className: "brfw-footer brfw-confirm-discard", children: [
+      /* @__PURE__ */ jsx("span", { children: "Clear all annotations? This cannot be undone." }),
+      /* @__PURE__ */ jsx("button", { type: "button", className: "brfw-button", onClick: () => setConfirmClear(false), children: "Keep" }),
+      /* @__PURE__ */ jsx("button", { type: "button", className: "brfw-button brfw-button--danger", onClick: doClear, children: "Clear" })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "brfw-canvas-frame", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-      import_react_konva.Stage,
+    /* @__PURE__ */ jsx("div", { className: "brfw-canvas-frame", children: /* @__PURE__ */ jsx(
+      Stage,
       {
         width: canvasSize.width,
         height: canvasSize.height,
@@ -197,18 +165,21 @@ function AnnotationCanvas({ screenshot, onComplete, onCancel }) {
         onTouchMove: handleMouseMove,
         onTouchEnd: handleMouseUp,
         ref: stageRef,
-        children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_react_konva.Layer, { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_react_konva.Image, { image, width: canvasSize.width, height: canvasSize.height }),
-          lines.map((line, i) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_react_konva.Line, { points: line.points, stroke: line.color, strokeWidth: line.width, tension: 0.5, lineCap: "round", lineJoin: "round" }, `line-${i}`)),
-          arrows.map((arrow, i) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_react_konva.Arrow, { points: arrow.points, stroke: arrow.color, strokeWidth: arrow.width, fill: arrow.color, pointerLength: 10, pointerWidth: 10 }, `arrow-${i}`)),
-          texts.map((text, i) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_react_konva.Text, { x: text.x, y: text.y, text: text.text, fontSize: text.fontSize, fill: text.color, stroke: "#FFFFFF", strokeWidth: 1, fontFamily: "Arial", fontStyle: "bold" }, `text-${i}`)),
-          blurs.map((blur, i) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_react_konva.Rect, { x: blur.x, y: blur.y, width: blur.width, height: blur.height, fill: "rgba(0,0,0,0.8)", stroke: "#000000", strokeWidth: 2 }, `blur-${i}`))
+        children: /* @__PURE__ */ jsxs(Layer, { children: [
+          /* @__PURE__ */ jsx(KonvaImage, { image, width: canvasSize.width, height: canvasSize.height }),
+          lines.map((line, i) => /* @__PURE__ */ jsx(Line, { points: line.points, stroke: line.color, strokeWidth: line.width, tension: 0.5, lineCap: "round", lineJoin: "round" }, `line-${i}`)),
+          arrows.map((arrow, i) => /* @__PURE__ */ jsx(Arrow, { points: arrow.points, stroke: arrow.color, strokeWidth: arrow.width, fill: arrow.color, pointerLength: 10, pointerWidth: 10 }, `arrow-${i}`)),
+          texts.map((text, i) => /* @__PURE__ */ jsx(Text, { x: text.x, y: text.y, text: text.text, fontSize: text.fontSize, fill: text.color, stroke: "#FFFFFF", strokeWidth: 1, fontFamily: "Arial", fontStyle: "bold" }, `text-${i}`)),
+          blurs.map((blur, i) => /* @__PURE__ */ jsx(Rect, { x: blur.x, y: blur.y, width: blur.width, height: blur.height, fill: "rgba(0,0,0,0.8)", stroke: "#000000", strokeWidth: 2 }, `blur-${i}`))
         ] })
       }
     ) }),
-    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "brfw-footer", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "brfw-button", onClick: onCancel, children: "Cancel" }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "brfw-button brfw-button--primary", onClick: handleComplete, children: "Use this screenshot" })
+    /* @__PURE__ */ jsxs("div", { className: "brfw-footer", children: [
+      /* @__PURE__ */ jsx("button", { type: "button", className: "brfw-button", onClick: onCancel, children: "Cancel" }),
+      /* @__PURE__ */ jsx("button", { type: "button", className: "brfw-button brfw-button--primary", onClick: handleComplete, children: "Use this screenshot" })
     ] })
   ] });
 }
+export {
+  AnnotationCanvas as default
+};
