@@ -14,6 +14,8 @@ import UpgradePrompt from './components/billing/UpgradePrompt';
 import SchedulerDebug from './components/admin/SchedulerDebug';
 import SchedulerStepper from './components/admin/SchedulerStepper';
 import ImpersonationPage from './components/admin/ImpersonationPage';
+import { ConnectionProvider } from './contexts/ConnectionContext';
+import GlobalConnectionModal from './components/common/GlobalConnectionModal';
 
 function AppContent() {
   const { user, loading } = useAuth();
@@ -147,6 +149,7 @@ function AppContent() {
     <>
       <AppLayout />
       <UpgradePrompt />
+      <GlobalConnectionModal onRetry={function() { window.location.reload(); }} />
     </>
   );
 }
@@ -155,7 +158,9 @@ export default function App() {
   return (
     <ErrorBoundary>
       <AuthProvider>
-        <AppContent />
+        <ConnectionProvider>
+          <AppContent />
+        </ConnectionProvider>
       </AuthProvider>
     </ErrorBoundary>
   );

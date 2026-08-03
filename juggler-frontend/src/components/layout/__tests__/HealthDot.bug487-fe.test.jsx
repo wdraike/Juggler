@@ -40,6 +40,23 @@ jest.mock('../../../services/apiClient', () => ({
   get: jest.fn()
 }));
 
+// 999.5016: HealthDot now uses useConnection — mock with stable references.
+// jest.mock is hoisted, so create the stable fn inside the factory.
+jest.mock('../../../contexts/ConnectionContext', () => {
+  var fn = jest.fn();
+  return {
+    useConnection: () => ({ setConnectionStatus: fn }),
+    ConnectionProvider: ({ children }) => children,
+  };
+});
+
+// 999.5016: mock GlobalConnectionModal so showConnectionModal doesn't touch the DOM.
+jest.mock('../../common/GlobalConnectionModal', () => ({
+  showConnectionModal: jest.fn(),
+  hideConnectionModal: jest.fn(),
+  default: () => null,
+}));
+
 import HealthDot from '../HealthDot';
 import apiClient from '../../../services/apiClient';
 

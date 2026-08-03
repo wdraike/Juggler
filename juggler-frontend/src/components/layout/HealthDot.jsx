@@ -16,6 +16,8 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import apiClient from '../../services/apiClient';
 import { getTheme } from '../../theme/colors';
 import { formatTimeAmPm, timeAgo } from '../../utils/timezone';
+import { useConnection } from '../../contexts/ConnectionContext';
+import { showConnectionModal, hideConnectionModal } from '../common/GlobalConnectionModal';
 
 var POLL_INTERVAL_MS = 60 * 1000; // 60s — matches climbrs default cadence
 var NETWORK_TIMEOUT_MS = 5000;
@@ -46,6 +48,9 @@ export default function HealthDot({ darkMode, theme }) {
   var inflightRef = useRef(false);
   var popoverRef = useRef(null);
   var buttonRef = useRef(null);
+  // 999.5016: track consecutive failures for connection-lost modal.
+  var failCountRef = useRef(0);
+  var { setConnectionStatus } = useConnection();
 
   var check = useCallback(async function() {
     if (inflightRef.current) return;
@@ -58,17 +63,27 @@ export default function HealthDot({ darkMode, theme }) {
       clearTimeout(timeoutId);
       var data = res.data;
       setState({ status: (data.status || 'UNKNOWN').toUpperCase(), data: data, error: null, lastChecked: new Date() });
+      // 999.5016: success resets the failure counter and hides the modal.
+      failCountRef.current = 0;
+      setConnectionStatus(true, null);
+      hideConnectionModal();
     } catch (err) {
       // 401 before login or a network blip both collapse to 'ERROR' — the
       // user can't distinguish "backend is down" from "I'm logged out" at
       // the dot level, and a red dot for either is reasonable. The popover
       // shows the raw error text so the user can tell them apart.
       setState({ status: 'ERROR', data: null, error: (err && err.message) || 'Health check failed', lastChecked: new Date() });
+      // 999.5016: show connection-lost modal after 2 consecutive failures.
+      failCountRef.current += 1;
+      setConnectionStatus(false, (err && err.message) || 'Health check failed');
+      if (failCountRef.current >= 2) {
+        showConnectionModal();
+      }
     } finally {
       inflightRef.current = false;
       setIsChecking(false);
     }
-  }, []);
+  }, [setConnectionStatus]);
 
   useEffect(function() {
     check();
