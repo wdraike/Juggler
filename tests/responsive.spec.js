@@ -1,6 +1,6 @@
 // @ts-check
 const { test, expect } = require('@playwright/test');
-const { setupAuth } = require('./helpers/playwright-helpers');
+const { setupAuth, openSettings, SELECTORS } = require('./helpers/playwright-helpers');
 
 // ── Device definitions ───────────────────────────────────────────────
 // Full viewport sweep — large desktop down to small mobile browser.
@@ -54,10 +54,13 @@ for (const device of DEVICES) {
 
     // ── 2. Navigation bar fits within viewport ─────────────────────
     test('navigation bar fits within viewport width', async ({ page }) => {
-      // All view mode buttons should be visible (not clipped)
-      const navButtons = page.locator('button').filter({ hasText: /^(Day|3-Day|Week|Month|List|Priority|Issues|Timeline|1|3|7|M|≡|P|!|↔)$/ });
+      // View-mode buttons render "icon + shortLabel" on mobile and a plain text
+      // label on wider layouts (NavigationBar.jsx:211), so button TEXT is not a
+      // viewport-independent anchor. The per-view tip title is: every VIEW_MODES
+      // tip contains "view — ", and no filter/date tip does.
+      const navButtons = page.locator('button[title*="view — "]');
       const count = await navButtons.count();
-      expect(count).toBeGreaterThan(0);
+      expect(count).toBeGreaterThanOrEqual(10);   // VIEW_MODES length (NavigationBar.jsx:13)
 
       // Check no nav button extends past the viewport
       for (let i = 0; i < Math.min(count, 8); i++) {
@@ -180,38 +183,18 @@ for (const device of DEVICES) {
 
     // ── 7. Settings panel doesn't overflow ─────────────────────────
     test('settings panel fits viewport', async ({ page }) => {
-      // Open settings — on mobile it's in overflow menu, on desktop it's a button
-      if (device.mobile) {
-        const overflowBtn = page.locator('button:has-text("…")').or(page.locator('button:has-text("⋯")'));
-        const hasOverflow = await overflowBtn.first().isVisible().catch(() => false);
-        if (hasOverflow) {
-          await overflowBtn.first().click();
-          await page.waitForTimeout(200);
-          const settingsItem = page.locator('text=Settings').first();
-          if (await settingsItem.isVisible()) {
-            await settingsItem.click();
-          }
-        }
-      } else {
-        const settingsBtn = page.locator('button[title="Settings — locations, tools, templates, and preferences"]');
-        if (await settingsBtn.isVisible()) {
-          await settingsBtn.click();
-        }
-      }
+      // openSettings() handles both layouts: the "More options" overflow menu
+      // below 920px, the user dropdown above it.
+      await openSettings(page);
+      await expect(page.locator(SELECTORS.SETTINGS_DIALOG)).toBeVisible();
 
-      await page.waitForTimeout(300);
+      const overflowX = await page.evaluate(() => {
+        return document.documentElement.scrollWidth > document.documentElement.clientWidth;
+      });
+      expect(overflowX).toBe(false);
 
-      // If settings opened, check it doesn't overflow
-      const settingsVisible = await page.locator('text=Settings').first().isVisible().catch(() => false);
-      if (settingsVisible) {
-        const overflowX = await page.evaluate(() => {
-          return document.documentElement.scrollWidth > document.documentElement.clientWidth;
-        });
-        expect(overflowX).toBe(false);
-
-        // Close settings
-        await page.keyboard.press('Escape');
-      }
+      // Close settings
+      await page.keyboard.press('Escape');
     });
 
     // ── 8. Week view columns scale with viewport ───────────────────

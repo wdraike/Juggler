@@ -8,7 +8,9 @@
  *
  * Key source facts:
  *   - App brand text: "StriveRS" (HeaderBar.jsx)
- *   - Settings button: title="Settings — locations, tools, templates, and preferences"
+ *   - Settings has NO header button: it is a menu item inside the user dropdown
+ *     (UserDropdown.jsx:121) on wide layouts and inside the "More options"
+ *     overflow menu (HeaderBar.jsx:70) below 920px. Use openSettings().
  *   - Add-task button: title="Add task"
  *   - View tabs: button text Day / Flex / 3-Day / Week / Month / Timeline / List / Priority
  *   - QuickAddTask trigger: button text "+ Add task"; input placeholder "Task name..."
@@ -31,7 +33,9 @@ const SELECTORS = {
   // App shell — "StriveRS" is the brand wordmark in HeaderBar.jsx
   APP_BRAND: 'text=StriveRS',
   // Header action buttons (title attributes from HeaderBar.jsx)
-  BTN_SETTINGS: 'button[title="Settings — locations, tools, templates, and preferences"]',
+  // Settings trigger — no direct button exists; see openSettings().
+  BTN_USER_MENU: 'button[aria-haspopup="true"]',      // UserDropdown.jsx:45 (wide layout)
+  BTN_OVERFLOW: 'button[title="More options"]',        // HeaderBar.jsx:243 (<920px)
   BTN_ADD_TASK: 'button[title="Add task"]',
   BTN_TOGGLE_DARK: 'button[title="Toggle dark mode"]',
   BTN_PREV_DAY: 'button[title="Previous day"]',
@@ -42,6 +46,7 @@ const SELECTORS = {
   QUICK_ADD_INPUT: 'input[placeholder="Task name..."]',
   QUICK_ADD_SUBMIT: 'button:has-text("Add")',
   // Settings panel (SettingsPanel.jsx)
+  SETTINGS_DIALOG: '[role="dialog"][aria-label="Settings"]',   // SettingsPanel.jsx:34
   SETTINGS_HEADING: 'text=Settings',
   SETTINGS_CLOSE: 'button:has-text("×")',
   // Settings tab labels (from TABS array in SettingsPanel.jsx)
@@ -178,12 +183,20 @@ async function setStatus(page, status) {
 }
 
 /**
- * Open the settings panel via the gear button.
+ * Open the settings panel. Settings is a menu item, not a header button:
+ * below 920px it lives in the "More options" overflow menu, above that in the
+ * user dropdown. Opens whichever menu this viewport renders, then clicks it.
  * @param {import('@playwright/test').Page} page
  */
 async function openSettings(page) {
-  await page.click(SELECTORS.BTN_SETTINGS);
-  await page.waitForSelector(SELECTORS.SETTINGS_HEADING, { timeout: 5000 });
+  const overflow = page.locator(SELECTORS.BTN_OVERFLOW);
+  if (await overflow.isVisible().catch(() => false)) {
+    await overflow.click();
+  } else {
+    await page.locator(SELECTORS.BTN_USER_MENU).first().click();
+  }
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.waitForSelector(SELECTORS.SETTINGS_DIALOG, { timeout: 5000 });
 }
 
 module.exports = {

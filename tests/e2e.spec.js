@@ -1,5 +1,8 @@
 // @ts-check
 const { test, expect } = require('@playwright/test');
+// Settings has no header button — it is a menu item behind the user dropdown
+// (UserDropdown.jsx) or the "More options" overflow menu below 920px.
+const { openSettings, SELECTORS } = require('./helpers/playwright-helpers');
 
 const TEST_TOKEN = process.env.TEST_TOKEN || 'playwright-test-token';
 const TEST_USER = {
@@ -53,8 +56,6 @@ async function setupAuth(page) {
   );
 }
 
-// Actual button title for the Settings gear in HeaderBar.jsx
-const SETTINGS_BTN = 'button[title="Settings — locations, tools, templates, and preferences"]';
 // Actual button title for the Import/Export icon in HeaderBar.jsx
 const EXPORT_BTN = 'button[title="Import/Export — save or load tasks as JSON"]';
 
@@ -130,48 +131,41 @@ test.describe('Juggler E2E', () => {
     await expect(page.locator('text=8 AM').first()).toBeVisible();
   });
 
-  test('8. Settings panel — all 6 tabs open without crash', async ({ page }) => {
-    // Actual title from HeaderBar.jsx line 180
-    await page.locator(SETTINGS_BTN).click();
-    await page.waitForTimeout(300);
-    await expect(page.locator('text=Settings').first()).toBeVisible();
+  test('8. Settings panel — all 7 tabs open without crash', async ({ page }) => {
+    await openSettings(page);
+    const panel = page.locator(SELECTORS.SETTINGS_DIALOG);
+    await expect(panel).toBeVisible();
 
-    // Actual tabs from SettingsPanel.jsx TABS array
-    const tabs = ['Locations', 'Tools', 'Tool Matrix', 'Templates', 'Projects', 'Preferences'];
-    for (const tab of tabs) {
-      await page.locator(`button:has-text("${tab}")`).click();
-      await page.waitForTimeout(200);
-      await expect(page.locator('text=Settings').first()).toBeVisible();
+    // Actual tabs from SettingsPanel.jsx TABS array (role="tab", aria-selected)
+    const tabs = ['Locations', 'Tools', 'Tool Matrix', 'Templates', 'Projects', 'Preferences', 'Notifications'];
+    for (const label of tabs) {
+      const tab = page.getByRole('tab', { name: label, exact: true });
+      await tab.click();
+      await expect(tab).toHaveAttribute('aria-selected', 'true');
     }
 
     // Close button is &times; (×) in SettingsPanel.jsx
-    await page.locator('button:has-text("×")').first().click();
+    await panel.locator('button:has-text("×")').first().click();
+    await expect(page.locator(SELECTORS.SETTINGS_DIALOG)).toHaveCount(0);
   });
 
   test('9. Preferences — grid zoom slider is interactable and updates label', async ({ page }) => {
-    await page.locator(SETTINGS_BTN).click();
-    await page.waitForTimeout(300);
-    await page.locator('button:has-text("Preferences")').click();
-    await page.waitForTimeout(200);
+    await openSettings(page);
+    const panel = page.locator(SELECTORS.SETTINGS_DIALOG);
+    await page.getByRole('tab', { name: 'Preferences', exact: true }).click();
 
     // Preferences has 2 range inputs: font-size (index 0) and grid-zoom (index 1).
     // The grid zoom slider shows "{value}px" label; font size does not.
-    const sliders = page.locator('input[type="range"]');
-    const count = await sliders.count();
-    const zoomIdx = count >= 2 ? 1 : 0;
-    const slider = sliders.nth(zoomIdx);
+    const slider = panel.locator('input[type="range"]').nth(1);
+    await expect(slider).toBeVisible();
+    await slider.fill('90');
+    // The "90px" label appears next to the grid zoom slider
+    await expect(panel.getByText('90px')).toBeVisible();
+    // Reset to default
+    await slider.fill('60');
+    await expect(panel.getByText('60px')).toBeVisible();
 
-    if (await slider.isVisible()) {
-      await slider.fill('90');
-      await page.waitForTimeout(300);
-      // The "90px" label appears next to the grid zoom slider
-      await expect(page.locator('text=90px')).toBeVisible();
-      // Reset to default
-      await slider.fill('60');
-      await page.waitForTimeout(300);
-    }
-
-    await page.locator('button:has-text("×")').first().click();
+    await panel.locator('button:has-text("×")').first().click();
     await expect(page.locator('text=StriveRS')).toBeVisible();
   });
 

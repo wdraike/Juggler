@@ -1,22 +1,24 @@
 // @ts-check
 /**
- * settings.spec.js — Flow 4: Settings panel — all 6 tabs accessible
+ * settings.spec.js — Flow 4: Settings panel — all 7 tabs accessible
  *
  * Selector strategy: juggler-frontend/src/ has NO data-testid attributes.
- * All selectors use visible text and button titles verified against actual JSX.
+ * All selectors use roles, visible text and button titles verified against actual JSX.
  *
  * Source references:
- *   SettingsPanel.jsx  — TABS array: Locations, Tools, Tool Matrix, Templates, Projects, Preferences
- *   HeaderBar.jsx      — settings button title="Settings — locations, tools, templates, and preferences"
+ *   SettingsPanel.jsx  — TABS array: Locations, Tools, Tool Matrix, Templates,
+ *                        Projects, Preferences, Notifications (role="tab" each)
+ *   UserDropdown.jsx   — "Settings" menu item behind the avatar button (wide layout)
+ *   HeaderBar.jsx      — "Settings" item in the "More options" overflow menu (<920px)
  *   AppLayout.jsx      — onShowSettings → setShowSettings(true)
  *
- * The settings panel is opened by clicking the gear button in the desktop header.
- * On mobile/compact layout the gear is behind the "…" overflow menu.
- * These tests run at 1280x800 (playwright.config.js default) so the button is inline.
+ * There is no Settings header button: openSettings() opens whichever menu the
+ * current viewport renders and clicks the item. These tests run at 1280x800
+ * (playwright.config.js default), i.e. the user-dropdown path.
  */
 
 const { test, expect } = require('@playwright/test');
-const { setupAuth, waitForApp, openSettings } = require('./helpers/playwright-helpers');
+const { setupAuth, waitForApp, openSettings, SELECTORS } = require('./helpers/playwright-helpers');
 
 // API route mocks needed for settings panel to load
 async function mockSettingsApis(page) {
@@ -61,76 +63,52 @@ test.describe('Settings Panel', () => {
     await openSettings(page);
   });
 
-  // Test 1: Settings panel opens — shows "Settings" heading and tab bar
-  test('Settings panel opens and shows heading', async ({ page }) => {
-    await expect(page.locator('text=Settings').first()).toBeVisible();
-    // All six tab buttons should be visible
-    await expect(page.locator('button:has-text("Locations")').first()).toBeVisible();
-    await expect(page.locator('button:has-text("Preferences")').first()).toBeVisible();
+  // Test 1: Settings panel opens — dialog plus the full tab bar
+  test('Settings panel opens and shows every tab', async ({ page }) => {
+    await expect(page.locator(SELECTORS.SETTINGS_DIALOG)).toBeVisible();
+    // TABS array in SettingsPanel.jsx:15 — 7 entries, each rendered role="tab"
+    await expect(page.getByRole('tab')).toHaveCount(7);
   });
 
-  // Test 2: Locations tab — visible and renders content area
-  test('Locations tab — opens without crash', async ({ page }) => {
-    await page.locator('button:has-text("Locations")').first().click();
-    await page.waitForTimeout(200);
-    // Settings still open (heading visible)
-    await expect(page.locator('text=Settings').first()).toBeVisible();
-    // App not crashed
-    await expect(page.locator('text=StriveRS').first()).toBeVisible();
-  });
+  // Tests 2-8: each tab renders its own content, not just a persistent heading.
+  // Anchor text verified against the live rendered panel, per tab.
+  const TAB_CONTENT = [
+    ['Locations',   'Locate me'],                                    // LocationsTab.jsx per-location geo button
+    ['Tools',       'Tool name'],                                    // ToolsTab.jsx add-tool input placeholder
+    ['Tool Matrix', 'Which tools are available at each location'],   // MatrixTab.jsx subtitle
+    ['Templates',   'Pick a location, then click or drag'],          // UnifiedTemplateTab.jsx paint hint
+    ['Projects',    'Sort:'],                                        // ProjectsTab.jsx sort control
+    ['Preferences', 'Grid zoom (px/hour):'],                         // PreferencesTab.jsx slider label
+    ['Notifications', 'Browser notifications'],                      // NotificationsTab.jsx heading
+  ];
 
-  // Test 3: Tools tab
-  test('Tools tab — opens without crash', async ({ page }) => {
-    await page.locator('button:has-text("Tools")').first().click();
-    await page.waitForTimeout(200);
-    await expect(page.locator('text=Settings').first()).toBeVisible();
-  });
+  for (const [label, anchor] of TAB_CONTENT) {
+    test(`${label} tab — selects and renders its own content`, async ({ page }) => {
+      const tab = page.getByRole('tab', { name: label, exact: true });
+      await tab.click();
+      await expect(tab).toHaveAttribute('aria-selected', 'true');
+      const panel = page.locator(SELECTORS.SETTINGS_DIALOG);
+      if (label === 'Tools') {
+        await expect(panel.locator(`input[placeholder="${anchor}"]`)).toBeVisible();
+      } else {
+        await expect(panel.getByText(anchor, { exact: false }).first()).toBeVisible();
+      }
+    });
+  }
 
-  // Test 4: Tool Matrix tab
-  test('Tool Matrix tab — opens without crash', async ({ page }) => {
-    await page.locator('button:has-text("Tool Matrix")').first().click();
-    await page.waitForTimeout(200);
-    await expect(page.locator('text=Settings').first()).toBeVisible();
-  });
+  // Test 9: Preferences grid-zoom slider moves and its label follows
+  test('Preferences — grid zoom slider updates its label, × closes the panel', async ({ page }) => {
+    await page.getByRole('tab', { name: 'Preferences', exact: true }).click();
+    const panel = page.locator(SELECTORS.SETTINGS_DIALOG);
+    // 2 range inputs: font size (0) and grid zoom (1) — PreferencesTab.jsx
+    const slider = panel.locator('input[type="range"]').nth(1);
+    await expect(slider).toBeVisible();
+    await expect(panel.getByText('60px')).toBeVisible();
+    await slider.fill('90');
+    await expect(panel.getByText('90px')).toBeVisible();
+    await slider.fill('60');
 
-  // Test 5: Templates tab
-  test('Templates tab — opens without crash', async ({ page }) => {
-    await page.locator('button:has-text("Templates")').first().click();
-    await page.waitForTimeout(200);
-    await expect(page.locator('text=Settings').first()).toBeVisible();
-  });
-
-  // Test 6: Projects tab
-  test('Projects tab — opens without crash', async ({ page }) => {
-    await page.locator('button:has-text("Projects")').first().click();
-    await page.waitForTimeout(200);
-    await expect(page.locator('text=Settings').first()).toBeVisible();
-  });
-
-  // Test 7: Preferences tab — renders and shows grid zoom slider
-  test('Preferences tab — renders grid zoom slider', async ({ page }) => {
-    await page.locator('button:has-text("Preferences")').first().click();
-    await page.waitForTimeout(200);
-    await expect(page.locator('text=Settings').first()).toBeVisible();
-
-    // Preferences has 2 range inputs: font-size (index 0) and grid-zoom (index 1).
-    const sliders = page.locator('input[type="range"]');
-    const count = await sliders.count();
-    // Pick grid zoom slider (index 1 if 2+ sliders, else index 0)
-    const zoomIdx = count >= 2 ? 1 : 0;
-    const slider = sliders.nth(zoomIdx);
-    const sliderVisible = await slider.isVisible().catch(() => false);
-    if (sliderVisible) {
-      // Change the value and verify the app doesn't crash
-      await slider.fill('90').catch(() => {});
-      await page.waitForTimeout(300);
-      await expect(page.locator('text=Settings').first()).toBeVisible();
-    }
-
-    // Close settings via the × button
-    await page.locator('button:has-text("×")').first().click();
-    await page.waitForTimeout(200);
-    // Settings panel should be gone
-    await expect(page.locator('text=StriveRS').first()).toBeVisible();
+    await panel.locator('button:has-text("×")').first().click();
+    await expect(page.locator(SELECTORS.SETTINGS_DIALOG)).toHaveCount(0);
   });
 });
