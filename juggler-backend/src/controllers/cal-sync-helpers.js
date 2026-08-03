@@ -7,6 +7,7 @@ var crypto = require('crypto');
 var { libCalAdapterLogger } = require('../lib/logger');
 
 var DEFAULT_TIMEZONE = require('../scheduler/constants').DEFAULT_TIMEZONE;
+var { safeTimezone } = require('juggler-shared/scheduler/dateHelpers');
 
 // 999.1192 (JUG-HEX-SLICES-CALL-CONTROLLERS): the three pure date transforms
 // (jugglerDateToISO / isoToJugglerDate / computeDurationMinutes) moved VERBATIM
@@ -80,10 +81,21 @@ function taskHash(task) {
  * Convert an ISO 8601 string (e.g. from Microsoft Graph) to a Date object
  * that Knex/mysql2 can serialize. Raw ISO strings with 'Z' or microseconds
  * cause ER_TRUNCATED_WRONG_VALUE in MySQL DATETIME columns.
+ *
+ * 999.5027: offset-less T-separated datetimes (Apple CalDAV LAST-MODIFIED)
+ * are defined as UTC per RFC 5545, but new Date() parses them as SERVER-LOCAL.
+ * On a non-UTC host (e.g. local dev), this shifts the stored time by the
+ * server's offset. Fix: detect offset-less T-separated forms and append 'Z'
+ * to pin them to UTC before parsing.
  */
 function toMySQLDate(isoString) {
   if (!isoString) return null;
-  var d = new Date(isoString);
+  var str = isoString;
+  // 999.5027: offset-less T-separated datetime → treat as UTC (RFC 5545).
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?$/.test(str) && !/[Zz]|[+-]\d{2}:?\d{2}$/.test(str)) {
+    str = str + 'Z';
+  }
+  var d = new Date(str);
   return isNaN(d.getTime()) ? null : d;
 }
 
@@ -124,10 +136,26 @@ function callWithRateLimit(pid, fn) {
  * in negative-offset timezones — misclassifying TODAY's all-day events as
  * past (Phase 3b then skips them permanently). Compare calendar dates for
  * all-day events, timestamps for timed ones.
+ *
+ * 999.5027: offset-less T-separated datetimes (Apple CalDAV floating times)
+ * must be interpreted in the user's timezone, not server-local. new Date()
+ * parses them as server-local (UTC on Cloud Run), shifting them by the full
+ * user offset and misclassifying future events as past.
  */
-function isEventPast(startDateTime, isAllDay, todayKey, todayStart) {
+function isEventPast(startDateTime, isAllDay, todayKey, todayStart, timezone) {
   if (!startDateTime) return false;
   if (isAllDay) return String(startDateTime).slice(0, 10) < todayKey;
+  // 999.5027: floating time (offset-less T-separated) — interpret in user's tz.
+  var floating = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2})?(?:\.\d+)?$/.test(startDateTime);
+  if (floating && timezone) {
+    var tz = safeTimezone(timezone, DEFAULT_TIMEZONE);
+    var localToUtc = require('../scheduler/dateHelpers').localToUtc;
+    var jd = isoToJugglerDate(startDateTime, tz);
+    if (jd && jd.date && jd.time) {
+      var utcInstant = localToUtc(jd.date, jd.time, tz);
+      if (utcInstant) return utcInstant < todayStart;
+    }
+  }
   return new Date(startDateTime) < todayStart;
 }
 

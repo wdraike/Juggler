@@ -1286,7 +1286,7 @@ async function sync(req, res) {
         // 999.1605: all-day events compare by calendar date — new Date('YYYY-MM-DD')
         // is UTC midnight, which lands before local todayStart in negative-offset
         // timezones and skipped TODAY's all-day events.
-        var isPast = existingTask ? false : isEventPast(newEvent.startDateTime, !!newEvent.isAllDay, todayKey, todayStart);
+        var isPast = existingTask ? false : isEventPast(newEvent.startDateTime, !!newEvent.isAllDay, todayKey, todayStart, newEvent.startTimezone || tz);
         // Round-trip detection — plain text + raw body (Microsoft returns
         // HTML-wrapped content) + the HTML-encoded '&amp;' variant.
         var evDesc = newEvent.description || '';

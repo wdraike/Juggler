@@ -194,8 +194,34 @@ function isoToJugglerDate(isoString, timezone) {
 
 /**
  * Compute duration in minutes between two ISO datetime strings.
+ *
+ * 999.5027: offset-less T-separated datetimes (Apple CalDAV floating times)
+ * are wall-clock times in the event's timezone. new Date() parses them as
+ * SERVER-LOCAL, so the difference is correct EXCEPT across a server-TZ DST
+ * transition where the server changes clocks but the event's wall clock
+ * does not. Fix: for floating times, read the components directly so the
+ * duration is always the wall-clock difference.
  */
 function computeDurationMinutes(start, end) {
+  if (!start || !end) return 30;
+  // 999.5027: floating times — compute wall-clock duration directly.
+  var floatingStart = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2})?(?:\.\d+)?$/.exec(start);
+  var floatingEnd   = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2})?(?:\.\d+)?$/.exec(end);
+  if (floatingStart && floatingEnd) {
+    // Both floating — compute wall-clock minutes directly from components.
+    var sTotal = (parseInt(floatingStart[1], 10) * 525600 +
+                  parseInt(floatingStart[2], 10) * 43200 +
+                  parseInt(floatingStart[3], 10) * 1440 +
+                  parseInt(floatingStart[4], 10) * 60 +
+                  parseInt(floatingStart[5], 10));
+    var eTotal = (parseInt(floatingEnd[1], 10) * 525600 +
+                  parseInt(floatingEnd[2], 10) * 43200 +
+                  parseInt(floatingEnd[3], 10) * 1440 +
+                  parseInt(floatingEnd[4], 10) * 60 +
+                  parseInt(floatingEnd[5], 10));
+    var diff = eTotal - sTotal;
+    return diff > 0 ? diff : 30;
+  }
   var s = new Date(start);
   var e = new Date(end);
   var diff = Math.round((e - s) / 60000);
