@@ -102,6 +102,35 @@ export default function UpgradePrompt({ darkMode }) {
     };
   }, []);
 
+  // 999.4812: set inert on the app root sibling when a blocking gate is shown,
+  // so keyboard Tab cannot reach controls behind the overlay.
+  var isBlocking = show && detail && (detail.type === 'subscription' || detail.type === 'error');
+
+  useEffect(function() {
+    if (!isBlocking) return;
+    // Mark the app root (parent of UpgradePrompt) as inert.
+    // UpgradePrompt is a sibling of AppLayout under the same parent (#root > fragment).
+    // Setting inert on #root would also disable UpgradePrompt itself, so we
+    // wrap: find the AppLayout's DOM node and set inert on its container.
+    // Simpler: set inert on all siblings of the gate overlay.
+    var root = document.getElementById('root');
+    if (!root) return;
+    // Set inert on all children of #root except the last child (UpgradePrompt's
+    // portal/overlay). In practice, AppLayout is the first child.
+    var children = root.children;
+    for (var i = 0; i < children.length; i++) {
+      children[i].setAttribute('inert', '');
+    }
+    return function() {
+      var root2 = document.getElementById('root');
+      if (!root2) return;
+      var ch = root2.children;
+      for (var j = 0; j < ch.length; j++) {
+        ch[j].removeAttribute('inert');
+      }
+    };
+  }, [isBlocking]);
+
   if (!show || !detail) return null;
 
   var title = 'Upgrade Your Plan';
@@ -141,7 +170,7 @@ export default function UpgradePrompt({ darkMode }) {
   return (
     <div style={{
       position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-      background: 'rgba(0,0,0,0.5)', zIndex: 10000,
+      background: 'rgba(0,0,0,0.5)', zIndex: 10002, // 999.4812: above app max (10001)
       display: 'flex', alignItems: 'center', justifyContent: 'center'
     }} onClick={function() { if (detail?.type !== 'subscription' && detail?.type !== 'error') setShow(false); }}>
       <div style={{
