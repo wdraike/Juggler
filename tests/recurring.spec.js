@@ -12,7 +12,7 @@
  *   TaskCard.jsx              — status toggle buttons via StatusToggle
  */
 
-const { test, expect } = require('@playwright/test');
+const { test, expect, request } = require('@playwright/test');
 const { setupAuth, waitForApp } = require('./helpers/playwright-helpers');
 
 // A recurring template task
@@ -232,18 +232,32 @@ test.describe('Recurring Tasks', () => {
     await expect(page.locator('text=StriveRS').first()).toBeVisible();
   });
 
-  // FIXME (999.5108) — the only test in this file that talks to the REAL API.
-  // Every other test here mocks **/api/** via setupAuth, so the page context
-  // carries the fake 'playwright-test-token'; a real POST /api/tasks with it is
-  // rejected (createRes.ok() === false) and the assertions below never run
-  // against anything. Making it real needs a genuine token minted from the
-  // seeded e2e user plus cleanup of the rows it creates — reported skipped
-  // until then rather than red.
-  test.fixme('rolling 1x/week: completing task generates next instance at +7 days', async ({ page }) => {
-    // This test hits the real API — requires servers to be running.
+  // 999.5108: this test hits the real API (not mocked routes) to verify the
+  // rolling anchor update end-to-end. Mint a real token from the auth service
+  // so the API calls authenticate, and clean up created rows afterwards.
+  test('rolling 1x/week: completing task generates next instance at +7 days', async ({ page }) => {
+    const AUTH_URL = process.env.AUTH_URL || 'http://localhost:5010';
+    const EMAIL = process.env.TEST_EMAIL || 'admin@e2e-test.local';
+    const PASSWORD = process.env.TEST_PASSWORD || 'E2eTestPass2024!';
+    const API_BASE = process.env.API_URL || 'http://localhost:5002/api';
+
+    // Mint a real access token for API calls
+    const authCtx = await request.newContext();
+    const loginRes = await authCtx.post(`${AUTH_URL}/api/auth/login`, {
+      data: { email: EMAIL, password: PASSWORD },
+    });
+    expect(loginRes.ok(), `Auth login failed: ${loginRes.status()}`).toBe(true);
+    const loginBody = await loginRes.json();
+    const token = loginBody.tokens?.accessToken;
+    expect(token).toBeTruthy();
+
+    const apiCtx = await request.newContext({
+      extraHTTPHeaders: { Authorization: `Bearer ${token}` },
+    });
+
     // Create rolling task via API
     const today = new Date().toISOString().slice(0, 10);
-    const createRes = await page.request.post('/api/tasks', {
+    const createRes = await apiCtx.post(`${API_BASE}/tasks`, {
       data: {
         text: 'E2E Rolling Haircut',
         dur: 30,
@@ -262,7 +276,7 @@ test.describe('Recurring Tasks', () => {
     await page.waitForTimeout(1000);
 
     // Fetch instances
-    const listRes = await page.request.get('/api/tasks?recurring_source=' + template.id);
+    const listRes = await apiCtx.get(`${API_BASE}/tasks?recurring_source=` + template.id);
     const { tasks } = await listRes.json();
     const instance = tasks.find(t => t.taskType === 'recurring_instance' && t.sourceId === template.id);
     expect(instance).toBeTruthy();
@@ -272,17 +286,17 @@ test.describe('Recurring Tasks', () => {
     );
 
     // Mark instance done — should update rolling_anchor to instance.date
-    const doneRes = await page.request.put('/api/tasks/' + instance.id + '/status', {
+    const doneRes = await apiCtx.put(`${API_BASE}/tasks/` + instance.id + '/status', {
       data: { status: 'done', scheduledAt: instance.date + 'T12:00:00Z' }
     });
     expect(doneRes.ok()).toBeTruthy();
 
     // Verify rolling_anchor updated on master
-    const masterRes = await page.request.get('/api/tasks/' + template.id);
+    const masterRes = await apiCtx.get(`${API_BASE}/tasks/` + template.id);
     const { task: updatedMaster } = await masterRes.json();
     expect(updatedMaster.rollingAnchor).toBe(instance.date);
 
     // Cleanup
-    await page.request.delete('/api/tasks/' + template.id);
+    await apiCtx.delete(`${API_BASE}/tasks/` + template.id);
   });
 });

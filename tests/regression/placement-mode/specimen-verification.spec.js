@@ -15,11 +15,13 @@
  */
 const { test, expect, request } = require('@playwright/test');
 
+// 999.5108: replace hardcoded dev credentials with env vars so the specs
+// can run in CI (seeds admin@e2e-test.local) or any other environment.
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3002';
 const AUTH_URL = process.env.AUTH_URL || 'http://localhost:5010';
 const API_URL = process.env.API_URL || 'http://localhost:5002/api';
-const EMAIL = 'wdraike@gmail.com';
-const PASSWORD = 'TempPass2024!';
+const EMAIL = process.env.TEST_EMAIL || 'admin@e2e-test.local';
+const PASSWORD = process.env.TEST_PASSWORD || 'E2eTestPass2024!';
 
 const PIN = '📌';   // 📌
 
