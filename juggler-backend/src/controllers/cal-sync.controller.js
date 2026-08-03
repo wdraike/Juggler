@@ -17,6 +17,8 @@ var { rowToTask, safeParseJSON } = require('./task.controller');
 var { localToUtc } = require('../scheduler/dateHelpers');
 var { safeTimezone } = require('juggler-shared/scheduler/dateHelpers');
 var { taskHash, userHash, isoToJugglerDate, toMySQLDate, DEFAULT_TIMEZONE, callWithRateLimit, isEventPast, isStalePastSkipRow } = require('./cal-sync-helpers');
+// 999.5028: MSFT Graph returns Windows timezone names; convert to IANA for localToUtc
+var { windowsToIana } = require('../slices/calendar/adapters/MicrosoftCalendarAdapter');
 var sseEmitter = require('../lib/sse-emitter');
 var { PLACEMENT_MODES } = require('../lib/placementModes');
 var { isTerminalStatus } = require('../lib/task-status');
@@ -1443,12 +1445,15 @@ async function sync(req, res) {
           var newTaskId = pid2 + '_' + crypto.randomBytes(8).toString('hex');
 
           // Compute scheduled_at
+          // 999.5028: convert with the EVENT's zone when it has one
+          // (MSFT returns Windows names; windowsToIana passes through IANA ids)
+          var newEventTz = windowsToIana(newEvent.startTimezone) || tz;
           var newScheduledAt = null;
           if (jd.date) {
             if (newEvent.isAllDay) {
               newScheduledAt = localToUtc(jd.date, '12:00 AM', tz);
             } else if (jd.time) {
-              newScheduledAt = localToUtc(jd.date, jd.time, tz);
+              newScheduledAt = localToUtc(jd.date, jd.time, newEventTz);
             }
           }
 

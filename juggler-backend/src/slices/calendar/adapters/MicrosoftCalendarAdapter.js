@@ -110,6 +110,25 @@ function ianaToWindows(iana) {
   return IANA_TO_WINDOWS[iana] || iana;
 }
 
+// 999.5028 — reverse mapping for MSFT Graph events whose start.timeZone is
+// a Windows zone name. When the event's wall clock differs from the user's
+// tz, localToUtc must convert in the EVENT's zone, not the user's.
+var WINDOWS_TO_IANA = {};
+Object.keys(IANA_TO_WINDOWS).forEach(function (iana) {
+  var win = IANA_TO_WINDOWS[iana];
+  // First-write wins: multiple IANA ids map to the same Windows name
+  // (e.g. America/New_York and America/Toronto → 'Eastern Standard Time').
+  // Any representative is correct — they share DST rules.
+  if (!WINDOWS_TO_IANA[win]) WINDOWS_TO_IANA[win] = iana;
+});
+
+function windowsToIana(win) {
+  if (!win) return null;
+  // Already an IANA id? Return as-is.
+  if (win.indexOf('/') !== -1) return win;
+  return WINDOWS_TO_IANA[win] || null;
+}
+
 function isConnected(user) {
   return !!user.msft_cal_refresh_token;
 }
@@ -390,6 +409,13 @@ function applyEventToTaskFields(event, tz, currentTask) {
     }
   }
 
+  // 999.5028 — the wall clock from isoToJugglerDate is in the EVENT's
+  // timezone (for offset-less MSFT strings), not the user's. Convert
+  // with the event's zone so scheduled_at lands in the right UTC instant.
+  // For all-day events and null-timezone events, the user's tz is correct.
+  var eventIana = windowsToIana(event.startTimezone);
+  var convertTz = eventIana || tz;
+
   var fields = {
     text: event.title,
     dur: event.durationMinutes,
@@ -400,7 +426,7 @@ function applyEventToTaskFields(event, tz, currentTask) {
     if (isAllDay) {
       fields.scheduled_at = localToUtc(jd.date, '12:00 AM', tz);
     } else if (jd.time) {
-      fields.scheduled_at = localToUtc(jd.date, jd.time, tz);
+      fields.scheduled_at = localToUtc(jd.date, jd.time, convertTz);
     }
   }
 
@@ -650,5 +676,6 @@ module.exports = {
   buildMsftEventBody,
   getEventIdColumn,
   getLastSyncedColumn,
-  setDb
+  setDb,
+  windowsToIana
 };
