@@ -54,18 +54,6 @@ test.describe('CalendarView — overdue badge (month view)', () => {
       })
     );
 
-    // Mock schedule placements — return _overdue=true for the past task
-    await page.route('**/schedule/placements**', (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          dayPlacements: { [PAST_DATE_KEY]: [PAST_PLACEMENT] },
-          unplaced: [],
-          ok: true,
-        }),
-      })
-    );
 
     // Mock schedule/run
     await page.route('**/schedule/run**', (route) =>
@@ -80,52 +68,60 @@ test.describe('CalendarView — overdue badge (month view)', () => {
     await waitForApp(page);
   });
 
-  // FIXME (999.5109) — measured 2026-08-03: CalendarView never renders this task,
-  // so the badge assertion can't be reached. Probe evidence, same mocked task
-  // (date 2025-01-15, status '', overdue 0):
-  //   List view  → chip 'Past due task' VISIBLE (the task is in the app)
-  //   Month view → NOT visible in Aug 2026, and still not visible after 20
-  //                'Previous month' clicks (reaches Dec 2024, so navigation
-  //                works and Jan 2025 was passed through)
-  //   adding snake_case scheduled_at / start / dur_mins changed nothing
-  // The spec's `**/schedule/placements**` mock is also dead: placements are now
-  // DERIVED from the /tasks payload (useTaskState.js:121 'No /schedule/placements
-  // fetch'). Whether month view SHOULD show a long-past overdue task is a product
-  // question — the overdue-stays-pinned ruling suggests yes — so this needs a
-  // ruling plus either a component fix or a rewritten expectation, not a red gate.
-  test.fixme('overdue task chip shows ⚠ badge in month (CalendarView) view', async ({ page }) => {
-    // Switch to Month view
-    const monthBtn = page.locator('button:has-text("Month")').first();
-    if (await monthBtn.isVisible()) {
-      await monthBtn.click({ force: true });
-      await page.waitForTimeout(500);
-    }
+  // 999.5109 — measured 2026-08-03 against the live stack: the month view DOES
+  // render a long-past overdue task in its historical cell. The Jan-2025 grid
+  // reads "...|14| |15|0/1|Past due task| |16|...". The earlier "CalendarView
+  // never renders this task" finding was a SPEC bug, not a product bug:
+  //   * the Month switch used button:has-text("Month"), but the nav buttons
+  //     render icon + shortLabel — anchor on button[title*="view — "], which
+  //     every VIEW_MODES tip carries and nothing else does;
+  //   * the back-navigation used the comma selector
+  //     'button[title="Previous month"], button:has-text("‹")' with .first().
+  //     HeaderBar's "‹" (Previous day) precedes CalendarView's button in the
+  //     DOM, so .first() paged DAYS and never reached Jan 2025.
+  // With the exact title selector it arrives in 18 clicks.
+  test('long-past overdue task renders in its historical month cell', async ({ page }) => {
+    // Switch to Month view. Every VIEW_MODES button carries title="… view — …".
+    const monthBtn = page.locator('button[title*="view — "]').filter({ hasText: 'Month' }).first();
+    await expect(monthBtn).toBeVisible();
+    await monthBtn.click({ force: true });
+    await page.waitForTimeout(500);
 
-    // Navigate back to January 2025 where the past task lives.
-    // The month view starts at current month, so we need to go back ~17 months.
-    // Rather than clicking many times, check if the task text is visible first.
-    // If the CalendarView is showing current month, navigate back.
-    const prevBtn = page.locator('button[title="Previous month"], button:has-text("‹")').first();
-    let iterations = 0;
-    while (iterations < 24) {
-      const taskText = page.locator('text=Past due task').first();
-      if (await taskText.isVisible().catch(() => false)) break;
-      if (await prevBtn.isVisible().catch(() => false)) {
-        await prevBtn.click({ force: true });
-        await page.waitForTimeout(200);
-      }
-      iterations++;
+    // Walk back to January 2025. Exact title only — see the note above.
+    const prevBtn = page.locator('button[title="Previous month"]').first();
+    const heading = page.locator('h2').first();
+    for (let i = 0; i < 24; i++) {
+      if ((await heading.innerText()).startsWith('Jan 2025')) break;
+      await prevBtn.click({ force: true });
+      await page.waitForTimeout(120);
     }
+    await expect(heading).toHaveText(/^Jan 2025/);
 
     // The task chip for the past-due task should be visible
     const taskChip = page.locator('text=Past due task').first();
     await expect(taskChip).toBeVisible({ timeout: 3000 });
+  });
 
-    // The overdue badge (⚠ U+26A0) should appear before the task text
-    // It renders inside the same parent div — check the parent contains the warning glyph
-    const chipContainer = taskChip.locator('..').locator('..');
-    const overdueGlyph = chipContainer.locator('span').filter({ hasText: '⚠' }).first();
-    await expect(overdueGlyph).toBeVisible({ timeout: 3000 });
+  // The chip renders (above, green) but carries NO ⚠. That is a real product
+  // bug, filed as 999.5116, not a spec problem: utils/overdue.js:19
+  // isTaskOverdue(task, isDone) is `!!(task && task.overdue) && !isDone`, so it
+  // consults ONLY the raw overdue column. This fixture sets overdue: 0 on
+  // purpose — the scheduler clears that flag on every run — so CalendarView.jsx:142
+  // computes isOverdue=false and the U+26A0 span at CalendarView.jsx:188 never
+  // renders. That is exactly the Bug-1 regression this file was written to guard.
+  // Fixing it means touching a canonical predicate with several consumers, so it
+  // is tracked rather than drive-by patched from a CI lane.
+  test.fixme('overdue task chip shows ⚠ badge when the DB overdue flag is cleared (999.5116)', async ({ page }) => {
+    const monthBtn = page.locator('button[title*="view — "]').filter({ hasText: 'Month' }).first();
+    await monthBtn.click({ force: true });
+    const prevBtn = page.locator('button[title="Previous month"]').first();
+    const heading = page.locator('h2').first();
+    for (let i = 0; i < 24; i++) {
+      if ((await heading.innerText()).startsWith('Jan 2025')) break;
+      await prevBtn.click({ force: true });
+      await page.waitForTimeout(120);
+    }
+    await expect(page.locator('text=Past due task').first()).toContainText('⚠');
   });
 
   test('completed overdue task does NOT show ⚠ badge', async ({ page }) => {
@@ -138,17 +134,6 @@ test.describe('CalendarView — overdue badge (month view)', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({ tasks: [DONE_PLACEMENT.task] }),
-      })
-    );
-    await page.route('**/schedule/placements**', (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          dayPlacements: { [PAST_DATE_KEY]: [DONE_PLACEMENT] },
-          unplaced: [],
-          ok: true,
-        }),
       })
     );
 
