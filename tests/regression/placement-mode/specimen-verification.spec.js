@@ -53,7 +53,18 @@ async function gotoApp(page) {
   await page.waitForTimeout(2500);
 }
 
-test('TC-BIRD-001 — May 23 day view: 4 specimens render WITHOUT pin badge', async ({ page }) => {
+// FIXME (999.5107) — cannot pass in ANY shared environment, so it reports skipped
+// rather than red. Two hard dependencies on one developer's local machine:
+//   1. it logs in as wdraike@gmail.com / TempPass2024! against a hardcoded
+//      http://localhost:5010, credentials that exist in no seeded environment
+//      (CI's e2e user is admin@e2e-test.local), so beforeAll gets 401;
+//   2. it asserts against named rows from that dev database ("Fix Weed Wacker",
+//      "CTA: Decide what to do with old Fiserv 401(k)", specimens dated
+//      2026-05-23) which no seeded fixture contains.
+// The regression it guards (placement_mode migration: calendar-imported tasks
+// must not render a pin badge) is real and worth keeping — it needs seeded
+// specimens and env-driven credentials, not a red gate in the meantime.
+test.fixme('TC-BIRD-001 — May 23 day view: 4 specimens render WITHOUT pin badge', async ({ page }) => {
   await gotoApp(page);
 
   const specimens = [
@@ -110,7 +121,7 @@ test('TC-BIRD-001 — May 23 day view: 4 specimens render WITHOUT pin badge', as
   }
 });
 
-test('TC-BIRD-002 — Fix Weed Wacker shows 📌 pin badge (legitimately fixed)', async ({ page }) => {
+test.fixme('TC-BIRD-002 — Fix Weed Wacker shows 📌 pin badge (legitimately fixed)', async ({ page }) => {
   await gotoApp(page);
 
   // Filter to Fixed to make sure the task is rendered visibly
@@ -185,7 +196,7 @@ test('TC-BIRD-002 — Fix Weed Wacker shows 📌 pin badge (legitimately fixed)'
   }
 });
 
-test('TC-BIRD-003 — Filter pills show Fixed (7) and Overdue (2)', async ({ page }) => {
+test.fixme('TC-BIRD-003 — Filter pills show Fixed (7) and Overdue (2)', async ({ page }) => {
   await gotoApp(page);
   await page.screenshot({ path: 'tests/ux-bird-day-view-full.png', fullPage: true });
 
@@ -202,7 +213,7 @@ test('TC-BIRD-003 — Filter pills show Fixed (7) and Overdue (2)', async ({ pag
   if (overdueMatch) expect(parseInt(overdueMatch[1], 10)).toBe(2);
 });
 
-test('TC-BIRD-004 — Open specimen editor: 🔄 Anytime is active scheduling mode', async ({ page }) => {
+test.fixme('TC-BIRD-004 — Open specimen editor: 🔄 Anytime is active scheduling mode', async ({ page }) => {
   await gotoApp(page);
 
   // Click on the specimen text to open editor
@@ -247,7 +258,7 @@ test('TC-BIRD-004 — Open specimen editor: 🔄 Anytime is active scheduling mo
   await page.screenshot({ path: 'tests/ux-bird-editor-anytime-active.png', fullPage: true });
 });
 
-test('TC-BIRD-005 — API verification: 4 specimens are anytime, Weed Wacker is fixed', async () => {
+test.fixme('TC-BIRD-005 — API verification: 4 specimens are anytime, Weed Wacker is fixed', async () => {
   const ctx = await request.newContext({
     extraHTTPHeaders: { Authorization: `Bearer ${accessToken}` },
   });

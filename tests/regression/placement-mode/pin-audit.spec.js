@@ -49,7 +49,18 @@ async function clickFilterPill(page, label) {
   await page.waitForTimeout(1500);
 }
 
-test('AUDIT — Pin badge presence across all views, filtered to Fixed', async ({ page }) => {
+// FIXME (999.5107) — cannot pass in ANY shared environment, so it reports skipped
+// rather than red. Two hard dependencies on one developer's local machine:
+//   1. it logs in as wdraike@gmail.com / TempPass2024! against a hardcoded
+//      http://localhost:5010, credentials that exist in no seeded environment
+//      (CI's e2e user is admin@e2e-test.local), so beforeAll gets 401;
+//   2. it asserts against named rows from that dev database ("Fix Weed Wacker",
+//      "CTA: Decide what to do with old Fiserv 401(k)", specimens dated
+//      2026-05-23) which no seeded fixture contains.
+// The regression it guards (placement_mode migration: calendar-imported tasks
+// must not render a pin badge) is real and worth keeping — it needs seeded
+// specimens and env-driven credentials, not a red gate in the meantime.
+test.fixme('AUDIT — Pin badge presence across all views, filtered to Fixed', async ({ page }) => {
   await setupApp(page);
 
   // Use the Fixed filter so we focus on the 7 tasks the system flagged
