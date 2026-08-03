@@ -9,7 +9,7 @@ const envConfig = require('../../../lib/config');
 // larger budget because model inference is slower than weather HTTP lookups.
 // 45s default lives in lib/config's SCHEMA now; override via AI_CALL_TIMEOUT_MS (999.1473).
 
-async function trackedGeminiCall(db, client, modelName, contents, config, { useCase, userId = null, correlationId = null, timeoutMs } = {}) {
+async function trackedGeminiCall(db, client, modelName, contents, config, { useCase, userId = null, authServiceId = null, correlationId = null, timeoutMs } = {}) {
   // Read env at call time (not module load) so tests setting process.env.AI_CALL_TIMEOUT_MS
   // before require() take effect via isolateModules, and runtime env overrides work.
   // config.getInt reads process.env fresh on every call (never memoized), same contract.
@@ -67,6 +67,7 @@ async function trackedGeminiCall(db, client, modelName, contents, config, { useC
         const usage = result?.usageMetadata ?? {};
         enqueue(db, {
           userId,
+          authServiceId,
           useCase,
           modelName,
           modelParams:   config ?? null,   // original config — no abortSignal

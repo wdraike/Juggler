@@ -10,7 +10,7 @@ async function enqueue(db, event) {
   try {
     await db('ai_usage_outbox').insert(stampInsert({
       id:             uuidv7(),
-      user_id:        event.userId ?? null,
+      user_id:        event.authServiceId ?? event.userId ?? null,
       use_case:       event.useCase,
       model_name:     event.modelName,
       model_params:   event.modelParams != null ? JSON.stringify(event.modelParams) : null,

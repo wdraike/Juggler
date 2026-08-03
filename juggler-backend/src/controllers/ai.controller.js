@@ -22,13 +22,16 @@ const AI_DAILY_LIMIT = aiEnrichment.AI_DAILY_LIMIT;
 // W2 (SECURITY — A09 audit trail): callGemini accepts userId so the inference
 // telemetry row (ai_usage_outbox) is attributed to the authenticated principal
 // instead of null. Cost/abuse investigations can now tie an AI call to a user.
-async function callGemini(prompt, systemPrompt, userId) {
+// authServiceId is the auth-service user ID for cross-service usage tracking
+// (999.5112); userId (local app ID) is still used for quota.
+async function callGemini(prompt, systemPrompt, userId, authServiceId) {
   const result = await aiEnrichment.generate(
     systemPrompt + '\n\n---\nUser request:\n' + prompt,
     { temperature: 0.2, topP: 0.8, topK: 40, maxOutputTokens: 8192 },
     {
       useCase:       AI_USE_CASES.TASK_AI,
       userId:        userId || null,
+      authServiceId: authServiceId || null,
       correlationId: null,
     }
   );
@@ -104,7 +107,7 @@ exports.handleCommand = async (req, res) => {
     // Sanitize user input
     var safeCmd = command.replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/—/g, '--').replace(/–/g, '-').replace(/…/g, '...');
 
-    const raw = await callGemini(safeCmd, sysPrompt, userId);
+    const raw = await callGemini(safeCmd, sysPrompt, userId, req.user.authServiceId);
 
     // Gemini call succeeded — consume one quota slot (W1b B5 fix: commit ONLY on success).
     // If callGemini throws (ETIMEDOUT, network error, etc.) this line is never reached.

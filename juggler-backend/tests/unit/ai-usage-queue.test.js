@@ -49,4 +49,10 @@ describe('ai-usage-queue enqueue() [juggler]', () => {
     mockInsert.mockRejectedValueOnce(new Error('DB down'));
     await expect(enqueue(mockDb, validEvent)).resolves.not.toThrow();
   });
+
+  test('uses authServiceId as user_id when provided', async () => {
+    await enqueue(mockDb, { ...validEvent, authServiceId: 'auth-svc-123' });
+    const row = mockInsert.mock.calls[0][0];
+    expect(row.user_id).toBe('auth-svc-123');
+  });
 });
