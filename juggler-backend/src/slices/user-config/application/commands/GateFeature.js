@@ -80,7 +80,7 @@ GateFeature.prototype.requireFeature = function requireFeature(ctx, featurePath)
 
   if (decision.outcome === 'deny') {
     this.logFeatureEvent(ctx.req, featurePath, 'blocked', { current_plan: ctx.planId || 'free' });
-    this.reportUsage({ userId: ctx.userId, planId: ctx.planId, featureKey: featurePath, eventType: 'blocked', endpoint: ctx.method + ' ' + ctx.originalUrl });
+    this.reportUsage({ userId: ctx.paymentUserId || ctx.userId, planId: ctx.planId, featureKey: featurePath, eventType: 'blocked', endpoint: ctx.method + ' ' + ctx.originalUrl });
     return {
       status: 403,
       body: {
@@ -95,7 +95,7 @@ GateFeature.prototype.requireFeature = function requireFeature(ctx, featurePath)
 
   // allow
   this.logFeatureEvent(ctx.req, featurePath, 'used', null);
-  this.reportUsage({ userId: ctx.userId, planId: ctx.planId, featureKey: featurePath, eventType: 'used', endpoint: ctx.method + ' ' + ctx.originalUrl });
+  this.reportUsage({ userId: ctx.paymentUserId || ctx.userId, planId: ctx.planId, featureKey: featurePath, eventType: 'used', endpoint: ctx.method + ' ' + ctx.originalUrl });
   return { status: null };
 };
 
@@ -206,7 +206,7 @@ GateFeature.prototype.checkUsageLimit = async function checkUsageLimit(ctx, limi
 
     if (decision.outcome === 'deny') {
       this.logFeatureEvent(ctx.req, limitKey, 'limit_reached', { current_usage: result.currentCount, limit: limit });
-      this.reportUsage({ userId: userId, planId: ctx.planId, featureKey: limitKey, eventType: 'limit_reached', endpoint: ctx.method + ' ' + ctx.originalUrl });
+      this.reportUsage({ userId: ctx.paymentUserId || userId, planId: ctx.planId, featureKey: limitKey, eventType: 'limit_reached', endpoint: ctx.method + ' ' + ctx.originalUrl });
       return {
         status: 429,
         body: {
@@ -224,7 +224,7 @@ GateFeature.prototype.checkUsageLimit = async function checkUsageLimit(ctx, limi
 
     // allow
     this.logFeatureEvent(ctx.req, limitKey, 'used', { count_after: result.currentCount });
-    this.reportUsage({ userId: userId, planId: ctx.planId, featureKey: limitKey, eventType: 'used', endpoint: ctx.method + ' ' + ctx.originalUrl });
+    this.reportUsage({ userId: ctx.paymentUserId || userId, planId: ctx.planId, featureKey: limitKey, eventType: 'used', endpoint: ctx.method + ' ' + ctx.originalUrl });
     return { status: null };
   } catch (err) {
     // fail-open (feature-gate.js:205-208)

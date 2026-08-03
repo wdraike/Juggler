@@ -36,6 +36,10 @@ function ctxFromReq(req) {
     planFeatures: req.planFeatures,
     planId: req.planId,
     userId: req.user?.id,
+    // 999.4917: payment-service usage tables are audited against
+    // auth_service.users.id; send the auth-service user id, not the local
+    // app user id, so the row is not a cross-service orphan.
+    paymentUserId: req.user?.authServiceId || req.user?.id,
     method: req.method,
     originalUrl: req.originalUrl
   };
