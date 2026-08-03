@@ -59,18 +59,14 @@ async function openCreateForm(page) {
 }
 
 async function openEditForm(page, taskText = 'UX sweep task') {
-  const listBtn = page.locator('button[title="List view — all tasks grouped by date"]').first();
-  if (await listBtn.isVisible().catch(() => false)) {
-    await listBtn.click({ force: true });
-    await page.waitForTimeout(600);
-  }
+  // No silent skips: a card that never renders, or a form that never opens, has
+  // to fail HERE with a readable message instead of leaving every later
+  // assertion to time out against a page that was never in the expected state.
+  await page.locator('button[title="List view — all tasks grouped by date"]').first().click({ force: true });
   const card = page.locator(`text=${taskText}`).first();
-  if (await card.isVisible().catch(() => false)) {
-    await card.click({ force: true });
-    await page.waitForTimeout(600);
-    return true;
-  }
-  return false;
+  await card.waitFor({ state: 'visible', timeout: 15000 });
+  await card.click({ force: true });
+  await page.locator('[data-testid="task-title"]').first().waitFor({ state: 'visible', timeout: 15000 });
 }
 
 async function ensureWhenExpanded(page) {
@@ -111,9 +107,9 @@ async function ensureConstraintsExpanded(page) {
  * Avoids matching the global search box or AI command input.
  */
 function taskNameInput(page) {
-  // The task name input is the textbox inside the form that has no placeholder
-  // and appears after the status toggle section.
-  return page.locator('input[type="text"]:not([placeholder])').first();
+  // TaskDetailHeader.jsx:161 — the only data-testid in the task form. Same
+  // element on mobile and desktop; TaskEditForm renders one header either way.
+  return page.locator('[data-testid="task-title"]').first();
 }
 
 // ── Desktop Suite ──────────────────────────────────────────────────────────
@@ -131,7 +127,11 @@ test.describe('UX Sweep — Desktop (1280x800)', () => {
       if (route.request().method() === 'PUT' || route.request().method() === 'PATCH') {
         return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
       }
-      return route.continue();
+      // Never route.continue() here. The request carries the fake test token, the
+      // real backend 401s it, and apiClient clears the session — the app drops to
+      // the signed-out landing page mid-test, so every later assertion runs
+      // against a page that has no task form at all.
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ task: TASK_BASE }) });
     });
   });
 
@@ -245,18 +245,23 @@ test.describe('UX Sweep — Desktop (1280x800)', () => {
     await page.waitForTimeout(100);
   });
 
-  test('Create mode — Rigid/Float button toggles', async ({ page }) => {
+  test('Create mode — scheduling-mode buttons toggle aria-pressed', async ({ page }) => {
     await page.goto('/');
     await waitForApp(page);
     await openCreateForm(page);
     await ensureWhenExpanded(page);
 
-    const floatBtn = page.locator('button').filter({ hasText: /Float/ }).first();
-    await expect(floatBtn).toBeVisible();
-    await floatBtn.click();
-    await page.waitForTimeout(100);
+    // The Rigid/Float pair is gone: the row is Anytime / Time window /
+    // Time blocks / All Day / Fixed, each an aria-pressed toggle
+    // (WhenSection.jsx:356-382).
+    const modeRow = page.locator('[role="group"][aria-label="Scheduling mode"]');
+    const anytime = modeRow.getByRole('button', { name: /Anytime/ });
+    const fixed = modeRow.getByRole('button', { name: /Fixed/ });
+    await expect(anytime).toHaveAttribute('aria-pressed', 'true');
 
-    await expect(page.locator('button').filter({ hasText: /Fixed/ }).first()).toBeVisible();
+    await fixed.click();
+    await expect(fixed).toHaveAttribute('aria-pressed', 'true');
+    await expect(anytime).toHaveAttribute('aria-pressed', 'false');
   });
 
   test('Create mode — End-time validation blocks save on invalid range', async ({ page }) => {
@@ -301,8 +306,7 @@ test.describe('UX Sweep — Desktop (1280x800)', () => {
 
     await page.goto('/');
     await waitForApp(page);
-    const opened = await openEditForm(page);
-    if (!opened) await openCreateForm(page);
+    await openEditForm(page);
     await ensureWhenExpanded(page);
 
     const input = taskNameInput(page);
@@ -315,10 +319,12 @@ test.describe('UX Sweep — Desktop (1280x800)', () => {
     expect(await saveBtn.isVisible().catch(() => false)).toBe(true);
   });
 
-  test('Edit mode — fixed/pinned task disables mode selector', async ({ page }) => {
-    const pinnedTask = { ...TASK_BASE, datePinned: true, placementMode: 'fixed' };
+  test('Edit mode — calendar-managed fixed task locks the mode selector', async ({ page }) => {
+    // WhenSection.jsx:253 — isFixed = placementMode === 'fixed' && isCalManaged,
+    // and isCalManaged = !!task.calLocked. datePinned alone does NOT lock the row.
+    const calTask = { ...TASK_BASE, placementMode: 'fixed', calLocked: true, gcalEventId: 'gcal_evt_1' };
     await page.route('**/api/tasks**', (route) =>
-      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ tasks: [pinnedTask] }) })
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ tasks: [calTask] }) })
     );
 
     await page.goto('/');
@@ -326,22 +332,21 @@ test.describe('UX Sweep — Desktop (1280x800)', () => {
     await openEditForm(page);
     await ensureWhenExpanded(page);
 
-    // When pinned/fixed, the scheduling-mode row is dimmed and pointer-events disabled.
-    // Look for the presence of the pin warning text or the disabled styling.
-    const warning = page.locator('text=Date is pinned').first();
-    const calendarManaged = page.locator('text=Calendar-managed').first();
-    const modeRowDimmed = await page.locator('button[title="No time restriction — the scheduler can place this in any available slot"]').first().evaluate((el) => {
-      return window.getComputedStyle(el).opacity < '1' || el.closest('div')?.style?.pointerEvents === 'none';
-    }).catch(() => false);
-    expect(
-      await warning.isVisible().catch(() => false) ||
-      await calendarManaged.isVisible().catch(() => false) ||
-      modeRowDimmed
-    ).toBe(true);
+    await expect(page.locator('text=Calendar-managed').first()).toBeVisible();
+    const modeRow = page.locator('[role="group"][aria-label="Scheduling mode"]');
+    await expect(modeRow).toHaveCSS('pointer-events', 'none');
+    // Every mode button is taken out of the tab order while locked
+    // (WhenSection.jsx tabIndex={isFixed ? -1 : 0})
+    expect(await modeRow.locator('button').evaluateAll(
+      (els) => els.every((el) => el.tabIndex === -1)
+    )).toBe(true);
   });
 
-  test('Edit mode — marker=true suppresses When/Where/Weather/Tools sections', async ({ page }) => {
-    const markerTask = { ...TASK_BASE, marker: true };
+  test('Edit mode — reminder task suppresses When/Where/Weather/Tools sections', async ({ page }) => {
+    // 999.1000: `marker` is DERIVED — TaskEditForm.jsx:259 reads
+    // placementMode === 'reminder'. The marker DB column was dropped, so a
+    // fixture that sets marker:true alone changes nothing.
+    const markerTask = { ...TASK_BASE, placementMode: 'reminder' };
     await page.route('**/api/tasks**', (route) =>
       route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ tasks: [markerTask] }) })
     );
@@ -350,9 +355,12 @@ test.describe('UX Sweep — Desktop (1280x800)', () => {
     await waitForApp(page);
     await openEditForm(page);
 
-    expect(await page.locator('button:has-text("When")').first().isVisible().catch(() => false)).toBe(false);
-    expect(await page.locator('button:has-text("Where")').first().isVisible().catch(() => false)).toBe(false);
-    expect(await page.locator('button:has-text("Weather")').first().isVisible().catch(() => false)).toBe(false);
+    // The ◇ Reminder toggle is on, and the scheduling sections are gone
+    // (TaskEditForm.jsx:377/428/435/455 all gate on !marker).
+    await expect(page.locator('button').filter({ hasText: /Reminder/ }).first()).toBeVisible();
+    for (const section of ['When', 'Where', 'Weather', 'Tools']) {
+      await expect(page.locator('button').filter({ hasText: new RegExp(`[▶▼] ${section}$`) })).toHaveCount(0);
+    }
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -446,7 +454,10 @@ test.describe('UX Sweep — Desktop (1280x800)', () => {
   });
 
   test('Recurring — rolling with anchor shows completed date and next due', async ({ page }) => {
-    const recurTask = { ...TASK_BASE, recurring: true, placementMode: 'anytime', recur: { type: 'rolling', every: 7, unit: 'days' }, recurType: 'rolling', recurEvery: 7, recurUnit: 'days', rolling_anchor: '2026-06-01' };
+    // next_start is the single unified anchor column (rolling_anchor and
+    // next_occurrence_anchor were dropped); rowToTask maps it to task.nextStart,
+    // which is what WhenSection.jsx:779 reads.
+    const recurTask = { ...TASK_BASE, recurring: true, placementMode: 'anytime', recur: { type: 'rolling', every: 7, unit: 'days' }, recurType: 'rolling', recurEvery: 7, recurUnit: 'days', nextStart: '2026-06-01' };
     await page.route('**/api/tasks**', (route) =>
       route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ tasks: [recurTask] }) })
     );
@@ -511,7 +522,11 @@ test.describe('UX Sweep — Mobile (375x667)', () => {
       if (route.request().method() === 'PUT' || route.request().method() === 'PATCH') {
         return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
       }
-      return route.continue();
+      // Never route.continue() here. The request carries the fake test token, the
+      // real backend 401s it, and apiClient clears the session — the app drops to
+      // the signed-out landing page mid-test, so every later assertion runs
+      // against a page that has no task form at all.
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ task: TASK_BASE }) });
     });
   });
 
