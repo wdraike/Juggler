@@ -21,6 +21,21 @@ jest.mock('../../../services/apiClient', () => ({
   clearAccessToken: jest.fn()
 }));
 
+// 999.5016 made HealthDot (rendered by HeaderBar) a useConnection consumer, which
+// throws "useConnection must be used within a ConnectionProvider" when the tree has
+// no provider — this suite's 3 tests were the only juggler-frontend failures in CI
+// Gate run 30816402513. Mocked the same way HealthDot.bug487-fe.test.jsx does.
+jest.mock('../../../contexts/ConnectionContext', () => ({
+  useConnection: () => ({ setConnectionStatus: jest.fn() }),
+  ConnectionProvider: ({ children }) => children,
+}));
+
+jest.mock('../../common/GlobalConnectionModal', () => ({
+  showConnectionModal: jest.fn(),
+  hideConnectionModal: jest.fn(),
+  default: () => null,
+}));
+
 jest.mock('../../auth/AuthProvider', () => ({
   __esModule: true,
   useAuth: () => ({
