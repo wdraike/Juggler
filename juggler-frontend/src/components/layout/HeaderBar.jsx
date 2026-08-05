@@ -18,7 +18,7 @@ import { Settings, CreditCard, Bug, LogOut } from 'lucide-react';
 import { services, homeUrl } from '../../proxy-config';
 var BILLING_URL = services.billing.frontend;
 
-export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, onShowMsftCalSync, msftCalSyncing, calSyncing, calSyncProgress, schedulerRunning, onShowCalSync, onShowHelp, onAddTask, onUndo, canUndo, isMobile, isCompact, aiPanel, weekStripDates, selectedDate, dayOffset, setDayOffset, today, activeTimezone, tzSource, onManageDisabled, onCompactChange }) {
+export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, onShowMsftCalSync, msftCalSyncing, calSyncing, calSyncProgress, schedulerRunning, onShowCalSync, onShowHelp, onAddTask, onUndo, canUndo, isMobile, isCompact, aiPanel, weekStripDates, selectedDate, dayOffset, setDayOffset, today, activeTimezone, tzSource, onManageDisabled, onCompactChange, viewMode }) {
   // Measure the actual header container width with ResizeObserver so the layout
   // reacts correctly when sidebars/panels open and narrow the header — window.innerWidth
   // based breakpoints miss that case entirely.
@@ -103,7 +103,8 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
       {aiPanel}
 
       {/* Inline week strip — fills the gap between AI input and action buttons */}
-      {!useOverflow && weekStripDates && (function() {
+      {/* 999.5163: hide date selector on non-date-dependent views */}
+      {!useOverflow && weekStripDates && viewMode && !['priority', 'deps', 'conflicts'].includes(viewMode) && (function() {
         var todayKey = formatDateKey(today);
         var SHORT_DAY = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
         var dateInputValue = selectedDate.getFullYear() + '-' +

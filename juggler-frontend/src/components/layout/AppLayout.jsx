@@ -840,8 +840,9 @@ export default function AppLayout() {
           weekStripDates={weekStripDates} selectedDate={selectedDate}
           dayOffset={dayOffset} setDayOffset={setDayOffset} today={today}
           onManageDisabled={function() { setShowDisabledItems(true); }}
+          viewMode={viewMode}
         />
-        {(isMobile || headerCompact) && <WeekStrip
+        {(isMobile || headerCompact) && viewMode && !['priority', 'deps', 'conflicts'].includes(viewMode) && <WeekStrip
           weekStripDates={weekStripDates} selectedDate={selectedDate}
           dayOffset={dayOffset} setDayOffset={setDayOffset} today={today}
           darkMode={darkMode} statuses={statuses} tasksByDate={tasksByDate}
