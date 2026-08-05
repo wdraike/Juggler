@@ -189,7 +189,12 @@ export default React.memo(function ScheduleCard({ item, status, splitProgress, o
           </span>
         ) : (
           <>
-            {onStatusChange && <StatusToggle value={status} onChange={onStatusChange} onDelete={onDelete} darkMode={darkMode} isMobile={isMobile} disableTerminal={!item.task.scheduledAt} />}
+            {onStatusChange && <StatusToggle value={status} onChange={onStatusChange} onDelete={onDelete} darkMode={darkMode} isMobile={isMobile} />}
+            {/* 999.5164: removed disableTerminal={!item.task.scheduledAt} — the
+                D-B ruling (2026-07-02) is global: unscheduled tasks are resolvable
+                in place. The backend snaps scheduled_at to now. TaskCard and
+                DailyViewUnschedEntry already dropped this guard; ScheduleCard was
+                missed, leaving grid tiles unable to mark an unscheduled task done. */}
             {/* 999.1220: merged split card — done is chunk-only, so surface
                 per-chunk progress ("1/3 done"); a done tap advances the next
                 incomplete chunk. */}

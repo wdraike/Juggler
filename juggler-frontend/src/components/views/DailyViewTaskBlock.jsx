@@ -204,7 +204,13 @@ export default function TaskBlock({ item, status, top, height, col, totalCols, o
           }}>
             {onStatusChange && (
               <span onClick={function(e) { e.stopPropagation(); }} style={{ display: 'inline-flex', flexShrink: 0 }}>
-                <StatusToggle value={status} onChange={onStatusChange} onDelete={onDelete ? function() { onDelete(t.id); } : null} darkMode={darkMode} compact disableTerminal={!t.scheduledAt} />
+                {/* 999.5164: removed disableTerminal={!t.scheduledAt} — the D-B
+                    ruling (2026-07-02) is global: unscheduled tasks are resolvable
+                    in place. The backend snaps scheduled_at to now. TaskCard and
+                    DailyViewUnschedEntry already dropped this guard; this call site
+                    was missed, leaving daily-view tiles unable to mark an
+                    unscheduled task done. */}
+                <StatusToggle value={status} onChange={onStatusChange} onDelete={onDelete ? function() { onDelete(t.id); } : null} darkMode={darkMode} compact />
               </span>
             )}
             {t.dur > 0 && (
