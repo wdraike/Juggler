@@ -2,18 +2,19 @@
  * ThreeDayView — 3-column calendar
  */
 
-import React from 'react';
+import React, { useMemo, useCallback } from 'react';
 import CalendarGrid from '../schedule/CalendarGrid';
 import { getTheme } from '../../theme/colors';
 import { formatDateKey } from '../../scheduler/dateHelpers';
 import { formatDayHeader } from '../../utils/timezone';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
+import { isTerminalStatus } from '../../shared/task-status';
 
 import WeatherBadge from '../features/WeatherBadge';
 import AllDayBanner from './AllDayBanner';
 import EmptyState from './EmptyState';
 
-export default function ThreeDayView({ selectedDate, dayPlacements, allTasks, statuses, onStatusChange, onDelete, onExpand, gridZoom, darkMode, schedCfg, nowMins, onGridDrop, blockedTaskIds, onZoomChange, isMobile, onMarkerDrag, weatherByDate }) {
+export default function ThreeDayView({ selectedDate, dayPlacements, allTasks, statuses, onStatusChange, onDelete, onExpand, gridZoom, darkMode, schedCfg, nowMins, onGridDrop, blockedTaskIds, onZoomChange, isMobile, onMarkerDrag, weatherByDate, filter, unplacedIds, pastDueIds, fixedIds }) {
   var theme = getTheme(darkMode);
   var todayKey = formatDateKey(new Date());
 
@@ -23,6 +24,35 @@ export default function ThreeDayView({ selectedDate, dayPlacements, allTasks, st
     var key = formatDateKey(d);
     return { date: d, key, isToday: key === todayKey };
   });
+
+  // 999.5162: status filter — matches DayView logic
+  var matchesFilter = useCallback(function (taskId, dateKey) {
+    if (!filter || filter === 'all') return true;
+    var st = statuses[taskId] || '';
+    var isPast = dateKey < todayKey;
+    if (filter === 'open') {
+      if (isPast && isTerminalStatus(st)) return true;
+      return !isTerminalStatus(st);
+    }
+    if (filter === 'action') return st === '';
+    if (filter === 'done') return st === 'done';
+    if (filter === 'pause') return st === 'pause';
+    if (filter === 'pastdue') return pastDueIds && pastDueIds.has(taskId);
+    if (filter === 'fixed') return fixedIds && fixedIds.has(taskId);
+    if (filter === 'blocked') return blockedTaskIds && blockedTaskIds.has(taskId);
+    if (filter === 'unplaced') return unplacedIds && unplacedIds.has(taskId);
+    return true;
+  }, [filter, statuses, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, todayKey]);
+
+  var filteredDayPlacements = useMemo(function () {
+    if (!filter || filter === 'all') return dayPlacements;
+    var result = {};
+    days.forEach(function (d) {
+      var raw = dayPlacements[d.key] || [];
+      result[d.key] = raw.filter(function (p) { return p.task && matchesFilter(p.task.id, d.key); });
+    });
+    return result;
+  }, [dayPlacements, filter, matchesFilter, days]);
 
   return (
     <div style={{ display: 'flex', flex: 1, flexDirection: 'column', minHeight: 0, position: 'relative' }}>
@@ -61,7 +91,7 @@ export default function ThreeDayView({ selectedDate, dayPlacements, allTasks, st
             />
             <CalendarGrid
               dateKey={d.key}
-              placements={dayPlacements[d.key] || []}
+              placements={filteredDayPlacements[d.key] || []}
               statuses={statuses}
 
               onStatusChange={onStatusChange} onDelete={onDelete}

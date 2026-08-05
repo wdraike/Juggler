@@ -32,7 +32,7 @@ jest.mock('../../../scheduler/locationHelpers', () => ({
 jest.mock('../../schedule/CalendarGrid', () => ({
   __esModule: true,
   default: ({ dateKey, placements }) => (
-    <div data-testid="calendar-grid" data-date={dateKey}>
+    <div data-testid="calendar-grid" data-date={dateKey} data-count={placements.length}>
       {placements.length} tasks
     </div>
   )
@@ -225,5 +225,47 @@ describe('ThreeDayView Component', () => {
     );
     
     expect(screen.getAllByTestId('calendar-grid').length).toBe(3);
+  });
+
+  // 999.5162: state filter must work on ThreeDayView, same as DayView
+  test('filter=done hides non-done tasks from the grid', () => {
+    const selectedDate = new Date('2026-06-15'); // Monday
+
+    const tasks = [
+      { id: 't1', text: 'Done Task', pri: 'P1', dur: 60, start: 480, end: 540, task: { id: 't1', text: 'Done Task', pri: 'P1', dur: 60 } },
+      { id: 't2', text: 'Open Task', pri: 'P2', dur: 30, start: 600, end: 630, task: { id: 't2', text: 'Open Task', pri: 'P2', dur: 30 } },
+    ];
+
+    const { getAllByTestId } = render(
+      <ThreeDayView
+        selectedDate={selectedDate}
+        dayPlacements={{
+          '2026-06-15': tasks,
+          '2026-06-16': [],
+          '2026-06-17': []
+        }}
+        allTasks={tasks}
+        statuses={{ 't1': 'done', 't2': '' }}
+        filter="done"
+        onStatusChange={() => {}}
+        onDelete={() => {}}
+        onExpand={() => {}}
+        gridZoom={100}
+        darkMode={false}
+        schedCfg={mockSchedCfg}
+        nowMins={960}
+        onGridDrop={() => {}}
+        blockedTaskIds={[]}
+        onZoomChange={() => {}}
+        isMobile={false}
+        onMarkerDrag={() => {}}
+      />
+    );
+
+    const grids = getAllByTestId('calendar-grid');
+    // The middle day (2026-06-15) has 2 tasks but only 1 is done.
+    // With filter='done', only the done task should reach CalendarGrid.
+    const middleGrid = grids.find(g => g.getAttribute('data-date') === '2026-06-15');
+    expect(middleGrid.getAttribute('data-count')).toBe('1');
   });
 });

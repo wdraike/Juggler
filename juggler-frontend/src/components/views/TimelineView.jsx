@@ -4,19 +4,46 @@
  * header chrome as DayView (date, location, progress, template picker).
  */
 
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useMemo, useCallback } from 'react';
 import HorizontalTimeline from '../schedule/HorizontalTimeline';
 import { getTheme } from '../../theme/colors';
 import { DAY_NAMES } from '../../state/constants';
 import { formatDayLong } from '../../utils/timezone';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
+import { isTerminalStatus } from '../../shared/task-status';
+import { formatDateKey } from '../../scheduler/dateHelpers';
 import WeatherBadge from '../features/WeatherBadge';
 import EmptyState from './EmptyState';
 
-export default function TimelineView({ selectedDate, selectedDateKey, placements, statuses, onStatusChange, onDelete, onExpand, onCreate, gridZoom, darkMode, schedCfg, nowMins, isToday, onGridDrop, locSchedules, onUpdateLocScheduleOverrides, allTasks, onBatchRecurringsDone, locations, onHourLocationOverride, blockedTaskIds, onZoomChange, isMobile, onMarkerDrag, weatherByDate }) {
+export default function TimelineView({ selectedDate, selectedDateKey, placements, statuses, onStatusChange, onDelete, onExpand, onCreate, gridZoom, darkMode, schedCfg, nowMins, isToday, onGridDrop, locSchedules, onUpdateLocScheduleOverrides, allTasks, onBatchRecurringsDone, locations, onHourLocationOverride, blockedTaskIds, onZoomChange, isMobile, onMarkerDrag, weatherByDate, filter, unplacedIds, pastDueIds, fixedIds }) {
   var theme = getTheme(darkMode);
   var scrollRef = useRef(null);
   var loc = getLocationForDatePure(selectedDateKey, schedCfg);
+  var todayKey = formatDateKey(new Date());
+
+  // 999.5162: status filter — matches DayView logic
+  var matchesFilter = useCallback(function (taskId) {
+    if (!filter || filter === 'all') return true;
+    var st = statuses[taskId] || '';
+    var isPast = selectedDateKey < todayKey;
+    if (filter === 'open') {
+      if (isPast && isTerminalStatus(st)) return true;
+      return !isTerminalStatus(st);
+    }
+    if (filter === 'action') return st === '';
+    if (filter === 'done') return st === 'done';
+    if (filter === 'pause') return st === 'pause';
+    if (filter === 'pastdue') return pastDueIds && pastDueIds.has(taskId);
+    if (filter === 'fixed') return fixedIds && fixedIds.has(taskId);
+    if (filter === 'blocked') return blockedTaskIds && blockedTaskIds.has(taskId);
+    if (filter === 'unplaced') return unplacedIds && unplacedIds.has(taskId);
+    return true;
+  }, [filter, statuses, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, selectedDateKey, todayKey]);
+
+  var filteredPlacements = useMemo(function () {
+    if (!filter || filter === 'all') return placements;
+    return placements.filter(function (p) { return p.task && matchesFilter(p.task.id); });
+  }, [placements, filter, matchesFilter]);
 
   // Template override state
   var dayName = DAY_NAMES[selectedDate.getDay()];
@@ -108,7 +135,7 @@ export default function TimelineView({ selectedDate, selectedDateKey, placements
       <div style={{ flex: 1, overflowX: 'auto', overflowY: 'auto', minHeight: 0 }} ref={scrollRef}>
         <HorizontalTimeline
           dateKey={selectedDateKey}
-          placements={placements}
+          placements={filteredPlacements}
           statuses={statuses}
 
           onStatusChange={onStatusChange} onDelete={onDelete}

@@ -27,7 +27,7 @@ jest.mock('../../../scheduler/locationHelpers', () => ({
 jest.mock('../../schedule/HorizontalTimeline', () => ({
   __esModule: true,
   default: ({ placements }) => (
-    <div data-testid="horizontal-timeline">
+    <div data-testid="horizontal-timeline" data-count={placements.length}>
       {placements.length} tasks on timeline
     </div>
   )
@@ -285,5 +285,46 @@ describe('TimelineView Component', () => {
     
     // Progress should show 0/0
     expect(screen.getByText('0/0')).toBeInTheDocument();
+  });
+
+  // 999.5162: state filter must work on TimelineView, same as DayView
+  test('filter=done hides non-done tasks from the timeline', () => {
+    const tasks = [
+      { id: 't1', text: 'Done Task', pri: 'P1', dur: 120, start: 480, end: 600, task: { id: 't1', text: 'Done Task', pri: 'P1', dur: 120 } },
+      { id: 't2', text: 'Open Task', pri: 'P2', dur: 60, start: 660, end: 720, task: { id: 't2', text: 'Open Task', pri: 'P2', dur: 60 } },
+    ];
+
+    render(
+      <TimelineView
+        selectedDate={new Date('2026-06-15')}
+        selectedDateKey="2026-06-15"
+        placements={tasks}
+        statuses={{ 't1': 'done', 't2': '' }}
+        filter="done"
+        onStatusChange={() => {}}
+        onDelete={() => {}}
+        onExpand={() => {}}
+        onCreate={() => {}}
+        gridZoom={100}
+        darkMode={false}
+        schedCfg={mockSchedCfg}
+        nowMins={960}
+        isToday={true}
+        onGridDrop={() => {}}
+        locSchedules={mockLocSchedules}
+        onUpdateLocScheduleOverrides={() => {}}
+        allTasks={tasks}
+        onBatchRecurringsDone={() => {}}
+        locations={mockLocations}
+        onHourLocationOverride={() => {}}
+        blockedTaskIds={[]}
+        onZoomChange={() => {}}
+        isMobile={false}
+        onMarkerDrag={() => {}}
+      />
+    );
+
+    // With filter='done', only the done task should reach HorizontalTimeline
+    expect(screen.getByTestId('horizontal-timeline').getAttribute('data-count')).toBe('1');
   });
 });

@@ -899,6 +899,8 @@ export default function AppLayout() {
               isMobile={isMobile}
               onMarkerDrag={handleMarkerDrag}
               weatherByDate={weatherByDate}
+              filter={filter}
+              unplacedIds={unplacedIds} pastDueIds={pastDueIds} fixedIds={fixedIds}
             />
           )}
           {viewMode === 'week' && (
@@ -913,6 +915,8 @@ export default function AppLayout() {
               isMobile={isMobile}
               onMarkerDrag={handleMarkerDrag}
               weatherByDate={weatherByDate}
+              filter={filter}
+              unplacedIds={unplacedIds} pastDueIds={pastDueIds} fixedIds={fixedIds}
             />
           )}
           {viewMode === 'timeline' && (
@@ -933,6 +937,8 @@ export default function AppLayout() {
               isMobile={isMobile}
               onMarkerDrag={handleMarkerDrag}
               weatherByDate={weatherByDate}
+              filter={filter}
+              unplacedIds={unplacedIds} pastDueIds={pastDueIds} fixedIds={fixedIds}
             />
           )}
           {viewMode === 'month' && (
