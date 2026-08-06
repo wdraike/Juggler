@@ -62,7 +62,10 @@
           "varsIgnorePattern": "^_"
         }
       ]
-    }
+    },
+    "ignorePatterns": [
+      "src/vendor/**"
+    ]
   },
   "browserslist": {
     "production": [
