@@ -52,7 +52,7 @@ function makeProbe(available) {
 // which is the W0 red state: module-absent => test file itself errors =>
 // Jest reports FAIL for the suite.
 // ---------------------------------------------------------------------------
-const { requireDB } = require('./requireDB');
+const { requireDB, assertDbAvailable } = require('./requireDB');
 
 // ---------------------------------------------------------------------------
 // Demonstration: the OLD silent-return shape does NOT throw.
@@ -172,6 +172,58 @@ describe('requireDB — TEST-FR-001 contract', () => {
 
       expect(caught).not.toBeNull();
       expect(caught.message).toMatch(/TEST-FR-001/);
+    });
+
+    // 999.5278 — pool runs allocate a dynamic per-slot port (e.g. slot 0 is
+    // 3410), not the documented default 3407. The failure message must name
+    // the port actually in use so it doesn't send the reader chasing a
+    // config problem that doesn't exist.
+    describe('999.5278 — port in the message reflects DB_PORT actually in use', () => {
+      const ORIGINAL_DB_PORT = process.env.DB_PORT;
+
+      afterEach(() => {
+        if (ORIGINAL_DB_PORT === undefined) {
+          delete process.env.DB_PORT;
+        } else {
+          process.env.DB_PORT = ORIGINAL_DB_PORT;
+        }
+      });
+
+      it('requireDB() names the DYNAMIC pool-slot port (e.g. 3410), not the hardcoded 3407 default', async () => {
+        process.env.DB_PORT = '3410';
+        const wrapped = requireDB(jest.fn(), makeProbe(false));
+
+        await expect(wrapped()).rejects.toThrow(/test-bed @3410/);
+        await expect(wrapped()).rejects.not.toThrow(/test-bed @3407/);
+      });
+
+      it('assertDbAvailable() names the DYNAMIC pool-slot port too', async () => {
+        process.env.DB_PORT = '3411';
+
+        await expect(assertDbAvailable(makeProbe(false))).rejects.toThrow(/test-bed @3411/);
+      });
+
+      it('falls back to the documented default port only when DB_PORT is unset', async () => {
+        delete process.env.DB_PORT;
+        const wrapped = requireDB(jest.fn(), makeProbe(false));
+
+        await expect(wrapped()).rejects.toThrow(/test-bed @3407/);
+      });
+
+      it('the unreachable-DB remediation no longer asserts a specific fixed port', async () => {
+        process.env.DB_PORT = '3410';
+        const wrapped = requireDB(jest.fn(), makeProbe(false));
+
+        let caught = null;
+        try {
+          await wrapped();
+        } catch (e) {
+          caught = e;
+        }
+
+        expect(caught).not.toBeNull();
+        expect(caught.message).not.toMatch(/Start test-bed \(make up in test-bed\/\)/);
+      });
     });
 
   });

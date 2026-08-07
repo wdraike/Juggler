@@ -25,6 +25,15 @@ var tasksWrite = require('../src/lib/tasks-write');
 var { assertDbAvailable } = require('./helpers/requireDB');
 var { rowToTask } = require('../src/controllers/task.controller');
 
+// 999.5281: every test in this file runs a full scheduler pass against real
+// MySQL (multi-query round trips, not a unit test) — jest's DEFAULT 5000ms
+// timeout is too small for that under load and flakes/blocks pushes
+// non-deterministically (measured worst case 34.773s for a single test under
+// load; solo it passes in well under a second). 60000ms gives headroom
+// without masking a genuine hang. Do NOT reduce test scope to fit a smaller
+// timeout — the integration coverage (real DB round trips) is the point.
+jest.setTimeout(60000);
+
 var available = false;
 var USER_ID = 'placements-test-001';
 

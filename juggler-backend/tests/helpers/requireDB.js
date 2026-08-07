@@ -36,6 +36,19 @@
 var testDb = require('./test-db');
 
 /**
+ * The DB port actually in use for this test run. Pool runs (test-bed/scripts/
+ * run-suite.sh) allocate a per-slot port and export DB_PORT dynamically (e.g.
+ * slot 0 is 3410) — it is NOT always the documented default of 3407. Naming a
+ * fixed port in the failure message sends the reader chasing a config problem
+ * that doesn't exist when the real DB is up on a different, correct port
+ * (999.5278). Falls back to the documented default only when DB_PORT is unset
+ * (e.g. a bare `jest` invocation outside the pool).
+ */
+function _dbPortLabel() {
+  return process.env.DB_PORT || '3407 (default)';
+}
+
+/**
  * Returns an async wrapper that:
  *   - Calls probe() to check DB availability.
  *   - If unavailable (or probe throws): throws an Error identifying TEST-FR-001.
@@ -57,16 +70,17 @@ function requireDB(fn, probe) {
       available = await resolvedProbe();
     } catch (probeError) {
       throw new Error(
-        '[TEST-FR-001] Required DB (test-bed @3407) is unreachable — ' +
+        '[TEST-FR-001] Required DB (test-bed @' + _dbPortLabel() + ') is unreachable — ' +
         'probe threw: ' + (probeError && probeError.message ? probeError.message : String(probeError))
       );
     }
 
     if (!available) {
       throw new Error(
-        '[TEST-FR-001] Required DB (test-bed @3407) is unreachable — ' +
+        '[TEST-FR-001] Required DB (test-bed @' + _dbPortLabel() + ') is unreachable — ' +
         'this DB-backed test cannot run without a live database. ' +
-        'Start test-bed (make up in test-bed/) before running DB-backed tests.'
+        'Verify test-bed is up and reachable on this port (pool runs use a dynamic ' +
+        'per-slot port, so this may not be the port you expect).'
       );
     }
 
@@ -97,15 +111,16 @@ async function assertDbAvailable(probe) {
     available = await resolvedProbe();
   } catch (probeError) {
     throw new Error(
-      '[TEST-FR-001] Required DB (test-bed @3407) is unreachable — ' +
+      '[TEST-FR-001] Required DB (test-bed @' + _dbPortLabel() + ') is unreachable — ' +
       'probe threw: ' + (probeError && probeError.message ? probeError.message : String(probeError))
     );
   }
   if (!available) {
     throw new Error(
-      '[TEST-FR-001] Required DB (test-bed @3407) is unreachable — ' +
+      '[TEST-FR-001] Required DB (test-bed @' + _dbPortLabel() + ') is unreachable — ' +
       'this DB-backed test cannot run without a live database. ' +
-      'Start test-bed (make up in test-bed/) before running DB-backed tests.'
+      'Verify test-bed is up and reachable on this port (pool runs use a dynamic ' +
+      'per-slot port, so this may not be the port you expect).'
     );
   }
 }

@@ -105,13 +105,18 @@ describeWithCreds(hasMsftCredentials, 'MSFT adapter — normalizeEvent', functio
 });
 
 // ─── 2. eventHash ───
+//
+// 999.5271 (sync audit): eventHash is PURE (hand-built event object, no
+// network/DB) — it was gated behind hasMsftCredentials() like every other
+// block in this file and never ran in CI/local (RUN_LIVE_CALENDAR_TESTS is
+// off by default — see test-setup.js). Verified clean before un-gating.
 
-describeWithCreds(hasMsftCredentials, 'MSFT adapter — eventHash', function () {
+describe('MSFT adapter — eventHash', function () {
   it('should produce a consistent 64-char SHA-256 hex hash', function () {
     // NOTE: The implementation uses SHA-256 (64 hex chars), not MD5 (32 hex chars).
-    // KNOWN PRODUCTION BUG: last_pulled_hash column is VARCHAR(32) which silently
-    // truncates SHA-256 hashes — see cal-sync change detection. This test documents
-    // the current implementation; the column width needs a migration to fix.
+    // The historical VARCHAR(32) truncation risk on cal_sync_ledger's hash columns
+    // was fixed by migration 20260521000000_widen_cal_sync_ledger_hash_columns.js
+    // (widened to 64) — confirmed by reading the migration (999.5271 sync audit).
     var event = {
       title: 'Hash Test MSFT',
       startDateTime: '2026-04-14T10:00:00',
@@ -146,8 +151,12 @@ describeWithCreds(hasMsftCredentials, 'MSFT adapter — eventHash', function () 
 });
 
 // ─── 3. buildMsftEventBody ───
+//
+// 999.5271 (sync audit): buildMsftEventBody is PURE (hand-built task -> event
+// body, no network/DB). Same dark-test problem as eventHash above — ungated
+// after verifying every assertion still holds against the current adapter.
 
-describeWithCreds(hasMsftCredentials, 'MSFT adapter — buildMsftEventBody', function () {
+describe('MSFT adapter — buildMsftEventBody', function () {
   it('should build a timed event body with Windows timezone', function () {
     var task = { id: 'test-m1', text: 'Timed Task MSFT', date: '4/15', time: '2:30 PM', dur: 45, when: 'afternoon' };
     var body = msftAdapter.buildMsftEventBody(task, 2026, TEST_TIMEZONE);
@@ -196,8 +205,18 @@ describeWithCreds(hasMsftCredentials, 'MSFT adapter — buildMsftEventBody', fun
 });
 
 // ─── 4. applyEventToTaskFields ───
+//
+// 999.5284 (sync audit follow-up): applyEventToTaskFields is PURE (hand-built
+// event + currentTask, no network/DB) — it was gated behind
+// hasMsftCredentials() like every other block in this file and never ran in
+// CI/local (RUN_LIVE_CALENDAR_TESTS is off by default — see test-setup.js).
+// date_pinned/marker were already content-fixed here in an earlier pass, but
+// the un-fixed enclosing gate meant even the correct assertions never ran.
+// Un-gated after also fixing the allday-to-timed fixture below (see comment
+// there — same 999.5284 finding-3 fixture-shape bug this file shared with
+// GCal/Apple, not yet fixed here despite the surrounding content fix).
 
-describeWithCreds(hasMsftCredentials, 'MSFT adapter — applyEventToTaskFields', function () {
+describe('MSFT adapter — applyEventToTaskFields', function () {
   it('should promote to fixed when time changes', function () {
     var event = {
       title: 'Moved Task MSFT',
@@ -236,6 +255,15 @@ describeWithCreds(hasMsftCredentials, 'MSFT adapter — applyEventToTaskFields',
     expect(fields.date_pinned).toBeUndefined();
   });
 
+  // 999.5284 finding 3 (was AMBIGUOUS — resolved CODE-IS-RIGHT, fixture was
+  // stale): see 01-adapter-gcal.test.js's identical case for the full
+  // reasoning + empirical evidence (real insert -> read -> rowToTask ->
+  // applyEventToTaskFields pipeline against test-bed MySQL). Short version: a
+  // real all-day currentTask always carries `time: '12:00 AM'` (derived by
+  // rowToTask from the ALL_DAY branch's own midnight scheduled_at) — the
+  // hand-written fixture omitting `time` never matches production, so the
+  // 999.012 null->value guard always suppressed the promotion. Fixture
+  // repaired; code unchanged.
   it('should promote allday-to-timed to fixed', function () {
     var event = {
       title: 'Was AllDay MSFT',
@@ -247,7 +275,7 @@ describeWithCreds(hasMsftCredentials, 'MSFT adapter — applyEventToTaskFields',
       isTransparent: false,
       description: ''
     };
-    var currentTask = { when: 'allday', date: '2026-04-15' };
+    var currentTask = { when: 'allday', date: '2026-04-15', time: '12:00 AM' };
     var fields = msftAdapter.applyEventToTaskFields(event, TEST_TIMEZONE, currentTask);
 
     expect(fields.placement_mode).toBe(PLACEMENT_MODES.FIXED);
@@ -272,7 +300,9 @@ describeWithCreds(hasMsftCredentials, 'MSFT adapter — applyEventToTaskFields',
     // 999.4671: losing transparency no longer rewrites placement at all — the
     // reminder is the user's Juggler-side choice. (This assertion was already
     // stale after 999.2030 flipped it to 'fixed'; it never ran because the
-    // enclosing block is creds-gated.)
+    // enclosing block is creds-gated. Also: applyEventToTaskFields hasn't set
+    // a `marker` field since 999.4671 — marker is a computed tasks_v column.)
+    expect(fields.marker).toBeUndefined();
     expect(fields.placement_mode).toBeUndefined();
   });
 });

@@ -113,9 +113,18 @@ describeWithCreds(hasAppleCredentials, 'Apple adapter — normalizeEvent', funct
 });
 
 // ─── 2. eventHash ───
+//
+// 999.5271 (sync audit): eventHash is PURE (hand-built event object, no
+// network/DB) — it was gated behind hasAppleCredentials() like every other
+// block in this file and never ran in CI/local (RUN_LIVE_CALENDAR_TESTS is
+// off by default — see test-setup.js). Verified clean before un-gating.
 
-describeWithCreds(hasAppleCredentials, 'Apple adapter — eventHash', function () {
-  it('should produce a consistent 32-char MD5 hex hash', function () {
+describe('Apple adapter — eventHash', function () {
+  it('should produce a consistent 64-char SHA-256 hex hash', function () {
+    // 999.5271 (sync audit): the implementation uses SHA-256 (64 hex chars),
+    // not MD5 (32 hex chars) — this assertion was stale (never ran; the
+    // enclosing block was creds-gated). See 01-adapter-gcal.test.js's
+    // identical fix for the (already-resolved) VARCHAR(32) truncation history.
     var event = {
       title: 'Hash Test Apple',
       startDateTime: '2026-04-14T10:00:00',
@@ -127,8 +136,8 @@ describeWithCreds(hasAppleCredentials, 'Apple adapter — eventHash', function (
     var hash1 = appleAdapter.eventHash(event);
     var hash2 = appleAdapter.eventHash(event);
 
-    expect(hash1).toHaveLength(32);
-    expect(hash1).toMatch(/^[a-f0-9]{32}$/);
+    expect(hash1).toHaveLength(64);
+    expect(hash1).toMatch(/^[a-f0-9]{64}$/);
     expect(hash1).toBe(hash2);
   });
 
@@ -150,8 +159,18 @@ describeWithCreds(hasAppleCredentials, 'Apple adapter — eventHash', function (
 });
 
 // ─── 3. applyEventToTaskFields ───
+//
+// 999.5284 (sync audit follow-up): applyEventToTaskFields is PURE (hand-built
+// event + currentTask, no network/DB) — it was gated behind
+// hasAppleCredentials() like every other block in this file and never ran in
+// CI/local (RUN_LIVE_CALENDAR_TESTS is off by default — see test-setup.js).
+// Un-gated after fixing the same 3 stale assertions documented in
+// 01-adapter-gcal.test.js's identical block: (1) date_pinned column removed,
+// (2) marker no longer written by applyEventToTaskFields (999.4671), (3) the
+// allday-to-timed fixture (see comment at that test below — verified NOT a
+// code bug).
 
-describeWithCreds(hasAppleCredentials, 'Apple adapter — applyEventToTaskFields', function () {
+describe('Apple adapter — applyEventToTaskFields', function () {
   it('should promote to fixed when time changes', function () {
     var event = {
       title: 'Moved Task Apple',
@@ -168,7 +187,7 @@ describeWithCreds(hasAppleCredentials, 'Apple adapter — applyEventToTaskFields
     expect(fields.placement_mode).toBe(PLACEMENT_MODES.FIXED);
   });
 
-  it('should set date_pinned when date changes', function () {
+  it('should promote to fixed when date changes', function () {
     var event = {
       title: 'Date Moved Apple',
       startDateTime: '2026-04-16T09:00:00',
@@ -182,9 +201,19 @@ describeWithCreds(hasAppleCredentials, 'Apple adapter — applyEventToTaskFields
     var fields = appleAdapter.applyEventToTaskFields(event, TEST_TIMEZONE, currentTask);
 
     expect(fields.placement_mode).toBe(PLACEMENT_MODES.FIXED);
-    expect(fields.date_pinned).toBe(1);
+    // date_pinned column removed — placement_mode === 'fixed' is the sole immovability signal
+    expect(fields.date_pinned).toBeUndefined();
   });
 
+  // 999.5284 finding 3 (was AMBIGUOUS — resolved CODE-IS-RIGHT, fixture was
+  // stale): see 01-adapter-gcal.test.js's identical case for the full
+  // reasoning + empirical evidence (real insert -> read -> rowToTask ->
+  // applyEventToTaskFields pipeline against test-bed MySQL). Short version: a
+  // real all-day currentTask always carries `time: '12:00 AM'` (derived by
+  // rowToTask from the ALL_DAY branch's own midnight scheduled_at) — the
+  // hand-written fixture omitting `time` never matches production, so the
+  // 999.012 null->value guard always suppressed the promotion. Fixture
+  // repaired; code unchanged.
   it('should promote allday-to-timed to fixed', function () {
     var event = {
       title: 'Was AllDay Apple',
@@ -195,13 +224,13 @@ describeWithCreds(hasAppleCredentials, 'Apple adapter — applyEventToTaskFields
       isTransparent: false,
       description: ''
     };
-    var currentTask = { when: 'allday', date: '2026-04-15' };
+    var currentTask = { when: 'allday', date: '2026-04-15', time: '12:00 AM' };
     var fields = appleAdapter.applyEventToTaskFields(event, TEST_TIMEZONE, currentTask);
 
     expect(fields.placement_mode).toBe(PLACEMENT_MODES.FIXED);
   });
 
-  it('should clear marker when event is no longer transparent', function () {
+  it('should not rewrite placement_mode when event loses transparency (no marker field written)', function () {
     var event = {
       title: 'Not Marker Apple',
       startDateTime: '2026-04-15T10:00:00',
@@ -211,10 +240,15 @@ describeWithCreds(hasAppleCredentials, 'Apple adapter — applyEventToTaskFields
       isTransparent: false,
       description: ''
     };
-    var currentTask = { when: 'fixed', marker: true, date: '2026-04-15', time: '10:00 AM' };
+    var currentTask = { when: 'fixed', placement_mode: 'reminder', date: '2026-04-15', time: '10:00 AM' };
     var fields = appleAdapter.applyEventToTaskFields(event, TEST_TIMEZONE, currentTask);
 
-    expect(fields.marker).toBe(false);
+    // 999.4671: losing transparency no longer rewrites placement at all — the
+    // reminder is the user's Juggler-side choice. Also: applyEventToTaskFields
+    // hasn't set a `marker` field since 999.4671 — marker is a computed
+    // tasks_v column derived from placement_mode==='reminder'.
+    expect(fields.placement_mode).toBeUndefined();
+    expect(fields.marker).toBeUndefined();
   });
 });
 

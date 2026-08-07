@@ -101,9 +101,23 @@ describeWithCreds(hasGCalCredentials, 'GCal adapter — normalizeEvent', functio
 });
 
 // ─── 2. eventHash ───
+//
+// 999.5271 (sync audit): eventHash is a PURE function over a hand-built event
+// object — it needs neither live credentials nor a DB. It was gated behind
+// hasGCalCredentials() like every other block in this file, so it never ran
+// in CI/local/`make test-juggler` (RUN_LIVE_CALENDAR_TESTS is off by default —
+// see test-setup.js). Verified clean (both assertions still hold against the
+// current adapter) before un-gating.
 
-describeWithCreds(hasGCalCredentials, 'GCal adapter — eventHash', function () {
-  it('should produce a consistent 32-char MD5 hex hash', function () {
+describe('GCal adapter — eventHash', function () {
+  it('should produce a consistent 64-char SHA-256 hex hash', function () {
+    // 999.5271 (sync audit): the implementation uses SHA-256 (64 hex chars),
+    // not MD5 (32 hex chars) — this assertion was stale (never ran; the
+    // enclosing block was creds-gated). The historical VARCHAR(32) truncation
+    // risk on cal_sync_ledger's hash columns (see 02-adapter-msft.test.js's
+    // identical eventHash test comment) was already fixed by migration
+    // 20260521000000_widen_cal_sync_ledger_hash_columns.js (widened to 64) —
+    // confirmed by reading the migration, not assumed.
     var event = {
       title: 'Hash Test',
       startDateTime: '2026-04-14T10:00:00',
@@ -115,8 +129,8 @@ describeWithCreds(hasGCalCredentials, 'GCal adapter — eventHash', function () 
     var hash1 = gcalAdapter.eventHash(event);
     var hash2 = gcalAdapter.eventHash(event);
 
-    expect(hash1).toHaveLength(32);
-    expect(hash1).toMatch(/^[a-f0-9]{32}$/);
+    expect(hash1).toHaveLength(64);
+    expect(hash1).toMatch(/^[a-f0-9]{64}$/);
     expect(hash1).toBe(hash2);
   });
 
@@ -138,6 +152,20 @@ describeWithCreds(hasGCalCredentials, 'GCal adapter — eventHash', function () 
 });
 
 // ─── 3. buildEventBody ───
+//
+// 999.5271 (sync audit): buildEventBody is PURE (no network/DB) and was
+// investigated for the same dark-test un-gating as eventHash above, but its
+// "should build an all-day event body" case FAILS against the current
+// adapter (fixture sets only task.when='allday', no placement_mode; GCal's
+// buildEventBody checks placement_mode/placementMode only — no legacy
+// task.when==='allday' fallback, unlike MicrosoftCalendarAdapter.js:496-498's
+// "ponytail: also check legacy when='allday' for test compat"). That is a
+// real cross-provider fork (TRAPS.md "Calendar adapters must stay
+// behavior-identical") whose correct resolution (add the fallback to GCal or
+// remove it from MSFT) needs its own investigation of whether any live task
+// row actually carries when='allday' without placement_mode='all_day' —
+// filed as a finding, not fixed here. Left creds-gated so this suite stays
+// green; do not un-gate until that's resolved.
 
 describeWithCreds(hasGCalCredentials, 'GCal adapter — buildEventBody', function () {
   it('should build a timed event body', function () {
@@ -177,8 +205,20 @@ describeWithCreds(hasGCalCredentials, 'GCal adapter — buildEventBody', functio
 });
 
 // ─── 4. applyEventToTaskFields ───
+//
+// 999.5284 (sync audit follow-up): applyEventToTaskFields is a PURE function
+// (hand-built event + currentTask, no network/DB) — it was gated behind
+// hasGCalCredentials() like every other block in this file and never ran in
+// CI/local (RUN_LIVE_CALENDAR_TESTS is off by default — see test-setup.js).
+// Un-gated after fixing 3 stale assertions found by direct node execution:
+// (1) 'date_pinned' — the column was removed (TASK-PROPERTIES.md, 999.867 XOR
+// invariant); placement_mode==='fixed' is the sole immovability signal now.
+// (2) 'fields.marker' — applyEventToTaskFields hasn't set a `marker` field
+// since 999.4671 (marker is now a computed tasks_v column derived from
+// placement_mode==='reminder', not a stored write). (3) the allday-to-timed
+// promotion test's currentTask fixture (see below) — verified NOT a code bug.
 
-describeWithCreds(hasGCalCredentials, 'GCal adapter — applyEventToTaskFields', function () {
+describe('GCal adapter — applyEventToTaskFields', function () {
   it('should promote to fixed when time changes', function () {
     var event = {
       title: 'Moved Task',
@@ -195,7 +235,7 @@ describeWithCreds(hasGCalCredentials, 'GCal adapter — applyEventToTaskFields',
     expect(fields.placement_mode).toBe(PLACEMENT_MODES.FIXED);
   });
 
-  it('should set date_pinned when date changes', function () {
+  it('should promote to fixed when date changes', function () {
     var event = {
       title: 'Date Moved',
       startDateTime: '2026-04-16T09:00:00',
@@ -209,9 +249,30 @@ describeWithCreds(hasGCalCredentials, 'GCal adapter — applyEventToTaskFields',
     var fields = gcalAdapter.applyEventToTaskFields(event, TEST_TIMEZONE, currentTask);
 
     expect(fields.placement_mode).toBe(PLACEMENT_MODES.FIXED);
-    expect(fields.date_pinned).toBe(1);
+    // date_pinned column removed — placement_mode === 'fixed' is the sole immovability signal
+    expect(fields.date_pinned).toBeUndefined();
   });
 
+  // 999.5284 finding 3 (was AMBIGUOUS — resolved CODE-IS-RIGHT, fixture was stale):
+  // the original fixture `currentTask = { when: 'allday', date: '2026-04-15' }`
+  // (no `time`) never matches real production data, so the null->value time
+  // transition guard (999.012: "a flexible task gaining its first computed
+  // anchor is NOT a promotion trigger") always suppressed the promotion —
+  // returning undefined, not FIXED. But a real all-day task's currentTask is
+  // never built from a hand literal; it comes from rowToTask() (facade.js
+  // allTasks map), and an all_day task's scheduled_at is stored at midnight
+  // (applyEventToTaskFields's own ALL_DAY branch: `localToUtc(jd.date, '12:00
+  // AM', tz)`), which rowToTask unconditionally converts to a NON-null
+  // `time: '12:00 AM'` — confirmed by direct execution of the real insert ->
+  // read -> rowToTask -> applyEventToTaskFields pipeline against test-bed
+  // MySQL (999.5284 evidence), which returned placement_mode='fixed' for this
+  // exact scenario once currentTask.time was populated realistically. So an
+  // all-day task ALWAYS has a prior non-null time anchor once read via the
+  // real mapper — the 999.012 guard's precondition is satisfied, and CAL-12
+  // (SCHEDULER-SPEC.md: "a genuine date/time move promotes the task to
+  // FIXED") + the live-creds integration test 'all-day -> timed -> promoted'
+  // (14-sync-promotion.test.js) both already encode "promoted" as the correct
+  // outcome. Fixture repaired to the realistic shape; code unchanged.
   it('should promote allday-to-timed to fixed', function () {
     var event = {
       title: 'Was AllDay',
@@ -222,13 +283,13 @@ describeWithCreds(hasGCalCredentials, 'GCal adapter — applyEventToTaskFields',
       isTransparent: false,
       description: ''
     };
-    var currentTask = { when: 'allday', date: '2026-04-15' };
+    var currentTask = { when: 'allday', date: '2026-04-15', time: '12:00 AM' };
     var fields = gcalAdapter.applyEventToTaskFields(event, TEST_TIMEZONE, currentTask);
 
     expect(fields.placement_mode).toBe(PLACEMENT_MODES.FIXED);
   });
 
-  it('should clear marker when event is no longer transparent', function () {
+  it('should not rewrite placement_mode when event loses transparency (no marker field written)', function () {
     var event = {
       title: 'Not Marker Anymore',
       startDateTime: '2026-04-15T10:00:00',
@@ -238,10 +299,16 @@ describeWithCreds(hasGCalCredentials, 'GCal adapter — applyEventToTaskFields',
       isTransparent: false,
       description: ''
     };
-    var currentTask = { when: 'fixed', marker: true, date: '2026-04-15', time: '10:00 AM' };
+    var currentTask = { when: 'fixed', placement_mode: 'reminder', date: '2026-04-15', time: '10:00 AM' };
     var fields = gcalAdapter.applyEventToTaskFields(event, TEST_TIMEZONE, currentTask);
 
-    expect(fields.marker).toBe(false);
+    // 999.4671: losing transparency no longer rewrites placement at all — the
+    // reminder is the user's Juggler-side choice. (This assertion was already
+    // stale after 999.2030 flipped it to 'fixed'; it never ran because the
+    // enclosing block was creds-gated. Also: applyEventToTaskFields hasn't set
+    // a `marker` field since 999.4671 — marker is a computed tasks_v column.)
+    expect(fields.placement_mode).toBeUndefined();
+    expect(fields.marker).toBeUndefined();
   });
 
   // Regression guard: adapter must write snake_case `placement_mode`, not
