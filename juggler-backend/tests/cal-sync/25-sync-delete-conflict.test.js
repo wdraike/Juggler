@@ -150,7 +150,10 @@ describe('999.5270: task completed mid-sync must survive a concurrent miss-ladde
       // "mid-sync task edit detected by watermark" test
       // (20-sync-lock.test.js) uses for the same reason.
       await tasksWrite.updateTaskById(db, task.id, {
-        status: 'done', completed_at: new Date(), updated_at: new Date(Date.now() + 60000)
+        // A faked JS clock would desync from the DB-written snapshot timestamp and
+        // break the very race this test reproduces; the +60000 offset is what makes
+        // this write unambiguously newer, whenever the suite runs.
+        status: 'done', completed_at: new Date(), updated_at: new Date(Date.now() + 60000) // time-mock-exempt: compared against MySQL-written timestamps
       }, TEST_USER_ID);
       return pairs.map(function(p) {
         return {
