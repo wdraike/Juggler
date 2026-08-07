@@ -1827,6 +1827,14 @@ module.exports = {
   utcToLocal: dateHelpers.utcToLocal,
   dateHelpers: dateHelpers,
 
+  // Windows->IANA timezone conversion (999.5028). Re-exported by reference,
+  // like the date helpers above, so cal-sync.controller.js can stop deep-
+  // importing MicrosoftCalendarAdapter directly — that import violated the
+  // JUG-HEX-P7 boundary rule and made `npm run lint:boundaries` fail, which
+  // blocked every commit staging juggler-backend and would red the CI Gate on
+  // any run where juggler is a changed service (ci-pipeline.yml:321).
+  windowsToIana: MicrosoftCalendarAdapter.windowsToIana,
+
   // domain ports
   CalendarPort: CalendarPort,
   SyncStateRepositoryPort: SyncStateRepositoryPort,

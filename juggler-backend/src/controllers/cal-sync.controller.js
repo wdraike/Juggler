@@ -17,8 +17,10 @@ var { rowToTask, safeParseJSON } = require('./task.controller');
 var { localToUtc } = require('../scheduler/dateHelpers');
 var { safeTimezone } = require('juggler-shared/scheduler/dateHelpers');
 var { taskHash, userHash, isoToJugglerDate, toMySQLDate, DEFAULT_TIMEZONE, callWithRateLimit, isEventPast, isStalePastSkipRow } = require('./cal-sync-helpers');
-// 999.5028: MSFT Graph returns Windows timezone names; convert to IANA for localToUtc
-var { windowsToIana } = require('../slices/calendar/adapters/MicrosoftCalendarAdapter');
+// 999.5028: MSFT Graph returns Windows timezone names; convert to IANA for localToUtc.
+// Via the facade, not a direct adapter import — the direct form violated the
+// JUG-HEX-P7 boundary rule (999.5273).
+var { windowsToIana } = require('../slices/calendar/facade');
 var sseEmitter = require('../lib/sse-emitter');
 var { PLACEMENT_MODES } = require('../lib/placementModes');
 var { isTerminalStatus } = require('../lib/task-status');
