@@ -190,6 +190,20 @@ function throttle() {
   return Promise.resolve();
 }
 
+// 999.5269: cooperative event-loop yield for the per-ledger-row decision
+// loop — NOT a rate limiter (throttle() above paces outbound provider
+// calls; this has nothing to do with providers). MEASURED
+// (scripts/dev/cal-sync-loop-lag-repro.js) that a STEADY-STATE sync (nothing
+// changed — every row is a pure in-memory decision with zero provider calls,
+// so throttle() never yields even once) pins the main loop for 500+ms at
+// ~2500 ledger rows, and a concurrent UI/API request landing in that window
+// sees comparably added latency (717ms observed) — the exact "sync affects
+// UI responsiveness" risk David asked to rule out. setImmediate (not
+// setTimeout(0)) queues behind any already-pending I/O callback (e.g. a
+// waiting HTTP request) with no artificial minimum delay of its own.
+var YIELD_EVERY_N_ROWS = 40;
+function yieldToEventLoop() { return new Promise(function(r) { setImmediate(r); }); }
+
 /**
  * Build the fields to write to a task when pulling an event edit back from a provider.
  * Promotion logic (placement_mode=fixed, marker clearing) lives in applyEventToTaskFields.
@@ -364,6 +378,7 @@ async function sync(req, res) {
       var pendingEventUpdates = []; // { eventId, task, ledgerId, newHash }
 
       for (var pli = 0; pli < pLedger.length; pli++) {
+        if (pli > 0 && pli % YIELD_EVERY_N_ROWS === 0) await yieldToEventLoop();
         var ledger = pLedger[pli];
         var task = ledger.task_id ? tasksById[ledger.task_id] : null;
 
@@ -1052,6 +1067,12 @@ async function sync(req, res) {
           // Collect successful results into mutation buffers
           var batchPushCount = 0;
           for (var bi = 0; bi < batchResults.length; bi++) {
+            // 999.5269: same cooperative yield as the ledger-decision loop —
+            // MEASURED (cal-sync-loop-lag-repro.js) that this synchronous
+            // batch-result loop, not the ledger loop, is the bottleneck on a
+            // large FRESH-PUSH sync (all-new tasks, so pLedger is empty and
+            // the ledger loop's yield above never fires).
+            if (bi > 0 && bi % YIELD_EVERY_N_ROWS === 0) await yieldToEventLoop();
             var br = batchResults[bi];
             var bTask = pushQueue[bi].task;
             if (br.error) {

@@ -1637,14 +1637,38 @@ async function runSyncWritePhase(userId, buffers, syncStart, emitProgress) {
   // Conflict detection: if a task was modified by user/MCP during the API
   // phase, skip our update for that task to avoid clobbering their edit.
   // Runs inside lock so the data is stable.
+  //
+  // 999.5270: taskDeletes (the miss-ladder's "event confirmed gone after
+  // MISS_THRESHOLD consecutive syncs" outcome, missing-event-decision.js)
+  // must go through the SAME freshness check as taskUpdates — a task the
+  // user edited/completed WHILE this sync run was deciding to delete it
+  // (from a stale Phase-1 snapshot) must survive, exactly like a mid-sync
+  // edit already survives a conflicting UPDATE. Both id sets are checked in
+  // one query. A delete whose task was touched since the snapshot is
+  // skipped (deleteSkipIds); the ledger row is still cleaned up by its
+  // already-queued ledgerUpdates entry (status/task_id cleared), so the next
+  // sync sees an unledgered, still-active task and re-pushes it fresh.
   var conflictSkipIds = new Set();
-  var taskIdsToCheck = taskUpdates.map(function(u) { return u.id; });
+  var deleteSkipIds = new Set();
+  var taskIdsToCheck = taskUpdates.map(function(u) { return u.id; })
+    .concat(taskDeletes.map(function(d) { return d.id; }));
   if (taskIdsToCheck.length > 0) {
+    // status + completed_at are selected alongside updated_at because
+    // updated_at is second-granularity (MySQL TIMESTAMP, 0 fractional digits —
+    // 20260415010000_create_task_masters_and_instances.js:102). A completion
+    // landing in the SAME wall-clock second as the snapshot stamp compares as
+    // "not newer" under the strict > below, and the delete would proceed. A
+    // changed status/completed_at catches that case regardless of timestamp
+    // resolution.
     var freshRows = await srcDb('tasks_v')
       .whereIn('id', taskIdsToCheck)
-      .select('id', 'updated_at');
+      .select('id', 'updated_at', 'status', 'completed_at');
     var freshById = {};
-    freshRows.forEach(function(r) { freshById[r.id] = r.updated_at; });
+    var freshStateById = {};
+    freshRows.forEach(function(r) {
+      freshById[r.id] = r.updated_at;
+      freshStateById[r.id] = { status: r.status, completed_at: r.completed_at };
+    });
     for (var ci = 0; ci < taskUpdates.length; ci++) {
       var tu = taskUpdates[ci];
       var origTask = tasksById[tu.id];
@@ -1661,6 +1685,34 @@ async function runSyncWritePhase(userId, buffers, syncStart, emitProgress) {
           }
         }
       }
+    }
+    for (var cd = 0; cd < taskDeletes.length; cd++) {
+      var del0 = taskDeletes[cd];
+      var origDelTask = tasksById[del0.id];
+      if (origDelTask && freshById[del0.id]) {
+        var origDelTime = new Date(String(origDelTask._updated_at).replace(' ', 'T') + 'Z').getTime();
+        var freshDelTime = new Date(String(freshById[del0.id]).replace(' ', 'T') + 'Z').getTime();
+        if (!isNaN(origDelTime) && !isNaN(freshDelTime) && freshDelTime > origDelTime) {
+          deleteSkipIds.add(del0.id);
+        } else {
+          // Same-second safety net: updated_at has 1s resolution, so a
+          // completion in the snapshot's own second is invisible to the
+          // comparison above. A changed status or completed_at proves the user
+          // touched the row regardless of clock granularity — skip the delete.
+          var freshState = freshStateById[del0.id] || {};
+          var origStatus = origDelTask.status;
+          var origCompletedAt = origDelTask.completed_at || origDelTask._completed_at;
+          var statusChanged = freshState.status !== undefined && freshState.status !== origStatus;
+          var completedChanged =
+            String(freshState.completed_at || '') !== String(origCompletedAt || '');
+          if (statusChanged || completedChanged) {
+            deleteSkipIds.add(del0.id);
+          }
+        }
+      }
+      // If freshById[del0.id] is falsy, the task is already gone (e.g. the
+      // user deleted it themselves) — deleteTaskById below is a no-op on a
+      // missing row, so no skip is needed for that case.
     }
   }
 
@@ -1704,6 +1756,26 @@ async function runSyncWritePhase(userId, buffers, syncStart, emitProgress) {
     }
     var mergedIds = Object.keys(mergedTaskUpdates);
     for (var wm = 0; wm < mergedIds.length; wm++) {
+      // 999.5269: this is a SEQUENTIAL per-row DB round trip (no batch-update
+      // path exists here, unlike taskInserts above), and on a large sync
+      // (many pushed/pulled tasks in one run) MEASURED
+      // (scripts/dev/cal-sync-loop-lag-repro.js) to be the dominant
+      // contributor to a 700+ms concurrent-request latency spike — a long
+      // chain of fast-resolving promises can starve the timer/macrotask
+      // phase (where a concurrent request's own handling is scheduled) even
+      // though each individual await is real I/O. A periodic setImmediate
+      // yield breaks the chain without materially slowing the transaction.
+      // 999.5269's periodic yield was REMOVED from this loop deliberately.
+      // It is inside an open transaction, so every handoff (a) holds row locks
+      // across a setImmediate and (b) widens the exact window 999.5270 exists
+      // to close: the delete-freshness SELECT runs before the transaction
+      // opens, so 25 deliberate handoffs on a 1000-row merge give a concurrent
+      // CompleteTask (which bypasses the write queue) time to land AFTER the
+      // freshness read and BEFORE the delete below — deleting a task the user
+      // just completed. Trading UI latency for lock-hold time and a data-loss
+      // race is a bad deal. The two yields in cal-sync.controller.js are kept:
+      // neither is inside a transaction. Proper relief for this loop is
+      // batching, not yielding — filed as 999.5287.
       var mid = mergedIds[wm];
       mergedTaskUpdates[mid].updated_at = now;
       await taskRepo.tasksWrite.updateTaskById(trx, mid, mergedTaskUpdates[mid], userId);
@@ -1712,6 +1784,12 @@ async function runSyncWritePhase(userId, buffers, syncStart, emitProgress) {
     // 3. Task deletes (remote-deleted events past miss threshold)
     for (var wd = 0; wd < taskDeletes.length; wd++) {
       var del = taskDeletes[wd];
+      // 999.5270: the task was edited/completed after the Phase-1 snapshot
+      // this delete decision was made from — preserve the user's write
+      // instead of deleting out from under it. The ledger row is still
+      // cleaned up by its own already-queued ledgerUpdates entry, so the
+      // (now-unledgered, still-active) task gets freshly re-pushed next sync.
+      if (deleteSkipIds.has(del.id)) continue;
       // Transfer dependencies first
       for (var wdt = 0; wdt < del.dependencyTransfers.length; wdt++) {
         var dt = del.dependencyTransfers[wdt];
