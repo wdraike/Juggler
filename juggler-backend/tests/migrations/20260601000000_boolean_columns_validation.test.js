@@ -33,7 +33,7 @@
  *     enabled       TINYINT(1) NOT NULL DEFAULT 1 — no explicit CHECK
  *
  *   oauth_auth_codes:
- *     used          TINYINT(1) DEFAULT 0  — no explicit CHECK
+ *     (table dropped 999.5277 — see the KNOWN_GAPS note below)
  *     (Note: oauth_code_nonces no longer has a 'used' column)
  *
  *   ai_usage_outbox:
@@ -741,11 +741,17 @@ describe('D) Gap analysis — columns needing CHECK constraints', () => {
     // dropped column can't be an unconstrained boolean column. Authorized,
     // intentional removal (SPEC.md AC1/MIG-1), a strict simplification of
     // this gap list, not a regression.
+    // 'oauth_auth_codes.used' removed (999.5277, 2026-08-07): same shape as
+    // overdue above — 20260807170000_drop_dead_oauth_tables_if_empty.js drops
+    // the whole table, so on any freshly-migrated DB (which is every DB this
+    // test runs against) the column cannot appear as a gap. That migration
+    // REFUSES to drop a table holding rows, so if this entry ever needs to come
+    // back, the real finding is that something wrote to a table believed dead —
+    // investigate that before re-adding the line.
     var KNOWN_GAPS = [
       { table: 'ai_usage_outbox',  column: 'error_flag'   },
       { table: 'cal_sync_ledger',  column: 'done_frozen'  },
       { table: 'cal_sync_ledger',  column: 'event_all_day' },
-      { table: 'oauth_auth_codes', column: 'used'         },
       { table: 'task_instances',   column: 'generated'    },
       { table: 'user_calendars',   column: 'enabled'      },
     ];
