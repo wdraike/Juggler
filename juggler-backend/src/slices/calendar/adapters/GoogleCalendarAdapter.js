@@ -31,6 +31,7 @@ var gcalApi = require('../../../lib/gcal-api');
 // the HTTP-layer controllers/cal-sync-helpers (which now shims to the same fns).
 var { jugglerDateToISO, isoToJugglerDate, computeDurationMinutes } = require('../domain/dateTransforms');
 var { undecorateTitle, applyDoneMark } = require('../domain/doneMarkText'); // 999.5272
+var { extractNotesFromDescription } = require('../domain/descriptionParse'); // 999.5283
 var { localToUtc } = require('../../../scheduler/dateHelpers');
 var { PLACEMENT_MODES } = require('../../../lib/placementModes');
 var { _isAllDayTaskBackend } = require('../../../lib/isAllDayTaskBackend');
@@ -326,6 +327,18 @@ function applyEventToTaskFields(event, tz, currentTask) {
     updated_at: getDb().fn.now()
   };
 
+  // 999.5283: a provider-side edit to the event's notes line round-trips
+  // back into task.notes — the ONE field of the composited description
+  // (Project/Priority/Notes/Link) safe to write back without a validation
+  // contract this pull mapper has no business enforcing. See
+  // descriptionParse.js header for the full scope decision + safety
+  // contract. Returns null (no key added) unless the description provably
+  // matches Juggler's own template with only the notes content differing.
+  var extractedNotes = extractNotesFromDescription(event.description, currentTask);
+  if (extractedNotes !== null) {
+    fields.notes = extractedNotes;
+  }
+
   if (jd.date) {
     if (isAllDay) {
       fields.scheduled_at = localToUtc(jd.date, '12:00 AM', tz);
@@ -396,9 +409,20 @@ function getLastSyncedColumn() {
 function buildEventBody(task, year, tz, _opts) {
   var startISO = jugglerDateToISO(task.date, task.time, year);
   var dur = task.dur || 30;
-  // Phase 15: Migrated to placement_mode='all_day' exclusively
+  // Phase 15: Migrated to placement_mode='all_day' exclusively — but also
+  // check the legacy when='allday' marker (999.5285: matches
+  // MicrosoftCalendarAdapter.js's fallback — a task row can carry when='allday'
+  // with placement_mode unset/stale if a caller sets placementMode without
+  // also touching `when` (taskToRow only writes `row.when` when the incoming
+  // body explicitly includes it — TASK-PROPERTIES.md's "when=allday is a
+  // legacy byproduct" does not guarantee it is always IN SYNC with
+  // placement_mode). Without this, GCal/Apple silently pushed such a row as a
+  // TIMED event while MSFT correctly treated it as all-day — the exact
+  // cross-provider fork TRAPS.md's "Calendar adapters must stay
+  // behavior-identical" (999.1012) exists to catch.
   var isAllDay = task.placementMode === PLACEMENT_MODES.ALL_DAY ||
-                 task.placement_mode === PLACEMENT_MODES.ALL_DAY;
+                 task.placement_mode === PLACEMENT_MODES.ALL_DAY ||
+                 (task.when === 'allday' && !task.time && !task.scheduledAt);  // 999.5285: gated — see note
 
   var descParts = [];
   if (task.project) descParts.push('Project: ' + task.project);

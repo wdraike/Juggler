@@ -601,3 +601,21 @@ describe('buildVEvent — checkmark idempotency', function () {
     expect(ics).not.toContain('SUMMARY:✓');
   });
 });
+
+// ─── 12. buildVEvent — legacy when='allday' fallback (999.5285) ───
+//
+// Mirrors 01-adapter-gcal.test.js's "should build an all-day event body"
+// case: a task carrying only the legacy task.when='allday' marker (no
+// placement_mode/placementMode) must still be pushed as an all-day VEVENT —
+// matching MicrosoftCalendarAdapter.js's fallback. See that adapter's
+// buildEventBody comment for the reachability evidence (999.5285).
+
+describe('buildVEvent — legacy when=allday fallback', function () {
+  it('should build an all-day VEVENT from task.when=\'allday\' alone (no placement_mode)', function () {
+    var task = { id: 'ck-allday-1', text: 'All Day Task', date: '4/15', when: 'allday', dur: 30 };
+    var ics = appleCalApi.buildVEvent(task, 2026, 'America/New_York');
+    expect(ics).toContain('DTSTART;VALUE=DATE:20260415');
+    expect(ics).toContain('DTEND;VALUE=DATE:20260416');
+    expect(ics).not.toMatch(/DTSTART:\d{8}T/); // not a timed DTSTART
+  });
+});

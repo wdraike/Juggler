@@ -31,6 +31,7 @@ var msftCalApi = require('../../../lib/msft-cal-api');
 // the HTTP-layer controllers/cal-sync-helpers (which now shims to the same fns).
 var { jugglerDateToISO, isoToJugglerDate, computeDurationMinutes } = require('../domain/dateTransforms');
 var { undecorateTitle, applyDoneMark } = require('../domain/doneMarkText'); // 999.5272
+var { extractNotesFromDescription } = require('../domain/descriptionParse'); // 999.5283
 var { localToUtc } = require('../../../scheduler/dateHelpers');
 var { PLACEMENT_MODES } = require('../../../lib/placementModes');
 var { isTerminalStatus } = require('../../../lib/task-status');
@@ -266,6 +267,16 @@ async function listEvents(token, timeMin, timeMax, userId) {
           var rs = e && e.responseStatus;
           return !(rs && rs.response === 'declined');
         })
+        .filter(function(e) {
+          // 999.5286: exclude a cancelled occurrence of a recurring series.
+          // Graph's $select requests isCancelled (lib/msft-cal-api.js) and it
+          // was mapped all the way onto the normalized event (normalizeEvent
+          // below) but never filtered — GCal needs no equivalent because
+          // events.list defaults showDeleted to false server-side; Graph's
+          // calendarView gives no such guarantee, which is presumably why
+          // isCancelled was captured here in the first place.
+          return !(e && e.isCancelled);
+        })
         .map(normalizeEvent)
         .map(function(ne) { ne._calendarId = cal.calendar_id; return ne; });
       allEvents = allEvents.concat(normalized);
@@ -425,6 +436,13 @@ function applyEventToTaskFields(event, tz, currentTask) {
     updated_at: getDb().fn.now()
   };
 
+  // 999.5283: see GoogleCalendarAdapter.js's applyEventToTaskFields comment
+  // for the full scope decision + safety contract — only `notes` round-trips.
+  var extractedNotes = extractNotesFromDescription(event.description, currentTask);
+  if (extractedNotes !== null) {
+    fields.notes = extractedNotes;
+  }
+
   if (jd.date) {
     if (isAllDay) {
       fields.scheduled_at = localToUtc(jd.date, '12:00 AM', tz);
@@ -494,11 +512,14 @@ function getLastSyncedColumn() {
 
 function buildMsftEventBody(task, year, tz, _opts) {
   var dur = task.dur || 30;
-  // Phase 15: Migrated to placement_mode='all_day' exclusively
-  // ponytail: also check legacy when='allday' for test compat
+  // Phase 15: Migrated to placement_mode='all_day' exclusively — but also
+  // check the legacy when='allday' marker (999.5285 confirmed this fallback
+  // is REACHABLE — see GoogleCalendarAdapter.js's buildEventBody comment —
+  // and matched it onto GCal/Apple rather than removing it here, so all
+  // three providers now classify all-day identically).
   var isAllDay = task.placementMode === PLACEMENT_MODES.ALL_DAY ||
                  task.placement_mode === PLACEMENT_MODES.ALL_DAY ||
-                 task.when === 'allday';
+                 (task.when === 'allday' && !task.time && !task.scheduledAt);  // 999.5285: gated — see note
 
   var descParts = [];
   if (task.project) descParts.push('Project: ' + task.project);

@@ -248,9 +248,13 @@ function buildVEvent(task, year, _tz) {
   descParts.push('', 'Synced from Raike & Sons');
   vevent.addPropertyWithValue('description', descParts.join('\n'));
 
-  // Phase 15: Migrated to placement_mode='all_day' exclusively
+  // Phase 15: Migrated to placement_mode='all_day' exclusively — but also
+  // check the legacy when='allday' marker (999.5285: matches
+  // MicrosoftCalendarAdapter.js's fallback and GoogleCalendarAdapter.js's —
+  // see that file's buildEventBody comment for the reachability rationale).
   var isAllDay = task.placementMode === PLACEMENT_MODES.ALL_DAY ||
-                 task.placement_mode === PLACEMENT_MODES.ALL_DAY;
+                 task.placement_mode === PLACEMENT_MODES.ALL_DAY ||
+                 (task.when === 'allday' && !task.time && !task.scheduledAt);  // 999.5285: gated — see note
 
   // Parse date — handle both YYYY-MM-DD (from utcToLocal) and legacy M/D format
   var dateStr = task.date || '';

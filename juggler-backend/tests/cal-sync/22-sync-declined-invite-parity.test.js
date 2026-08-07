@@ -142,6 +142,58 @@ describe('999.1012: MSFT declined-self-invite excluded from listEvents', () => {
   });
 });
 
+// ─── 999.5286: MSFT isCancelled excluded from listEvents ─────────────────
+// msft-cal-api.js:170 requests isCancelled in its $select and
+// MicrosoftCalendarAdapter.js's normalizeEvent maps it onto the normalized
+// event (BF-8 / "normalizeEvent: isCancelled field exposed" in
+// 05-adapter-msft-edge.test.js prove that wire-level plumbing) — but until
+// this fix nothing ever filtered or acted on it, so a cancelled occurrence of
+// a recurring series could pull into Juggler as a live task with no path to
+// ever recognize the cancellation. GCal needs no equivalent filter because
+// events.list defaults showDeleted to false (gcal-api.js) — Graph's
+// calendarView gives no equivalent server-side guarantee, which is presumably
+// why isCancelled was captured into $select/normalizeEvent in the first
+// place (half-finished defensive plumbing, per 999.5271 audit).
+function msftCancellable(id, isCancelled) {
+  return {
+    id: id,
+    subject: 'Meeting ' + id,
+    start: { dateTime: '2026-07-05T10:00:00', timeZone: 'UTC' },
+    end: { dateTime: '2026-07-05T10:30:00', timeZone: 'UTC' },
+    isAllDay: false,
+    isCancelled: isCancelled
+  };
+}
+
+describe('999.5286: MSFT cancelled occurrence excluded from listEvents', () => {
+  it('excludes an event with isCancelled:true', async () => {
+    jest.spyOn(msftCalApi, 'listEvents').mockResolvedValue({
+      items: [msftCancellable('msft-cancelled-1', true)]
+    });
+    var result = await msftAdapter.listEvents('mock-token', '2026-07-01', '2026-07-08', null);
+    expect(result).toHaveLength(0);
+  });
+
+  it('a mixed batch: only the cancelled occurrence is excluded, the live one survives', async () => {
+    jest.spyOn(msftCalApi, 'listEvents').mockResolvedValue({
+      items: [msftCancellable('msft-cancelled-2', true), msftCancellable('msft-live-1', false)]
+    });
+    var result = await msftAdapter.listEvents('mock-token', '2026-07-01', '2026-07-08', null);
+    var ids = result.map(function(e) { return e.id; });
+    expect(ids).not.toContain('msft-cancelled-2');
+    expect(ids).toContain('msft-live-1');
+    expect(result).toHaveLength(1);
+  });
+
+  it('keeps an event with no isCancelled field at all (999.1014-style null-safety)', async () => {
+    jest.spyOn(msftCalApi, 'listEvents').mockResolvedValue({
+      items: [msftCancellable('msft-no-iscancelled-1', undefined)]
+    });
+    var result = await msftAdapter.listEvents('mock-token', '2026-07-01', '2026-07-08', null);
+    expect(result).toHaveLength(1);
+  });
+});
+
 // ─── Apple (CalDAV/ICS) — ATTENDEE parsing (no DB) ────────────────────────
 
 function icsWithAttendee(uid, partstat, selfEmail) {

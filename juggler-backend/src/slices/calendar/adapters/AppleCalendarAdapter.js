@@ -38,6 +38,7 @@ var { decrypt } = require('../../../lib/credential-encrypt');
 // were never exported and never called — dead undefined bindings, dropped.)
 var { isoToJugglerDate } = require('../domain/dateTransforms');
 var { undecorateTitle } = require('../domain/doneMarkText'); // 999.5272
+var { extractNotesFromDescription } = require('../domain/descriptionParse'); // 999.5283
 var { localToUtc } = require('../../../scheduler/dateHelpers');
 var { PLACEMENT_MODES } = require('../../../lib/placementModes');
 var { calAdapterAppleLogger } = require('../../../lib/logger');
@@ -266,6 +267,13 @@ function applyEventToTaskFields(event, tz, currentTask) {
     dur: event.durationMinutes,
     updated_at: getDb().fn.now()
   };
+
+  // 999.5283: see GoogleCalendarAdapter.js's applyEventToTaskFields comment
+  // for the full scope decision + safety contract — only `notes` round-trips.
+  var extractedNotes = extractNotesFromDescription(event.description, currentTask);
+  if (extractedNotes !== null) {
+    fields.notes = extractedNotes;
+  }
 
   if (jd.date) {
     if (isAllDay) {

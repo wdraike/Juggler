@@ -155,19 +155,27 @@ describe('GCal adapter — eventHash', function () {
 //
 // 999.5271 (sync audit): buildEventBody is PURE (no network/DB) and was
 // investigated for the same dark-test un-gating as eventHash above, but its
-// "should build an all-day event body" case FAILS against the current
-// adapter (fixture sets only task.when='allday', no placement_mode; GCal's
-// buildEventBody checks placement_mode/placementMode only — no legacy
-// task.when==='allday' fallback, unlike MicrosoftCalendarAdapter.js:496-498's
-// "ponytail: also check legacy when='allday' for test compat"). That is a
-// real cross-provider fork (TRAPS.md "Calendar adapters must stay
-// behavior-identical") whose correct resolution (add the fallback to GCal or
-// remove it from MSFT) needs its own investigation of whether any live task
-// row actually carries when='allday' without placement_mode='all_day' —
-// filed as a finding, not fixed here. Left creds-gated so this suite stays
-// green; do not un-gate until that's resolved.
+// "should build an all-day event body" case FAILED against the (then)
+// current adapter (fixture sets only task.when='allday', no placement_mode;
+// GCal's buildEventBody checked placement_mode/placementMode only — no
+// legacy task.when==='allday' fallback, unlike
+// MicrosoftCalendarAdapter.js's). That was a real cross-provider fork
+// (TRAPS.md "Calendar adapters must stay behavior-identical").
+//
+// 999.5285: resolved. Reachability confirmed — taskToRow (taskMappers.js)
+// only writes `row.when` when the incoming body explicitly includes it, so a
+// caller that flips placement_mode away from ALL_DAY without also sending
+// `when` (any non-WhenSection-UI writer, e.g. MCP/API update_task) leaves a
+// stale when='allday' row with a non-all_day placement_mode — a real,
+// reachable drift, not dead-fixture defensiveness. Fix: matched GCal/Apple's
+// isAllDay check onto MSFT's (add the when==='allday' fallback), rather than
+// removing it from MSFT — other app subsystems (scheduler skip-gate,
+// AllDayBanner, CalendarView per cal-sync.controller.js's own comment) still
+// treat `when==='allday'` as a legacy-but-live signal, so MSFT's stance was
+// the more consistent one. Un-gated: every case in this block is pure
+// (no network/DB) and now passes.
 
-describeWithCreds(hasGCalCredentials, 'GCal adapter — buildEventBody', function () {
+describe('GCal adapter — buildEventBody', function () {
   it('should build a timed event body', function () {
     var task = { id: 'test-1', text: 'Timed Task', date: '4/15', time: '2:30 PM', dur: 45, when: 'afternoon' };
     var body = gcalAdapter.buildEventBody(task, 2026, TEST_TIMEZONE);

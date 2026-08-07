@@ -20,7 +20,7 @@ var { taskHash, userHash, isoToJugglerDate, toMySQLDate, DEFAULT_TIMEZONE, callW
 // 999.5028: MSFT Graph returns Windows timezone names; convert to IANA for localToUtc.
 // Via the facade, not a direct adapter import — the direct form violated the
 // JUG-HEX-P7 boundary rule (999.5273).
-var { windowsToIana, undecorateTitle } = require('../slices/calendar/facade');
+var { windowsToIana, undecorateTitle, stripDoneMark } = require('../slices/calendar/facade');
 var sseEmitter = require('../lib/sse-emitter');
 var { PLACEMENT_MODES } = require('../lib/placementModes');
 var { isTerminalStatus } = require('../lib/task-status');
@@ -1324,11 +1324,34 @@ async function sync(req, res) {
           || combinedBody.indexOf('Synced from Juggler') !== -1;
         // Orphan match (dual-write recovery) — only computed when the marker
         // branch is actually reached, matching the original short-circuit.
+        // 999.5274: strip the done-mark on BOTH sides before comparing. A done
+        // task's provider title carries the "✓ " decoration (999.5272) while
+        // the stored task text is clean by design, so a bare `===` compare
+        // can never match for a done task — the match misses and control
+        // falls through to orphan-DELETE, which calls the real
+        // pAdapter2.deleteEvent against the user's live calendar. stripDoneMark
+        // is idempotent on the already-clean stored side.
         var reachesMarkerBranch = !existingTask && !isPast && isJugglerOriginBody;
         var jdOrphan = reachesMarkerBranch ? isoToJugglerDate(newEvent.startDateTime, newEvent.startTimezone || tz) : null;
-        var orphanMatch = reachesMarkerBranch ? allTasks.find(function(t) {
-          return t.text === newEvent.title && t.date === jdOrphan.date && !processedTaskIds2.has(t.id);
-        }) : null;
+        // EXACT match first, stripped only as a fallback. applyDoneMark
+        // deliberately preserves a user's OWN leading mark (doneMarkText.js),
+        // so "✓ Deploy checklist" is a legitimate stored text. With a single
+        // stripped compare, an event titled "Deploy checklist" would match
+        // whichever of the two tasks came first in array order — relinking the
+        // WRONG task, overwriting its event-id column, and orphaning its real
+        // event so a later sync can reach orphan-DELETE against the live
+        // calendar. Exact-first makes the widening strictly delete-reducing.
+        var orphanCandidate = function(matchTitle) {
+          return function(t) {
+            return matchTitle(t) && t.date === jdOrphan.date && !processedTaskIds2.has(t.id);
+          };
+        };
+        var orphanMatch = reachesMarkerBranch ? (
+          allTasks.find(orphanCandidate(function(t) { return t.text === newEvent.title; })) ||
+          allTasks.find(orphanCandidate(function(t) {
+            return stripDoneMark(t.text) === stripDoneMark(newEvent.title);
+          }))
+        ) : null;
         var calIngestMode = calIngestModeMap[newEvent._calendarId] || 'task';
 
         var ingestDecision = decideIngestEvent({
@@ -1465,8 +1488,11 @@ async function sync(req, res) {
           // invisibly hijacked one. The hint is recorded via the existing
           // sync_history logSyncAction pattern below (action
           // 'possible_duplicate') — no new schema/UI.
+          // 999.5274: same done-mark strip as orphanMatch above — a done
+          // task's decorated title otherwise never collides with itself here
+          // either, silently hiding a real possible-duplicate hint.
           var possibleDupTask = allTasks.find(function(t) {
-            return t.text === newEvent.title && t.date === jd.date;
+            return stripDoneMark(t.text) === stripDoneMark(newEvent.title) && t.date === jd.date;
           });
 
           var newTaskId = pid2 + '_' + crypto.randomBytes(8).toString('hex');
