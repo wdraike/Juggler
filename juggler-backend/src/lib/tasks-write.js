@@ -265,6 +265,150 @@ async function updateTaskById(dbOrTrx, id, changes, userId) {
   return { masterUpdated: masterUpdated, instanceUpdated: instanceUpdated };
 }
 
+function isKnexRaw(v) {
+  return !!(v && typeof v === 'object' && typeof v.toSQL === 'function');
+}
+
+/**
+ * Batch UPDATE for many tasks in one call (999.5287). Same field-routing,
+ * per-row who-attribution stamping, and updated_by-only no-op suppression as
+ * updateTaskById — see that function's doc. Groups rows by their ROUTED
+ * field-NAME set (same columns being written) and issues one multi-row
+ * UPDATE per group via a `CASE `id`` expression per column, instead of one
+ * round trip per row. This mirrors the field-signature GROUPING the calendar
+ * facade's ledger-update batching (calendar/facade.js runSyncWritePhase,
+ * step 4) already does one call above this one — grouping by field-name
+ * (not literal value, unlike the ledger grouping) is required here because
+ * the dominant real caller (a fresh-push sync writing back each task's new
+ * provider event id) gives every row the SAME single field name
+ * (`gcal_event_id`/etc.) but a DIFFERENT value per row; grouping by literal
+ * value like the ledger code would put every row in its own singleton group
+ * and batch nothing.
+ *
+ * `updated_at` is exempted from the per-row CASE: every call site in this
+ * codebase sets it to ONE shared `db.fn.now()` raw for the whole batch (the
+ * write-phase loop assigns a single `now` before the loop and copies it onto
+ * every merged row), so it is applied once per group instead of once per
+ * CASE branch — a knex Raw cannot be used as a `?` binding inside a raw CASE
+ * string. A group whose rows carry DIFFERING raw values for the same field
+ * (this module has no caller that does this) throws rather than silently
+ * picking one, per the no-unapproved-fallbacks rule; use per-row
+ * updateTaskById calls for such a batch.
+ *
+ * `updates` — Array<{ id, changes }>. Falls straight through to a single
+ * updateTaskById call for a 0- or 1-row batch (no benefit from a CASE for
+ * one row). Returns { masterUpdated, instanceUpdated } — summed row counts
+ * across all groups (same shape as updateTaskById).
+ */
+async function updateTaskByIdBatch(dbOrTrx, updates, userId) {
+  if (!updates || updates.length === 0) return { masterUpdated: 0, instanceUpdated: 0 };
+  if (updates.length === 1) {
+    return updateTaskById(dbOrTrx, updates[0].id, updates[0].changes, userId);
+  }
+
+  // Per-row stamping (999.1576) — same getActor() resolution updateTaskById
+  // uses, called once per row so caller-provided updated_by (if any) still
+  // wins per row, exactly like N sequential updateTaskById calls would.
+  var stampedRows = updates.map(function(u) {
+    return { id: u.id, changes: stampUpdate(u.changes) };
+  });
+
+  var masterRows = [];
+  var instanceRows = [];
+  stampedRows.forEach(function(u) {
+    var split = splitUpdateFields(u.changes);
+    // 999.1576 (harrison): updated_by alone must not turn a deliberate no-op
+    // into a write — same suppression updateTaskById applies per row.
+    var masterHasWrite = Object.keys(split.master).some(function(k) { return k !== 'updated_by'; });
+    var instanceHasWrite = Object.keys(split.instance).some(function(k) { return k !== 'updated_by'; });
+    if (masterHasWrite) masterRows.push({ id: u.id, fields: split.master });
+    if (instanceHasWrite) instanceRows.push({ id: u.id, fields: split.instance });
+  });
+
+  var masterUpdated = await batchUpdateTableByFieldSignature(dbOrTrx, 'task_masters', masterRows, userId);
+  var instanceUpdated = await batchUpdateTableByFieldSignature(dbOrTrx, 'task_instances', instanceRows, userId);
+  return { masterUpdated: masterUpdated, instanceUpdated: instanceUpdated };
+}
+
+/**
+ * Group `rows` (Array<{id, fields}>) by identical field-NAME set (sorted,
+ * joined) and run one grouped UPDATE per group. Order of execution follows
+ * first-seen group order; the target rows are disjoint (one row per id, id
+ * appears in at most one group), so cross-group ordering has no observable
+ * effect on the final state.
+ */
+async function batchUpdateTableByFieldSignature(dbOrTrx, table, rows, userId) {
+  if (rows.length === 0) return 0;
+
+  var groups = {};
+  var order = [];
+  rows.forEach(function(r) {
+    var keys = Object.keys(r.fields).sort();
+    var sig = keys.join('|');
+    if (!groups[sig]) { groups[sig] = { keys: keys, rows: [] }; order.push(sig); }
+    groups[sig].rows.push(r);
+  });
+
+  var total = 0;
+  for (var gi = 0; gi < order.length; gi++) {
+    total += await runFieldGroupUpdate(dbOrTrx, table, groups[order[gi]], userId);
+  }
+  return total;
+}
+
+async function runFieldGroupUpdate(dbOrTrx, table, group, userId) {
+  if (group.rows.length === 1) {
+    var only = group.rows[0];
+    var singleWhere = { id: only.id };
+    if (userId) singleWhere.user_id = userId;
+    return dbOrTrx(table).where(singleWhere).update(only.fields);
+  }
+
+  // Fields whose value is identical across every row in the group (always
+  // true for updated_at — see module doc) are applied once, outside the
+  // CASE; this both avoids the "raw as a bound param" problem and is a free
+  // optimization for any other field that happens to match too.
+  var directPayload = {};
+  var caseKeys = [];
+  group.keys.forEach(function(k) {
+    var first = group.rows[0].fields[k];
+    var firstIsRaw = isKnexRaw(first);
+    var allSame = group.rows.every(function(r) {
+      var v = r.fields[k];
+      if (firstIsRaw || isKnexRaw(v)) return v === first; // raw: reference equality only
+      return JSON.stringify(v) === JSON.stringify(first);
+    });
+    if (allSame) {
+      directPayload[k] = first;
+      return;
+    }
+    if (firstIsRaw || group.rows.some(function(r) { return isKnexRaw(r.fields[k]); })) {
+      throw new Error(
+        'tasks-write.updateTaskByIdBatch: field "' + k + '" carries DIFFERING raw SQL ' +
+        'values within one batch group (' + table + ') — cannot fold into a CASE expression'
+      );
+    }
+    caseKeys.push(k);
+  });
+
+  var ids = group.rows.map(function(r) { return r.id; });
+  var payload = Object.assign({}, directPayload);
+  caseKeys.forEach(function(k) {
+    var sql = 'CASE `id` ';
+    var bindings = [];
+    group.rows.forEach(function(r) {
+      sql += 'WHEN ? THEN ? ';
+      bindings.push(r.id, r.fields[k]);
+    });
+    sql += 'END';
+    payload[k] = dbOrTrx.raw(sql, bindings);
+  });
+
+  var qb = dbOrTrx(table).whereIn('id', ids);
+  if (userId) qb = qb.where('user_id', userId);
+  return qb.update(payload);
+}
+
 /**
  * DELETE a task by id (and optionally user_id for tenancy safety).
  * Works for masters, instances, or shared-id rows: deletes from both tables.
@@ -562,6 +706,7 @@ module.exports = {
   insertTasksBatch: insertTasksBatch,
   resetRecurringInstances: resetRecurringInstances,
   updateTaskById: updateTaskById,
+  updateTaskByIdBatch: updateTaskByIdBatch,
   deleteTaskById: deleteTaskById,
   softCancelById: softCancelById,
   softCancelWhere: softCancelWhere,

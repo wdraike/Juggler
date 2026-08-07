@@ -1754,31 +1754,36 @@ async function runSyncWritePhase(userId, buffers, syncStart, emitProgress) {
       if (!mergedTaskUpdates[upd.id]) mergedTaskUpdates[upd.id] = {};
       Object.assign(mergedTaskUpdates[upd.id], upd.fields);
     }
+    // 999.5269/999.5287: this used to be a SEQUENTIAL per-row DB round trip
+    // (no batch-update path existed here, unlike taskInserts above), and on
+    // a large sync (many pushed/pulled tasks in one run) MEASURED
+    // (scripts/dev/cal-sync-loop-lag-repro.js) to be the dominant
+    // contributor to a 700+ms concurrent-request latency spike — a long
+    // chain of fast-resolving promises can starve the timer/macrotask phase
+    // (where a concurrent request's own handling is scheduled) even though
+    // each individual await is real I/O. 999.5269 tried a periodic
+    // setImmediate yield here and it was REMOVED deliberately: this loop is
+    // inside an open transaction, so every handoff (a) holds row locks
+    // across a setImmediate and (b) widens the exact window 999.5270 exists
+    // to close: the delete-freshness SELECT runs before the transaction
+    // opens, so deliberate handoffs on a large merge give a concurrent
+    // CompleteTask (which bypasses the write queue) time to land AFTER the
+    // freshness read and BEFORE the delete below — deleting a task the user
+    // just completed. Trading UI latency for lock-hold time and a data-loss
+    // race is a bad deal. The two yields in cal-sync.controller.js are kept:
+    // neither is inside a transaction. The correct relief is SHORTENING the
+    // transaction, not yielding inside it — updateTaskByIdBatch
+    // (lib/tasks-write.js, 999.5287) groups the merged rows by their routed
+    // field-name set and folds each group into one CASE-based multi-row
+    // UPDATE per table (mirrors the ledger-update grouping at step 4 below),
+    // instead of N sequential round trips.
     var mergedIds = Object.keys(mergedTaskUpdates);
-    for (var wm = 0; wm < mergedIds.length; wm++) {
-      // 999.5269: this is a SEQUENTIAL per-row DB round trip (no batch-update
-      // path exists here, unlike taskInserts above), and on a large sync
-      // (many pushed/pulled tasks in one run) MEASURED
-      // (scripts/dev/cal-sync-loop-lag-repro.js) to be the dominant
-      // contributor to a 700+ms concurrent-request latency spike — a long
-      // chain of fast-resolving promises can starve the timer/macrotask
-      // phase (where a concurrent request's own handling is scheduled) even
-      // though each individual await is real I/O. A periodic setImmediate
-      // yield breaks the chain without materially slowing the transaction.
-      // 999.5269's periodic yield was REMOVED from this loop deliberately.
-      // It is inside an open transaction, so every handoff (a) holds row locks
-      // across a setImmediate and (b) widens the exact window 999.5270 exists
-      // to close: the delete-freshness SELECT runs before the transaction
-      // opens, so 25 deliberate handoffs on a 1000-row merge give a concurrent
-      // CompleteTask (which bypasses the write queue) time to land AFTER the
-      // freshness read and BEFORE the delete below — deleting a task the user
-      // just completed. Trading UI latency for lock-hold time and a data-loss
-      // race is a bad deal. The two yields in cal-sync.controller.js are kept:
-      // neither is inside a transaction. Proper relief for this loop is
-      // batching, not yielding — filed as 999.5287.
-      var mid = mergedIds[wm];
-      mergedTaskUpdates[mid].updated_at = now;
-      await taskRepo.tasksWrite.updateTaskById(trx, mid, mergedTaskUpdates[mid], userId);
+    if (mergedIds.length > 0) {
+      var taskUpdateBatch = mergedIds.map(function(mid) {
+        mergedTaskUpdates[mid].updated_at = now;
+        return { id: mid, changes: mergedTaskUpdates[mid] };
+      });
+      await taskRepo.tasksWrite.updateTaskByIdBatch(trx, taskUpdateBatch, userId);
     }
 
     // 3. Task deletes (remote-deleted events past miss threshold)
