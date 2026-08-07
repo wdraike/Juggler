@@ -115,6 +115,10 @@ jest.mock('../../src/lib/sse-emitter', () => ({
 jest.mock('../../src/lib/task-write-queue', () => ({
   isLocked: jest.fn(() => Promise.resolve(false)),
   enqueueWrite: jest.fn(() => Promise.resolve()),
+  // 999.5288/999.5291: facade.js's DeleteTask wiring now also destructures
+  // discardQueuedWrites off this module — add it to the mock or facade
+  // construction throws "missing dependency" at require time (mock-drift).
+  discardQueuedWrites: jest.fn(() => Promise.resolve()),
   splitFields: jest.fn((row) => ({ schedulingFields: row, nonSchedulingFields: {} })),
   flushQueue: jest.fn(() => Promise.resolve())
 }));

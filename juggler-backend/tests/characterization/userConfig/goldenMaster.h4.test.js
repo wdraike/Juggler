@@ -198,6 +198,7 @@ jest.mock('../../../src/lib/tasks-write', () => ({
 jest.mock('../../../src/lib/task-write-queue', () => ({
   isLocked: jest.fn(() => Promise.resolve(false)),
   enqueueWrite: jest.fn(() => Promise.resolve()),
+  discardQueuedWrites: jest.fn(() => Promise.resolve()), // 999.5288/999.5291
   splitFields: jest.fn((row) => ({ schedulingFields: row, nonSchedulingFields: {} })),
   flushQueue: jest.fn(() => Promise.resolve())
 }));

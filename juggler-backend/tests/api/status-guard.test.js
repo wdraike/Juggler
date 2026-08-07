@@ -92,6 +92,20 @@ jest.mock('../../src/lib/sse-emitter', () => ({
   addClient: jest.fn()
 }));
 
+// 999.5288: UpdateTaskStatus now checks isLocked before writing (lock-protocol
+// parity with CreateTask/UpdateTask). This suite's mockDb chain.raw() returns
+// the raw SQL STRING (not a [[rows]] tuple) for other callers that pass a raw
+// fragment into a query builder — under that shape, isLocked's own
+// `db.raw(...)` call (`row[0] && row[0].length > 0`) reads `row[0]` as the raw
+// SQL string's first CHARACTER, which is truthy, so isLocked would spuriously
+// report "locked" for every request. This suite is about the scheduled_at
+// D-B snap-then-write guard, not lock/queue interaction — stub isLocked false
+// so writes still land directly, same as before this dependency existed.
+jest.mock('../../src/lib/task-write-queue', () => {
+  const actual = jest.requireActual('../../src/lib/task-write-queue');
+  return Object.assign({}, actual, { isLocked: jest.fn(() => Promise.resolve(false)) });
+});
+
 const VALID_TOKEN = 'valid-test-token';
 let app, request;
 

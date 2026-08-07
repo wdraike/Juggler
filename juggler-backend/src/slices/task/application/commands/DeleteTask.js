@@ -31,6 +31,43 @@
  * ── P1 ── soft-skip update omits updated_at (repo stamps new Date()).
  * ── NO NEW FALLBACKS ── preserved verbatim.
  *
+ * ── 999.5288/999.5291 (LOCK PATH, resolved) ── UpdateTaskStatus now queues
+ * status writes under an active sync lock (999.5288), which created a NEW race:
+ * "complete X (queued) -> delete X (direct, soft-cancel) -> lock releases ->
+ * flush replays the queued {status:'done'} over the cancelled row" resurrects
+ * a task the user deleted. Before status writes were queued, both writes were
+ * direct and real time ordered them (delete won); queueing broke that.
+ *
+ * Two DIFFERENT fixes, chosen per branch after tracing what each one actually
+ * writes (999.5291 narrowed the original "DeleteTask cannot be queued at all"
+ * claim — that only holds for the multi-row branches):
+ *
+ *   - cascadeRecurringDelete (scope=series), standardDelete (scope=instance
+ *     and the no-scope default) and thisAndFutureDelete (scope=this_and_future)
+ *     stay DIRECT writes — ledger cleanup, JSON_CONTAINS dependency fixups and
+ *     multi-row cascades are not representable in the write-queue's single-row
+ *     {operation,fields} replay model (duplicating them into
+ *     task-write-queue.js is the Fork-Drift trap; reaching from the queue lib
+ *     back into slices/task/facade.js's collaborators would close a NEW
+ *     require cycle at an already-capped budget). Each of these branches now
+ *     calls `discardQueuedWrites(userId, taskId)` (via `_discardIds`) for
+ *     EVERY row it soft-cancelled, AFTER the write lands, so a stale queued
+ *     write for that same task can never replay over it.
+ *   - The recurring_instance soft-skip branch (no scope) is different: it is
+ *     a plain single-row `updateTaskById({status:'skip', scheduled_at})` —
+ *     exactly the queue's `update` shape, no ledger, no cascade. It is routed
+ *     through the SAME isLocked+splitFields+enqueueWrite idiom
+ *     UpdateTaskStatus._writeTaskFields uses (`_writeTaskFields` below),
+ *     so it QUEUES (coalescing correctly with any earlier queued write for
+ *     the same instance) rather than writing-then-discarding. This also
+ *     closes the narrower residual risk 999.5291 flagged (a direct DeleteTask
+ *     write still racing the sync's own write-phase transaction while
+ *     locked) for this one branch, which discard-after-write cannot.
+ *
+ * The write-queue's `delete` operation verb stays dead code (999.5291 finding
+ * (1)): it hard-deletes, contradicting R55 soft-cancel, and none of the above
+ * branches route through it.
+ *
  * @typedef {Object} DeleteTaskDeps  (see constructor required list)
  */
 
@@ -42,13 +79,20 @@ var assertDeps = require('../_assertDeps');
 function DeleteTask(deps) {
   var required = ['repo', 'cache', 'enqueueScheduleRun', 'loadCalSyncSettings',
     'findProviderLedgerRow', 'findCalLockedSeriesInstance', 'cascadeRecurringDelete',
-    'standardDelete', 'thisAndFutureDelete'];
+    'standardDelete', 'thisAndFutureDelete',
+    // 999.5288/999.5291: discardQueuedWrites guards the direct-write branches;
+    // isLocked/enqueueWrite/splitFieldsLib gate the queued soft-skip branch.
+    'discardQueuedWrites', 'isLocked', 'enqueueWrite', 'splitFieldsLib'];
   assertDeps('DeleteTask', deps, required);
   this.repo = deps.repo;
   this.cache = deps.cache;
   this.enqueueScheduleRun = deps.enqueueScheduleRun;
   this.loadCalSyncSettings = deps.loadCalSyncSettings;
   this.findProviderLedgerRow = deps.findProviderLedgerRow;
+  this.discardQueuedWrites = deps.discardQueuedWrites;
+  this.isLocked = deps.isLocked;
+  this.enqueueWrite = deps.enqueueWrite;
+  this.splitFields = deps.splitFieldsLib.splitFields;
   // FR-6 (juggler-recur-lifecycle-redesign, series cal_locked delete gate):
   // REQUIRED (FIX bert ernie-w2-callocked-gate-failopen-default, 2026-07-09) —
   // this is a safety gate; a fail-OPEN `|| noop` default here would silently
@@ -64,6 +108,49 @@ function DeleteTask(deps) {
   this.thisAndFutureDelete = deps.thisAndFutureDelete;
   this.PROVIDER_NAMES = { gcal: 'Google Calendar', msft: 'Microsoft Calendar', apple: 'Apple Calendar' };
 }
+
+/**
+ * 999.5288 — discard any queued write for every id one of the direct-write
+ * branches (standardDelete/cascadeRecurringDelete/thisAndFutureDelete) just
+ * soft-cancelled, so a stale queued status write (e.g. a completion queued
+ * before the delete) can never replay over the row after it lands. Called
+ * AFTER the branch's direct write, so the discard is ordered after the
+ * delete and cannot race ahead of it. Safe/idempotent when nothing was
+ * queued (0-row delete) — called unconditionally, not just under an active
+ * lock, since a crashed/expired lock can leave stale queue rows behind even
+ * once isLocked() reads false.
+ * @returns {Promise<void>}
+ */
+DeleteTask.prototype._discardIds = async function _discardIds(userId, ids) {
+  var self = this;
+  await Promise.all(ids.map(function (taskId) { return self.discardQueuedWrites(userId, taskId); }));
+};
+
+/**
+ * 999.5291 — locked-aware row write for the recurring-instance soft-skip
+ * branch ONLY (the one DeleteTask branch that is a plain single-row update,
+ * the queue's exact shape). Mirrors UpdateTaskStatus._writeTaskFields
+ * verbatim: unlocked writes directly (unchanged behavior); locked splits
+ * fields and defers scheduling fields via enqueueWrite, applied by
+ * task-write-queue.js's flush once the lock releases.
+ * @returns {Promise<{queued: boolean}>}
+ */
+DeleteTask.prototype._writeTaskFields = async function _writeTaskFields(id, userId, fields, source) {
+  var locked = await this.isLocked(userId);
+  if (!locked) {
+    await this.repo.updateTaskById(id, fields, userId);
+    return { queued: false };
+  }
+  var split = this.splitFields(fields);
+  if (Object.keys(split.nonSchedulingFields).length > 0) {
+    await this.repo.updateTaskById(id, split.nonSchedulingFields, userId);
+  }
+  if (Object.keys(split.schedulingFields).length > 0) {
+    await this.enqueueWrite(userId, id, 'update', split.schedulingFields, source);
+    return { queued: true };
+  }
+  return { queued: false };
+};
 
 /**
  * @param {Object} input
@@ -159,6 +246,10 @@ DeleteTask.prototype.execute = async function execute(input) {
     var result = await this.repo.runInTransaction(async function (trxRepo) {
       return this.cascadeRecurringDelete({ trxRepo: trxRepo, userId: userId, templateId: templateId });
     }.bind(this));
+    // 999.5288: discard any queued write for every row cascadeRecurringDelete
+    // just soft-cancelled (pending instances + the template) — see
+    // _discardIds header.
+    await this._discardIds(userId, (result.pendingIds || []).concat([templateId]));
     await this.cache.invalidateTasks(userId);
     this.enqueueScheduleRun(userId, 'api:deleteTask:cascade',
       [templateId].concat(result.pendingIds || []).concat(result.keptIds || []));
@@ -183,6 +274,8 @@ DeleteTask.prototype.execute = async function execute(input) {
     await this.repo.runInTransaction(async function (trxRepo) {
       await this.standardDelete({ trxRepo: trxRepo, userId: userId, id: id, task: task });
     }.bind(this));
+    // 999.5288: see _discardIds header.
+    await this.discardQueuedWrites(userId, id);
     await this.cache.invalidateTasks(userId);
     this.enqueueScheduleRun(userId, 'api:deleteTask:instance', [id]);
     return { status: 200, body: { message: 'Instance deleted', id: id } };
@@ -199,6 +292,10 @@ DeleteTask.prototype.execute = async function execute(input) {
     var tfResult = await this.repo.runInTransaction(async function (trxRepo) {
       return this.thisAndFutureDelete({ trxRepo: trxRepo, userId: userId, id: id, templateId: tplId, task: task });
     }.bind(this));
+    // 999.5288: discard any queued write for every row thisAndFutureDelete
+    // just soft-cancelled (pending/future instances + the template) — see
+    // _discardIds header.
+    await this._discardIds(userId, (tfResult.pendingIds || []).concat([tplId]));
     await this.cache.invalidateTasks(userId);
     this.enqueueScheduleRun(userId, 'api:deleteTask:thisAndFuture',
       [tplId].concat(tfResult.pendingIds || []).concat(tfResult.keptIds || []));
@@ -218,21 +315,30 @@ DeleteTask.prototype.execute = async function execute(input) {
   // 999.1988/999.1989: snap scheduled_at to now if unscheduled — the DB CHECK
   // constraint chk_task_instances_terminal_scheduled rejects status='skip' with
   // NULL scheduled_at (same snap-then-write pattern as UpdateTaskStatus D-B).
+  // 999.5291: this is a plain single-row update (the queue's exact shape,
+  // unlike this file's other branches) — routed through the SAME
+  // isLocked+splitFields+enqueueWrite idiom UpdateTaskStatus uses via
+  // _writeTaskFields, so it QUEUES under an active lock instead of writing
+  // directly + discarding. See file header for the full reasoning.
   if (isRecurringInstance) {
     var softSkipUpdate = { status: 'skip' };
     if (!task.scheduled_at) {
       softSkipUpdate.scheduled_at = new Date();
     }
-    await this.repo.updateTaskById(id, softSkipUpdate, userId);
+    var softSkipWrite = await this._writeTaskFields(id, userId, softSkipUpdate, 'api:deleteTask:softSkip');
     await this.cache.invalidateTasks(userId);
-    this.enqueueScheduleRun(userId, 'api:deleteTask:softSkip', [id]);
-    return { status: 200, body: { message: 'Recurring instance skipped', id: id, softDelete: true } };
+    this.enqueueScheduleRun(userId, 'api:deleteTask:softSkip', [id], { skipEmit: softSkipWrite.queued });
+    var softSkipBody = { message: 'Recurring instance skipped', id: id, softDelete: true };
+    if (softSkipWrite.queued) softSkipBody.queued = true;
+    return { status: 200, body: softSkipBody };
   }
 
   // standard single-task delete (handler L1530-1568)
   await this.repo.runInTransaction(async function (trxRepo) {
     await this.standardDelete({ trxRepo: trxRepo, userId: userId, id: id, task: task });
   }.bind(this));
+  // 999.5288: see _discardIds header.
+  await this.discardQueuedWrites(userId, id);
   await this.cache.invalidateTasks(userId);
   this.enqueueScheduleRun(userId, 'api:deleteTask', [id]);
   return { status: 200, body: { message: 'Task deleted', id: id } };

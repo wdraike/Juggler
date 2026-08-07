@@ -116,6 +116,7 @@ function baseDeps(extra) {
     projects: { ensureProject: function () { return Promise.resolve(); } },
     isLocked: function () { return Promise.resolve(false); },
     enqueueWrite: function () { return Promise.resolve(); },
+    discardQueuedWrites: function () { return Promise.resolve(); },
     uuidv7: function () { return 'gen-' + Math.random().toString(36).slice(2, 10); },
     sleep: function () { return Promise.resolve(); }
   };

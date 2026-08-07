@@ -1521,7 +1521,9 @@ var _updateTaskStatus = new app.UpdateTaskStatus({
   materializeRcInstance: materializeRcInstance, handleTemplatePause: handleTemplatePause,
   loadMaster: loadMaster, isRollingMaster: isRollingMaster, applyRollingAnchor: applyRollingAnchor,
   loadSplitSiblings: loadSplitSiblings, triggerCalSync: triggerCalSync,
-  reactivateDoneFrozen: reactivateDoneFrozen, logger: logger
+  reactivateDoneFrozen: reactivateDoneFrozen, logger: logger,
+  // 999.5288: lock-protocol parity with CreateTask/UpdateTask.
+  isLocked: isLocked, enqueueWrite: enqueueWrite, splitFieldsLib: splitFieldsLib
 });
 
 var _completeTask = new app.CompleteTask({ updateTaskStatus: _updateTaskStatus });
@@ -1532,7 +1534,16 @@ var _deleteTask = new app.DeleteTask({
   loadCalSyncSettings: loadCalSyncSettings, findProviderLedgerRow: findProviderLedgerRow,
   findCalLockedSeriesInstance: findCalLockedSeriesInstance,
   cascadeRecurringDelete: cascadeRecurringDelete, standardDelete: standardDelete,
-  thisAndFutureDelete: thisAndFutureDelete
+  thisAndFutureDelete: thisAndFutureDelete,
+  // 999.5288/999.5291: discardQueuedWrites orders a queue-discard AFTER
+  // DeleteTask's direct soft-cancel writes (standardDelete/cascade/
+  // this-and-future) so a queued status write from before the delete can't
+  // replay over the cancelled row and resurrect it. isLocked/enqueueWrite/
+  // splitFieldsLib are for the recurring-instance soft-skip branch only —
+  // that branch is a plain single-row update (the queue's exact shape), so
+  // it is QUEUED like UpdateTaskStatus rather than write-then-discard.
+  discardQueuedWrites: taskWriteQueue.discardQueuedWrites,
+  isLocked: isLocked, enqueueWrite: enqueueWrite, splitFieldsLib: splitFieldsLib
 });
 
 var _batchCreateTasks = new app.BatchCreateTasks({

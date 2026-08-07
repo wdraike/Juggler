@@ -237,7 +237,14 @@ async function flushQueueInLock(userId) {
 async function _doFlush(userId) {
   var entries = await db('task_write_queue')
     .where('user_id', userId)
+    // 999.5288: id (auto-increment PK) is the tiebreaker, and it is the one
+    // that actually matters. created_at is `table.timestamp(...)` with
+    // datetime_precision 0 (20260414000000_create_task_write_queue.js:16), so
+    // two writes to the same task inside one second sort MySQL-arbitrarily and
+    // coalesce in the wrong order — done then reopen could land as reopen then
+    // done. Newly reachable now that status writes flow through this queue.
     .orderBy('created_at', 'asc')
+    .orderBy('id', 'asc')
     .select('id', 'task_id', 'operation', 'fields', 'source', 'created_by');
 
   if (entries.length === 0) return;
@@ -351,8 +358,27 @@ async function _doFlush(userId) {
   }
 }
 
+/**
+ * Drop every queued write for one task (999.5288).
+ *
+ * Needed because DeleteTask writes DIRECTLY (soft-cancel, R55) while
+ * UpdateTaskStatus now QUEUES under a sync lock. Without this, the sequence
+ * "complete X (queued) -> delete X (direct) -> lock releases -> flush" replays
+ * the queued status write over the already-cancelled row and RESURRECTS the
+ * task the user deleted. Before status writes were queued, both writes were
+ * direct and real time ordered them correctly; queueing is what created the
+ * window, so queueing has to close it.
+ *
+ * Called by DeleteTask after its direct write, so the discard is ordered after
+ * the delete and cannot race ahead of it.
+ */
+async function discardQueuedWrites(userId, taskId) {
+  return db('task_write_queue').where({ user_id: userId, task_id: taskId }).del();
+}
+
 module.exports = {
   isLocked: isLocked,
+  discardQueuedWrites: discardQueuedWrites,
   enqueueWrite: enqueueWrite,
   flushQueue: flushQueue,
   flushQueueInLock: flushQueueInLock,

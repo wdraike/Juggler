@@ -171,6 +171,75 @@ describe('UpdateTaskStatus (updateTaskStatus)', function () {
       expect(out.body.instancesUnpaused).toBe(2);
     });
   });
+
+  // ── 999.5288: root class behind 999.5270 — UpdateTaskStatus bypassed the
+  // sync write-queue entirely (no isLocked check at all). A status write
+  // (done/cancel/skip/wip) issued while a calendar sync holds the per-user
+  // sync_locks row must be QUEUED (task-write-queue.js), not applied directly —
+  // same isLocked+enqueueWrite protocol CreateTask/UpdateTask already use.
+  test('999.5288 LOCK PATH: status write is QUEUED, not applied directly — 200 queued, row unchanged, no publish', function () {
+    var repo = seedScheduled();
+    var trigger = H.makeTriggerSpy();
+    var events = H.makeEventsSpy();
+    var enqueued = [];
+    var writeSpy = jest.spyOn(repo, 'updateTaskById');
+    var uc = new UpdateTaskStatus(statusDeps(repo, trigger, events, {
+      isLocked: function () { return Promise.resolve(true); },
+      enqueueWrite: function (uid, id, op, fields, src) {
+        enqueued.push({ userId: uid, id: id, op: op, fields: fields, src: src });
+        return Promise.resolve();
+      }
+    }));
+    return uc.execute({ id: 's1', userId: USER, body: { status: 'done' } }).then(function (out) {
+      expect(out.status).toBe(200);
+      expect(out.body.queued).toBe(true);
+      // OBSERVABLE OUTCOME: the row must NOT reflect the write yet — proves the
+      // write was deferred, not merely that isLocked was consulted.
+      expect(writeSpy).not.toHaveBeenCalled();
+      return repo.fetchTaskWithEventIds('s1', USER).then(function (r) {
+        expect(r.status).toBe(''); // unchanged — still pre-completion
+        expect(r.completed_at).toBeFalsy();
+      });
+    }).then(function () {
+      expect(enqueued.length).toBe(1);
+      expect(enqueued[0].id).toBe('s1');
+      expect(enqueued[0].op).toBe('update');
+      expect(enqueued[0].fields.status).toBe('done');
+      expect(enqueued[0].src).toBe('api:updateTaskStatus');
+      // no publish on the queued path (CreateTask/UpdateTask precedent) — a
+      // publish subscriber would otherwise read stale-vs-claimed state.
+      expect(events.published.length).toBe(0);
+      // scheduler still runs (status is always scheduling-relevant) but the
+      // emit is skipped since the DB doesn't reflect the change yet.
+      expect(trigger.calls[0].options).toEqual({ skipEmit: true });
+    });
+  });
+
+  test('999.5288 LOCK PATH: recurring_template pause/unpause status flip is also QUEUED', function () {
+    var repo = new InMemoryTaskRepository({ rows: [
+      { id: 'tpl-locked', user_id: USER, task_type: 'recurring_template', recurring: 1, status: '', updated_at: new Date() }
+    ] });
+    var trigger = H.makeTriggerSpy();
+    var enqueued = [];
+    var writeSpy = jest.spyOn(repo, 'updateTaskById');
+    var uc = new UpdateTaskStatus(statusDeps(repo, trigger, H.makeEventsSpy(), {
+      isLocked: function () { return Promise.resolve(true); },
+      enqueueWrite: function (uid, id, op, fields, src) {
+        enqueued.push({ id: id, op: op, fields: fields, src: src });
+        return Promise.resolve();
+      },
+      handleTemplatePause: function () { return Promise.resolve({ pausedCount: 1, pausedIds: ['inst-x'], unpausedCount: 0, unpausedIds: [] }); }
+    }));
+    return uc.execute({ id: 'tpl-locked', userId: USER, body: { status: 'pause' } }).then(function (out) {
+      expect(out.status).toBe(200);
+      expect(writeSpy).not.toHaveBeenCalled();
+      expect(enqueued.length).toBe(1);
+      expect(enqueued[0].fields.status).toBe('pause');
+      return repo.fetchTaskWithEventIds('tpl-locked', USER).then(function (r) {
+        expect(r.status).toBe(''); // unchanged — deferred to the queue
+      });
+    });
+  });
 });
 
 // ── W5-2: triggerCalSync.sync spy (BLOCK gap closed) ─────────────────────────
@@ -218,6 +287,39 @@ describe('CompleteTask (done path delegation)', function () {
       expect(out.status).toBe(200);
       expect(out.body.task.status).toBe('done');
       expect(events.published[0].type).toBe('completed');
+    });
+  });
+
+  // 999.5288: CompleteTask has NO write of its own — it fully delegates to
+  // UpdateTaskStatus.execute(). CompleteTask therefore needs no isLocked check
+  // of its own (that would double-guard); it inherits UpdateTaskStatus's lock
+  // protocol for free. This is the exact 999.5270 scenario: a user completing
+  // a task while a calendar sync holds the lock.
+  test('999.5288 LOCK PATH: a completion issued while locked is QUEUED, not applied — inherited from UpdateTaskStatus', function () {
+    var repo = new InMemoryTaskRepository({ rows: [
+      { id: 'c-locked', user_id: USER, task_type: 'task', status: '', scheduled_at: new Date('2026-06-02T15:00:00Z'), updated_at: new Date() }
+    ] });
+    var events = H.makeEventsSpy();
+    var enqueued = [];
+    var writeSpy = jest.spyOn(repo, 'updateTaskById');
+    var uts = new UpdateTaskStatus(statusDeps(repo, H.makeTriggerSpy(), events, {
+      isLocked: function () { return Promise.resolve(true); },
+      enqueueWrite: function (uid, id, op, fields, src) {
+        enqueued.push({ id: id, op: op, fields: fields, src: src });
+        return Promise.resolve();
+      }
+    }));
+    var uc = new CompleteTask({ updateTaskStatus: uts });
+    return uc.execute({ id: 'c-locked', userId: USER }).then(function (out) {
+      expect(out.status).toBe(200);
+      expect(out.body.queued).toBe(true);
+      expect(writeSpy).not.toHaveBeenCalled();
+      expect(enqueued.length).toBe(1);
+      expect(enqueued[0].fields.status).toBe('done');
+      expect(events.published.length).toBe(0); // no completion published on the queued path
+      return repo.fetchTaskWithEventIds('c-locked', USER).then(function (r) {
+        expect(r.status).toBe(''); // survives — the sync cannot race a write that never landed
+      });
     });
   });
 });
@@ -445,6 +547,155 @@ describe('DeleteTask (deleteTask)', function () {
     return uc.execute({ id: 'ri-s', userId: USER, scope: 'series' }).then(function (out) {
       expect(out.status).toBe(200);
       expect(cascadeIds).toEqual(['m55']);
+    });
+  });
+
+  // ── 999.5288/999.5291: resurrection-race fix ──────────────────────────────
+  // UpdateTaskStatus now queues status writes under an active sync lock
+  // (999.5288). Before that, DeleteTask's direct soft-cancel writes and a
+  // status write were BOTH direct and real time ordered them (delete won).
+  // Queueing broke that: "complete X (queued) -> delete X (direct) -> lock
+  // releases -> flush replays the queued write over the cancelled row"
+  // resurrects a task the user deleted. `makeQueueSimulator` below is a
+  // MINIMAL in-memory stand-in for task-write-queue.js's real
+  // enqueueWrite/discardQueuedWrites/flush contract — enough to prove the
+  // end-to-end sequencing without a real DB.
+  function makeQueueSimulator() {
+    var queue = []; // [{ taskId, fields }]
+    return {
+      enqueueWrite: function (userId, taskId, op, fields) {
+        queue.push({ taskId: taskId, fields: fields });
+        return Promise.resolve();
+      },
+      discardQueuedWrites: function (userId, taskId) {
+        queue = queue.filter(function (e) { return e.taskId !== taskId; });
+        return Promise.resolve();
+      },
+      // Mirrors _doFlush: apply every still-queued write, in order.
+      flush: function (repo, userId) {
+        return queue.reduce(function (p, e) {
+          return p.then(function () { return repo.updateTaskById(e.taskId, e.fields, userId); });
+        }, Promise.resolve());
+      }
+    };
+  }
+
+  test('999.5288/999.5291 RED->GREEN: complete-then-delete-under-lock does NOT resurrect the task after flush (standard delete)', function () {
+    var repo = new InMemoryTaskRepository({ rows: [
+      { id: 'res1', user_id: USER, task_type: 'task', status: '', scheduled_at: new Date('2026-06-02T15:00:00Z'), updated_at: new Date() }
+    ] });
+    var q = makeQueueSimulator();
+    var trigger = H.makeTriggerSpy();
+    var events = H.makeEventsSpy();
+
+    // 1. user completes task X while a sync lock is held -> QUEUED, not applied.
+    var uts = new UpdateTaskStatus(statusDeps(repo, trigger, events, {
+      isLocked: function () { return Promise.resolve(true); },
+      enqueueWrite: q.enqueueWrite
+    }));
+
+    // 2. user deletes task X while STILL locked -> DeleteTask writes DIRECTLY
+    // (soft-cancel, R55) and must discard the queued write for the same id.
+    var uc = new DeleteTask(deleteDeps(repo, trigger, {
+      discardQueuedWrites: q.discardQueuedWrites,
+      standardDelete: function (ctx) { return ctx.trxRepo.updateTaskById(ctx.id, { status: 'cancelled' }, ctx.userId); }
+    }));
+
+    return uts.execute({ id: 'res1', userId: USER, body: { status: 'done' } })
+      .then(function () { return uc.execute({ id: 'res1', userId: USER }); })
+      .then(function () {
+        // 3. lock releases -> flush replays whatever is STILL queued.
+        return q.flush(repo, USER);
+      })
+      .then(function () { return repo.fetchTaskWithEventIds('res1', USER); })
+      .then(function (r) {
+        // OBSERVABLE END STATE: stays cancelled — never resurrected to 'done'.
+        expect(r.status).toBe('cancelled');
+      });
+  });
+
+  test('999.5291: recurring_instance soft-skip under lock is QUEUED (not written directly), coalesces over an earlier queued complete', function () {
+    var repo = new InMemoryTaskRepository({ rows: [
+      { id: 'ri-lock', user_id: USER, task_type: 'recurring_instance', source_id: 'm1', master_id: 'm1', status: '', scheduled_at: new Date('2026-06-02T15:00:00Z'), updated_at: new Date() }
+    ] });
+    var q = makeQueueSimulator();
+    var trigger = H.makeTriggerSpy();
+    var writeSpy = jest.spyOn(repo, 'updateTaskById');
+
+    // user completes the instance while locked (queued 'done'), then deletes
+    // it (soft-skip) while STILL locked — soft-skip must also queue, not write.
+    var uts = new UpdateTaskStatus(statusDeps(repo, trigger, H.makeEventsSpy(), {
+      isLocked: function () { return Promise.resolve(true); },
+      enqueueWrite: q.enqueueWrite
+    }));
+    var uc = new DeleteTask(deleteDeps(repo, trigger, {
+      isLocked: function () { return Promise.resolve(true); },
+      enqueueWrite: q.enqueueWrite,
+      discardQueuedWrites: q.discardQueuedWrites
+    }));
+
+    return uts.execute({ id: 'ri-lock', userId: USER, body: { status: 'done' } })
+      .then(function () { return uc.execute({ id: 'ri-lock', userId: USER }); })
+      .then(function (out) {
+        expect(out.status).toBe(200);
+        expect(out.body.queued).toBe(true);
+        expect(writeSpy).not.toHaveBeenCalled(); // never written directly while locked
+        return q.flush(repo, USER);
+      })
+      .then(function () { return repo.fetchTaskWithEventIds('ri-lock', USER); })
+      .then(function (r) {
+        // last-queued write wins on flush: soft-skip (queued after complete) wins.
+        expect(r.status).toBe('skip');
+      });
+  });
+
+  test('999.5288: scope=series discards queued writes for the template AND every soft-cancelled instance', function () {
+    var repo = new InMemoryTaskRepository({ rows: [
+      { id: 'tplDisc', user_id: USER, task_type: 'recurring_template', recurring: 1, status: '', updated_at: new Date() }
+    ] });
+    var discardCalls = [];
+    var uc = new DeleteTask(deleteDeps(repo, H.makeTriggerSpy(), {
+      discardQueuedWrites: function (userId, taskId) { discardCalls.push(taskId); return Promise.resolve(); },
+      cascadeRecurringDelete: function () {
+        return Promise.resolve({ deletedCount: 2, keptCount: 0, pendingIds: ['instA', 'instB'], keptIds: [] });
+      }
+    }));
+    return uc.execute({ id: 'tplDisc', userId: USER, scope: 'series' }).then(function (out) {
+      expect(out.status).toBe(200);
+      expect(discardCalls.sort()).toEqual(['instA', 'instB', 'tplDisc']);
+    });
+  });
+
+  test('999.5288: scope=this_and_future discards queued writes for the template AND every soft-cancelled instance', function () {
+    var repo = new InMemoryTaskRepository({ rows: [
+      { id: 'tplTFDisc', user_id: USER, task_type: 'recurring_template', recurring: 1, status: '', updated_at: new Date() }
+    ] });
+    var discardCalls = [];
+    var uc = new DeleteTask(deleteDeps(repo, H.makeTriggerSpy(), {
+      discardQueuedWrites: function (userId, taskId) { discardCalls.push(taskId); return Promise.resolve(); },
+      thisAndFutureDelete: function () {
+        // pendingIds are INSTANCE ids (source_id=templateId rows) — realistically
+        // distinct from the template's own id, never overlapping with tplId.
+        return Promise.resolve({ deletedCount: 2, keptCount: 0, pendingIds: ['instCurrent', 'futureX'], keptIds: [] });
+      }
+    }));
+    return uc.execute({ id: 'tplTFDisc', userId: USER, scope: 'this_and_future' }).then(function (out) {
+      expect(out.status).toBe(200);
+      expect(discardCalls.sort()).toEqual(['futureX', 'instCurrent', 'tplTFDisc']);
+    });
+  });
+
+  test('999.5288: scope=instance discards the queued write for that single id', function () {
+    var repo = new InMemoryTaskRepository({ rows: [
+      { id: 'instDisc', user_id: USER, task_type: 'task', status: '', updated_at: new Date() }
+    ] });
+    var discardCalls = [];
+    var uc = new DeleteTask(deleteDeps(repo, H.makeTriggerSpy(), {
+      discardQueuedWrites: function (userId, taskId) { discardCalls.push(taskId); return Promise.resolve(); }
+    }));
+    return uc.execute({ id: 'instDisc', userId: USER, scope: 'instance' }).then(function (out) {
+      expect(out.status).toBe(200);
+      expect(discardCalls).toEqual(['instDisc']);
     });
   });
 });

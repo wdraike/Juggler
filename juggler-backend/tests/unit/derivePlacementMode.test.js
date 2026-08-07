@@ -36,6 +36,7 @@ jest.mock('../../src/lib/sse-emitter', () => ({
 jest.mock('../../src/lib/task-write-queue', () => ({
   isLocked: jest.fn().mockReturnValue(false),
   enqueueWrite: jest.fn(),
+  discardQueuedWrites: jest.fn(() => Promise.resolve()), // 999.5288/999.5291
   splitFields: jest.fn(() => ({ schedulingFields: {}, nonSchedulingFields: {} })),
   flushQueue: jest.fn(),
 }));

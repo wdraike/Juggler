@@ -136,6 +136,7 @@ jest.mock('../src/lib/task-write-queue', function() {
   return {
     isLocked: function() { return Promise.resolve(false); },
     enqueueWrite: function() { return Promise.resolve(); },
+    discardQueuedWrites: jest.fn(() => Promise.resolve()), // 999.5288/999.5291
     splitFields: splitFields
   };
 });

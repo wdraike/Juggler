@@ -248,6 +248,7 @@ jest.mock('../src/lib/task-write-queue', function() {
       mockEnqueueCalls.push({ userId: userId, taskId: taskId, op: op, fields: fields, src: src });
       return Promise.resolve();
     },
+    discardQueuedWrites: jest.fn(() => Promise.resolve()), // 999.5288/999.5291
     splitFields: splitFields
   };
 });

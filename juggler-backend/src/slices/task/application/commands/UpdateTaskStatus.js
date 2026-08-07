@@ -41,6 +41,42 @@
  * deletion, split-sibling lookup, cal-sync trigger) are INJECTED collaborators —
  * the legacy blocks lifted verbatim, wired by W6.
  *
+ * ── 999.5288 (LOCK PATH) ── this command used to write directly with NO lock
+ * check at all — one of three writers (with DeleteTask/CompleteTask, the latter
+ * delegating here) that bypassed the sync_locks + task-write-queue.js protocol
+ * CreateTask/UpdateTask/BatchCreateTasks/BatchUpdateTasks already use, which is
+ * the class behind 999.5270 (a sync deleting a task the user had just completed
+ * mid-sync). Mirrors UpdateTask's `_lockPath`/`splitFields` idiom exactly: the
+ * PRIMARY row write (recurring_template pause/unpause AND the main status
+ * write) is now isLocked-gated — locked routes scheduling fields through
+ * `enqueueWrite` (applied by task-write-queue.js's flush once the lock
+ * releases) instead of `repo.updateTaskById`. Status/completed_at/scheduled_at/
+ * time_remaining are never in task-write-queue's NON_SCHEDULING_FIELDS, so a
+ * status write is always 100% deferred when locked (never partially applied).
+ * Matching CreateTask/UpdateTask's locked-path contract: no event publish
+ * (subscribers would see stale-vs-claimed state), enqueueScheduleRun still
+ * fires (status is always scheduling-relevant) but with `skipEmit: true` (the
+ * flush's own post-apply code re-emits once the write actually lands).
+ *
+ * NOT deferred through the queue (documented scope boundary, not an oversight):
+ * `handleTemplatePause`'s cascade to instances, `applyRollingAnchor` (already
+ * concurrency-safe via its own GREATEST/monotonic guard), split-sibling
+ * propagation, and `reactivateDoneFrozen`/`triggerCalSync` all touch rows/
+ * tables the queue's single-task {operation,fields} replay model does not
+ * represent — deferring them would mean duplicating multi-row/ledger logic
+ * inside task-write-queue.js (the Fork-Drift trap) or reaching back into
+ * slices/task/facade.js from the queue lib, which would close a require cycle
+ * (the cycle budget is at its cap). DeleteTask has the SAME constraint (worse —
+ * cal_sync_ledger cleanup + dependency fixups + cascade) and was deliberately
+ * NOT gated in 999.5288; filed as a follow-up, 999.5291, which narrowed and
+ * resolved it: DeleteTask.js's multi-row branches (standardDelete/
+ * cascadeRecurringDelete/thisAndFutureDelete) stay direct writes but now call
+ * `discardQueuedWrites` for every row they touch (write-then-discard closes
+ * the resurrection race without needing the queue to represent multi-row
+ * writes); its recurring-instance soft-skip branch — a plain single-row
+ * update, unlike the others — is queued via the same `_writeTaskFields`
+ * idiom used here. See DeleteTask.js's header for the full trace.
+ *
  * @typedef {Object} UpdateTaskStatusDeps  (see constructor required list)
  */
 
@@ -67,7 +103,8 @@ function UpdateTaskStatus(deps) {
   var required = ['repo', 'cache', 'events', 'enqueueScheduleRun', 'mappers',
     'statusUpdateSchema', 'safeTimezone', 'dateHelpers', 'isTerminalStatus',
     'materializeRcInstance', 'handleTemplatePause', 'loadMaster', 'isRollingMaster',
-    'applyRollingAnchor', 'loadSplitSiblings', 'triggerCalSync', 'reactivateDoneFrozen'];
+    'applyRollingAnchor', 'loadSplitSiblings', 'triggerCalSync', 'reactivateDoneFrozen',
+    'isLocked', 'enqueueWrite', 'splitFieldsLib'];
   assertDeps('UpdateTaskStatus', deps, required);
   this.repo = deps.repo;
   this.cache = deps.cache;
@@ -80,6 +117,9 @@ function UpdateTaskStatus(deps) {
   this.isTerminalStatus = deps.isTerminalStatus;
   this.materializeRcInstance = deps.materializeRcInstance;
   this.handleTemplatePause = deps.handleTemplatePause;
+  this.isLocked = deps.isLocked;
+  this.enqueueWrite = deps.enqueueWrite;
+  this.splitFields = deps.splitFieldsLib.splitFields;
   this.loadMaster = deps.loadMaster;
   this.isRollingMaster = deps.isRollingMaster;
   this.applyRollingAnchor = deps.applyRollingAnchor;
@@ -88,6 +128,34 @@ function UpdateTaskStatus(deps) {
   this.reactivateDoneFrozen = deps.reactivateDoneFrozen;
   this.logger = deps.logger || { error: function () {} };
 }
+
+/**
+ * 999.5288 — locked-aware row write, mirroring UpdateTask's `_lockPath`/
+ * `splitFields` idiom. Unlocked: write directly (unchanged behavior). Locked:
+ * split fields the same way the write-queue's other producers do — any
+ * NON_SCHEDULING_FIELDS write immediately (safe to apply under an active sync
+ * lock), everything else is deferred via `enqueueWrite` and applied by
+ * task-write-queue.js's flush once the lock releases. Status/completed_at/
+ * scheduled_at/time_remaining are never non-scheduling, so a status write is
+ * always 100% deferred when locked.
+ * @returns {Promise<{queued: boolean}>}
+ */
+UpdateTaskStatus.prototype._writeTaskFields = async function _writeTaskFields(id, userId, fields, source) {
+  var locked = await this.isLocked(userId);
+  if (!locked) {
+    await this.repo.updateTaskById(id, fields, userId);
+    return { queued: false };
+  }
+  var split = this.splitFields(fields);
+  if (Object.keys(split.nonSchedulingFields).length > 0) {
+    await this.repo.updateTaskById(id, split.nonSchedulingFields, userId);
+  }
+  if (Object.keys(split.schedulingFields).length > 0) {
+    await this.enqueueWrite(userId, id, 'update', split.schedulingFields, source);
+    return { queued: true };
+  }
+  return { queued: false };
+};
 
 /**
  * @param {Object} input
@@ -134,22 +202,21 @@ UpdateTaskStatus.prototype.execute = async function execute(input) {
     if (status !== 'pause' && status !== '') {
       return { status: 400, body: { error: 'Recurring templates can only be paused or unpaused' } };
     }
-    await this.repo.updateTaskById(id, { status: status || '' }, userId);
+    var templateWrite = await this._writeTaskFields(id, userId, { status: status || '' }, 'api:updateTaskStatus:template');
     var cascadeResult = await this.handleTemplatePause({ id: id, userId: userId, status: status, repo: this.repo });
     var tmplRows = await this.repo.getRecurringTemplateRows(userId);
     var srcMapT = this.mappers.buildSourceMap(tmplRows);
     await this.cache.invalidateTasks(userId);
     var cascadedIds = (cascadeResult.pausedIds || []).concat(cascadeResult.unpausedIds || []);
-    this.enqueueScheduleRun(userId, 'api:updateTaskStatus:template', [id].concat(cascadedIds));
+    this.enqueueScheduleRun(userId, 'api:updateTaskStatus:template', [id].concat(cascadedIds), { skipEmit: templateWrite.queued });
     var updatedTemplate = await this.repo.fetchTaskWithEventIds(id, userId);
-    return {
-      status: 200,
-      body: {
-        task: this.mappers.rowToTask(updatedTemplate, null, srcMapT),
-        instancesPaused: cascadeResult.pausedCount || 0,
-        instancesUnpaused: cascadeResult.unpausedCount || 0
-      }
+    var templateBody = {
+      task: this.mappers.rowToTask(updatedTemplate, null, srcMapT),
+      instancesPaused: cascadeResult.pausedCount || 0,
+      instancesUnpaused: cascadeResult.unpausedCount || 0
     };
+    if (templateWrite.queued) templateBody.queued = true;
+    return { status: 200, body: templateBody };
   }
 
   // terminal-requires-schedule guard w/ rolling exemption (handler L1723-1742)
@@ -262,7 +329,7 @@ UpdateTaskStatus.prototype.execute = async function execute(input) {
     update.scheduled_at = new Date();
   }
 
-  await this.repo.updateTaskById(id, update, userId);
+  var mainWrite = await this._writeTaskFields(id, userId, update, 'api:updateTaskStatus');
 
   // rolling-anchor projection (handler L1789-1808) — delegated. Gate is the
   // shared ANCHOR_PROJECTION_STATUSES (999.1098), not a hand-copied list.
@@ -304,7 +371,9 @@ UpdateTaskStatus.prototype.execute = async function execute(input) {
       if (TERMINAL_REQUIRES_SCHEDULE.indexOf(status) !== -1 && !siblings[si].scheduled_at && !siblingUpdate.scheduled_at) {
         siblingUpdate.scheduled_at = new Date();
       }
-      await this.repo.updateTaskById(siblings[si].id, siblingUpdate, userId);
+      // 999.5288: same locked-aware write as the primary task — a sibling
+      // status write racing an active sync lock is deferred too.
+      await this._writeTaskFields(siblings[si].id, userId, siblingUpdate, 'api:updateTaskStatus');
     }
   }
 
@@ -323,16 +392,21 @@ UpdateTaskStatus.prototype.execute = async function execute(input) {
   var tmplRows2 = await this.repo.getRecurringTemplateRows(userId);
   var srcMap = this.mappers.buildSourceMap(tmplRows2);
   await this.cache.invalidateTasks(userId);
-  this.enqueueScheduleRun(userId, 'api:updateTaskStatus', [id].concat(siblingIds));
-  if (status === 'done') {
-    this.events.publishTaskCompleted({ id: id, userId: userId, status: updated && updated.status });
-  } else {
-    this.events.publishTaskUpdated({ id: id, userId: userId, status: updated && updated.status });
+  this.enqueueScheduleRun(userId, 'api:updateTaskStatus', [id].concat(siblingIds), { skipEmit: mainWrite.queued });
+  // 999.5288: no publish on the queued path — matches CreateTask/UpdateTask's
+  // locked-path contract. A publish here would tell subscribers the status
+  // already changed when the DB write hasn't landed yet (it lands when
+  // task-write-queue.js's flush applies it after the lock releases).
+  if (!mainWrite.queued) {
+    if (status === 'done') {
+      this.events.publishTaskCompleted({ id: id, userId: userId, status: updated && updated.status });
+    } else {
+      this.events.publishTaskUpdated({ id: id, userId: userId, status: updated && updated.status });
+    }
   }
-  return {
-    status: 200,
-    body: { task: this.mappers.rowToTask(updated, null, srcMap), siblingsUpdated: siblingIds.length }
-  };
+  var responseBody = { task: this.mappers.rowToTask(updated, null, srcMap), siblingsUpdated: siblingIds.length };
+  if (mainWrite.queued) responseBody.queued = true;
+  return { status: 200, body: responseBody };
 };
 
 module.exports = UpdateTaskStatus;
