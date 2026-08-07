@@ -83,9 +83,20 @@ var config = require('../../lib/config');
 // importWipeTasks/importInsertTask) get the write module via the task slice
 // facade's exported KnexTaskRepository class instead of requiring the raw
 // module directly. Required at MODULE SCOPE (not lazily inside the functions,
-// unlike the enforceDowngradeLimits seam below) — task/facade.js does not
-// require this file, so there is no load-order cycle to avoid, and a top-level
-// require here keeps these collaborators evaluated at the same load-time point
+// unlike the enforceDowngradeLimits seam below).
+//
+// WHY THAT IS SAFE — and it is NOT "task/facade.js does not require this file",
+// which is only true directly. task/facade.js DOES sit in a require cycle with
+// this file via middleware/entity-limits.js. The actual guarantee is that the
+// back-edges which close that loop are LAZY: task/facade.js:1475 and :1478
+// require entity-limits INSIDE a function, so the loop is never entered during
+// module load and `.KnexTaskRepository` (assigned in task/facade.js's
+// module.exports block) is fully populated by the time this line reads it.
+// DO NOT hoist those two requires to the top of task/facade.js: this line would
+// silently evaluate to undefined and `new TaskKnexTaskRepository(...)` below
+// (:159/:183/:187/:198) would throw at call time, far from the cause.
+//
+// A top-level require here also keeps these collaborators evaluated at the same load-time point
 // the legacy `require('lib/tasks-write')` was (load-order-sensitive test doubles
 // — e.g. facade.bugfix.regression.test.js's jest.isolateModules — mock the
 // module graph only during that synchronous load; a lazy require deferred to
