@@ -13,6 +13,7 @@ var ICAL = require('ical.js');
 var { PLACEMENT_MODES } = require('./placementModes');
 var { libAppleLogger } = require('./logger');
 var { isTerminalStatus } = require('./task-status');
+var { applyDoneMark } = require('../slices/calendar/domain/doneMarkText'); // 999.5272
 
 var DEFAULT_SERVER_URL = 'https://caldav.icloud.com';
 
@@ -233,8 +234,9 @@ function buildVEvent(task, year, _tz) {
   vevent.addPropertyWithValue('uid', uid);
 
   var isDone = isTerminalStatus(task.status);
-  var cleanText = task.text.replace(/^(✓\s+)+/, '');
-  var summaryText = isDone ? '✓ ' + cleanText : task.text;
+  // 999.5272: applyDoneMark strips ANY existing marks before deciding — this
+  // heals an already-contaminated title on its next push.
+  var summaryText = applyDoneMark(task.text, isDone);
   vevent.addPropertyWithValue('summary', summaryText);
 
   // Description with metadata

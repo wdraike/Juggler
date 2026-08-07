@@ -37,6 +37,7 @@ var { decrypt } = require('../../../lib/credential-encrypt');
 // (The previously destructured `_jugglerDateToISO`/`_computeDurationMinutes`
 // were never exported and never called — dead undefined bindings, dropped.)
 var { isoToJugglerDate } = require('../domain/dateTransforms');
+var { undecorateTitle } = require('../domain/doneMarkText'); // 999.5272
 var { localToUtc } = require('../../../scheduler/dateHelpers');
 var { PLACEMENT_MODES } = require('../../../lib/placementModes');
 var { calAdapterAppleLogger } = require('../../../lib/logger');
@@ -259,7 +260,9 @@ function applyEventToTaskFields(event, tz, currentTask) {
   var jd = isoToJugglerDate(event.startDateTime, tz);
 
   var fields = {
-    text: event.title,
+    // 999.5272: strip any provider-side "✓ " done-mark before writing the
+    // title into storage — see doneMarkText.js header for the full mechanism.
+    text: undecorateTitle(event.title, currentTask && currentTask.text),
     dur: event.durationMinutes,
     updated_at: getDb().fn.now()
   };

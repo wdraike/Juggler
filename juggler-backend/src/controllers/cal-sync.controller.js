@@ -20,7 +20,7 @@ var { taskHash, userHash, isoToJugglerDate, toMySQLDate, DEFAULT_TIMEZONE, callW
 // 999.5028: MSFT Graph returns Windows timezone names; convert to IANA for localToUtc.
 // Via the facade, not a direct adapter import — the direct form violated the
 // JUG-HEX-P7 boundary rule (999.5273).
-var { windowsToIana } = require('../slices/calendar/facade');
+var { windowsToIana, undecorateTitle } = require('../slices/calendar/facade');
 var sseEmitter = require('../lib/sse-emitter');
 var { PLACEMENT_MODES } = require('../lib/placementModes');
 var { isTerminalStatus } = require('../lib/task-status');
@@ -574,7 +574,11 @@ async function sync(req, res) {
                     logSyncAction(pid, 'conflict_provider', {
                       taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
                       oldValues: { text: task.text, when: task.when, dur: task.dur },
-                      newValues: { text: event.title, when: conflictPullFields.when || task.when, dur: event.durationMinutes },
+                      // 999.5272: log what actually gets STORED. The pull
+                      // undecorates a done-mark we can prove is ours, so
+                      // logging event.title raw would claim a rename to
+                      // "✓ X" that never happened.
+                      newValues: { text: undecorateTitle(event.title, task.text), when: conflictPullFields.when || task.when, dur: event.durationMinutes },
                       detail: 'Conflict: calendar edit accepted (newer than task)',
                       calendarName: calendarLabels[pid] || null
                     });
@@ -1462,6 +1466,12 @@ async function sync(req, res) {
           var taskRow = {
             id: newTaskId,
             user_id: userId,
+            // 999.5272: VERBATIM on purpose. This is the create/ingest path —
+            // there is no existing task, so a leading "✓ " cannot be proven to
+            // be ours (it may be the user's own, or come from a shared calendar
+            // or another app). undecorateTitle would return it unchanged here
+            // anyway; taking it raw keeps that explicit. Consistent with the
+            // update path, which also preserves marks it cannot attribute.
             text: newEvent.title,
             scheduled_at: newScheduledAt,
             dur: ingestDecision.dur,

@@ -52,6 +52,7 @@ var ProviderType = require('./domain/value-objects/ProviderType');
 
 var GoogleCalendarAdapter = require('./adapters/GoogleCalendarAdapter');
 var MicrosoftCalendarAdapter = require('./adapters/MicrosoftCalendarAdapter');
+var doneMarkText = require('./domain/doneMarkText'); // 999.5272
 var AppleCalendarAdapter = require('./adapters/AppleCalendarAdapter');
 var InMemoryCalendarAdapter = require('./adapters/InMemoryCalendarAdapter');
 var KnexSyncStateRepository = require('./adapters/KnexSyncStateRepository');
@@ -1834,6 +1835,12 @@ module.exports = {
   // blocked every commit staging juggler-backend and would red the CI Gate on
   // any run where juggler is a changed service (ci-pipeline.yml:321).
   windowsToIana: MicrosoftCalendarAdapter.windowsToIana,
+
+  // Done-mark title helpers (999.5272). Exposed here rather than let callers
+  // deep-import slices/calendar/domain/ — same JUG-HEX-P7 boundary that
+  // windowsToIana above exists to respect.
+  undecorateTitle: doneMarkText.undecorateTitle,
+  stripDoneMark: doneMarkText.stripDoneMark,
 
   // domain ports
   CalendarPort: CalendarPort,

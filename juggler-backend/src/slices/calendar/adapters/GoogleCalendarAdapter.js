@@ -30,6 +30,7 @@ var gcalApi = require('../../../lib/gcal-api');
 // 999.1192: pure date transforms come from the slice's own domain module, not
 // the HTTP-layer controllers/cal-sync-helpers (which now shims to the same fns).
 var { jugglerDateToISO, isoToJugglerDate, computeDurationMinutes } = require('../domain/dateTransforms');
+var { undecorateTitle, applyDoneMark } = require('../domain/doneMarkText'); // 999.5272
 var { localToUtc } = require('../../../scheduler/dateHelpers');
 var { PLACEMENT_MODES } = require('../../../lib/placementModes');
 var { _isAllDayTaskBackend } = require('../../../lib/isAllDayTaskBackend');
@@ -315,7 +316,12 @@ function applyEventToTaskFields(event, tz, currentTask) {
   var jd = isoToJugglerDate(event.startDateTime, tz);
 
   var fields = {
-    text: event.title,
+    // 999.5272: strip any provider-side "✓ " done-mark before writing the
+    // title into storage — a done task's pushed summary carries the mark,
+    // and if the task is reopened before the event catches up, the pull
+    // would otherwise write the decorated title in verbatim (never healing,
+    // since the non-done push branch below now sends the same stripped text).
+    text: undecorateTitle(event.title, currentTask && currentTask.text),
     dur: event.durationMinutes,
     updated_at: getDb().fn.now()
   };
@@ -402,8 +408,11 @@ function buildEventBody(task, year, tz, _opts) {
   descParts.push('', 'Synced from Raike & Sons');
 
   var isDone = isTerminalStatus(task.status);
-  var cleanText = task.text.replace(/^(✓\s+)+/, '');
-  var summaryText = isDone ? '✓ ' + cleanText : task.text;
+  // 999.5272: applyDoneMark strips ANY existing marks before deciding — this
+  // is what makes an already-contaminated title heal on its next push,
+  // instead of the old `: task.text` branch carrying the contamination
+  // forward forever.
+  var summaryText = applyDoneMark(task.text, isDone);
 
   if (isAllDay) {
     // task.date is now ISO YYYY-MM-DD post-migration; legacy rows may still be

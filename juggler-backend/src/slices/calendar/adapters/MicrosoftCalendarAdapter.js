@@ -30,6 +30,7 @@ var msftCalApi = require('../../../lib/msft-cal-api');
 // 999.1192: pure date transforms come from the slice's own domain module, not
 // the HTTP-layer controllers/cal-sync-helpers (which now shims to the same fns).
 var { jugglerDateToISO, isoToJugglerDate, computeDurationMinutes } = require('../domain/dateTransforms');
+var { undecorateTitle, applyDoneMark } = require('../domain/doneMarkText'); // 999.5272
 var { localToUtc } = require('../../../scheduler/dateHelpers');
 var { PLACEMENT_MODES } = require('../../../lib/placementModes');
 var { isTerminalStatus } = require('../../../lib/task-status');
@@ -417,7 +418,9 @@ function applyEventToTaskFields(event, tz, currentTask) {
   var convertTz = eventIana || tz;
 
   var fields = {
-    text: event.title,
+    // 999.5272: strip any provider-side "✓ " done-mark before writing the
+    // title into storage — see doneMarkText.js header for the full mechanism.
+    text: undecorateTitle(event.title, currentTask && currentTask.text),
     dur: event.durationMinutes,
     updated_at: getDb().fn.now()
   };
@@ -505,8 +508,9 @@ function buildMsftEventBody(task, year, tz, _opts) {
   descParts.push('', 'Synced from Raike & Sons');
 
   var isDone = isTerminalStatus(task.status);
-  var cleanText = task.text.replace(/^(✓\s+)+/, '');
-  var subjectText = isDone ? '✓ ' + cleanText : task.text;
+  // 999.5272: applyDoneMark strips ANY existing marks before deciding — this
+  // heals an already-contaminated title on its next push.
+  var subjectText = applyDoneMark(task.text, isDone);
 
   if (isAllDay) {
     // task.date may be ISO YYYY-MM-DD or legacy M/D — handle both to avoid "2026-2026-NaN"
