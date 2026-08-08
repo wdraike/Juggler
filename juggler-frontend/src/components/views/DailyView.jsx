@@ -695,7 +695,7 @@ export default function DailyView({
 
           {/* Now marker */}
           {nowY != null && nowY >= 0 && nowY <= gridHeight && (
-            <div style={{
+            <div data-testid="now-indicator" style={{
               position: 'absolute', top: nowY, left: GUTTER_W, right: 0,
               height: 2, background: theme.redText, zIndex: 30, borderRadius: 1
             }}>

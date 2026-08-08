@@ -23,7 +23,39 @@ const TEST_USER = {
  *  - Catch-all must be registered FIRST so specific routes registered after
  *    it can override via LIFO priority
  */
+/**
+ * Pin the browser clock to midday so anything that renders only inside the
+ * visible grid window is deterministic no matter when the suite runs.
+ *
+ * WHY: test 14 asserts the now-indicator, which DailyView renders only for
+ * `nowY >= 0` — i.e. from GRID_START (6 AM) onward. The user's timezone here is
+ * the America/New_York fallback (config is stubbed `{}`), and CI Integration is
+ * scheduled at 08:00 UTC: the juggler shard reached that test at 09:26 UTC =
+ * 05:26 EDT, BEFORE 6 AM. The indicator was correctly absent, and the test
+ * failed on real behaviour it had no business asserting at that hour. It passed
+ * for anyone running it during a working day, which is exactly why it survived
+ * to fail nightly.
+ *
+ * Stubbing GET /api/now does NOT work and was tried: AppLayout seeds `nowMins`
+ * from `useState(() => getNowInTimezone(tz, serverClock).nowMins)` while
+ * serverClock is still null, and only recomputes on a 60s interval — so for the
+ * whole life of a 5-second test the value comes from the browser clock, whatever
+ * /api/now later returns. Controlling Date itself is the only thing that reaches
+ * it.
+ *
+ * setFixedTime, not install(): the app's own 60s nowMins interval and every
+ * other timer must keep running normally. Only Date is pinned. The DATE stays
+ * today, so `isToday` and the week strip still agree with the rest of the app.
+ */
+async function pinClockToMidday(page) {
+  const midday = new Date();
+  midday.setUTCHours(16, 0, 0, 0); // 12:00 America/New_York (EDT)
+  await page.clock.setFixedTime(midday);
+}
+
 async function setupAuth(page) {
+  await pinClockToMidday(page);
+
   // Seed localStorage so apiClient initialises accessToken at module load time.
   await page.addInitScript((token) => {
     localStorage.setItem('juggler-access-token', token);
@@ -222,16 +254,17 @@ test.describe('Juggler E2E', () => {
     await page.locator('button:has-text("Day")').first().click({ force: true });
     await page.waitForTimeout(500);
 
-    // Now indicator: DailyView renders a 2px div with borderRadius:1 for the line.
-    // Uses page.evaluate because browsers lower-case hex colors in style attrs.
-    const nowExists = await page.evaluate(() => {
-      // Match divs whose style has height:2px (the now-line) — unique to the indicator
-      return Array.from(document.querySelectorAll('div')).some(function(el) {
-        var s = el.style;
-        return s.height === '2px' && s.borderRadius === '1px' && s.position === 'absolute';
-      });
-    });
-    expect(nowExists).toBe(true);
+    // The "Day" view is DailyView (NavigationBar VIEW_MODES `daily` → AppLayout
+    // renders <DailyView>), and its now-marker carries data-testid
+    // ="now-indicator" (DailyView.jsx, "Now marker").
+    //
+    // The selector was NOT the bug. The previous style-sniff — height:2px AND
+    // borderRadius:1px AND position:absolute — describes DailyView's marker
+    // exactly and would have matched it. This test failed in CI because the
+    // marker was legitimately absent: see pinClockToMidday above. The test id
+    // is here only so the assertion names what it wants instead of inferring it
+    // from three inline styles; the clock pin is what makes it deterministic.
+    await expect(page.getByTestId('now-indicator')).toBeVisible();
   });
 
   test('15. Timeline view — renders strip and cards', async ({ page }) => {
