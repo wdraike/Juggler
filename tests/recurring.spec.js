@@ -272,13 +272,17 @@ test.describe('Recurring Tasks', () => {
     expect(createRes.ok()).toBeTruthy();
     const { task: template } = await createRes.json();
 
-    // Wait for scheduler to generate the first instance
-    await page.waitForTimeout(1000);
-
-    // Fetch instances
-    const listRes = await apiCtx.get(`${API_BASE}/tasks?recurring_source=` + template.id);
-    const { tasks } = await listRes.json();
-    const instance = tasks.find(t => t.taskType === 'recurring_instance' && t.sourceId === template.id);
+    // Wait for scheduler to generate the first instance (poll — CI Docker is slower than local)
+    // ponytail: 15s ceiling — CI Docker scheduler latency; upgrade path is a scheduler webhook/push notification
+    let instance = null;
+    const pollDeadline = Date.now() + 15000;
+    while (Date.now() < pollDeadline) {
+      await page.waitForTimeout(500);
+      const listRes = await apiCtx.get(`${API_BASE}/tasks?recurring_source=` + template.id);
+      const { tasks } = await listRes.json();
+      instance = tasks.find(t => t.taskType === 'recurring_instance' && t.sourceId === template.id);
+      if (instance) break;
+    }
     expect(instance).toBeTruthy();
     expect(instance.date).toBe(
       // anchor + 7 days
