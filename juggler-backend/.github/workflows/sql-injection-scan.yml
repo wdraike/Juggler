@@ -40,6 +40,7 @@ jobs:
       with:
         name: sql-injection-scan-results
         path: sql-injection-report.json
+        retention-days: 7  # 999.15581: bound artifact lifetime — account-level storage quota
 
     - name: Fail on SQL injection vulnerabilities
       if: failure()
