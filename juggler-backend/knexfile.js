@@ -1,3 +1,4 @@
+/* global require, module, process */
 require('dotenv').config();
 
 // Keep-alive: validate connections before use and periodically ping idle ones
@@ -29,6 +30,7 @@ module.exports = {
       password: process.env.DB_PASSWORD || '',
       database: process.env.DB_NAME || 'juggler',
       charset: 'utf8mb4',
+      collate: 'utf8mb4_unicode_ci',
       timezone: '+00:00',
       multipleStatements: true,
       dateStrings: true
@@ -48,6 +50,7 @@ module.exports = {
       password: process.env.DB_PASSWORD,
       database: process.env.DB_NAME,
       charset: 'utf8mb4',
+      collate: 'utf8mb4_unicode_ci',
       timezone: '+00:00',
       dateStrings: true
     } : {
@@ -57,6 +60,7 @@ module.exports = {
       password: process.env.DB_PASSWORD,
       database: process.env.DB_NAME,
       charset: 'utf8mb4',
+      collate: 'utf8mb4_unicode_ci',
       timezone: '+00:00',
       dateStrings: true
     },
@@ -76,6 +80,7 @@ module.exports = {
       password: process.env.DB_PASSWORD || '',
       database: process.env.DB_NAME || 'juggler_test',
       charset: 'utf8mb4',
+      collate: 'utf8mb4_unicode_ci',
       timezone: '+00:00',
       dateStrings: true
     },
