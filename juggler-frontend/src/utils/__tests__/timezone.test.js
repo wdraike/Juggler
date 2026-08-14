@@ -43,6 +43,23 @@ describe('display end-to-end (A1)', () => {
     expect(tasks[0].time).toBe('8:00 AM');
   });
 
+  test('999.15604: hydration STAMPS the zone on every task, placed or not', () => {
+    // The stamp is what lets utils/overdue put the midnight boundary in the
+    // user's day. Without this assertion the producer is unpinned: moving the
+    // stamp inside the `if (t.scheduledAt)` branch below it — the natural place
+    // a reader would put it — silently un-stamps every UNPLACED task while the
+    // whole suite stays green, and an unplaced deadline task then resolves its
+    // boundary through live storage instead of the hydration zone.
+    const tz = 'Asia/Tokyo';
+    const tasks = [
+      { scheduledAt: '2026-06-22T12:00:00Z' },
+      { scheduledAt: null, deadline: '2026-06-22' },
+    ];
+    hydrateTaskTimezones(tasks, tz);
+    expect(tasks[0]._displayTz).toBe(tz);
+    expect(tasks[1]._displayTz).toBe(tz);
+  });
+
   test('sanity: same UTC fed the +9 browser tz would have shown 9:00 PM (the bug)', () => {
     expect(convertTimeForDisplay('2026-06-22T12:00:00Z', 'Asia/Tokyo').time).toBe('9:00 PM');
   });

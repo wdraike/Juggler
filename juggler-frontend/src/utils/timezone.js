@@ -152,6 +152,13 @@ export function hydrateTaskTimezones(tasks, timezone) {
   if (!tasks || !timezone) return tasks;
   for (var i = 0; i < tasks.length; i++) {
     var t = tasks[i];
+    // 999.15604: stamp the tz these local fields were rendered in, so the display
+    // overdue predicate (utils/overdue.js) can put the midnight boundary in the
+    // USER's day rather than UTC's. Set for every task, placed or not — an
+    // unplaced task with a deadline needs the boundary just as much. Threading a
+    // tz prop through all six isTaskOverdue call sites would be the alternative;
+    // the fields it guards are hydrated right here, so the tz belongs here too.
+    t._displayTz = timezone;
     if (t.scheduledAt) {
       var local = convertTimeForDisplay(t.scheduledAt, timezone);
       if (local.date) {
@@ -211,6 +218,34 @@ var DEFAULT_TIMEZONE = sharedNowInTimezone.DEFAULT_TIMEZONE;
 export function resolveDisplayTimezone(opts) {
   var o = opts || {};
   return o.override || o.userTimezone || DEFAULT_TIMEZONE;
+}
+
+// localStorage keys for the display timezone. Declared here, next to the
+// resolver that consumes them, so this module is self-contained.
+export var TZ_OVERRIDE_KEY = 'juggler-tz-override';
+export var USER_TZ_KEY = 'juggler-user-tz';
+
+/**
+ * The user's configured display timezone, read from storage: explicit override →
+ * configured users.timezone → NY default. THE one resolver: apiClient (the
+ * X-Timezone header), useTaskState (hydration, which stamps _displayTz) and
+ * utils/overdue (the display overdue boundary) all call THIS — 999.15604
+ * collapsed the three byte-identical copies that had grown in those modules.
+ * Keep it that way: hydration and the overdue boundary resolving the zone
+ * differently would put two tasks in the same render pass on different days.
+ *
+ * 999.15604: it lives HERE, not in apiClient, so a leaf util can use it without
+ * importing the axios client — 28 suites factory-mock apiClient, and a mock that
+ * omits one export turns every consumer into a TypeError at render.
+ */
+export function getActiveTimezone() {
+  var override = null;
+  var userTz = null;
+  try {
+    override = localStorage.getItem(TZ_OVERRIDE_KEY);
+    userTz = localStorage.getItem(USER_TZ_KEY);
+  } catch (e) { /* storage unavailable (private mode / SSR) — fall through */ }
+  return resolveDisplayTimezone({ override: override, userTimezone: userTz });
 }
 
 /**

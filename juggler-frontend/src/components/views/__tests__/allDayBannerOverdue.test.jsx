@@ -121,14 +121,21 @@ describe('AllDayBanner — overdue chip affordance (999.1083, AC-7)', function()
   });
 
   it('AC-7: non-overdue chip (task.overdue=false) is UNCHANGED (no red affordance)', function() {
-    var task = { id: 'od-5', text: 'Fine all-day thing', placementMode: 'all_day', date: '2026-06-20', overdue: false };
+      // 999.15604: this fixture must be a genuinely NON-overdue all-day row. Its day
+  // used to be 2026-06-20, which is in the past — and an all-day row's own day is
+  // a hard commitment in the backend SSOT (computeOverdueForRow's
+  // _isAllDayWithResolvableDate), so once the display predicate stopped needing a
+  // separate deadline to reach that rule, the row became correctly overdue and
+  // the assertion below was pinning the wrong thing. A far-future day keeps the
+  // case meaning "not overdue" permanently, without depending on the clock.
+    var task = { id: 'od-5', text: 'Fine all-day thing', placementMode: 'all_day', date: '2099-06-20', overdue: false };
     var chip = renderChip(task, { 'od-5': '' });
     expect(chip.getAttribute('data-overdue')).not.toBe('true');
     expect(chip.style.color).not.toEqual(hexToRgb(theme.redText));
   });
 
   it('AC-7: non-overdue chip (task.overdue undefined) is UNCHANGED (no red affordance)', function() {
-    var task = { id: 'od-6', text: 'No overdue flag at all', placementMode: 'all_day', date: '2026-06-20' };
+        var task = { id: 'od-6', text: 'No overdue flag at all', placementMode: 'all_day', date: '2099-06-20' };
     var chip = renderChip(task, { 'od-6': '' });
     expect(chip.getAttribute('data-overdue')).not.toBe('true');
     expect(chip.style.color).not.toEqual(hexToRgb(theme.redText));
@@ -157,13 +164,13 @@ describe('AllDayBanner — overdue chip affordance (999.1083, AC-7)', function()
   });
 
   it('AC-7 / zoe-001: non-overdue chip (task.overdue=false) does NOT render the "⚠" glyph', function() {
-    var task = { id: 'od-9', text: 'Fine all-day thing 2', placementMode: 'all_day', date: '2026-06-20', overdue: false };
+        var task = { id: 'od-9', text: 'Fine all-day thing 2', placementMode: 'all_day', date: '2099-06-20', overdue: false };
     var chip = renderChip(task, { 'od-9': '' });
     expect(within(chip).queryByText('⚠')).not.toBeInTheDocument();
   });
 
   it('AC-7 / zoe-001: non-overdue chip (task.overdue undefined) does NOT render the "⚠" glyph', function() {
-    var task = { id: 'od-10', text: 'No overdue flag at all 2', placementMode: 'all_day', date: '2026-06-20' };
+        var task = { id: 'od-10', text: 'No overdue flag at all 2', placementMode: 'all_day', date: '2099-06-20' };
     var chip = renderChip(task, { 'od-10': '' });
     expect(within(chip).queryByText('⚠')).not.toBeInTheDocument();
   });

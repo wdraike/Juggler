@@ -10,23 +10,12 @@
 
 import { useReducer, useCallback, useRef, useEffect, useState } from 'react';
 import taskReducer, { TASK_STATE_INIT } from '../state/taskReducer';
-import apiClient, { TZ_OVERRIDE_KEY, USER_TZ_KEY, getAccessToken } from '../services/apiClient';
+import apiClient, { getAccessToken } from '../services/apiClient';
 import { apiBase } from '../proxy-config';
-import { hydrateTaskTimezones, resolveDisplayTimezone } from '../utils/timezone';
+import { hydrateTaskTimezones, getActiveTimezone } from '../utils/timezone';
 import { isTerminalStatus } from '../state/constants';
 import { derivePlacements } from '../utils/derivePlacements';
 
-function getHydrationTimezone() {
-  // Display in the user's CONFIGURED timezone, never the browser's (A1 /
-  // TZ-DISPLAY-1/3): explicit override → configured users.timezone → NY default.
-  var override = null;
-  var userTz = null;
-  try {
-    override = localStorage.getItem(TZ_OVERRIDE_KEY);
-    userTz = localStorage.getItem(USER_TZ_KEY);
-  } catch (e) { /* ignore */ }
-  return resolveDisplayTimezone({ override: override, userTimezone: userTz });
-}
 
 // Fields that map to task object properties for partial saves
 var SAVE_FIELDS = [
@@ -216,7 +205,7 @@ export default function useTaskState(onError) {
       ]);
 
       const tasks = tasksRes.data.tasks || [];
-      hydrateTaskTimezones(tasks, getHydrationTimezone());
+      hydrateTaskTimezones(tasks, getActiveTimezone());
       const statuses = {};
       tasks.forEach(t => {
         if (t.status) statuses[t.id] = t.status;
@@ -600,7 +589,7 @@ export default function useTaskState(onError) {
           lastVersionRef.current = serverVersion;
           var [tasksRes] = await Promise.all([apiClient.get('/tasks')]);
           var tasks = tasksRes.data.tasks || [];
-          hydrateTaskTimezones(tasks, getHydrationTimezone());
+          hydrateTaskTimezones(tasks, getActiveTimezone());
           var statuses = {};
           tasks.forEach(function(t) { if (t.status) statuses[t.id] = t.status; });
           dispatch({ type: 'INIT', tasks, statuses });
@@ -740,7 +729,7 @@ export default function useTaskState(onError) {
                 dispatch({ type: 'REMOVE_TASKS', ids: removals });
               }
               if (upserts.length > 0) {
-                hydrateTaskTimezones(upserts, getHydrationTimezone());
+                hydrateTaskTimezones(upserts, getActiveTimezone());
                 dispatch({ type: 'UPSERT_TASKS', tasks: upserts });
               }
             });
@@ -791,7 +780,7 @@ export default function useTaskState(onError) {
               else if (typeof a === 'string') addedFetchIds.push(a);
             });
             if (addedFullRows.length > 0) {
-              hydrateTaskTimezones(addedFullRows, getHydrationTimezone());
+              hydrateTaskTimezones(addedFullRows, getActiveTimezone());
               dispatch({ type: 'UPSERT_TASKS', tasks: addedFullRows });
             }
             var fetchIds = addedFetchIds.concat(changedFetchIds);
@@ -803,7 +792,7 @@ export default function useTaskState(onError) {
               })).then(function(tasks) {
                 var valid = tasks.filter(Boolean);
                 if (valid.length > 0) {
-                  hydrateTaskTimezones(valid, getHydrationTimezone());
+                  hydrateTaskTimezones(valid, getActiveTimezone());
                   dispatch({ type: 'UPSERT_TASKS', tasks: valid });
                 }
               });
