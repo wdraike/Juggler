@@ -15,6 +15,8 @@ import { apiBase } from '../proxy-config';
 import { hydrateTaskTimezones, getActiveTimezone } from '../utils/timezone';
 import { isTerminalStatus } from '../state/constants';
 import { derivePlacements } from '../utils/derivePlacements';
+import { routeUpdates, friendlySaveError } from '../utils/saveRouting';
+import { createSelfWriteTokens } from '../utils/selfWriteTokens';
 
 
 // Fields that map to task object properties for partial saves
@@ -79,33 +81,11 @@ export default function useTaskState(onError) {
   // over tasks:changed, and without filtering we'd re-fetch them — which
   // races any still-queued writes and flashes the UI back to pre-write
   // state. Each entry is an expiry timestamp (ms since epoch).
-  const selfWriteExpiryRef = useRef(new Map());
-  const SELF_WRITE_TTL_MS = 3000;
+  const selfWriteTokensRef = useRef(createSelfWriteTokens(3000));
 
-  function markSelfWrite(ids) {
-    if (!ids) return;
-    var arr = Array.isArray(ids) ? ids : [ids];
-    var expiry = Date.now() + SELF_WRITE_TTL_MS;
-    arr.forEach(function(id) { if (id) selfWriteExpiryRef.current.set(id, expiry); });
-  }
+  function markSelfWrite(ids) { selfWriteTokensRef.current.mark(ids); }
 
-  function filterOutSelfWrites(ids) {
-    if (!ids || ids.length === 0) return ids;
-    var now = Date.now();
-    var map = selfWriteExpiryRef.current;
-    // Evict expired entries as we go.
-    var kept = [];
-    for (var i = 0; i < ids.length; i++) {
-      var id = ids[i];
-      var exp = map.get(id);
-      if (exp == null) { kept.push(id); continue; }
-      if (exp < now) { map.delete(id); kept.push(id); continue; }
-      // Self-written within TTL — skip and consume the token so a second
-      // echo (shouldn't happen, but safety) goes through.
-      map.delete(id);
-    }
-    return kept;
-  }
+  function filterOutSelfWrites(ids) { return selfWriteTokensRef.current.filter(ids); }
 
   // Derive placements from the already-loaded /tasks data (W3 — DB single
   // source). No /schedule/placements fetch: each task already carries its
@@ -165,10 +145,43 @@ export default function useTaskState(onError) {
         }).filter(Boolean);
 
         if (updates.length > 0) {
-          markSelfWrite(updates.map(function(u) { return u.id; }));
-          await apiClient.put('/tasks/batch', { updates });
+          // 999.15605: PUT /tasks/batch refuses nextStart (it lacks the anchor
+          // validation and recurrence redraw the field needs), so those fields
+          // take PUT /tasks/:id, which has both. This is the DEBOUNCED autosave
+          // lane (card edits, AI ops); the single-task edit form goes through
+          // updateTask below. Both must route, or the field is unreachable.
+          var routed = routeUpdates(updates);
+          // Dirty markers are cleared PER LANE, from that lane's OWN payload.
+          // Clearing the whole savedFields map after the batch write would
+          // un-dirty the peeled anchor fields the singles lane has not sent yet:
+          // a rejected anchor would then be left on screen with nothing dirty
+          // and nothing to retry — silent loss, worse than the retry loop this
+          // replaced.
+          var clearFor = function(payloads) {
+            var map = {};
+            payloads.forEach(function(pl) {
+              var m = {};
+              Object.keys(pl).forEach(function(k) { if (k !== 'id') m[k] = true; });
+              map[pl.id] = m;
+            });
+            var ids = Object.keys(map);
+            if (ids.length > 0) dispatch({ type: 'CLEAR_DIRTY_TASKS', ids: ids, savedFields: map });
+          };
+          if (routed.batch.length > 0) {
+            markSelfWrite(routed.batch.map(function(u) { return u.id; }));
+            await apiClient.put('/tasks/batch', { updates: routed.batch });
+            clearFor(routed.batch);
+          }
+          for (var si = 0; si < routed.singles.length; si++) {
+            var one = routed.singles[si];
+            markSelfWrite(one.id);
+            await apiClient.put('/tasks/' + one.id, one);
+            clearFor([one]);
+          }
         }
-        // Only clear the specific fields we saved — preserve any dirtied during the await
+        // Both lanes cleared their own fields above as each write returned; the
+        // ids that produced no payload at all (filtered phantoms) still need
+        // their markers dropped so they do not re-flush forever.
         dispatch({ type: 'CLEAR_DIRTY_TASKS', ids: savingIds, savedFields: savedFields });
         // Placements refresh via SSE schedule:changed — no blocking wait here
       } catch (error) {
@@ -350,15 +363,34 @@ export default function useTaskState(onError) {
       // Send the actual task ID — the backend routes template fields to the
       // source and instance fields to the instance for recurring_instance tasks.
       var partial = Object.assign({ id: id }, fields);
-      markSelfWrite(id);
-      await apiClient.put('/tasks/batch', { updates: [partial] });
+      // 999.15605: routeUpdates peels the anchor off into its own single-task
+      // PUT (the only endpoint wired for it) and leaves every ordinary field on
+      // the batch route that has always accepted this payload shape. Batch
+      // first, then the anchor, so the order is deterministic.
+      var routedOne = routeUpdates([partial]);
+      if (routedOne.batch.length > 0) {
+        markSelfWrite(id);
+        await apiClient.put('/tasks/batch', { updates: routedOne.batch });
+        // Committed. A later failure on the anchor lane must not roll these back.
+        routedOne.batch.forEach(function(b) {
+          Object.keys(b).forEach(function(k) { if (k !== 'id') delete prevFields[k]; });
+        });
+      }
+      for (var ri = 0; ri < routedOne.singles.length; ri++) {
+        markSelfWrite(id);
+        await apiClient.put('/tasks/' + routedOne.singles[ri].id, routedOne.singles[ri]);
+      }
       dispatch({ type: 'CLEAR_DIRTY_TASKS', ids: [id], savedFields: { [id]: fields } });
       return true;
     } catch (error) {
       console.error('Save failed:', error);
       // Propagate the server's error message string if present so the caller
       // can surface it in the UI. The backend returns { error: '...' } on 400.
-      var serverMsg = error && error.response && error.response.data && error.response.data.error;
+      // 999.15605: translated here, at the one place a server string becomes a
+      // return value the edit form renders — the raw text names our endpoints
+      // and the payload index, neither of which means anything to the user.
+      var rawMsg = error && error.response && error.response.data && error.response.data.error;
+      var serverMsg = rawMsg ? friendlySaveError(rawMsg) : null;
       // Roll back the optimistic UPDATE_TASK dispatch — the server rejected the
       // change, so the UI must not keep showing it (REG-44/F3). Guarded (WARN-2):
       // skip the rollback if a newer updateTask call for this id has since
@@ -405,7 +437,11 @@ export default function useTaskState(onError) {
       }
     } catch (error) {
       console.error('Failed to add tasks:', error);
-      var serverMsg = error && error.response && error.response.data && error.response.data.error;
+      // 999.15605: translated here, at the one place a server string becomes a
+      // return value the edit form renders — the raw text names our endpoints
+      // and the payload index, neither of which means anything to the user.
+      var rawMsg = error && error.response && error.response.data && error.response.data.error;
+      var serverMsg = rawMsg ? friendlySaveError(rawMsg) : null;
       if (preserveOnFailure) {
         // Keep the tasks visible/editable instead of vanishing them — see
         // header note. ponytail 999.1571: a UI badge/styling for
@@ -536,7 +572,11 @@ export default function useTaskState(onError) {
       dispatch({ type: 'REMOVE_TASKS', ids: [task.id] });
       // Surface the failure instead of swallowing it (JUG-UI-FEEDBACK-STANDARD).
       if (typeof opts.onError === 'function') {
-        var serverMsg = error && error.response && error.response.data && error.response.data.error;
+        // 999.15605: translated here, at the one place a server string becomes a
+      // return value the edit form renders — the raw text names our endpoints
+      // and the payload index, neither of which means anything to the user.
+      var rawMsg = error && error.response && error.response.data && error.response.data.error;
+      var serverMsg = rawMsg ? friendlySaveError(rawMsg) : null;
         opts.onError(serverMsg || 'Could not create task — change reverted', error);
       }
     }

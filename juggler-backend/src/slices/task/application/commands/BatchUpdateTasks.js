@@ -38,6 +38,15 @@ var assertDeps = require('../_assertDeps');
 
 var MAX_RETRIES = 3;
 
+// 999.15605: fields PUT /tasks/batch refuses. This path has neither
+// resolveNextStartAnchor validation nor the resetRecurringInstances redraw the
+// recurrence anchor needs, so persisting next_start here would be silently
+// wrong — fail loud and let the client route it to PUT /tasks/:id, which has
+// both. EXPORTED so the client's routing list is asserted against this list
+// rather than scraped out of the source below.
+var BATCH_REFUSED_FIELDS = ['nextStart'];
+var BATCH_REFUSED_LABELS = { nextStart: 'Next Cycle Starts' };
+
 /** @param {BatchUpdateTasksDeps} deps */
 function BatchUpdateTasks(deps) {
   var required = ['repo', 'cache', 'enqueueScheduleRun', 'validation',
@@ -109,8 +118,15 @@ BatchUpdateTasks.prototype.execute = async function execute(input) {
     // wrong, not merely incomplete). Bulk anchor editing is not an exposed
     // product feature (the UI's "Next Cycle Starts" control only appears on
     // the single-task edit form) — fail loud rather than silently-wrong.
-    if (bvFields.nextStart !== undefined) {
-      return { status: 400, body: { error: 'Update item ' + bvi + ' (' + bvItem.id + '): nextStart ("Next Cycle Starts") is not supported in batch updates — edit it via the single-task update endpoint' } };
+    // 999.15605: the refused set is EXPORTED (BATCH_REFUSED_FIELDS) so the
+    // frontend's routing list can be asserted equal to it instead of scraping
+    // this source — a second refused field added here without updating the
+    // client would otherwise silently surface a raw 400 to the user again.
+    for (var bvfi = 0; bvfi < BATCH_REFUSED_FIELDS.length; bvfi++) {
+      var bvRefused = BATCH_REFUSED_FIELDS[bvfi];
+      if (bvFields[bvRefused] !== undefined) {
+        return { status: 400, body: { error: 'Update item ' + bvi + ' (' + bvItem.id + '): ' + bvRefused + ' ("' + BATCH_REFUSED_LABELS[bvRefused] + '") is not supported in batch updates — edit it via the single-task update endpoint' } };
+      }
     }
     var bvErrs = this.validation.validateTaskInput(bvFields, bvExisting);
     if (bvErrs.length > 0) {
@@ -167,3 +183,5 @@ BatchUpdateTasks.prototype.execute = async function execute(input) {
 
 module.exports = BatchUpdateTasks;
 module.exports.MAX_RETRIES = MAX_RETRIES;
+module.exports.BATCH_REFUSED_FIELDS = BATCH_REFUSED_FIELDS;
+module.exports.BATCH_REFUSED_LABELS = BATCH_REFUSED_LABELS;

@@ -312,6 +312,30 @@ UpdateTask.prototype.execute = async function execute(input) {
   // LOCK PATH (handler L1142-1179)
   var locked = await this.isLocked(userId);
   if (locked) {
+    // 999.15605: the recurrence anchor CANNOT go through the locked path.
+    // _lockPath enqueues scheduling fields (next_start is one — it is absent
+    // from NON_SCHEDULING_FIELDS) and the flush applies them as a plain
+    // updateTaskById, which resolves no template id: for an instance id
+    // ("<masterId>-<n>") that is UPDATE task_masters WHERE id = '<masterId>-<n>'
+    // — zero rows — while the API has already answered 200 {queued:true} and the
+    // client has cleared its dirty markers. The edit vanishes with no error.
+    // Even for a template id the queued write skips resetRecurringInstances, so
+    // the anchor would persist with the old occurrences still drawn — the exact
+    // silently-wrong state BatchUpdateTasks refuses to create. Refuse loudly and
+    // let the user retry in a moment; the lock cycles about every two minutes.
+    // Wiring the full redraw into the locked path is filed separately.
+    // recurring===0 is exempt: _lockPath routes that shape into the full
+    // recurCleanup transaction, which resolves the template id and redraws, so
+    // it is the one locked case that lands correctly. Refusing it would 409 a
+    // user simply turning "repeats" off, since the edit form nulls the anchor
+    // as part of that change.
+    var turningRecurrenceOff = row.recurring === 0 || row.recurring === false;
+    if (row.next_start !== undefined && !turningRecurrenceOff) {
+      return {
+        status: 409,
+        body: { error: 'Your calendar is syncing right now — try changing "Next Cycle Starts" again in a moment.' }
+      };
+    }
     return this._lockPath({ id: id, userId: userId, row: row, existing: existing });
   }
 
