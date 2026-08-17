@@ -128,6 +128,14 @@ async function start() {
     // have pending queue entries. The scheduleQueue's own startup scan
     // picks up anything already in the queue via the in-memory dirty flag;
     // re-inserting here just duplicates rows on every restart.
+    //
+    // 999.13735: wrap in runWithActor('scheduler', ...) — this callback runs
+    // OUTSIDE any HTTP request, so expressAuditContext never establishes an
+    // ALS actor context. Without this wrap, stampInsert() inside
+    // upsertQueueRow throws (getActor: no actor), the error is caught inside
+    // enqueueScheduleRun, and the queue row is NEVER inserted — the function
+    // returns { enqueued: true } but the poll loop has nothing to pick up.
+    const { runWithActor } = require('./lib/audit-context');
     Promise.all([
       db('tasks_v').distinct('user_id'),
       db('schedule_queue').distinct('user_id')
@@ -135,8 +143,10 @@ async function start() {
       var existing = {};
       results[1].forEach(function(r) { existing[r.user_id] = true; });
       var newUsers = results[0].filter(function(r) { return !existing[r.user_id]; });
-      newUsers.forEach(function(r) { enqueueScheduleRun(r.user_id, 'startup'); });
-      if (newUsers.length > 0) serverLogger.info('Enqueued startup runs', { userCount: newUsers.length });
+      runWithActor('scheduler', function () {
+        newUsers.forEach(function(r) { enqueueScheduleRun(r.user_id, 'startup'); });
+        if (newUsers.length > 0) serverLogger.info('Enqueued startup runs', { userCount: newUsers.length });
+      });
     }).catch(function(err) {
       serverLogger.error('Startup enqueue failed', { error: err });
     });
