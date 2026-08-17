@@ -79,7 +79,11 @@ export default function useCalSyncState(showToast, loadPlacements, config, editi
       var newUrl = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
       window.history.replaceState({}, '', newUrl);
       if (window.opener) {
-        window.opener.postMessage('gcal-connected', '*');
+        // 999.15716: pin targetOrigin to our own origin, never '*' — a '*'
+        // targetOrigin delivers to whatever document currently occupies
+        // window.opener, leaking the OAuth completion signal to a hostile
+        // page if the opener navigated away.
+        window.opener.postMessage('gcal-connected', window.location.origin);
         window.close();
       }
     }
@@ -89,7 +93,8 @@ export default function useCalSyncState(showToast, loadPlacements, config, editi
       var newUrl2 = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
       window.history.replaceState({}, '', newUrl2);
       if (window.opener) {
-        window.opener.postMessage('msftcal-connected', '*');
+        // 999.15716: pin targetOrigin to our own origin, never '*'.
+        window.opener.postMessage('msftcal-connected', window.location.origin);
         window.close();
       }
     }

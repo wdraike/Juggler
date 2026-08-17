@@ -231,6 +231,11 @@ export default function CalSyncPanel({
   // Listen for popup messages
   useEffect(() => {
     function handleMessage(e) {
+      // 999.15716: only accept messages from our own origin — the popup is
+      // same-app so its origin is window.location.origin. Without this check
+      // any page can postMessage 'gcal-connected'/'msftcal-connected' and
+      // spoof a successful OAuth completion.
+      if (e.origin !== window.location.origin) return;
       if (e.data === 'gcal-connected') {
         setGcalConnected(true);
         setGcalConnecting(false);
