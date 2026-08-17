@@ -59,7 +59,29 @@ function timingSafeEqualStr(a, b) {
 async function authenticate(req, res, next) {
   // Dev/test-only bypass — NEVER honored in production (elmo W1, 999.627), so a
   // single prod env-var misconfig cannot open this internal scheduler endpoint.
-  if (config.getString('SKIP_SCHEDULER_TASK_AUTH') === 'true' && config.getString('NODE_ENV') !== 'production') { // 999.1473
+  // 999.15739: ported the fail-closed hardening from RO's worker-tasks.routes.js
+  // (999.15732). Two changes:
+  //   (1) ALLOWLIST NODE_ENV to development/test (lowercased+trimmed), never
+  //       denylist 'production' — 'Production', 'PRODUCTION', 'prod', 'staging',
+  //       '' and unset all sailed through the old `!== 'production'` check.
+  //   (2) Refuse the bypass outright when K_SERVICE is set (Cloud Run sets it on
+  //       every revision and no NODE_ENV value can spoof it — terraform emits
+  //       NODE_ENV=development for every non-production deployment).
+  if (config.getString('SKIP_SCHEDULER_TASK_AUTH') === 'true') {
+    if (process.env.K_SERVICE) {
+      logger.error('[scheduler-tasks] SKIP_SCHEDULER_TASK_AUTH is set on a deployed Cloud Run service (K_SERVICE=' + process.env.K_SERVICE + ') — REFUSING. It is a local-development bypass.');
+      return res.status(500).json({ error: 'SKIP_SCHEDULER_TASK_AUTH is not permitted on a deployed service' });
+    }
+    // Read NODE_ENV from process.env directly, not config.getString (which
+    // normalizes empty/unset to 'development' — hiding the exact case where
+    // the bypass must NOT fire: a misconfigured deployment with no NODE_ENV).
+    var _rawNodeEnv = process.env.NODE_ENV;
+    var _env = (_rawNodeEnv != null ? _rawNodeEnv : '').trim().toLowerCase();
+    if (_env !== 'development' && _env !== 'test') {
+      logger.error('[scheduler-tasks] SKIP_SCHEDULER_TASK_AUTH is set with NODE_ENV="' + (_rawNodeEnv != null ? _rawNodeEnv : 'unset') + '" — REFUSING. It is a development-only bypass.');
+      return res.status(500).json({ error: 'SKIP_SCHEDULER_TASK_AUTH is only permitted when NODE_ENV is development or test' });
+    }
+    logger.warn('[scheduler-tasks] SKIP_SCHEDULER_TASK_AUTH active — auth bypassed (NODE_ENV=' + _env + ')');
     return next();
   }
 
@@ -92,11 +114,21 @@ async function authenticate(req, res, next) {
     if (!audience) {
       return res.status(500).json({ error: 'JUGGLER_WORKER_BASE_URL not configured on this worker' });
     }
+    // 999.15739: make the SA pin MANDATORY (500 when unset), then an
+    // unconditional email mismatch 403. As a conditional pin, an unset
+    // CLOUD_TASKS_INVOKER_SA accepted ANY Google-signed token with the right
+    // audience — every GCP principal, not just ours. .trim() the CONFIGURED
+    // value only, never the token claim (a Secret-Manager trailing newline
+    // otherwise 403s every legitimate delivery).
+    var expectedSa = config.getString('CLOUD_TASKS_INVOKER_SA').trim();
+    if (!expectedSa) {
+      logger.error('[scheduler-tasks] CLOUD_TASKS_INVOKER_SA not configured — REFUSING. Without it any Google-signed token would be accepted.');
+      return res.status(500).json({ error: 'CLOUD_TASKS_INVOKER_SA not configured on this worker' });
+    }
     try {
       const ticket = await authClient().verifyIdToken({ idToken: token, audience });
       const payload = ticket.getPayload();
-      const expectedSa = config.getString('CLOUD_TASKS_INVOKER_SA'); // 999.1473
-      if (expectedSa && payload.email !== expectedSa) {
+      if (payload.email !== expectedSa) {
         return res.status(403).json({ error: 'token not issued for expected service account' });
       }
       req.taskAuth = 'oidc';
