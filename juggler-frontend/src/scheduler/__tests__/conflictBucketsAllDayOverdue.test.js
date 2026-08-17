@@ -44,15 +44,17 @@ describe('conflictBuckets — all_day overdue contract (999.1083, AC-8)', functi
     expect(r.actionCount).toBe(1);
   });
 
-  it('AC-8 (pre-fix shape pin): all_day past task WITHOUT overdue flag lands in stale (no deadline, past date)', function() {
-    // This is exactly the shape a not-yet-fixed backend read model produces for
-    // an all_day row: no `overdue` field set, no `deadline`, but a past `date`.
-    // Pinning this proves the contract is a data-shape flip (overdue:true moves
-    // the row from stale → overdue), not a code change in this module.
+  // 999.15685: with conflictBuckets now using isTaskOverdue (the display SSOT),
+  // an all_day past task WITHOUT an overdue flag is correctly identified as
+  // overdue — isTaskOverdue derives past-due from all_day placement_mode. The
+  // old inline rule only checked t.deadline and t.overdue, missing this. This
+  // test was a "pre-fix shape pin" for the OLD behavior (stale); it now pins
+  // the CORRECTED behavior (overdue).
+  it('AC-8: all_day past task WITHOUT overdue flag is overdue (isTaskOverdue derives it)', function() {
     var task = { id: 'ad-stale-1', placementMode: 'all_day', date: '2026-06-19' };
     var r = run([task], { statuses: { 'ad-stale-1': '' } });
-    expect(r.stale.map(function(t) { return t.id; })).toEqual(['ad-stale-1']);
-    expect(r.overdue.map(function(t) { return t.id; })).not.toContain('ad-stale-1');
+    expect(r.overdue.map(function(t) { return t.id; })).toEqual(['ad-stale-1']);
+    expect(r.stale.map(function(t) { return t.id; })).not.toContain('ad-stale-1');
   });
 
   it('AC-8: overdue all_day task does not double count when also present as generated instance', function() {

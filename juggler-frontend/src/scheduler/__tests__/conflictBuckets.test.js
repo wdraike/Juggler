@@ -76,3 +76,26 @@ test('no double-counting: a task counted once even if overdue (matches page rend
   expect(r.overdue).toHaveLength(1);
   expect(r.actionCount).toBe(1);
 });
+
+// 999.15685 acceptance tests: conflictBuckets now uses isTaskOverdue (display SSOT)
+// instead of an inline deadline/flag check. The inline rule missed FIXED intra-day
+// catch-up and all_day past-day checks.
+
+test('999.15685: FIXED task placed earlier today (past slot) appears in Overdue bucket', () => {
+  // A fixed task with a slot time that has already passed today.
+  // isTaskOverdue derives past-due from the slot time (intra-day check).
+  // TODAY = 2026-06-24T12:00:00 — a 09:00 slot has passed.
+  var r = run([
+    { id: 'fixed-past', placementMode: 'fixed', date: '2026-06-24', time: '09:00' }
+  ]);
+  expect(r.overdue.map(t => t.id)).toContain('fixed-past');
+});
+
+test('999.15685: date-only-deadline task due today does NOT appear in Overdue bucket', () => {
+  // A task with a deadline of today — the day hasn't turned over yet.
+  // isTaskOverdue checks deadlineKey < todayKey (strict less-than), so today == today is NOT overdue.
+  var r = run([
+    { id: 'due-today', deadline: '2026-06-24' }
+  ]);
+  expect(r.overdue.map(t => t.id)).not.toContain('due-today');
+});

@@ -16,6 +16,7 @@
 import { parseDate } from './dateHelpers';
 import { getDepsStatus } from './dependencyHelpers';
 import { isTerminalStatus } from '../shared/task-status';
+import { isTaskOverdue } from '../utils/overdue';
 
 // juggler-issues-split-overdue-collapse (W1) — group raw per-chunk rows into
 // one entry per split occurrence, mirroring DailyView.jsx's Unscheduled-lane
@@ -72,12 +73,14 @@ export function computeConflictBuckets({ allTasks, statuses, unplaced, backlog, 
     // Generated recurring instances are scheduler-managed unless flagged overdue.
     if (t.generated && !t.overdue) return;
 
-    var isOverdue = false;
-    if (t.deadline) {
-      var dd = parseDate(t.deadline);
-      if (dd && dd < today) isOverdue = true;
-    }
-    if (t.overdue) isOverdue = true;
+    // 999.15685: use the canonical isTaskOverdue helper (the display SSOT) instead
+    // of an inline deadline/flag check. The inline rule missed FIXED intra-day
+    // catch-up (a fixed task past its slot today) and all_day past-day checks,
+    // so a card could show an overdue border while the Issues list stayed empty.
+    // isDone is false here (terminal status already filtered at line 69).
+    // Pass `today` as `now` so the helper's clock matches this computation's
+    // frame; timezone falls back to the task's _displayTz or the active tz.
+    var isOverdue = isTaskOverdue(t, false, today);
 
     if (isOverdue) {
       // Movable overdue tasks (unscheduled=1) are routed to the Unscheduled
