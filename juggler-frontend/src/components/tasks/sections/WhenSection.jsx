@@ -54,7 +54,12 @@ function addIntervalToDate(dateStr, every, unit) {
   if (unit === 'weeks') { d.setDate(d.getDate() + n * 7); }
   else if (unit === 'months') { var day = d.getDate(); d.setDate(1); d.setMonth(d.getMonth() + n); var max = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(); d.setDate(Math.min(day, max)); }
   else { d.setDate(d.getDate() + n); }
-  return d.toISOString().slice(0, 10);
+  // 999.15686: format in LOCAL time, not UTC (toISOString shifts the date
+  // backward in eastern timezones, making the test fail east of ~UTC+13).
+  var y = d.getFullYear();
+  var mo = String(d.getMonth() + 1).padStart(2, '0');
+  var dy = String(d.getDate()).padStart(2, '0');
+  return y + '-' + mo + '-' + dy;
 }
 
 function formatAnchorDate(dateStr) {
