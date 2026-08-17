@@ -160,7 +160,14 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
         );
       })()}
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'inherit', flexShrink: 0, ...(useOverflow ? { marginLeft: 'auto' } : {}) }}>
+      {/* 999.15524: always right-anchor the action-button cluster with
+          marginLeft:auto so it stays pinned to the right edge regardless of
+          whether the calendar control (week strip) is rendered. Previously
+          marginLeft:auto was only applied in compact/overflow mode, and on
+          desktop the menu relied on the week strip's flex:1 to push it right —
+          when the week strip was hidden (priority/deps/conflicts views), the
+          menu slid left. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'inherit', flexShrink: 0, marginLeft: 'auto' }}>
         {/* Backend health dot (#35). Polls /api/health/detailed every 60s
             and shows a colored indicator + popover with per-service status. */}
         <HealthDot darkMode={darkMode} theme={theme} />
