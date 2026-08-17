@@ -312,31 +312,23 @@ UpdateTask.prototype.execute = async function execute(input) {
   // LOCK PATH (handler L1142-1179)
   var locked = await this.isLocked(userId);
   if (locked) {
-    // 999.15605: the recurrence anchor CANNOT go through the locked path.
-    // _lockPath enqueues scheduling fields (next_start is one — it is absent
+    // 999.15687: the recurrence anchor CAN now go through the locked path.
+    // Previously 999.15605 shipped a LOUD 409 refusal here because _lockPath's
+    // generic branch enqueues scheduling fields (next_start is one — absent
     // from NON_SCHEDULING_FIELDS) and the flush applies them as a plain
     // updateTaskById, which resolves no template id: for an instance id
     // ("<masterId>-<n>") that is UPDATE task_masters WHERE id = '<masterId>-<n>'
     // — zero rows — while the API has already answered 200 {queued:true} and the
-    // client has cleared its dirty markers. The edit vanishes with no error.
-    // Even for a template id the queued write skips resetRecurringInstances, so
-    // the anchor would persist with the old occurrences still drawn — the exact
-    // silently-wrong state BatchUpdateTasks refuses to create. Refuse loudly and
-    // let the user retry in a moment; the lock cycles about every two minutes.
-    // Wiring the full redraw into the locked path is filed separately.
-    // recurring===0 is exempt: _lockPath routes that shape into the full
+    // client has cleared its dirty markers. The fix: route next_start through
+    // _lockPath's recurCleanup branch (same as recurring===0), which resolves
+    // the template id and redraws future instances correctly.
+    // recurring===0 is also exempt: _lockPath routes that shape into the full
     // recurCleanup transaction, which resolves the template id and redraws, so
-    // it is the one locked case that lands correctly. Refusing it would 409 a
-    // user simply turning "repeats" off, since the edit form nulls the anchor
-    // as part of that change.
-    var turningRecurrenceOff = row.recurring === 0 || row.recurring === false;
-    if (row.next_start !== undefined && !turningRecurrenceOff) {
-      return {
-        status: 409,
-        body: { error: 'Your calendar is syncing right now — try changing "Next Cycle Starts" again in a moment.' }
-      };
-    }
-    return this._lockPath({ id: id, userId: userId, row: row, existing: existing });
+    // it is the one locked case that always landed correctly. Refusing it would
+    // 409 a user simply turning "repeats" off, since the edit form nulls the
+    // anchor as part of that change.
+    return this._lockPath({ id: id, userId: userId, row: row, existing: existing,
+                            anchorDateVal: anchorDateVal, tz: tz });
   }
 
   // transaction: routing + recurrence cleanup (handler L1185-1346)
@@ -494,6 +486,8 @@ UpdateTask.prototype._lockPath = async function _lockPath(ctx) {
   var userId = ctx.userId;
   var row = ctx.row;
   var existing = ctx.existing;
+  var anchorDateVal = ctx.anchorDateVal;
+  var tz = ctx.tz;
 
   // 999.967 (RC3): recurring=false must run the SAME recurCleanup transaction
   // the unlocked complex path runs (ledger cleanup, done-instance handling,
@@ -502,7 +496,15 @@ UpdateTask.prototype._lockPath = async function _lockPath(ctx) {
   // toggle-off that lands while the scheduler/cal-sync lock is held (routine —
   // the lock cycles every ~2min) silently skipped all recurrence cleanup,
   // leaving orphaned cal_sync_ledger rows and stale future instances.
-  if (row.recurring === 0) {
+  //
+  // 999.15687: a next_start ("Next Cycle Starts") anchor edit also needs
+  // recurCleanup — it resolves the template id from the instance row and
+  // redraws future pending instances from the new anchor. The generic
+  // splitFields path below would enqueue next_start and the flush would apply
+  // it as a plain updateTaskById with the URL id — for an instance id
+  // ("<masterId>-<n>") that updates zero rows, silently losing the edit.
+  var needsRecurCleanup = row.recurring === 0 || row.next_start !== undefined;
+  if (needsRecurCleanup) {
     var taskType = existing.task_type || 'task';
     var TEMPLATE_FIELDS = this.mappers.TEMPLATE_FIELDS;
     await this.repo.runInTransaction(async function (trxRepo) {
@@ -511,21 +513,21 @@ UpdateTask.prototype._lockPath = async function _lockPath(ctx) {
         taskType: taskType,
         existing: existing,
         row: row,
-        anchorDateVal: undefined,
-        tz: null,
+        anchorDateVal: anchorDateVal,
+        tz: tz,
         userId: userId,
         id: id,
         TEMPLATE_FIELDS: TEMPLATE_FIELDS
       });
     });
     await this.cache.invalidateTasks(userId);
-    var toggleBroadcastIds = [id];
-    try { toggleBroadcastIds = await this.repo.expandToAllInstanceIds(userId, [id]); } catch { /* fall back */ }
-    this.enqueueScheduleRun(userId, 'api:updateTask', toggleBroadcastIds, { skipEmit: false, skipScheduler: false });
-    var toggledRow = await this.repo.fetchTaskWithEventIds(id, userId);
-    var toggleTemplateRows = await this.repo.getRecurringTemplateRows(userId);
-    var toggleSrcMap = this.mappers.buildSourceMap(toggleTemplateRows);
-    return { status: 200, body: { task: this.mappers.rowToTask(toggledRow, null, toggleSrcMap), queued: true } };
+    var recurBroadcastIds = [id];
+    try { recurBroadcastIds = await this.repo.expandToAllInstanceIds(userId, [id]); } catch { /* fall back */ }
+    this.enqueueScheduleRun(userId, 'api:updateTask', recurBroadcastIds, { skipEmit: false, skipScheduler: false });
+    var recurRow = await this.repo.fetchTaskWithEventIds(id, userId);
+    var recurTemplateRows = await this.repo.getRecurringTemplateRows(userId);
+    var recurSrcMap = this.mappers.buildSourceMap(recurTemplateRows);
+    return { status: 200, body: { task: this.mappers.rowToTask(recurRow, null, recurSrcMap), queued: true } };
   }
 
   var split = this.splitFields(row);

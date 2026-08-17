@@ -51,7 +51,7 @@ describe('999.15605: PUT /tasks/:id accepts the peeled anchor payload', () => {
   });
 });
 
-describe('999.15605: the anchor is refused LOUDLY while the calendar lock is held', () => {
+describe('999.15687: the anchor edit is applied through recurCleanup while the calendar lock is held', () => {
   const UpdateTask = require('../../src/slices/task/application/commands/UpdateTask');
 
   function makeCmd(locked) {
@@ -69,13 +69,15 @@ describe('999.15605: the anchor is refused LOUDLY while the calendar lock is hel
       }),
       updateTaskById: async () => 1,
       fetchTaskRecurring: async () => ({ id: 't1', recurring: 1, recur: JSON.stringify({ type: 'daily' }) }),
+      runInTransaction: async function (fn) { return fn(this); },
+      expandToAllInstanceIds: async () => ['t1-1'],
+      getRecurringTemplateRows: async () => [],
     };
     cmd.safeTimezone = () => 'America/New_York';
     cmd.mappers = require('../../src/slices/task/domain/mappers/taskMappers');
     cmd.dateHelpers = require('juggler-shared/scheduler/dateHelpers');
     cmd.validateReferences = async () => [];
     cmd.PLACEMENT_MODES = { FIXED: 'fixed', ALL_DAY: 'all_day', ANYTIME: 'anytime', REMINDER: 'reminder', TIME_WINDOW: 'time_window' };
-    cmd._lockPath = async () => ({ status: 200, body: { queued: true } });
     cmd.cache = { invalidateTasks: async () => {} };
     cmd.events = { emit: () => {}, publishTaskUpdated: () => {} };
     cmd.enqueueScheduleRun = async () => {};
@@ -83,18 +85,27 @@ describe('999.15605: the anchor is refused LOUDLY while the calendar lock is hel
     return cmd;
   }
 
-  test('an anchor edit under lock is a 409, never a 200 that writes nothing', async () => {
-    // _lockPath queues next_start as a scheduling field and the flush applies it
-    // with the URL id — for an instance id that is an UPDATE of task_masters by
-    // a row id that does not exist, i.e. zero rows, after the API already said
-    // 200 {queued:true} and the client cleared its dirty markers. Silent loss.
+  test('an anchor edit under lock is applied via recurCleanup, never a 409', async () => {
+    // 999.15687: _lockPath now routes next_start through recurCleanup (same as
+    // the recurring===0 toggle-off path), which resolves the template id and
+    // redraws future instances. The 409 refusal was a stopgap from 999.15605;
+    // this is the real fix.
     const cmd = makeCmd(true);
+    // Override _lockPath to verify recurCleanup is called with next_start in the row
+    var recurCleanupCalled = false;
+    var recurCleanupCtx = null;
+    cmd.recurCleanup = async function (ctx) {
+      recurCleanupCalled = true;
+      recurCleanupCtx = ctx;
+    };
     const res = await UpdateTask.prototype.execute.call(cmd, {
       id: 't1-1', userId: 'u1', body: { nextStart: '2026-09-07' }, timezoneHeader: 'America/New_York',
     });
-    expect(res.status).toBe(409);
-    expect(res.body.error).toMatch(/Next Cycle Starts/);
-    expect(res.body.error).not.toMatch(/queue|enqueue|lock path/i);
+    expect(res.status).toBe(200);
+    expect(res.body.queued).toBe(true);
+    // recurCleanup was called with the anchor edit in the row
+    expect(recurCleanupCalled).toBe(true);
+    expect(recurCleanupCtx.row.next_start).toBeDefined();
   });
 
   test('turning recurrence OFF with an anchor present is NOT refused', async () => {
@@ -103,6 +114,7 @@ describe('999.15605: the anchor is refused LOUDLY while the calendar lock is hel
     // silently wrong. Refusing it would 409 a user merely un-checking "repeats",
     // since the edit form nulls the anchor as part of that change.
     const cmd = makeCmd(true);
+    cmd.recurCleanup = async () => {};
     const res = await UpdateTask.prototype.execute.call(cmd, {
       id: 't1-1', userId: 'u1', body: { recurring: false, nextStart: null },
       timezoneHeader: 'America/New_York',
@@ -115,6 +127,10 @@ describe('999.15605: the anchor is refused LOUDLY while the calendar lock is hel
     // (a text-only edit returns via the fast path and never gets there, pinning
     // nothing about the guard).
     const cmd = makeCmd(true);
+    cmd.splitFields = function (row) {
+      return { schedulingFields: {}, nonSchedulingFields: row };
+    };
+    cmd.enqueueWrite = async () => {};
     const res = await UpdateTask.prototype.execute.call(cmd, {
       id: 't1-1', userId: 'u1', body: { when: 'today' }, timezoneHeader: 'America/New_York',
     });
