@@ -12,7 +12,7 @@ export default function AppFooter({ darkMode }) {
   return (
     <div style={{
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      gap: 12, padding: '6px 16px', flexShrink: 0, flexWrap: 'wrap',
+      gap: 12, padding: '6px 16px', flex: '0 0 auto', flexWrap: 'wrap',
       borderTop: '1px solid ' + theme.border,
       background: darkMode ? theme.bg : BRAND.charcoal,
       fontSize: 11, color: darkMode ? theme.textMuted : BRAND.parchmentDark
