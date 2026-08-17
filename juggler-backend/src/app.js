@@ -200,7 +200,15 @@ const apiLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 1000, store: maybeRedis
 const aiLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 20, store: maybeRedisStore('jugrl-ai:') });
 const mcpLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 300, store: maybeRedisStore('jugrl-mcp:') });
 const oauthCallbackLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 20, message: { error: 'Too many requests, please wait.' }, store: maybeRedisStore('jugrl-oauth:') });
-const billingWebhookLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 120, message: { error: 'Too many webhook calls.' }, store: maybeRedisStore('jugrl-billing:') });
+// 999.15704: coarse IP-keyed flood guard BEFORE signature verification.
+// Its ONLY job is bounding HMAC-SHA256 CPU work from unsigned garbage floods.
+// It is NOT a throughput cap on legitimate traffic — all payment->juggler
+// webhook traffic shares payment-service's few Cloud Run egress IPs, so a
+// tight cap (the former 120/min) is ONE shared bucket for every user and
+// trips on a legitimate sweep. 2000/min (~33/s) is trivially cheap for
+// HMAC work to sustain and sits far above any real sweep. Mirrors RO's
+// webhookFloodLimiter (999.15538).
+const billingWebhookLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 2000, message: { error: 'Too many requests' }, store: maybeRedisStore('jugrl-billing:') });
 const healthLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 300, store: maybeRedisStore('jugrl-health:') });
 // Dedicated brute-force limiter for the service-key feature endpoints
 // (/api/feature-catalog, /api/feature-events). The global apiLimiter (1000/min)

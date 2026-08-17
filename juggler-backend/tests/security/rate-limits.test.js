@@ -36,19 +36,21 @@ describe('Rate limits — targeted attack surfaces', () => {
     expect(limit).toBeNull();
   });
 
-  it('/api/billing-webhooks has tighter limit than general /api (120 vs 1000)', async () => {
+  // 999.15704: the billing webhook limiter is a coarse IP-keyed flood guard
+  // (2000/min), NOT a tight throughput cap — all payment traffic shares a few
+  // Cloud Run egress IPs, so a tight cap is one shared bucket for every user.
+  // The flood cap's job is CPU protection (bounding HMAC work from unsigned
+  // floods), not volume throttling. Mirrors RO's webhookFloodLimiter (999.15538).
+  it('/api/billing-webhooks has a flood-guard rate limit (2000/min)', async () => {
     // POST without valid signature — still gets rate-limit headers before route handler
     const webhookRes = await request(app)
       .post('/api/billing-webhooks')
       .set('Content-Type', 'application/json')
       .send('{}');
-    const apiRes = await request(app).get('/health');
 
     const webhookLimit = getRateLimitMax(webhookRes.headers);
     expect(webhookLimit).not.toBeNull();
-    expect(webhookLimit).toBe(120);
-    // Webhook limit is tighter than the general API limit (1000)
-    expect(webhookLimit).toBeLessThan(1000);
+    expect(webhookLimit).toBe(2000);
   });
 
   it('/api/gcal/callback has tight OAuth limit (20/min)', async () => {
