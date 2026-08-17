@@ -1202,6 +1202,38 @@ describe('expandRecurring', () => {
       expect(fixDates).not.toContain('2026-05-21'); // spacing respected
       expect(fixDates).toContain('2026-05-25');     // correct next date: 5/18 + 7
     });
+
+    // 999.15656: David ruling 2026-08-12 — rolling tasks generate exactly ONE
+    // instance at a time, never multiple ahead. This test asserts the invariant
+    // directly: with no existing active instance, exactly ONE is generated; with
+    // an existing active (non-terminal) instance, ZERO are generated.
+    test('999.15656: rolling master with no active instance emits exactly ONE (never multiple)', () => {
+      const src = makeRolling(7, null);
+      // Wide horizon (42 days) — a pre-R5 bug would emit +7,+14,+21,+28,+35.
+      const result = expandRecurring(
+        [src],
+        new Date(2026, 4, 18), // 5/18
+        new Date(2026, 5, 29)  // 6/29 (42 days)
+      );
+      const ours = result.filter(r => r.sourceId === 'r1');
+      expect(ours).toHaveLength(1);
+      expect(ours[0].date || ours[0]._candidateDate).toBe('2026-05-25'); // anchor+7
+    });
+
+    test('999.15656: rolling master WITH an active instance emits ZERO new ones', () => {
+      const src = makeRolling(7, null);
+      const activeInstance = {
+        id: 'r1-1', sourceId: 'r1', taskType: 'recurring_instance',
+        date: '2026-05-25', status: '' // non-terminal = active
+      };
+      const result = expandRecurring(
+        [src, activeInstance],
+        new Date(2026, 4, 18),
+        new Date(2026, 5, 29)
+      );
+      const ours = result.filter(r => r.sourceId === 'r1');
+      expect(ours).toHaveLength(0); // active instance blocks projection
+    });
   });
 
   describe('edge cases', () => {

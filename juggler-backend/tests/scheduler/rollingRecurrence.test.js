@@ -549,7 +549,7 @@ describe('BUG1 (W1): next_start never advances via PUT /tasks/batch (facade.batc
   beforeAll(async () => { await setupTestDB(); });
   afterAll(async () => { await teardownTestDB(); });
 
-  it('done via batchUpdateTasks({updates:[{id,status:"done"}]}) should advance next_start the same as the single-item path — CURRENTLY FAILS', async () => {
+  it('done via batchUpdateTasks({updates:[{id,status:"done"}]}) should advance next_start the same as the single-item path', async () => {
     const task = await rollingTask({ nextStart: '2026-06-15' });
     const instance = await createTask({
       master_id: task.id,
