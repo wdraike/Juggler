@@ -232,13 +232,14 @@ test.describe('Recurring Tasks', () => {
     await expect(page.locator('text=StriveRS').first()).toBeVisible();
   });
 
-  // 999.5108: this test hits the real API (not mocked routes) to verify the
+  // 999.5108/999.15657: this test hits the real API (not mocked routes) to verify the
   // rolling anchor update end-to-end. Mint a real token from the auth service
   // so the API calls authenticate, and clean up created rows afterwards.
-  // 999.5325 NEEDS-RULING: the full test is skipped because the rolling anchor
-  // date shape is wrong — instance.date doesn't match anchor+7, and downstream
-  // assertions (rollingAnchor update) depend on that date. Skip until David rules.
-  test.skip('rolling 1x/week: completing task generates next instance at +7 days', async ({ page }) => {
+  // David's 2026-08-12 ruling (999.15657): rolling tasks generate exactly ONE
+  // instance at a time. The first instance date = anchor + intervalDays. After
+  // completing it, exactly ONE new instance appears at completedDate + 7, and
+  // the old instance is marked done (not deleted).
+  test('rolling 1x/week: exactly ONE instance at anchor+7; completing generates ONE new at +7', async ({ page }) => {
     const AUTH_URL = process.env.AUTH_URL || 'http://localhost:5010';
     const EMAIL = process.env.TEST_EMAIL || 'admin@e2e-test.local';
     const PASSWORD = process.env.TEST_PASSWORD || 'E2eTestPass2024!';
@@ -260,6 +261,7 @@ test.describe('Recurring Tasks', () => {
 
     // Create rolling task via API
     const today = new Date().toISOString().slice(0, 10);
+    const expectedFirstDate = new Date(new Date(today + 'T00:00:00').getTime() + 7 * 86400000).toISOString().slice(0, 10);
     const createRes = await apiCtx.post(`${API_BASE}/tasks`, {
       data: {
         text: 'E2E Rolling Haircut',
@@ -275,39 +277,59 @@ test.describe('Recurring Tasks', () => {
     expect(createRes.ok()).toBeTruthy();
     const { task: template } = await createRes.json();
 
-    // Wait for scheduler to generate the first instance (poll — CI Docker is slower than local)
-    // ponytail: 15s ceiling — CI Docker scheduler latency; upgrade path is a scheduler webhook/push notification
-    let instance = null;
-    const pollDeadline = Date.now() + 15000;
-    while (Date.now() < pollDeadline) {
-      await page.waitForTimeout(500);
-      const listRes = await apiCtx.get(`${API_BASE}/tasks?recurring_source=` + template.id);
-      const { tasks } = await listRes.json();
-      instance = tasks.find(t => t.taskType === 'recurring_instance' && t.sourceId === template.id);
-      if (instance) break;
+    try {
+      // Wait for scheduler to generate the first instance (poll — CI Docker is slower than local)
+      // ponytail: 15s ceiling — CI Docker scheduler latency; upgrade path is a scheduler webhook/push notification
+      let instance = null;
+      const pollDeadline = Date.now() + 15000;
+      while (Date.now() < pollDeadline) {
+        await page.waitForTimeout(500);
+        const listRes = await apiCtx.get(`${API_BASE}/tasks`);
+        const { tasks } = await listRes.json();
+        instance = tasks.find(t => t.taskType === 'recurring_instance' && t.sourceId === template.id);
+        if (instance) break;
+      }
+      expect(instance).toBeTruthy();
+      // (1) verify exactly ONE instance exists
+      const allListRes = await apiCtx.get(`${API_BASE}/tasks`);
+      const { tasks: allTasks } = await allListRes.json();
+      const instances = allTasks.filter(t => t.taskType === 'recurring_instance' && t.sourceId === template.id);
+      expect(instances).toHaveLength(1);
+      // (2) verify instance.date = today + 7 days (anchor + intervalDays)
+      expect(instance.date).toBe(expectedFirstDate);
+
+      // (3) mark instance done
+      const doneRes = await apiCtx.put(`${API_BASE}/tasks/` + instance.id + '/status', {
+        data: { status: 'done', scheduledAt: instance.date + 'T12:00:00Z' }
+      });
+      expect(doneRes.ok()).toBeTruthy();
+
+      // Wait for scheduler to generate the next instance (poll)
+      let newInstance = null;
+      const pollDeadline2 = Date.now() + 15000;
+      while (Date.now() < pollDeadline2) {
+        await page.waitForTimeout(500);
+        const listRes2 = await apiCtx.get(`${API_BASE}/tasks`);
+        const { tasks: tasks2 } = await listRes2.json();
+        newInstance = tasks2.find(t => t.taskType === 'recurring_instance' && t.sourceId === template.id && t.status === '');
+        if (newInstance) break;
+      }
+      expect(newInstance).toBeTruthy();
+      // (4) verify exactly ONE new (non-terminal) instance exists
+      const allListRes2 = await apiCtx.get(`${API_BASE}/tasks`);
+      const { tasks: allTasks2 } = await allListRes2.json();
+      const activeInstances = allTasks2.filter(t => t.taskType === 'recurring_instance' && t.sourceId === template.id && t.status === '');
+      expect(activeInstances).toHaveLength(1);
+      // (5) verify new instance is at completedDate + 7
+      const expectedNextDate = new Date(new Date(instance.date + 'T00:00:00').getTime() + 7 * 86400000).toISOString().slice(0, 10);
+      expect(newInstance.date).toBe(expectedNextDate);
+      // (6) verify old instance is marked done (not deleted)
+      const oldInstance = allTasks2.find(t => t.id === instance.id);
+      expect(oldInstance).toBeTruthy();
+      expect(oldInstance.status).toBe('done');
+    } finally {
+      // Cleanup
+      await apiCtx.delete(`${API_BASE}/tasks/` + template.id);
     }
-    expect(instance).toBeTruthy();
-    // 999.5325 NEEDS-RULING: the date assertion below fails because the API returns
-    // a different date than anchor+7. Skip the date shape assertion until David rules
-    // on the expected rolling anchor behavior. The polling fix (999.15569) confirmed
-    // the instance IS generated — only the date shape is in question.
-    // expect(instance.date).toBe(
-    //   // anchor + 7 days
-    //   new Date(new Date(today + 'T00:00:00').getTime() + 7 * 86400000).toISOString().slice(0, 10)
-    // );
-
-    // Mark instance done — should update rolling_anchor to instance.date
-    const doneRes = await apiCtx.put(`${API_BASE}/tasks/` + instance.id + '/status', {
-      data: { status: 'done', scheduledAt: instance.date + 'T12:00:00Z' }
-    });
-    expect(doneRes.ok()).toBeTruthy();
-
-    // Verify rolling_anchor updated on master
-    const masterRes = await apiCtx.get(`${API_BASE}/tasks/` + template.id);
-    const { task: updatedMaster } = await masterRes.json();
-    expect(updatedMaster.rollingAnchor).toBe(instance.date);
-
-    // Cleanup
-    await apiCtx.delete(`${API_BASE}/tasks/` + template.id);
   });
 });
