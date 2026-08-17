@@ -97,6 +97,19 @@ var LOCK_RETRY_MS  = 2000;   // wait between lock acquisition retries
 var RATE_LIMIT_MAX        = 10;     // max enqueues per window per user
 var RATE_LIMIT_WINDOW_MS  = 60000;  // 60s window
 
+// ── Max consecutive scheduler failures (999.15799) ──────────────────────────
+// After MAX_RUN_FAILURES consecutive run failures for a user, the queue row is
+// DELETED (dequeueScheduleRun) instead of merely released (releaseClaim). This
+// breaks the infinite poll-loop retry: a released row (claimed_at=NULL) matches
+// getPendingQueueUsers on the next 3s tick, re-claiming and re-running the
+// scheduler indefinitely. Deleting the row removes it from the poll query. The
+// counter resets on a successful run. In-memory per-instance — cross-instance
+// handoff starts fresh, but that implies enough time passed that a tight loop
+// is not occurring. ponytail: per-instance ceiling — a second instance picking
+// up the same row starts from 0; upgrade to a DB retry_count column if
+// cross-instance coordination is needed.
+var MAX_RUN_FAILURES = 3;
+
 // ── Multi-instance claiming constants (FIX-04) ──────────────────────────────
 
 var POLL_LOOP_INSTANCE;
@@ -119,6 +132,7 @@ var _inflight = new Set();            // outer processUser promises
 var _lastPollTime = 0;
 var _lastError = null;                // { timestamp, message } — last scheduler error, for health checks
 var _rateWindows = new Map();         // user_id → array of enqueue timestamps (within the rate-limit window) (999.591)
+var _failureCounts = new Map();       // user_id → consecutive run failure count (999.15799)
 
 // Injectable clock (999.1195) — every wall-clock read in this module derives
 // from a ClockPort. Production wires MysqlClockAdapter (the same adapter
@@ -147,6 +161,24 @@ function checkRateLimit(userId) {
   }
   hits.push(now);
   return true;
+}
+
+// ── Consecutive-failure tracking (999.15799) ─────────────────────────────────
+// recordRunFailure increments the per-user counter and returns true when the
+// limit is reached (caller should dequeue, not release). resetFailureCount
+// clears it (called on success and by _resetForTests).
+function recordRunFailure(userId) {
+  var count = (_failureCounts.get(userId) || 0) + 1;
+  _failureCounts.set(userId, count);
+  return count >= MAX_RUN_FAILURES;
+}
+
+function getFailureCount(userId) {
+  return _failureCounts.get(userId) || 0;
+}
+
+function resetFailureCount(userId) {
+  _failureCounts.delete(userId);
 }
 
 // Poll loop tracking for health checks
@@ -346,6 +378,7 @@ async function claimAndRunInner(userId) {
     });
 
     // Success: sweep the queue and notify frontend with the changeset
+    resetFailureCount(userId);
     await dequeueScheduleRun(userId);
     try {
       var _ssePayload = {};
@@ -364,7 +397,19 @@ async function claimAndRunInner(userId) {
     _lastError = { timestamp: _now(), message: err.message };
     // Emit schedule:changed to clear the "Scheduling..." indicator on error
     try { getSseEmitter().emit(userId, 'schedule:changed', {}); } catch (_e2) { /* non-fatal */ }
-    await releaseClaim(userId, INSTANCE_ID);
+    // 999.15799: after MAX_RUN_FAILURES consecutive failures, DELETE the queue
+    // row (dequeueScheduleRun) instead of just releasing the claim (releaseClaim).
+    // A released row (claimed_at=NULL) matches getPendingQueueUsers on the next
+    // poll tick, re-claiming and re-running the scheduler every ~3s indefinitely.
+    var maxReached = recordRunFailure(userId);
+    if (maxReached) {
+      logger.error('[SCHED-QUEUE] Max consecutive failures (' + MAX_RUN_FAILURES
+        + ') reached for ' + userId + ' — dequeueing to stop retry loop');
+      resetFailureCount(userId);
+      await dequeueScheduleRun(userId);
+    } else {
+      await releaseClaim(userId, INSTANCE_ID);
+    }
     return { claimed: true, success: false, error: err.message };
   } finally {
     clearClaimHeartbeat(heartbeat);
@@ -565,6 +610,7 @@ function _resetForTests() {
   _running.clear();
   _inflight.clear();
   _rateWindows.clear();
+  _failureCounts.clear();
   _lastError = null;
   _lastPollTime = 0;
   _clock = new MysqlClockAdapter();
@@ -676,6 +722,11 @@ module.exports = {
     // so claimed_at/created_at stamps AND the ms-epoch helper move together.
     setClockPort: function (clock) { _clock = clock || new MysqlClockAdapter(); },
     resetRateLimit: function () { _rateWindows.clear(); },
+    // 999.15799: consecutive-failure tracking test seams.
+    MAX_RUN_FAILURES,
+    recordRunFailure,
+    getFailureCount,
+    resetFailureCount,
     RATE_LIMIT_MAX,
     RATE_LIMIT_WINDOW_MS,
     // Backend-cache test seam (999.869): inject a stale/half-loaded `_queueBackend` to
