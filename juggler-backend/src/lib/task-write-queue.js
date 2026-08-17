@@ -354,7 +354,11 @@ async function _doFlush(userId) {
     var payload = { source: 'write-queue-flush', timestamp: Date.now() };
     payload.ids = broadcastIds;
     getSseEmitter().emit(userId, 'tasks:changed', payload);
-    enqueueScheduleRun(userId, 'write-queue-flush');
+    // 999.15791: await the enqueue so the schedule_queue upsert completes
+    // before claimAndRunInner's dequeueScheduleRun deletes the row. Without
+    // the await, the fire-and-forget upsert can land AFTER the delete, leaving
+    // a new row that the poll loop re-runs the scheduler on.
+    await enqueueScheduleRun(userId, 'write-queue-flush');
   }
 }
 
