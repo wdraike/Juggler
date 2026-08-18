@@ -684,7 +684,13 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
     // used by runSchedule.js's period-boundary classifier).
     var rollingInterval = rollingIntervalDays(r);
     var rollingAnchor = getAnchor(src, startDate);
-    for (var n = 1; n <= 1000; n++) {
+    // 999.15815: For a rolling template with no nextStart (first-ever fabrication,
+    // no completion yet), the first instance should be dated AT the anchor
+    // (recurStart) itself, not anchor+interval. When nextStart IS set (after a
+    // completion advanced the anchor), the next instance is at nextStart+interval
+    // (unchanged). Start n at 0 when no nextStart, 1 when nextStart is present.
+    var nStart = (src.nextStart ? 1 : 0);
+    for (var n = nStart; n <= 1000; n++) {
       var offsetDays = Math.round(n * rollingInterval);
       var rollingDate = new Date(rollingAnchor.getTime());
       rollingDate.setDate(rollingDate.getDate() + offsetDays);

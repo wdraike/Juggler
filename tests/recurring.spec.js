@@ -232,14 +232,14 @@ test.describe('Recurring Tasks', () => {
     await expect(page.locator('text=StriveRS').first()).toBeVisible();
   });
 
-  // 999.5108/999.15657: this test hits the real API (not mocked routes) to verify the
+  // 999.5108/999.15657/999.15815: this test hits the real API (not mocked routes) to verify the
   // rolling anchor update end-to-end. Mint a real token from the auth service
   // so the API calls authenticate, and clean up created rows afterwards.
-  // David's 2026-08-12 ruling (999.15657): rolling tasks generate exactly ONE
-  // instance at a time. The first instance date = anchor + intervalDays. After
-  // completing it, exactly ONE new instance appears at completedDate + 7, and
-  // the old instance is marked done (not deleted).
-  test('rolling 1x/week: exactly ONE instance at anchor+7; completing generates ONE new at +7', async ({ page }) => {
+  // David's 2026-08-18 ruling (999.15815): for a rolling weekly template with
+  // recurStart=today, the first fabricated instance is dated TODAY (not today+7).
+  // After completing it, exactly ONE new instance appears at completedDate + 7,
+  // and the old instance is marked done (not deleted).
+  test('rolling 1x/week: exactly ONE instance at anchor (today); completing generates ONE new at +7', async ({ page }) => {
     const AUTH_URL = process.env.AUTH_URL || 'http://localhost:5010';
     const EMAIL = process.env.TEST_EMAIL || 'admin@e2e-test.local';
     const PASSWORD = process.env.TEST_PASSWORD || 'E2eTestPass2024!';
@@ -261,7 +261,8 @@ test.describe('Recurring Tasks', () => {
 
     // Create rolling task via API
     const today = new Date().toISOString().slice(0, 10);
-    const expectedFirstDate = new Date(new Date(today + 'T00:00:00').getTime() + 7 * 86400000).toISOString().slice(0, 10);
+    // 999.15815: first instance is at the anchor (today), not today+7
+    const expectedFirstDate = today;
     const createRes = await apiCtx.post(`${API_BASE}/tasks`, {
       data: {
         text: 'E2E Rolling Haircut',
@@ -295,7 +296,7 @@ test.describe('Recurring Tasks', () => {
       const { tasks: allTasks } = await allListRes.json();
       const instances = allTasks.filter(t => t.taskType === 'recurring_instance' && t.sourceId === template.id);
       expect(instances).toHaveLength(1);
-      // (2) verify instance.date = today + 7 days (anchor + intervalDays)
+      // (2) verify instance.date = today (anchor = recurStart, 999.15815)
       expect(instance.date).toBe(expectedFirstDate);
 
       // (3) mark instance done

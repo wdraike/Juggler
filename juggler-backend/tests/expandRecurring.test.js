@@ -1118,10 +1118,14 @@ describe('expandRecurring', () => {
 
     // R5 (David 2026-06-29): a rolling task has only ONE active instance at a time —
     // "only scheduled at completion of the active instance; when completed, the next is
-    // generated." So expandRecurring emits ONLY the next instance (anchor+interval), NOT
-    // the whole horizon. Subsequent occurrences appear on later runs after completion
-    // advances next_start. (Was: anchor+7,+14,+21 all at once — pre-R5 behavior.)
-    test('7-day interval emits ONLY the next active instance (anchor+7)', () => {
+    // generated." So expandRecurring emits ONLY the next instance (anchor itself for
+    // first fabrication per 999.15815, or anchor+interval when nextStart is set),
+    // NOT the whole horizon. Subsequent occurrences appear on later runs after
+    // completion advances next_start. (Was: anchor+7,+14,+21 all at once — pre-R5 behavior.)
+    //
+    // 999.15815 (David 2026-08-18): for recurStart=today with no nextStart, the first
+    // instance is AT the anchor (today), not anchor+7.
+    test('7-day interval emits ONLY the first active instance (at anchor, 999.15815)', () => {
       const src = makeRolling(7, null); // falls back to recurStart
       const result = expandRecurring(
         [src],
@@ -1129,12 +1133,12 @@ describe('expandRecurring', () => {
         new Date(2026, 5, 1)   // 6/1
       );
       const dates = result.filter(r => r.sourceId === 'r1').map(r => r.date || r._candidateDate);
-      expect(dates).toEqual(['2026-05-25']); // single active instance only
+      expect(dates).toEqual(['2026-05-18']); // single active instance at anchor
       expect(dates).not.toContain('2026-06-01'); // next one waits for completion
-      expect(dates).not.toContain('2026-05-18'); // anchor itself not emitted
+      expect(dates).not.toContain('2026-05-25'); // old anchor+7 behavior, now wrong
     });
 
-    test('3.5-day interval: emits ONLY the next active instance (anchor+4, rounded)', () => {
+    test('3.5-day interval: emits ONLY the first active instance (at anchor, 999.15815)', () => {
       const src = makeRolling(3.5, null);
       const result = expandRecurring(
         [src],
@@ -1142,7 +1146,7 @@ describe('expandRecurring', () => {
         new Date(2026, 5, 1)
       );
       const dates = result.filter(r => r.sourceId === 'r1').map(r => r.date || r._candidateDate);
-      expect(dates).toEqual(['2026-05-22']); // round(3.5) = +4; single active instance only
+      expect(dates).toEqual(['2026-05-18']); // at anchor, not anchor+4
     });
 
     test('nextStart overrides recurStart', () => {
@@ -1169,8 +1173,10 @@ describe('expandRecurring', () => {
         new Date(2026, 5, 1)
       );
       const dates = result.filter(r => r.sourceId === 'r1').map(r => r.date || r._candidateDate);
+      // 999.15815: with no nextStart, first instance is at anchor (5/18).
+      // The done instance at 5/25 is a different date, so it doesn't block 5/18.
+      expect(dates).toContain('2026-05-18'); // at anchor
       expect(dates).not.toContain('2026-05-25'); // already done — deduped
-      expect(dates).toContain('2026-06-01');     // next slot still generated
     });
 
     test('null nextStart with null recurStart falls back to startDate', () => {
@@ -1181,7 +1187,8 @@ describe('expandRecurring', () => {
         new Date(2026, 4, 25)
       );
       const dates = result.filter(r => r.sourceId === 'r1').map(r => r.date || r._candidateDate);
-      expect(dates).toContain('2026-05-25'); // startDate + 7
+      // 999.15815: with no nextStart, n starts at 0 → at startDate itself
+      expect(dates).toContain('2026-05-18'); // startDate (n=0, offset=0)
     });
 
     test('null nextStart + old recurStart generates wrong date (demonstrates bug pre-backfill)', () => {
@@ -1217,7 +1224,7 @@ describe('expandRecurring', () => {
       );
       const ours = result.filter(r => r.sourceId === 'r1');
       expect(ours).toHaveLength(1);
-      expect(ours[0].date || ours[0]._candidateDate).toBe('2026-05-25'); // anchor+7
+      expect(ours[0].date || ours[0]._candidateDate).toBe('2026-05-18'); // at anchor (999.15815)
     });
 
     test('999.15656: rolling master WITH an active instance emits ZERO new ones', () => {
@@ -1233,6 +1240,37 @@ describe('expandRecurring', () => {
       );
       const ours = result.filter(r => r.sourceId === 'r1');
       expect(ours).toHaveLength(0); // active instance blocks projection
+    });
+
+    // 999.15815: David ruling 2026-08-18 — for a rolling weekly template with
+    // recurStart=today and NO nextStart (first-ever fabrication, no completion
+    // yet), the first instance should be dated at the anchor (recurStart) itself,
+    // NOT anchor+interval. The recurStart hard floor (999.2187) permits today,
+    // and today+7 was never the correct first occurrence for a rolling task
+    // starting today. When nextStart IS set (after a completion), the instance
+    // is still at nextStart + interval (unchanged behavior).
+    test('999.15815: first rolling instance with no nextStart is at anchor (recurStart), not anchor+interval', () => {
+      const src = makeRolling(7, null); // recurStart = 2026-05-18, no nextStart
+      const result = expandRecurring(
+        [src],
+        new Date(2026, 4, 18), // today = anchor
+        new Date(2026, 5, 1)   // 14-day horizon
+      );
+      const dates = result.filter(r => r.sourceId === 'r1').map(r => r.date || r._candidateDate);
+      expect(dates).toContain('2026-05-18'); // first instance AT anchor, not anchor+7
+      expect(dates).not.toContain('2026-05-25'); // old wrong behavior: anchor+7
+    });
+
+    test('999.15815: after completion (nextStart set), next instance is still nextStart+interval', () => {
+      const src = makeRolling(7, '2026-05-18'); // nextStart set = completed on 5/18
+      const result = expandRecurring(
+        [src],
+        new Date(2026, 4, 18),
+        new Date(2026, 5, 1)
+      );
+      const dates = result.filter(r => r.sourceId === 'r1').map(r => r.date || r._candidateDate);
+      expect(dates).toContain('2026-05-25'); // nextStart + 7 = 5/25
+      expect(dates).not.toContain('2026-05-18'); // NOT at nextStart itself
     });
   });
 
