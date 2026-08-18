@@ -67,6 +67,67 @@ describe('ListTasks (getAllTasks)', function () {
       expect(out.tasks[0].id).toBe('WRONG'); // confirms the test would catch a mapper regression
     });
   });
+
+  // 999.15801: recurring_source query param must filter by source_id.
+  // The InMemory double ignores the queryBuilder filter (contract surface), so
+  // we verify the queryBuilder is called with a source_id where clause.
+  test('recurring_source passes a where(source_id) to the queryBuilder', function () {
+    var repo = new InMemoryTaskRepository({ rows: rows() });
+    var captured = null;
+    // Wrap fetchTasksWithEventIds to capture the queryBuilder and invoke it on a spy.
+    var origFetch = repo.fetchTasksWithEventIds.bind(repo);
+    repo.fetchTasksWithEventIds = function (userId, queryBuilder) {
+      var spyQ = { clauses: [], whereNot: function (c, v) { this.clauses.push(['whereNot', c, v]); }, orderByRaw: function (s) { this.clauses.push(['orderByRaw', s]); }, limit: function (n) { this.clauses.push(['limit', n]); return this; }, offset: function (n) { this.clauses.push(['offset', n]); return this; }, where: function (c, v) { this.clauses.push(['where', c, v]); return this; } };
+      if (typeof queryBuilder === 'function') queryBuilder(spyQ);
+      captured = spyQ.clauses;
+      return origFetch(userId, function () {});
+    };
+    var cache = H.makeCacheFake();
+    var uc = new ListTasks({ repo: repo, cache: cache, mappers: H.mappers });
+    return uc.execute({ userId: USER, query: { recurring_source: 'src-123' } }).then(function () {
+      var hasSourceFilter = captured.some(function (c) { return c[0] === 'where' && c[1] === 'source_id' && c[2] === 'src-123'; });
+      expect(hasSourceFilter).toBe(true);
+    });
+  });
+
+  // 999.15801: recurring_source must bypass the cache (a filtered request must not
+  // return a cached unfiltered list).
+  test('recurring_source bypasses the cache (no cache read, no cache write)', function () {
+    var repo = new InMemoryTaskRepository({ rows: rows() });
+    var cache = H.makeCacheFake({ ['tasks:' + USER]: { tasks: [{ id: 'cached-all' }], version: 'v0' } });
+    var uc = new ListTasks({ repo: repo, cache: cache, mappers: H.mappers });
+    return uc.execute({ userId: USER, query: { recurring_source: 'src-123' } }).then(function (out) {
+      // Must NOT return the cached payload — must have read through to the repo.
+      expect(out.tasks[0].id).not.toBe('cached-all');
+      expect(cache.calls.getTasks).toBe(0); // cache was bypassed entirely
+      expect(cache.calls.setTasks).toBe(0); // do not cache filtered results
+    });
+  });
+
+  // 999.15802: limit must bypass the cache (a request with limit must not return
+  // a cached unfiltered list, and must not cache its own limited result).
+  test('limit bypasses the cache (no cache read, no cache write)', function () {
+    var repo = new InMemoryTaskRepository({ rows: rows() });
+    var cache = H.makeCacheFake({ ['tasks:' + USER]: { tasks: [{ id: 'cached-all' }], version: 'v0' } });
+    var uc = new ListTasks({ repo: repo, cache: cache, mappers: H.mappers });
+    return uc.execute({ userId: USER, query: { limit: '10' } }).then(function (out) {
+      expect(out.tasks[0].id).not.toBe('cached-all');
+      expect(cache.calls.getTasks).toBe(0);
+      expect(cache.calls.setTasks).toBe(0);
+    });
+  });
+
+  // 999.15802: offset must bypass the cache.
+  test('offset bypasses the cache (no cache read, no cache write)', function () {
+    var repo = new InMemoryTaskRepository({ rows: rows() });
+    var cache = H.makeCacheFake({ ['tasks:' + USER]: { tasks: [{ id: 'cached-all' }], version: 'v0' } });
+    var uc = new ListTasks({ repo: repo, cache: cache, mappers: H.mappers });
+    return uc.execute({ userId: USER, query: { offset: '5' } }).then(function (out) {
+      expect(out.tasks[0].id).not.toBe('cached-all');
+      expect(cache.calls.getTasks).toBe(0);
+      expect(cache.calls.setTasks).toBe(0);
+    });
+  });
 });
 
 describe('GetTask (getTask)', function () {

@@ -44,15 +44,36 @@ function ListTasks(deps) {
 /**
  * @param {Object} input
  * @param {string} input.userId
- * @param {Object} [input.query] `{ limit, offset }` (raw query-string values,
- *   parsed verbatim as the controller did — parseInt without radix, matching
- *   legacy `getAllTasks` L668-669 exactly).
+ * @param {Object} [input.query] `{ limit, offset, recurring_source }` (raw
+ *   query-string values, parsed verbatim as the controller did — parseInt
+ *   without radix, matching legacy `getAllTasks` L668-669 exactly).
+ *   `recurring_source` filters by source_id (999.15801).
  * @returns {Promise<{ tasks: Object[], version: string }>}
  */
 ListTasks.prototype.execute = function execute(input) {
   var self = this;
   var userId = input.userId;
   var query = input.query || {};
+  // 999.15801/999.15802: any filtering/pagination param bypasses the cache (which
+  // is keyed only by userId and holds the unfiltered list). Do not cache filtered
+  // results either, so the next unfiltered request still gets the full set.
+  var hasSourceFilter = !!query.recurring_source;
+  var hasPagination = !!query.limit || !!query.offset;
+  if (hasSourceFilter || hasPagination) {
+    return self.repo.fetchTasksWithEventIds(userId, function (q) {
+      q.whereNot('status', 'cancelled');
+      q.orderByRaw('(scheduled_at IS NULL) ASC, scheduled_at ASC');
+      q.where('source_id', query.recurring_source);
+      if (query.limit) q.limit(parseInt(query.limit) || 1000);
+      if (query.offset) q.offset(parseInt(query.offset) || 0);
+    }).then(function (rows) {
+      var srcMap = self.mappers.buildSourceMap(rows);
+      var tasks = rows.map(function (r) { return self.mappers.rowToTask(r, null, srcMap); });
+      return self.repo.getTasksVersion(userId).then(function (version) {
+        return { tasks: tasks, version: version };
+      });
+    });
+  }
   return this.cache.getTasks(userId).then(function (cached) {
     if (cached) return cached;
     return self.repo.fetchTasksWithEventIds(userId, function (q) {
