@@ -46,7 +46,7 @@ async function callback(req, res) {
 
 async function disconnect(req, res) {
   try {
-    var result = await facade.gcalDisconnect(req.user.id);
+    var result = await facade.gcalDisconnect(req.user.id, req.user);
     res.json(result);
   } catch (error) {
     logger.error('GCal disconnect error:', error);

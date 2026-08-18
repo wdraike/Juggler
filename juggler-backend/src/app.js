@@ -431,6 +431,9 @@ app.use('/api/tools', authenticateJWT, writeRateLimiter, toolRoutes);
 app.use('/api/data', dataRoutes);
 app.use('/api/gcal/callback', oauthCallbackLimiter);
 app.use('/api/gcal', gcalRoutes);
+// 999.15520: GCal push-notification webhook — unauthenticated (Google is the
+// caller), rate-limited, channel ID is a crypto.randomUUID (unguessable).
+app.use('/api/gcal-webhook', require('./routes/gcal-webhook.routes'));
 app.use('/api/msft-cal/callback', oauthCallbackLimiter);
 app.use('/api/msft-cal', msftCalRoutes);
 app.use('/api/apple-cal', appleCalRoutes);

@@ -1698,6 +1698,20 @@ async function sync(req, res) {
       }
     });
 
+    // 999.15520: Register/renew GCal push-notification watches so future
+    // changes are pushed by Google instead of polled. Best-effort — a failure
+    // here is non-fatal (polling continues as the fallback). Only attempted
+    // when GCal is connected and a webhook URL is configured.
+    try {
+      var gcalAdapter = calendarFacade.getAdapter('gcal');
+      if (gcalAdapter && gcalAdapter.isConnected(req.user) && process.env.GCAL_WEBHOOK_URL) {
+        var watchToken = await gcalAdapter.getValidAccessToken(req.user);
+        await gcalAdapter.registerWatch(watchToken, userId, process.env.GCAL_WEBHOOK_URL);
+      }
+    } catch (watchErr) {
+      logger.warn('GCal watch registration failed (non-fatal — polling continues)', { error: watchErr.message });
+    }
+
     res.json(stats);
   } catch (error) {
     logger.error('Cal sync error:', error);

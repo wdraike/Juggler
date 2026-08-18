@@ -253,7 +253,17 @@ async function gcalCallback(code, state, reqUser) {
   });
 }
 
-async function gcalDisconnect(userId) {
+async function gcalDisconnect(userId, user) {
+  // 999.15520: Stop GCal push-notification watches BEFORE clearing tokens —
+  // stopWatch needs a valid access token to call Google's channels.stop.
+  try {
+    if (user && user.gcal_refresh_token) {
+      var token = await getAdapter('gcal').getValidAccessToken(user);
+      await getAdapter('gcal').unregisterWatch(token, userId);
+    }
+  } catch (e) {
+    logger.warn('GCal watch unregister on disconnect failed (non-fatal)', { error: e.message });
+  }
   await accountRepo.updateUser(userId, {
     gcal_access_token: null,
     gcal_refresh_token: null,
@@ -1987,6 +1997,9 @@ module.exports = {
 
   // 999.1025 sub-leg 3: cal-sync controller "Write Phase" facade method
   runSyncWritePhase: runSyncWritePhase,
+
+  // 999.15520: GCal push-notification watch API
+  findUserByWatchChannel: GoogleCalendarAdapter.findUserByWatchChannel,
 };
 
 // 999.1628 (CalendarFacadeTriggerPort inversion): register this facade with

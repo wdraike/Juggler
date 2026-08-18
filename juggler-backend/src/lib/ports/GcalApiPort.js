@@ -65,6 +65,13 @@
  *
  * @property {(accessToken: string, requests: Array<Object>) => Promise<Array<{id: string, status: number, body: (Object|null)}>>} batchRequest
  *   Send up to 50 sub-requests as one multipart/mixed batch call.
+ *
+ * @property {(accessToken: string, calendarId: string, channelId: string, webhookUrl: string) => Promise<{id: string, resourceId: string, expiration: string, resourceUri: string}>} watchEvents
+ *   999.15520: register a push-notification watch on a calendar (Google POSTs
+ *   to webhookUrl on change). Watches expire after ~7 days.
+ *
+ * @property {(accessToken: string, channelId: string, resourceId: string) => Promise<null>} stopWatch
+ *   999.15520: stop an active watch channel before its natural expiration.
  */
 
 'use strict';
@@ -119,6 +126,14 @@ GcalApiPort.prototype.batchRequest = function batchRequest(_accessToken, _reques
   throw new Error('GcalApiPort.batchRequest not implemented');
 };
 
+GcalApiPort.prototype.watchEvents = function watchEvents(_accessToken, _calendarId, _channelId, _webhookUrl) {
+  throw new Error('GcalApiPort.watchEvents not implemented');
+};
+
+GcalApiPort.prototype.stopWatch = function stopWatch(_accessToken, _channelId, _resourceId) {
+  throw new Error('GcalApiPort.stopWatch not implemented');
+};
+
 /**
  * The exact set of methods an adapter MUST expose to satisfy GcalApiPort.
  * @type {ReadonlyArray<string>}
@@ -134,7 +149,9 @@ var GCAL_API_PORT_METHODS = Object.freeze([
   'insertEvent',
   'patchEvent',
   'deleteEvent',
-  'batchRequest'
+  'batchRequest',
+  'watchEvents',
+  'stopWatch'
 ]);
 
 module.exports = GcalApiPort;

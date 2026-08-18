@@ -1,20 +1,5 @@
-## Verdict: SHIP
+## Re-review: juggler backlog 999.15520
 
-### What the fix does
-Wraps the `app.listen` callback's startup `enqueueScheduleRun` loop in `runWithActor('scheduler', fn)`, providing the ALS actor context that `stampInsert()` (called inside `upsertQueueRow` → `SchedulerQueueRepository.upsertQueueRow` line 27) requires. Without this, `getActor()` throws, the error is caught inside `enqueueScheduleRun`'s try/catch, and the queue row is never inserted — the function returns `{ enqueued: true }` but the poll loop has nothing to pick up.
+**Verdict: SHIP**
 
-### Correctness
-- `runWithActor('scheduler', fn)` establishes the ALS context for the synchronous duration of `fn`. Inside `fn`, `enqueueScheduleRun` is called (async), but `stampInsert` is called synchronously during the `await _queueRepo.upsertQueueRow(db, row)` expression evaluation — within the `runWithActor` context. `getActor()` returns 'scheduler'. Correct.
-- The 'scheduler' actor identity matches what `pollOnce` (scheduleQueue.js:466) and `claimAndRun` (scheduleQueue.js:313) use. Consistent.
-
-### Completeness
-- All other `enqueueScheduleRun` call sites (config.controller.js, data.controller.js, schedule.routes.js, cal-sync.controller.js) run inside HTTP request handlers where `expressAuditContext` provides the ALS context. The `task-write-queue.js:357` call runs inside `claimAndRun` which already wraps in `runWithActor('scheduler', ...)`. The `morning-schedule-cron.js:81` call runs inside `runWithActor('morning-schedule-cron', ...)`. The facade wrapper (`slices/task/facade.js:165`) uses `setTimeout` which preserves the ALS context from the HTTP request. No other unwrapped call sites found.
-
-### Test
-- RED test documents the bug: bare `enqueueScheduleRun` (no actor) swallows `stampInsert` throw, row NOT inserted, returns `enqueued:true`.
-- GREEN test verifies the fix: wrapped in `runWithActor('scheduler')`, queue row inserted with `created_by='scheduler'`, `updated_by='scheduler'`.
-
-### Regressions
-- None. The fix only adds a `runWithActor` wrapper around existing code; no behavior change for the case where the actor context was already present (which it wasn't, since this is the startup path).
-
-Verdict: SHIP
+The webhook route now uses GoogleCalendarAdapter.findUserByWatchChannel (via the calendar slice adapter) instead of a direct lib/db import, resolving the boundary violation. The db() -> getDefaultDb() fix from the previous round is also confirmed. All 44 tests pass including the MOCK-DRIFT smoke test.

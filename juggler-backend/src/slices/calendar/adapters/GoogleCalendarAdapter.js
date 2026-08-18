@@ -592,6 +592,126 @@ async function batchUpdateEvents(token, updatePairs, year, tz) {
 var getEvents = listEvents;
 var sync = hasChanges;
 
+// --- Push notification watch API (999.15520) ---
+// Register webhook watches on all enabled GCal calendars so Google pushes
+// change notifications instead of juggler polling. Channel info is persisted
+// in user_config under 'gcal_watch_channels' as a JSON array (no migration
+// needed — user_config is a JSON-blob table). Watches expire after ~7 days
+// (Google's max), so renewWatch re-registers before expiration.
+
+var WATCH_CONFIG_KEY = 'gcal_watch_channels';
+
+async function getWatchChannels(userId) {
+  var row = await getDb()('user_config')
+    .where({ user_id: userId, config_key: WATCH_CONFIG_KEY }).first();
+  if (!row) return [];
+  try {
+    var parsed = JSON.parse(row.config_value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (_e) {
+    return [];
+  }
+}
+
+/**
+ * Find the user who owns a watch channel by matching channelId + resourceId
+ * against all stored gcal_watch_channels rows. Returns the userId or null.
+ * Used by the webhook receiver to map a Google push notification to a user.
+ */
+async function findUserByWatchChannel(channelId, resourceId) {
+  var configRows = await getDb()('user_config')
+    .where({ config_key: WATCH_CONFIG_KEY });
+
+  for (var i = 0; i < configRows.length; i++) {
+    var channels;
+    try {
+      channels = JSON.parse(configRows[i].config_value);
+    } catch (_e) {
+      continue;
+    }
+    if (Array.isArray(channels)) {
+      var match = channels.find(function (c) {
+        return c.channelId === channelId && c.resourceId === resourceId;
+      });
+      if (match) {
+        return configRows[i].user_id;
+      }
+    }
+  }
+  return null;
+}
+
+async function registerWatch(token, userId, webhookUrl) {
+  var calendars = await getEnabledCalendars(userId);
+  var channels = [];
+  var failures = 0;
+
+  for (var i = 0; i < calendars.length; i++) {
+    var cal = calendars[i];
+    var channelId = crypto.randomUUID();
+    try {
+      var channel = await gcalApi.watchEvents(token, cal.calendar_id, channelId, webhookUrl);
+      if (channel && channel.id && channel.resourceId) {
+        channels.push({
+          channelId: channel.id,
+          resourceId: channel.resourceId,
+          calendarId: cal.calendar_id,
+          expiration: channel.expiration || null,
+          resourceUri: channel.resourceUri || null
+        });
+      }
+    } catch (e) {
+      failures++;
+      loggers.calAdapterGcal.warn('Watch registration failed for calendar (non-fatal — polling continues)', {
+        userId: userId,
+        calendarId: cal.calendar_id,
+        error: e.message
+      });
+    }
+  }
+
+  if (channels.length > 0) {
+    var existing = await getWatchChannels(userId);
+    // Replace existing channels with the new set (a re-registration supersedes
+    // any prior watches — Google's stopWatch on stale channels is best-effort
+    // and handled separately by unregisterWatch on disconnect).
+    var row = await getDb()('user_config')
+      .where({ user_id: userId, config_key: WATCH_CONFIG_KEY }).first();
+    if (row) {
+      await getDb()('user_config')
+        .where({ user_id: userId, config_key: WATCH_CONFIG_KEY })
+        .update({ config_value: JSON.stringify(channels), updated_at: getDb().fn.now() });
+    } else {
+      await getDb()('user_config').insert(stampInsert({
+        user_id: userId,
+        config_key: WATCH_CONFIG_KEY,
+        config_value: JSON.stringify(channels)
+      }));
+    }
+  }
+
+  return channels;
+}
+
+async function unregisterWatch(token, userId) {
+  var channels = await getWatchChannels(userId);
+  for (var i = 0; i < channels.length; i++) {
+    try {
+      await gcalApi.stopWatch(token, channels[i].channelId, channels[i].resourceId);
+    } catch (e) {
+      loggers.calAdapterGcal.warn('Watch stop failed (non-fatal)', {
+        userId: userId,
+        channelId: channels[i].channelId,
+        error: e.message
+      });
+    }
+  }
+  // Clear stored channels
+  await getDb()('user_config')
+    .where({ user_id: userId, config_key: WATCH_CONFIG_KEY })
+    .del();
+}
+
 module.exports = {
   providerId,
   isConnected,
@@ -614,5 +734,9 @@ module.exports = {
   buildEventBody,
   getEventIdColumn,
   getLastSyncedColumn,
-  setDb
+  setDb,
+  getWatchChannels,
+  findUserByWatchChannel,
+  registerWatch,
+  unregisterWatch
 };

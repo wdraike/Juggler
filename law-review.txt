@@ -1,0 +1,5 @@
+## Security Review — 999.15520 GCal Push Notifications (Watch API)
+
+**Verdict: CLEAR**
+
+The webhook endpoint is correctly unauthenticated (Google is the caller), rate-limited (100/min), and uses crypto.randomUUID channel IDs as bearer tokens. No user data is returned in responses. The channel lookup goes through the calendar adapter (no direct DB access from the route). No SSRF, no injection, no information disclosure. Worst case of a forged notification is a spurious sync (no data leak, no mutation). CLEAR.

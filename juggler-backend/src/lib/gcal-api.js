@@ -268,6 +268,47 @@ async function batchRequest(accessToken, requests) {
   });
 }
 
+/**
+ * Register a push notification watch on a calendar (999.15520).
+ * POST /calendars/{calendarId}/events/watch — Google will POST to webhookUrl
+ * whenever the calendar changes. Watches expire after ~7 days (Google's max).
+ *
+ * @param {string} accessToken
+ * @param {string} calendarId - calendar to watch (default 'primary')
+ * @param {string} channelId - unique UUID for this watch channel
+ * @param {string} webhookUrl - HTTPS URL Google will notify
+ * @returns {Promise<{id, resourceId, expiration, resourceUri}>} Google's channel resource
+ */
+async function watchEvents(accessToken, calendarId, channelId, webhookUrl) {
+  var calId = calendarId || 'primary';
+  var body = {
+    id: channelId,
+    type: 'web_hook',
+    address: webhookUrl
+  };
+  return calendarFetch(accessToken, '/calendars/' + encodeURIComponent(calId) + '/events/watch', {
+    method: 'POST',
+    body: body
+  });
+}
+
+/**
+ * Stop a push notification channel (999.15520).
+ * POST /channels/stop — terminates an active watch before its natural expiration.
+ *
+ * @param {string} accessToken
+ * @param {string} channelId - the channel id from watchEvents
+ * @param {string} resourceId - the resource id from watchEvents
+ * @returns {Promise<null>}
+ */
+async function stopWatch(accessToken, channelId, resourceId) {
+  await calendarFetch(accessToken, '/channels/stop', {
+    method: 'POST',
+    body: { id: channelId, resourceId: resourceId }
+  });
+  return null;
+}
+
 module.exports = {
   createOAuth2Client,
   getAuthUrl,
@@ -279,5 +320,7 @@ module.exports = {
   insertEvent,
   patchEvent,
   deleteEvent,
-  batchRequest
+  batchRequest,
+  watchEvents,
+  stopWatch
 };
