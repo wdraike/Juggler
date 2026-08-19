@@ -5,7 +5,11 @@
  */
 import { computeConflictBuckets } from '../conflictBuckets';
 
-var TODAY = new Date('2026-06-24T12:00:00');
+// Z suffix: the instant must be past 09:00 in America/New_York (the default
+// display tz) regardless of the runner's local tz — without it, a UTC CI runner
+// parses 12:00 as 12:00 UTC = 08:00 EDT, BEFORE the 09:00 slot, and the test
+// false-fails (999.15886).
+var TODAY = new Date('2026-06-24T16:00:00Z'); // 12:00 EDT — a 09:00 slot has passed.
 
 function run(tasks, extra) {
   return computeConflictBuckets(Object.assign({
@@ -84,7 +88,7 @@ test('no double-counting: a task counted once even if overdue (matches page rend
 test('999.15685: FIXED task placed earlier today (past slot) appears in Overdue bucket', () => {
   // A fixed task with a slot time that has already passed today.
   // isTaskOverdue derives past-due from the slot time (intra-day check).
-  // TODAY = 2026-06-24T12:00:00 — a 09:00 slot has passed.
+  // TODAY = 2026-06-24T16:00:00Z (12:00 EDT) — a 09:00 slot has passed.
   var r = run([
     { id: 'fixed-past', placementMode: 'fixed', date: '2026-06-24', time: '09:00' }
   ]);
