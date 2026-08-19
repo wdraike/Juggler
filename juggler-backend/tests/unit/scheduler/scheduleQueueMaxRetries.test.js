@@ -33,7 +33,7 @@ jest.mock('../../../src/db', function () {
     raw: function (sql) { return sql; }
   };
   var mockDb = function () { return chain; };
-  mockDb.fn = { now: function () { return new Date(); } };
+  mockDb.fn = { now: function () { return new Date(0); } };
   return mockDb;
 });
 
