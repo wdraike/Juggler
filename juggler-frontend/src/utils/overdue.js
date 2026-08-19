@@ -124,17 +124,25 @@ export function isTaskOverdue(task, isDone, now, timezone) {
 
   if (!task.deadline) return false;
 
-  // Deadline-driven: compare against the DEADLINE, not the placed slot. A
-  // deadline is a DATE column end to end — `task_masters.deadline` is
-  // `table.date(...)`, rowToTask emits `String(row.deadline).split('T')[0]`, and
-  // taskToRow writes toDateISO — so it can only ever mean a whole day, and the
-  // day turning over is the only threshold there is. The ticket's AC3 ("a
-  // deadline carrying a specific time uses that time") is unimplementable on the
-  // display side alone: honouring a time here that the schema cannot store, and
-  // that computeOverdueForRow would still ignore, would fork the two predicates
-  // again (999.1224). Filed separately instead.
-  var deadlineKey = String(task.deadline).slice(0, 10);
-  return deadlineKey < nowInfo.todayKey;
+  // 999.15816: deadline is now a DATETIME column. A non-midnight time
+  // component means the deadline is due at that specific time, not end of
+  // day. Midnight (including all legacy DATE values coerced to DATETIME)
+  // keeps end-of-day semantics.
+  var deadlineStr = String(task.deadline);
+  var deadlineKey = deadlineStr.slice(0, 10);
+  // Extract time if present (ISO 'T' or space separator)
+  var dlTimeMatch = deadlineStr.match(/[T ](\d{2}):(\d{2})/);
+  var dlMins = null;
+  if (dlTimeMatch && !(dlTimeMatch[1] === '00' && dlTimeMatch[2] === '00')) {
+    dlMins = parseInt(dlTimeMatch[1], 10) * 60 + parseInt(dlTimeMatch[2], 10);
+  }
+
+  if (deadlineKey < nowInfo.todayKey) return true;
+  if (deadlineKey === nowInfo.todayKey && dlMins !== null) {
+    return nowInfo.nowMins >= dlMins;
+  }
+  // Date-only deadline: end-of-day (not overdue during the day)
+  return false;
 }
 
 /**

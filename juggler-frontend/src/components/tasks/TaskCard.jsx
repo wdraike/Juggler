@@ -189,7 +189,20 @@ function TaskCard({ task, status, onStatusChange, onDelete, onExpand, darkMode, 
             background: isPastDue ? theme.error : theme.amberBg,
             borderRadius: 3, padding: '1px 4px'
           }}>
-            {isPastDue ? 'OVERDUE ' : 'Deadline '}{task.deadline}
+            {isPastDue ? 'OVERDUE ' : 'Deadline '}{(function() {
+              // 999.15816: format deadline with optional time component
+              var s = String(task.deadline);
+              var date = s.slice(0, 10);
+              var m = s.match(/[T ](\d{2}):(\d{2})/);
+              if (m && !(m[1] === '00' && m[2] === '00')) {
+                var h = parseInt(m[1], 10);
+                var mins = m[2];
+                var ap = h >= 12 ? 'PM' : 'AM';
+                var h12 = h % 12 || 12;
+                return date + ' ' + h12 + ':' + mins + ' ' + ap;
+              }
+              return date;
+            })()}
           </span>
         )}
         {isMarker && (

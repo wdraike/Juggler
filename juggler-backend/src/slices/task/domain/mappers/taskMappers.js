@@ -305,6 +305,21 @@ function computeOverdueForRow(row, timezone, nowInfo) {
     // Explicit, user-set deadline is authoritative.
     dueKey = dateColumnToISO(row.deadline);
   }
+  // 999.15816: intra-day deadline threshold. When the deadline column
+  // (now DATETIME) carries a non-midnight time, the overdue check on the
+  // deadline day uses that time instead of end-of-day. Midnight deadlines
+  // (including all legacy DATE values coerced to DATETIME) keep end-of-day.
+  var _deadlineMins = null;
+  if (row.deadline) {
+    var _dlRaw = row.deadline instanceof Date
+      ? row.deadline.toISOString()
+      : String(row.deadline);
+    // Match time after either 'T' (ISO) or ' ' (MySQL datetime space separator)
+    var _dlTimeMatch = _dlRaw.match(/[T ](\d{2}):(\d{2})/);
+    if (_dlTimeMatch && !(_dlTimeMatch[1] === '00' && _dlTimeMatch[2] === '00')) {
+      _deadlineMins = parseInt(_dlTimeMatch[1], 10) * 60 + parseInt(_dlTimeMatch[2], 10);
+    }
+  }
   // REG-25/F5: tracks whether dueKey below ends up sourced from
   // impliedDeadlineISO (the recurrence-PERIOD boundary, R50.0) rather than
   // an explicit user deadline — only the period-boundary case gets the
@@ -411,6 +426,9 @@ function computeOverdueForRow(row, timezone, nowInfo) {
       // ends today — R50.0 "missed ON periodEnd", no intra-day grace to extend
       // it to tomorrow.
       return true;
+    } else if (_deadlineMins !== null) {
+      // 999.15816: a timed deadline is overdue once the deadline time passes.
+      if (_now.nowMins >= _deadlineMins) return true;
     }
   }
   return false;
@@ -509,12 +527,28 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
     time = ptH12 + ':' + (ptM < 10 ? '0' : '') + ptM + ' ' + ptAmpm;
   }
 
-  // Derive deadline (ISO YYYY-MM-DD) from the DATE column.
+  // Derive deadline from the DATETIME column.
+  // 999.15816: deadline widened from DATE to DATETIME. A non-midnight time
+  // component must survive the round trip for intra-day overdue checks.
+  // Midnight (00:00:00) — including all legacy DATE values coerced to
+  // DATETIME — is treated as date-only (no time component), preserving
+  // the original end-of-day semantics for existing rows.
   var deadlineISO = null;
   if (row.deadline) {
-    deadlineISO = row.deadline instanceof Date
-      ? row.deadline.toISOString().split('T')[0]
-      : String(row.deadline).split('T')[0];
+    var _dlStr = row.deadline instanceof Date
+      ? row.deadline.toISOString()
+      : String(row.deadline);
+    // Normalize MySQL's space separator to 'T' for consistent splitting
+    _dlStr = _dlStr.replace(' ', 'T');
+    var _dlParts = _dlStr.split('T');
+    deadlineISO = _dlParts[0]; // YYYY-MM-DD
+    // Preserve time when non-midnight (HH:MM where HH:MM !== 00:00)
+    if (_dlParts[1]) {
+      var _dlTime = _dlParts[1].slice(0, 5); // HH:MM
+      if (_dlTime !== '00:00') {
+        deadlineISO = _dlParts[0] + 'T' + _dlTime;
+      }
+    }
   }
   // Derive earliestStart. Prefer `earliest_start` (migration 20260624120000 —
   // the newer per-instance column on task_instances, a stable anchor persisted
@@ -676,8 +710,17 @@ function taskToRow(task, userId, timezone, _currentTask) {
   if (task.section !== undefined) row.section = task.section;
   if (task.notes !== undefined) row.notes = task.notes;
   if (task.url !== undefined) row.url = task.url || null;
+  // 999.15816: preserve a time component on the deadline (DATETIME column).
+  // toDateISO strips to YYYY-MM-DD — use it only when no time is present.
   if (task.deadline !== undefined) {
-    row.deadline = task.deadline ? toDateISO(task.deadline) || task.deadline : null;
+    if (!task.deadline) {
+      row.deadline = null;
+    } else if (String(task.deadline).indexOf('T') >= 0) {
+      // Already an ISO-ish string with a time — write as-is (knex DATETIME)
+      row.deadline = task.deadline;
+    } else {
+      row.deadline = toDateISO(task.deadline) || task.deadline;
+    }
   }
   if (task.earliestStart !== undefined) {
     // task_masters column is `start_after_at` (see read mapper note, 999.866).

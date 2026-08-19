@@ -100,7 +100,16 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   });
   var [endTimeError, setEndTimeError] = useState(null);
   var [timeRemaining, setTimeRemaining] = useState(isCreate ? '' : (task.timeRemaining != null ? task.timeRemaining : ''));
-  var [deadline, setDeadline] = useState(isCreate ? '' : toDateISO(task.deadline));
+  // 999.15816: deadline can carry a time (DATETIME column). Preserve it.
+  // State holds 'YYYY-MM-DD' (date-only) or 'YYYY-MM-DDTHH:MM' (with time).
+  var [deadline, setDeadline] = useState(isCreate ? '' : (function() {
+    if (!task.deadline) return '';
+    var s = String(task.deadline);
+    var date = s.slice(0, 10);
+    var m = s.match(/[T ](\d{2}):(\d{2})/);
+    if (m && !(m[1] === '00' && m[2] === '00')) return date + 'T' + m[1] + ':' + m[2];
+    return date;
+  })());
   var [earliestStart, setEarliestStart] = useState(isCreate ? '' : toDateISO(task.earliestStart));
   var [notes, setNotes] = useState(isCreate ? '' : (task.notes || ''));
   var [url, setUrl] = useState(isCreate ? '' : (task.url || ''));

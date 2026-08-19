@@ -34,7 +34,15 @@ export function useTaskEditFormSave({
       text: t.text || '', project: t.project || '', pri: t.pri || 'P3',
       date: toDateISO(t.date) || '', time: toTime24(t.time) || '',
       dur: t.dur || 30, timeRemaining: t.timeRemaining != null ? t.timeRemaining : '',
-      deadline: toDateISO(t.deadline) || '', earliestStart: toDateISO(t.earliestStart) || '',
+      // 999.15816: preserve deadline time for change detection
+      deadline: (function() {
+        if (!t.deadline) return '';
+        var s = String(t.deadline);
+        var date = s.slice(0, 10);
+        var m = s.match(/[T ](\d{2}):(\d{2})/);
+        if (m && !(m[1] === '00' && m[2] === '00')) return date + 'T' + m[1] + ':' + m[2];
+        return date;
+      })(), earliestStart: toDateISO(t.earliestStart) || '',
       notes: t.notes || '', url: t.url || '', when: t.when || '', dayReq: t.dayReq || 'any',
       recurring: !!t.recurring,
       timeFlex: t.timeFlex != null ? t.timeFlex : null,

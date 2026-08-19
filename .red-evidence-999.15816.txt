@@ -1,0 +1,61 @@
+RED GATE EVIDENCE — 999.15816
+
+Test file: tests/unit/mappers/deadline-datetime.test.js
+Command: npx jest --config /tmp/jest-no-db.config.js --no-coverage
+
+Before the fix (4 failing, 10 passing):
+
+  ● 999.15816 — deadline DATETIME round trip › rowToTask — deadline with time › preserves a DATETIME deadline with a non-midnight time
+
+    expect(received).toContain(expected) // indexOf
+
+    Expected substring: "14:30"
+    Received string:    "2026-08-25"
+
+      70 |       var task = rowToTask(row, TZ);
+      71 |       // The time component must survive — not just '2026-08-25'
+    > 72 |       expect(task.deadline).toContain('14:30');
+         |                                    ^
+      73 |     });
+
+  ● 999.15816 — deadline DATETIME round trip › taskToRow — deadline with time › writes a deadline with time as a DATETIME string
+
+    expect(received).toContain(expected) // indexOf
+
+    Expected substring: "14:30"
+    Received string:    "2026-08-25"
+
+      90 |       var row = taskToRow(task, 'user-1', TZ);
+      91 |       // Must preserve the time component, not strip to date-only
+    > 92 |       expect(String(row.deadline)).toContain('14:30');
+         |                                    ^
+      93 |     });
+
+  ● 999.15816 — computeOverdueForRow intra-day deadline › IS overdue after the deadline time on the deadline day
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: true
+    Received: false
+
+      131 |     // Now is 15:00 (after 14:30) on the deadline day
+      132 |     var nowInfo = { todayKey: '2026-08-25', nowMins: 15 * 60 };
+    > 133 |     expect(computeOverdueForRow(row, TZ, nowInfo)).toBe(true);
+          |                                                    ^
+      134 |   });
+
+  ● 999.15816 — computeOverdueForRow intra-day deadline › IS overdue exactly AT the deadline time
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: true
+    Received: false
+
+      142 |     // Now is exactly 14:30 on the deadline day
+      143 |     var nowInfo = { todayKey: '2026-08-25', nowMins: 14 * 60 + 30 };
+    > 144 |     expect(computeOverdueForRow(row, TZ, nowInfo)).toBe(true);
+          |                                                    ^
+      145 |   });
+
+Test Suites: 1 failed, 1 total
+Tests:       4 failed, 10 passed, 14 total

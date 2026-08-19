@@ -233,16 +233,19 @@ describe('999.15604: date-only deadline is end-of-day, in the user timezone', ()
     expect(isTaskOverdue(task, false, now, TZ)).toBe(true);
   });
 
-  test('AC3 DEFERRED — deadline is a DATE column, so a time component is ignored', () => {
-    // deadline is a DATE column end to end (task_masters.deadline is
-    // table.date(...); rowToTask splits on 'T'; taskToRow writes toDateISO), so
-    // a time component cannot survive a round trip. Honouring one here — while
-    // the backend's computeOverdueForRow ignores it — would fork the two
-    // predicates, which is the defect 999.1224 exists to prevent. The ticket's
-    // AC3 needs a schema + backend change and is filed separately.
+  test('999.15816 — deadline with a time component uses that time for the overdue threshold', () => {
+    // 999.15816: deadline is now a DATETIME column. A non-midnight time
+    // component IS honoured by both the backend (computeOverdueForRow) and
+    // this display predicate. This replaces the former "AC3 DEFERRED" test
+    // which asserted the time was ignored — that deferral is now resolved.
     var now = new Date('2026-08-03T16:00:00Z'); // 12:00 EDT
     var withTime = { overdue: 0, date: '2026-08-03', time: '08:00', deadline: '2026-08-03T09:00:00' };
-    expect(isTaskOverdue(withTime, false, now, TZ)).toBe(false);
+    // 12:00 EDT >= 09:00 deadline → overdue
+    expect(isTaskOverdue(withTime, false, now, TZ)).toBe(true);
+
+    // Before the deadline time: NOT overdue
+    var beforeTime = new Date('2026-08-03T12:00:00Z'); // 08:00 EDT
+    expect(isTaskOverdue(withTime, false, beforeTime, TZ)).toBe(false);
   });
 
   test('an un-hydrated task (optimistic create) uses the CONFIGURED zone, not New York', () => {

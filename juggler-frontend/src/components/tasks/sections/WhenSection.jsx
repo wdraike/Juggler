@@ -876,8 +876,31 @@ export default function WhenSection(props) {
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 6 }}>
           <label style={lStyle}>
             Deadline
-            <input type="date" value={deadline} onChange={e => onDeadlineChange(e.target.value)}
+            <input type="date" value={deadline ? String(deadline).slice(0, 10) : ''} onChange={e => {
+              var newDate = e.target.value;
+              if (!newDate) { onDeadlineChange(''); return; }
+              // Preserve existing time if present
+              var existing = String(deadline || '');
+              var timeMatch = existing.match(/T(\d{2}:\d{2})/);
+              onDeadlineChange(timeMatch ? newDate + 'T' + timeMatch[1] : newDate);
+            }}
               style={{ ...iStyle, width: 130 }} />
+            {/* 999.15816: optional deadline time (DATETIME column) */}
+            {deadline && String(deadline).indexOf('T') >= 0 && (
+              <input type="time" value={String(deadline).split('T')[1] || ''} onChange={e => {
+                var datePart = String(deadline).slice(0, 10);
+                onDeadlineChange(e.target.value ? datePart + 'T' + e.target.value : datePart);
+              }}
+                style={{ ...iStyle, width: 90, marginTop: 4 }} />
+            )}
+            {deadline && String(deadline).indexOf('T') < 0 && (
+              <button type="button" onClick={() => onDeadlineChange(String(deadline).slice(0, 10) + 'T12:00')}
+                style={{ ...iStyle, width: 'auto', marginTop: 4, cursor: 'pointer', fontSize: 11 }}>+ time</button>
+            )}
+            {deadline && String(deadline).indexOf('T') >= 0 && (
+              <button type="button" onClick={() => onDeadlineChange(String(deadline).slice(0, 10))}
+                style={{ ...iStyle, width: 'auto', marginTop: 4, cursor: 'pointer', fontSize: 11 }}>remove time</button>
+            )}
           </label>
           <label style={lStyle}>
             Start after
