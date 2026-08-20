@@ -680,7 +680,7 @@ async function registerWatch(token, userId, webhookUrl) {
     if (row) {
       await getDb()('user_config')
         .where({ user_id: userId, config_key: WATCH_CONFIG_KEY })
-        .update({ config_value: JSON.stringify(channels), updated_at: getDb().fn.now() });
+        .update(stampUpdate({ config_value: JSON.stringify(channels) }));
     } else {
       await getDb()('user_config').insert(stampInsert({
         user_id: userId,

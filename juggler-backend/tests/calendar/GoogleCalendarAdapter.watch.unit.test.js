@@ -19,6 +19,7 @@ function makeMockDb(seedCalendars, seedConfig) {
   var calendars = (seedCalendars || []).slice();
   var configRows = (seedConfig || []).slice();
   var insertedConfig = [];
+  var updatedConfig = [];
 
   function db(table) {
     if (table === 'user_calendars') {
@@ -40,6 +41,7 @@ function makeMockDb(seedCalendars, seedConfig) {
           });
           filtered.first = function () { return Promise.resolve(filtered[0] || null); };
           filtered.update = function (fields) {
+            updatedConfig.push(fields);
             filtered.forEach(function (r) { Object.assign(r, fields); });
             return Promise.resolve(1);
           };
@@ -69,7 +71,7 @@ function makeMockDb(seedCalendars, seedConfig) {
   }
   db.fn = { now: function () { return 'NOW()'; } };
 
-  return { db: db, configRows: configRows, insertedConfig: insertedConfig };
+  return { db: db, configRows: configRows, insertedConfig: insertedConfig, updatedConfig: updatedConfig };
 }
 
 var USER_ID = 'user-15520';
@@ -168,6 +170,27 @@ describe('GoogleCalendarAdapter.registerWatch', function () {
 
     expect(channels.length).toBe(1);
     expect(channels[0].calendarId).toBe('good');
+  });
+
+  // 999.15916: the UPDATE path must use stampUpdate() so updated_by is populated
+  test('registerWatch UPDATE path includes updated_by audit column (999.15916)', async function () {
+    var mock = makeMockDb(
+      [{ id: 1, user_id: USER_ID, provider: 'gcal', calendar_id: 'primary', enabled: true }],
+      [{ user_id: USER_ID, config_key: 'gcal_watch_channels', config_value: '[]' }]
+    );
+    GoogleCalendarAdapter.setDb(mock.db);
+
+    gcalApi.watchEvents.mockImplementation(function (token, calId, chId) {
+      return Promise.resolve({ id: chId, resourceId: 'res-' + calId, expiration: '123', resourceUri: 'uri' });
+    });
+
+    await GoogleCalendarAdapter.registerWatch('tok', USER_ID, 'https://app.example.com/api/gcal/webhook');
+
+    // The existing config row means the UPDATE path runs (not INSERT)
+    expect(mock.insertedConfig.length).toBe(0);
+    expect(mock.updatedConfig.length).toBe(1);
+    // stampUpdate() must add updated_by to the update fields
+    expect(mock.updatedConfig[0]).toHaveProperty('updated_by');
   });
 });
 
